@@ -8,7 +8,11 @@ app = FastAPI()
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
-ALLOWED_TEST_SYMBOLS = ["AAPL", "NVDA", "JPM", "TSLA"]
+ALLOWED_TEST_SYMBOLS = [
+    "AAPL", "NVDA", "TSLA", "JPM",
+    "BAC", "AMD", "AMZN", "PLTR",
+    "SOFI", "NIO", "RKLB", "GOOGL"
+]
 
 SECTOR_DATA = {}
 COMPANIES_DATA = {}
@@ -27,12 +31,15 @@ HARAM_INDUSTRY_KEYWORDS = [
 LOW_PRICE_HARD_BLOCK = 2.0
 LOW_PRICE_WARNING = 3.0
 
+
 # -------------------- utils --------------------
 def clean_key(key):
     return str(key).replace("\ufeff", "").strip()
 
+
 def clean_row(row):
     return {clean_key(k): v for k, v in row.items()}
+
 
 def to_float(value):
     try:
@@ -43,14 +50,17 @@ def to_float(value):
     except:
         return 0.0
 
+
 def period_rank(p):
     return {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4, "FY": 5, "TTM": 6}.get(str(p).upper(), 0)
+
 
 def parse_date_safe(v):
     try:
         return datetime.strptime(str(v).strip(), "%Y-%m-%d")
     except:
         return datetime.min
+
 
 def latest_key(row):
     return (
@@ -59,11 +69,13 @@ def latest_key(row):
         period_rank(row.get("Fiscal Period", ""))
     )
 
+
 def safe_round(x, digits=2):
     try:
         return round(float(x), digits)
     except:
         return x
+
 
 # -------------------- CSV reader --------------------
 def read_csv(path):
@@ -91,6 +103,7 @@ def read_csv(path):
 
     return []
 
+
 # -------------------- loaders --------------------
 def load_sector():
     data = {}
@@ -103,6 +116,7 @@ def load_sector():
             }
     return data
 
+
 def load_companies():
     data = {}
     for r in read_csv("data/companies.csv"):
@@ -110,6 +124,7 @@ def load_companies():
         if t:
             data[t] = r
     return data
+
 
 def load_latest(path):
     data = {}
@@ -125,10 +140,12 @@ def load_latest(path):
         data[t].pop("_k", None)
     return data
 
+
 SECTOR_DATA = load_sector()
 COMPANIES_DATA = load_companies()
 BALANCE_DATA = load_latest("data/balance_sheet.csv")
 INCOME_DATA = load_latest("data/income_statement.csv")
+
 
 # -------------------- market data --------------------
 def get_prev(symbol):
@@ -147,6 +164,7 @@ def get_prev(symbol):
         }
     except:
         return None
+
 
 def get_history_levels(symbol):
     if symbol in HISTORY_CACHE:
@@ -201,6 +219,7 @@ def get_history_levels(symbol):
     HISTORY_CACHE[symbol] = out
     return out
 
+
 # -------------------- info --------------------
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
@@ -212,6 +231,7 @@ def get_info(symbol):
         "industry": str(s.get("industry", "")).strip(),
         "industry_id": industry_id
     }
+
 
 # -------------------- halal --------------------
 def halal(symbol):
@@ -282,6 +302,7 @@ def halal(symbol):
         "financials": financials
     }
 
+
 # -------------------- base analysis --------------------
 def base_analysis(symbol):
     p = get_prev(symbol)
@@ -337,6 +358,7 @@ def base_analysis(symbol):
         "near_high": near_high,
         "near_low": near_low
     }
+
 
 # -------------------- professional trade engine --------------------
 def trade_plan_pro(symbol):
@@ -439,7 +461,7 @@ def trade_plan_pro(symbol):
         elif momentum == "محايد":
             quality_score += 3
         elif momentum == "هابط":
-            quality_score -= 8  # تشديد مهم
+            quality_score -= 8
 
     # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
@@ -492,7 +514,6 @@ def trade_plan_pro(symbol):
 
     quality_score = min(100, max(1, quality_score))
 
-    # decision
     if quality_score >= 82:
         decision = "دخول"
     elif quality_score >= 65:
@@ -542,6 +563,7 @@ def trade_plan_pro(symbol):
         "risk_flags": risk_flags,
     }
 
+
 # -------------------- endpoints --------------------
 @app.get("/")
 def home():
@@ -554,6 +576,7 @@ def home():
             "income_rows": len(INCOME_DATA),
         }
     }
+
 
 @app.get("/scan")
 def scan():
@@ -616,6 +639,7 @@ def scan():
         "rejected": rejected,
     }
 
+
 @app.get("/trade-scan")
 def trade_scan():
     trades = []
@@ -665,6 +689,7 @@ def trade_scan():
         "rejected": rejected
     }
 
+
 @app.get("/analyze/{symbol}")
 def analyze_single(symbol: str):
     symbol = symbol.upper()
@@ -706,6 +731,7 @@ def analyze_single(symbol: str):
         "halal": h,
         "trade_plan": plan
     }
+
 
 @app.get("/debug/{symbol}")
 def debug_symbol(symbol: str):
