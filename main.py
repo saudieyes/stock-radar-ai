@@ -2,11 +2,13 @@ from fastapi import FastAPI
 import requests
 import os
 import csv
+from datetime import datetime
 
 app = FastAPI()
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
+# أول تشغيل نختبر على 4 أسهم فقط
 ALLOWED_TEST_SYMBOLS = ["AAPL", "NVDA", "JPM", "TSLA"]
 
 SECTOR_DATA = {}
@@ -22,6 +24,7 @@ HARAM_SECTORS = {
 
 HARAM_INDUSTRY_KEYWORDS = [
     "bank",
+    "banks",
     "insurance",
     "tobacco",
     "alcohol",
@@ -31,8 +34,57 @@ HARAM_INDUSTRY_KEYWORDS = [
     "credit services",
     "mortgage",
     "reit mortgage",
+    "asset management",
+    "capital markets",
 ]
 
+def clean_key(key: str) -> str:
+    return str(key).replace("\ufeff", "").strip()
+
+def clean_row(row: dict) -> dict:
+    return {clean_key(k): v for k, v in row.items()}
+
+def to_float(value):
+    try:
+        if value is None:
+            return 0.0
+        value = str(value).strip().replace(",", "")
+        if value == "":
+            return 0.0
+        return float(value)
+    except:
+        return 0.0
+
+def period_rank(period: str) -> int:
+    p = str(period).strip().upper()
+    order = {
+        "Q1": 1,
+        "Q2": 2,
+        "Q3": 3,
+        "Q4": 4,
+        "FY": 5,
+        "TTM": 6,
+    }
+    return order.get(p, 0)
+
+def parse_date_safe(value: str):
+    try:
+        value = str(value).strip()
+        if not value:
+            return datetime.min
+        return datetime.strptime(value, "%Y-%m-%d")
+    except:
+        return datetime.min
+
+def latest_key_from_row(row: dict):
+    publish_date = parse_date_safe(row.get("Publish Date", ""))
+    fiscal_year = int(to_float(row.get("Fiscal Year", 0)))
+    fiscal_period = period_rank(row.get("Fiscal Period", ""))
+    return (publish_date, fiscal_year, fiscal_period)
+
+# -------------------------------
+# تحميل Sector / Industry
+# -------------------------------
 def load_sector_industry():
     data = {}
     path = "data/sector_industry.csv"
@@ -41,7 +93,8 @@ def load_sector_industry():
 
     with open(path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
+        for raw in reader:
+            row = clean_row(raw)
             industry_id = str(row.get("IndustryId", "")).strip()
             if industry_id:
                 data[industry_id] = {
@@ -50,6 +103,9 @@ def load_sector_industry():
                 }
     return data
 
+# -------------------------------
+# تحميل الشركات
+# -------------------------------
 def load_companies():
     data = {}
     path = "data/companies.csv"
@@ -58,14 +114,17 @@ def load_companies():
 
     with open(path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
+        for raw in reader:
+            row = clean_row(raw)
             ticker = str(row.get("Ticker", "")).strip().upper()
             if not ticker:
                 continue
-
             data[ticker] = row
     return data
 
+# -------------------------------
+# تحميل أحدث Balance Sheet لكل سهم
+# -------------------------------
 def load_latest_balance():
     data = {}
     path = "data/balance_sheet.csv"
@@ -74,23 +133,25 @@ def load_latest_balance():
 
     with open(path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
+        for raw in reader:
+            row = clean_row(raw)
             ticker = str(row.get("Ticker", "")).strip().upper()
-            fiscal_year = str(row.get("Fiscal Year", "")).strip()
-            fiscal_period = str(row.get("Fiscal Period", "")).strip()
             if not ticker:
                 continue
 
-            key = (fiscal_year, fiscal_period)
-            if ticker not in data or key > data[ticker]["_key"]:
-                row["_key"] = key
+            key = latest_key_from_row(row)
+            if ticker not in data or key > data[ticker]["_latest_key"]:
+                row["_latest_key"] = key
                 data[ticker] = row
 
-    for t in list(data.keys()):
-        data[t].pop("_key", None)
+    for ticker in list(data.keys()):
+        data[ticker].pop("_latest_key", None)
 
     return data
 
+# -------------------------------
+# تحميل أحدث Income Statement لكل سهم
+# -------------------------------
 def load_latest_income():
     data = {}
     path = "data/income_statement.csv"
@@ -99,30 +160,21 @@ def load_latest_income():
 
     with open(path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
+        for raw in reader:
+            row = clean_row(raw)
             ticker = str(row.get("Ticker", "")).strip().upper()
-            fiscal_year = str(row.get("Fiscal Year", "")).strip()
-            fiscal_period = str(row.get("Fiscal Period", "")).strip()
             if not ticker:
                 continue
 
-            key = (fiscal_year, fiscal_period)
-            if ticker not in data or key > data[ticker]["_key"]:
-                row["_key"] = key
+            key = latest_key_from_row(row)
+            if ticker not in data or key > data[ticker]["_latest_key"]:
+                row["_latest_key"] = key
                 data[ticker] = row
 
-    for t in list(data.keys()):
-        data[t].pop("_key", None)
+    for ticker in list(data.keys()):
+        data[ticker].pop("_latest_key", None)
 
     return data
-
-def to_float(value):
-    try:
-        if value is None or value == "":
-            return 0.0
-        return float(str(value).replace(",", ""))
-    except:
-        return 0.0
 
 SECTOR_DATA = load_sector_industry()
 COMPANIES_DATA = load_companies()
@@ -131,50 +183,77 @@ INCOME_DATA = load_latest_income()
 
 @app.get("/")
 def home():
-    return {"message": "Stock Radar AI is running 🚀"}
+    return {
+        "message": "Stock Radar AI is running 🚀",
+        "loaded": {
+            "companies": len(COMPANIES_DATA),
+            "sector_industry": len(SECTOR_DATA),
+            "balance_rows": len(BALANCE_DATA),
+            "income_rows": len(INCOME_DATA),
+        }
+    }
 
+# -------------------------------
+# الأسهم الحالية في وضع الاختبار
+# -------------------------------
 def get_test_symbols():
     return ALLOWED_TEST_SYMBOLS
 
+# -------------------------------
+# جلب بيانات Polygon اليومية
+# -------------------------------
 def get_polygon_prev(symbol):
     url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={POLYGON_API_KEY}"
-    res = requests.get(url, timeout=20).json()
+    try:
+        res = requests.get(url, timeout=20).json()
+    except:
+        return None
 
     if "results" not in res or not res["results"]:
         return None
 
     d = res["results"][0]
     return {
-        "price": d.get("c", 0),
-        "high": d.get("h", 0),
-        "low": d.get("l", 0),
-        "volume": d.get("v", 0),
-        "open": d.get("o", 0),
+        "price": to_float(d.get("c", 0)),
+        "high": to_float(d.get("h", 0)),
+        "low": to_float(d.get("l", 0)),
+        "volume": to_float(d.get("v", 0)),
+        "open": to_float(d.get("o", 0)),
     }
 
+# -------------------------------
+# بيانات الشركة والقطاع
+# -------------------------------
 def get_company_sector_info(symbol):
     company = COMPANIES_DATA.get(symbol, {})
     industry_id = str(company.get("IndustryId", "")).strip()
-    info = SECTOR_DATA.get(industry_id, {})
+    sector_info = SECTOR_DATA.get(industry_id, {})
 
     return {
         "company_name": str(company.get("Company Name", "")).strip(),
         "industry_id": industry_id,
-        "industry": str(info.get("industry", "")).strip(),
-        "sector": str(info.get("sector", "")).strip(),
+        "industry": str(sector_info.get("industry", "")).strip(),
+        "sector": str(sector_info.get("sector", "")).strip(),
     }
 
+# -------------------------------
+# الفلتر الشرعي
+# المرحلة 1: النشاط
+# المرحلة 2: المالي
+# -------------------------------
 def halal_filter(symbol):
     info = get_company_sector_info(symbol)
     sector = info["sector"].lower()
     industry = info["industry"].lower()
 
+    # 1) فلتر النشاط
     if sector in HARAM_SECTORS:
         return {
             "allowed": False,
             "reason": f"قطاع محرم: {info['sector']}",
             "sector": info["sector"],
             "industry": info["industry"],
+            "financials": {}
         }
 
     text = f"{sector} {industry}"
@@ -185,31 +264,76 @@ def halal_filter(symbol):
                 "reason": f"نشاط محرم: {word}",
                 "sector": info["sector"],
                 "industry": info["industry"],
+                "financials": {}
             }
 
+    # 2) الفلتر المالي
     balance = BALANCE_DATA.get(symbol, {})
+    income = INCOME_DATA.get(symbol, {})
+
     total_assets = to_float(balance.get("Total Assets"))
+    cash = to_float(balance.get("Cash, Cash Equivalents & Short Term Investments"))
     short_term_debt = to_float(balance.get("Short Term Debt"))
     long_term_debt = to_float(balance.get("Long Term Debt"))
     total_debt = short_term_debt + long_term_debt
 
-    if total_assets > 0:
-        debt_ratio = total_debt / total_assets
-        if debt_ratio > 0.33:
-            return {
-                "allowed": False,
-                "reason": f"نسبة ديون مرتفعة: {debt_ratio:.2%}",
-                "sector": info["sector"],
-                "industry": info["industry"],
-            }
+    # القيمة السوقية التقريبية = السعر الحالي × عدد الأسهم
+    prev = get_polygon_prev(symbol)
+    current_price = prev["price"] if prev else 0.0
+
+    shares_diluted = to_float(income.get("Shares (Diluted)"))
+    shares_basic = to_float(income.get("Shares (Basic)"))
+    shares = shares_diluted if shares_diluted > 0 else shares_basic
+
+    approx_market_cap = current_price * shares if current_price > 0 and shares > 0 else 0.0
+
+    debt_to_market_cap = (total_debt / approx_market_cap) if approx_market_cap > 0 else None
+    cash_to_assets = (cash / total_assets) if total_assets > 0 else None
+
+    financials = {
+        "total_assets": total_assets,
+        "cash": cash,
+        "short_term_debt": short_term_debt,
+        "long_term_debt": long_term_debt,
+        "total_debt": total_debt,
+        "shares": shares,
+        "current_price": current_price,
+        "approx_market_cap": approx_market_cap,
+        "debt_to_market_cap": debt_to_market_cap,
+        "cash_to_assets": cash_to_assets,
+    }
+
+    # شرط الديون
+    if debt_to_market_cap is not None and debt_to_market_cap > 0.33:
+        return {
+            "allowed": False,
+            "reason": f"نسبة الدين إلى القيمة السوقية مرتفعة: {debt_to_market_cap:.2%}",
+            "sector": info["sector"],
+            "industry": info["industry"],
+            "financials": financials
+        }
+
+    # شرط النقد / الأصول
+    if cash_to_assets is not None and cash_to_assets > 0.50:
+        return {
+            "allowed": False,
+            "reason": f"نسبة النقد إلى الأصول مرتفعة: {cash_to_assets:.2%}",
+            "sector": info["sector"],
+            "industry": info["industry"],
+            "financials": financials
+        }
 
     return {
         "allowed": True,
         "reason": "مقبول مبدئيًا",
         "sector": info["sector"],
         "industry": info["industry"],
+        "financials": financials
     }
 
+# -------------------------------
+# التحليل الفني المبدئي
+# -------------------------------
 def analyze_stock(symbol):
     prev = get_polygon_prev(symbol)
     if not prev:
@@ -234,12 +358,10 @@ def analyze_stock(symbol):
         volume_signal = "متوسطة"
 
     location_signal = "وسط"
-    if high > 0:
-        near_high = price >= (high * 0.985)
-        near_low = price <= (low * 1.015 if low > 0 else low)
-        if near_high:
+    if high > 0 and low > 0:
+        if price >= (high * 0.985):
             location_signal = "قرب مقاومة"
-        elif near_low:
+        elif price <= (low * 1.015):
             location_signal = "قرب دعم"
 
     score = 40
@@ -287,6 +409,7 @@ def scan():
                 "reason": halal["reason"],
                 "sector": halal["sector"],
                 "industry": halal["industry"],
+                "financials": halal["financials"],
             })
             continue
 
@@ -296,6 +419,7 @@ def scan():
             analysis["companyName"] = info["company_name"]
             analysis["sector"] = info["sector"]
             analysis["industry"] = info["industry"]
+            analysis["financials"] = halal["financials"]
             results.append(analysis)
 
     return {
