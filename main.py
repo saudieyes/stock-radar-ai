@@ -153,7 +153,7 @@ def get_prev(symbol):
     try:
         r = requests.get(
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={POLYGON_API_KEY}",
-            timeout=10
+            timeout=12
         ).json()
         d = r["results"][0]
         return {
@@ -189,7 +189,7 @@ def get_history_levels(symbol):
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
             f"{from_52w}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
         )
-        r52 = requests.get(url_52w, timeout=15).json()
+        r52 = requests.get(url_52w, timeout=18).json()
         highs_52 = [to_float(x.get("h")) for x in r52.get("results", []) if to_float(x.get("h")) > 0]
         if highs_52:
             out["year_high"] = max(highs_52)
@@ -201,7 +201,7 @@ def get_history_levels(symbol):
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
             f"{from_5y}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
         )
-        r5 = requests.get(url_5y, timeout=20).json()
+        r5 = requests.get(url_5y, timeout=22).json()
         highs_5 = [to_float(x.get("h")) for x in r5.get("results", []) if to_float(x.get("h")) > 0]
         if highs_5:
             out["ath_high"] = max(highs_5)
@@ -228,7 +228,7 @@ def get_trend(symbol):
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
             f"2024-01-01/2026-12-31?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
         )
-        r = requests.get(url, timeout=20).json()
+        r = requests.get(url, timeout=22).json()
         data = r.get("results", [])
 
         closes = [to_float(x.get("c")) for x in data if to_float(x.get("c")) > 0]
@@ -260,7 +260,7 @@ def get_volume_ratio(symbol):
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
             f"2024-01-01/2026-12-31?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
         )
-        r = requests.get(url, timeout=20).json()
+        r = requests.get(url, timeout=22).json()
         data = r.get("results", [])
 
         volumes = [to_float(x.get("v")) for x in data if to_float(x.get("v")) > 0]
@@ -540,28 +540,29 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # softer volume ratio AI
+    # volume ratio AI
     if volume_ratio >= 2.0:
         quality_score += 8
     elif volume_ratio >= 1.5:
         quality_score += 5
     elif volume_ratio >= 1.2:
         quality_score += 2
-    elif volume_ratio >= 1.0:
-        quality_score -= 2
+    elif volume_ratio >= 0.9:
+        quality_score += 0
     elif volume_ratio >= 0.8:
-        quality_score -= 4
+        quality_score -= 2
     else:
-        quality_score -= 6
+        quality_score -= 5
 
-    # softer fake breakout
+    # breakout confidence
     if trade_type == "Breakout":
-        if volume_ratio < 1.0:
-            quality_score -= 8
+        if volume_ratio < 0.9:
+            quality_score -= 6
             risk_flags.append("اختراق ضعيف (بدون سيولة كافية)")
-        elif volume_ratio < 1.2:
-            quality_score -= 3
+        elif volume_ratio < 1.1:
             risk_flags.append("اختراق يحتاج تأكيد سيولة")
+        elif volume_ratio < 1.2:
+            quality_score += 0
 
     # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
@@ -596,7 +597,6 @@ def trade_plan_pro(symbol):
     # data quality
     info = get_info(symbol)
     h = halal(symbol)
-
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
     risk_flags.extend(dq_flags)
 
@@ -605,15 +605,19 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
-    # softer final thresholds
-    if quality_score >= 78:
-        decision = "دخول"
+    # 3-tier decision
+    if quality_score >= 82:
+        decision = "دخول قوي"
+    elif quality_score >= 72:
+        decision = "دخول بحذر"
     elif quality_score >= 62:
         decision = "مراقبة"
     else:
         return None
 
-    if data_quality == "low" and decision == "دخول":
+    if data_quality == "low" and decision == "دخول قوي":
+        decision = "مراقبة"
+    elif data_quality == "low" and decision == "دخول بحذر":
         decision = "مراقبة"
 
     return {
@@ -669,14 +673,17 @@ def trade_scan():
 
     trades = sorted(trades, key=lambda x: x["quality_score"], reverse=True)
 
-    top = [x for x in trades if x["decision"] == "دخول"]
+    strong_entries = [x for x in trades if x["decision"] == "دخول قوي"]
+    cautious_entries = [x for x in trades if x["decision"] == "دخول بحذر"]
     watch = [x for x in trades if x["decision"] == "مراقبة"]
 
     return {
         "count": len(trades),
-        "top_picks_count": len(top),
+        "strong_entries_count": len(strong_entries),
+        "cautious_entries_count": len(cautious_entries),
         "watchlist_count": len(watch),
-        "top_picks": top,
+        "strong_entries": strong_entries,
+        "cautious_entries": cautious_entries,
         "watchlist": watch,
         "rejected_count": len(rejected),
         "rejected": rejected
