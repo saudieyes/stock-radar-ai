@@ -32,10 +32,10 @@ def get_active_stocks():
     return {"error": None, "symbols": symbols}
 
 # -------------------------------
-# فلتر شرعي مع تشخيص
+# فلتر شرعي باستخدام FMP stable endpoint
 # -------------------------------
 def halal_filter(symbol):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={FMP_API_KEY}"
+    url = f"https://financialmodelingprep.com/stable/profile?symbol={symbol}&apikey={FMP_API_KEY}"
 
     try:
         res = requests.get(url, timeout=20).json()
@@ -135,7 +135,7 @@ def analyze_stock(symbol):
     }
 
 # -------------------------------
-# الرادار الرئيسي مع تشخيص
+# الرادار الرئيسي
 # -------------------------------
 @app.get("/scan")
 def scan():
@@ -221,7 +221,7 @@ def analyze(symbol: str):
     }
 
 # -------------------------------
-# تشخيص مباشر لسهم واحد
+# تشخيص سهم واحد
 # -------------------------------
 @app.get("/debug/{symbol}")
 def debug_symbol(symbol: str):
