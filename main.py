@@ -540,18 +540,28 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # volume ratio AI
-    if volume_ratio >= 2:
+    # softer volume ratio AI
+    if volume_ratio >= 2.0:
         quality_score += 8
     elif volume_ratio >= 1.5:
         quality_score += 5
-    elif volume_ratio < 0.8:
+    elif volume_ratio >= 1.2:
+        quality_score += 2
+    elif volume_ratio >= 1.0:
+        quality_score -= 2
+    elif volume_ratio >= 0.8:
+        quality_score -= 4
+    else:
         quality_score -= 6
 
-    # fake breakout
-    if trade_type == "Breakout" and volume_ratio < 1.2:
-        quality_score -= 8
-        risk_flags.append("اختراق ضعيف (بدون سيولة)")
+    # softer fake breakout
+    if trade_type == "Breakout":
+        if volume_ratio < 1.0:
+            quality_score -= 8
+            risk_flags.append("اختراق ضعيف (بدون سيولة كافية)")
+        elif volume_ratio < 1.2:
+            quality_score -= 3
+            risk_flags.append("اختراق يحتاج تأكيد سيولة")
 
     # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
@@ -595,9 +605,10 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
-    if quality_score >= 82:
+    # softer final thresholds
+    if quality_score >= 78:
         decision = "دخول"
-    elif quality_score >= 65:
+    elif quality_score >= 62:
         decision = "مراقبة"
     else:
         return None
