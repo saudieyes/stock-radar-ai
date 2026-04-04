@@ -9,10 +9,10 @@ app = FastAPI()
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
 ALLOWED_TEST_SYMBOLS = [
-    "AAPL", "NVDA", "TSLA", "JPM", "BAC", "AMD", "AMZN", "PLTR", "SOFI", "NIO",
-    "RKLB", "GOOGL", "MSFT", "META", "AVGO", "CRM", "ADBE", "NFLX", "ORCL", "INTC",
-    "QCOM", "MU", "ANET", "PANW", "CRWD", "SNOW", "SHOP", "UBER", "ABNB", "PYPL",
-    "COIN", "ROKU", "SQ", "TTD", "HIMS", "MARA", "RIOT", "OKLO", "ASTS", "MRVL"
+    "AAPL","NVDA","TSLA","AMD","AMZN","META","MSFT","GOOGL","AVGO","CRM",
+    "ADBE","NFLX","ORCL","INTC","QCOM","MU","ANET","PANW","CRWD","SNOW",
+    "SHOP","UBER","ABNB","PYPL","COIN","ROKU","SQ","TTD","HIMS","MARA",
+    "RIOT","OKLO","ASTS","MRVL","NIO","RKLB","BAC","JPM","SOFI","PLTR"
 ]
 
 SECTOR_DATA = {}
@@ -23,24 +23,14 @@ HISTORY_CACHE = {}
 
 HARAM_SECTORS = {"financial services", "banks", "insurance"}
 
-HARAM_INDUSTRY_KEYWORDS = [
-    "bank", "banks", "insurance", "tobacco", "alcohol",
-    "gambling", "casino", "betting", "credit services",
-    "mortgage", "reit mortgage", "asset management", "capital markets",
-]
-
 LOW_PRICE_HARD_BLOCK = 2.0
 LOW_PRICE_WARNING = 3.0
-
-
 # -------------------- utils --------------------
 def clean_key(key):
     return str(key).replace("\ufeff", "").strip()
 
-
 def clean_row(row):
     return {clean_key(k): v for k, v in row.items()}
-
 
 def to_float(value):
     try:
@@ -51,10 +41,8 @@ def to_float(value):
     except:
         return 0.0
 
-
 def period_rank(p):
-    return {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4, "FY": 5, "TTM": 6}.get(str(p).upper(), 0)
-
+    return {"Q1":1,"Q2":2,"Q3":3,"Q4":4,"FY":5,"TTM":6}.get(str(p).upper(),0)
 
 def parse_date_safe(v):
     try:
@@ -62,23 +50,19 @@ def parse_date_safe(v):
     except:
         return datetime.min
 
-
 def latest_key(row):
     return (
-        parse_date_safe(row.get("Publish Date", "")),
-        int(to_float(row.get("Fiscal Year", 0))),
-        period_rank(row.get("Fiscal Period", ""))
+        parse_date_safe(row.get("Publish Date","")),
+        int(to_float(row.get("Fiscal Year",0))),
+        period_rank(row.get("Fiscal Period",""))
     )
-
 
 def safe_round(x, digits=2):
     try:
         return round(float(x), digits)
     except:
         return x
-
-
-# -------------------- CSV reader --------------------
+        # -------------------- CSV reader --------------------
 def read_csv(path):
     if not os.path.exists(path):
         return []
@@ -146,8 +130,6 @@ SECTOR_DATA = load_sector()
 COMPANIES_DATA = load_companies()
 BALANCE_DATA = load_latest("data/balance_sheet.csv")
 INCOME_DATA = load_latest("data/income_statement.csv")
-
-
 # -------------------- market data --------------------
 def get_prev(symbol):
     try:
@@ -221,7 +203,60 @@ def get_history_levels(symbol):
     return out
 
 
-# -------------------- info --------------------
+# -------------------- trend / volume AI --------------------
+def get_trend(symbol):
+    try:
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
+            f"2024-01-01/2026-12-31?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+        )
+        r = requests.get(url, timeout=20).json()
+        data = r.get("results", [])
+
+        closes = [to_float(x.get("c")) for x in data if to_float(x.get("c")) > 0]
+
+        if len(closes) < 50:
+            return {"trend": "unknown", "ma20": 0.0, "ma50": 0.0}
+
+        ma20 = sum(closes[-20:]) / 20
+        ma50 = sum(closes[-50:]) / 50
+        price = closes[-1]
+
+        if price > ma20 > ma50:
+            trend = "صاعد قوي"
+        elif price > ma50:
+            trend = "صاعد"
+        elif price < ma20 < ma50:
+            trend = "هابط"
+        else:
+            trend = "متذبذب"
+
+        return {"trend": trend, "ma20": ma20, "ma50": ma50}
+    except:
+        return {"trend": "unknown", "ma20": 0.0, "ma50": 0.0}
+
+
+def get_volume_ratio(symbol):
+    try:
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
+            f"2024-01-01/2026-12-31?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+        )
+        r = requests.get(url, timeout=20).json()
+        data = r.get("results", [])
+
+        volumes = [to_float(x.get("v")) for x in data if to_float(x.get("v")) > 0]
+
+        if len(volumes) < 20:
+            return 1.0
+
+        avg_volume = sum(volumes[-20:]) / 20
+        today_volume = volumes[-1]
+
+        return today_volume / avg_volume if avg_volume > 0 else 1.0
+    except:
+        return 1.0
+        # -------------------- info --------------------
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
     industry_id = str(c.get("IndustryId", "")).strip()
@@ -262,51 +297,51 @@ def data_quality_check(symbol, info, financials):
     return quality, flags
 
 
-# -------------------- halal --------------------
+# -------------------- halal / financial filter --------------------
 def halal(symbol):
-    i = get_info(symbol)
-    txt = f"{i['sector']} {i['industry']}".lower()
+    info = get_info(symbol)
+    text = f"{info['sector']} {info['industry']}".lower()
 
-    if i["sector"].lower() in HARAM_SECTORS:
+    if info["sector"].lower() in HARAM_SECTORS:
         return {
             "allowed": False,
-            "reason": f"قطاع محرم: {i['sector']}",
+            "reason": f"قطاع محرم: {info['sector']}",
             "financials": {}
         }
 
-    for w in HARAM_INDUSTRY_KEYWORDS:
-        if w in txt:
+    for word in HARAM_INDUSTRY_KEYWORDS:
+        if word in text:
             return {
                 "allowed": False,
-                "reason": f"نشاط محرم: {w}",
+                "reason": f"نشاط محرم: {word}",
                 "financials": {}
             }
 
-    b = BALANCE_DATA.get(symbol, {})
-    inc = INCOME_DATA.get(symbol, {})
+    balance = BALANCE_DATA.get(symbol, {})
+    income = INCOME_DATA.get(symbol, {})
 
-    debt = to_float(b.get("Short Term Debt")) + to_float(b.get("Long Term Debt"))
-    assets = to_float(b.get("Total Assets"))
-    cash = to_float(b.get("Cash, Cash Equivalents & Short Term Investments"))
+    total_debt = to_float(balance.get("Short Term Debt")) + to_float(balance.get("Long Term Debt"))
+    total_assets = to_float(balance.get("Total Assets"))
+    cash = to_float(balance.get("Cash, Cash Equivalents & Short Term Investments"))
 
-    shares = to_float(inc.get("Shares (Diluted)"))
+    shares = to_float(income.get("Shares (Diluted)"))
     if shares <= 0:
-        shares = to_float(inc.get("Shares (Basic)"))
+        shares = to_float(income.get("Shares (Basic)"))
 
-    p = get_prev(symbol)
-    price = p["price"] if p else 0.0
-    mcap = price * shares if shares > 0 else 0.0
+    prev = get_prev(symbol)
+    current_price = prev["price"] if prev else 0.0
+    approx_market_cap = current_price * shares if shares > 0 else 0.0
 
-    debt_to_market_cap = (debt / mcap) if mcap > 0 else None
-    cash_to_assets = (cash / assets) if assets > 0 else None
+    debt_to_market_cap = (total_debt / approx_market_cap) if approx_market_cap > 0 else None
+    cash_to_assets = (cash / total_assets) if total_assets > 0 else None
 
     financials = {
-        "total_assets": assets,
+        "total_assets": total_assets,
         "cash": cash,
-        "total_debt": debt,
+        "total_debt": total_debt,
         "shares": shares,
-        "current_price": price,
-        "approx_market_cap": mcap,
+        "current_price": current_price,
+        "approx_market_cap": approx_market_cap,
         "debt_to_market_cap": debt_to_market_cap,
         "cash_to_assets": cash_to_assets,
     }
@@ -334,15 +369,15 @@ def halal(symbol):
 
 # -------------------- base analysis --------------------
 def base_analysis(symbol):
-    p = get_prev(symbol)
-    if not p:
+    prev = get_prev(symbol)
+    if not prev:
         return None
 
-    price = p["price"]
-    high = p["high"]
-    low = p["low"]
-    volume = p["volume"]
-    open_price = p["open"]
+    price = prev["price"]
+    high = prev["high"]
+    low = prev["low"]
+    volume = prev["volume"]
+    open_price = prev["open"]
 
     day_range = max(high - low, 0.01)
     range_pct = day_range / price if price > 0 else 0.0
@@ -363,10 +398,10 @@ def base_analysis(symbol):
     elif volume > 2_000_000:
         volume_signal = "متوسطة"
 
-    location = "وسط"
     near_high = high > 0 and price >= high * 0.985
     near_low = low > 0 and price <= low * 1.02
 
+    location = "وسط"
     if near_high:
         location = "قرب مقاومة"
     elif near_low:
@@ -387,9 +422,7 @@ def base_analysis(symbol):
         "near_high": near_high,
         "near_low": near_low
     }
-
-
-# -------------------- professional trade engine --------------------
+    # -------------------- professional trade engine --------------------
 def trade_plan_pro(symbol):
     a = base_analysis(symbol)
     if not a:
@@ -409,11 +442,8 @@ def trade_plan_pro(symbol):
         return None
 
     risk_flags = []
-    if LOW_PRICE_HARD_BLOCK <= price < LOW_PRICE_WARNING:
+    if price < LOW_PRICE_WARNING:
         risk_flags.append("سهم منخفض السعر - مخاطرة عالية")
-
-    if price <= 0 or high <= 0 or low <= 0:
-        return None
 
     if volume < 2_000_000:
         return None
@@ -421,14 +451,17 @@ def trade_plan_pro(symbol):
     if range_pct > 0.15:
         return None
 
+    # 🔥 Trend + Volume AI
+    trend_data = get_trend(symbol)
+    volume_ratio = get_volume_ratio(symbol)
+    trend = trend_data["trend"]
+
+    # ATH logic
     history = get_history_levels(symbol)
-    near_52w_high = history["near_52w_high"]
     near_ath = history["near_ath"]
     ath_breakout_zone = history["ath_breakout_zone"]
 
-    if near_ath and momentum != "صاعد" and near_high:
-        risk_flags.append("قرب قمة تاريخية بدون زخم كافٍ")
-
+    # تحديد نوع الصفقة
     trade_type = None
     entry = None
     stop = None
@@ -452,18 +485,17 @@ def trade_plan_pro(symbol):
     if risk <= 0:
         return None
 
-    risk_pct = risk / entry if entry > 0 else 0
+    risk_pct = risk / entry
 
     if risk_pct > 0.08:
         return None
 
     target_1 = entry + risk * 1.5
     target_2 = entry + risk * 2.0
-    rr_1 = (target_1 - entry) / risk if risk > 0 else 0
-    rr_2 = (target_2 - entry) / risk if risk > 0 else 0
 
     quality_score = 42
 
+    # -------------------- Volume strength --------------------
     if volume > 120_000_000:
         quality_score += 15
     elif volume > 80_000_000:
@@ -472,108 +504,88 @@ def trade_plan_pro(symbol):
         quality_score += 9
     elif volume > 10_000_000:
         quality_score += 6
-    elif volume > 2_000_000:
+    else:
         quality_score += 3
 
-    if trade_type == "Breakout":
-        if momentum == "صاعد":
-            quality_score += 16
-        elif momentum == "محايد":
-            quality_score += 4
-        else:
-            quality_score -= 12
-    elif trade_type == "Pullback":
-        if momentum == "صاعد":
-            quality_score += 8
-        elif momentum == "محايد":
-            quality_score += 3
-        elif momentum == "هابط":
-            quality_score -= 8
-
-    if trade_type == "Breakout" and location == "قرب مقاومة":
-        quality_score += 10
-    if trade_type == "Pullback" and location == "قرب دعم":
-        quality_score += 8
-
-    if risk_pct <= 0.015:
-        quality_score += 14
-    elif risk_pct <= 0.025:
-        quality_score += 10
-    elif risk_pct <= 0.04:
-        quality_score += 6
-    elif risk_pct <= 0.06:
-        quality_score += 2
+    # -------------------- Momentum --------------------
+    if momentum == "صاعد":
+        quality_score += 12
     else:
         quality_score -= 6
 
-    if range_pct <= 0.03:
-        quality_score += 8
-    elif range_pct <= 0.06:
+    # -------------------- Trend AI --------------------
+    if trend == "صاعد قوي":
+        quality_score += 10
+    elif trend == "صاعد":
         quality_score += 5
-    elif range_pct <= 0.10:
-        quality_score += 1
+    elif trend == "هابط":
+        quality_score -= 10
+
+    # -------------------- Volume Ratio AI --------------------
+    if volume_ratio >= 2:
+        quality_score += 8
+    elif volume_ratio >= 1.5:
+        quality_score += 5
+    elif volume_ratio < 0.8:
+        quality_score -= 6
+
+    # Fake breakout
+    if trade_type == "Breakout" and volume_ratio < 1.2:
+        quality_score -= 8
+        risk_flags.append("اختراق ضعيف (بدون سيولة)")
+
+    # -------------------- Position --------------------
+    if trade_type == "Breakout" and location == "قرب مقاومة":
+        quality_score += 10
+    elif trade_type == "Pullback" and location == "قرب دعم":
+        quality_score += 8
+
+    # -------------------- Risk --------------------
+    if risk_pct <= 0.02:
+        quality_score += 10
+    elif risk_pct <= 0.04:
+        quality_score += 6
     else:
         quality_score -= 5
 
-    if ath_breakout_zone and trade_type == "Breakout" and momentum == "صاعد":
-        quality_score += 8
-        risk_flags.append("قرب/اختراق قمة تاريخية")
-    elif near_ath and trade_type == "Breakout" and momentum == "صاعد":
-        quality_score += 4
-        risk_flags.append("قرب قمة تاريخية")
-    elif near_52w_high and trade_type == "Breakout" and momentum == "صاعد":
-        quality_score += 2
-        risk_flags.append("قرب أعلى مستوى سنوي")
-
-    if near_ath and momentum == "هابط":
-        quality_score -= 10
-
-    if trade_type == "Pullback":
-        if volume < 20_000_000:
-            quality_score -= 4
-        if range_pct > 0.06:
-            quality_score -= 4
-
-    if price < 5 and volume > 30_000_000:
+    # -------------------- Range --------------------
+    if range_pct <= 0.03:
+        quality_score += 6
+    elif range_pct <= 0.06:
+        quality_score += 3
+    else:
         quality_score -= 5
-        risk_flags.append("سهم مضاربي عالي الخطورة")
 
+    # -------------------- ATH --------------------
+    if ath_breakout_zone and momentum == "صاعد":
+        quality_score += 8
+        risk_flags.append("قرب اختراق ATH")
+    elif near_ath:
+        quality_score -= 6
+        risk_flags.append("قرب ATH بدون اختراق")
+
+    # -------------------- Data Quality --------------------
     info = get_info(symbol)
     h = halal(symbol)
+
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
     risk_flags.extend(dq_flags)
 
     if data_quality == "low":
         quality_score -= 12
 
-    if near_ath and not ath_breakout_zone:
-        quality_score -= 6
-        risk_flags.append("قرب ATH بدون اختراق")
-
-    quality_score = min(100, max(1, quality_score))
+    # -------------------- Final Decision --------------------
+    quality_score = max(1, min(100, quality_score))
 
     if quality_score >= 82:
         decision = "دخول"
     elif quality_score >= 65:
         decision = "مراقبة"
     else:
-        decision = "تجنب"
+        return None
 
     if data_quality == "low" and decision == "دخول":
         decision = "مراقبة"
-
-    confidence = "ضعيف"
-    if quality_score >= 88:
-        confidence = "عالي جدًا 🔥"
-    elif quality_score >= 78:
-        confidence = "عالي"
-    elif quality_score >= 65:
-        confidence = "متوسط"
-    else:
-        confidence = "ضعيف"
-
-    if quality_score < 65:
-        return None
 
     return {
         "symbol": symbol,
@@ -581,32 +593,16 @@ def trade_plan_pro(symbol):
         "decision": decision,
         "entry": safe_round(entry),
         "stop_loss": safe_round(stop),
-        "risk_per_share": safe_round(risk),
-        "risk_pct": safe_round(risk_pct * 100),
         "target_1": safe_round(target_1),
         "target_2": safe_round(target_2),
-        "rr_1": safe_round(rr_1),
-        "rr_2": safe_round(rr_2),
-        "valid_for": valid_for,
-        "confidence": confidence,
+        "risk_pct": safe_round(risk_pct * 100),
         "quality_score": quality_score,
-        "price": safe_round(price),
-        "high": safe_round(high),
-        "low": safe_round(low),
-        "volume": int(volume),
-        "momentum": momentum,
-        "location": location,
-        "year_high": safe_round(history["year_high"]),
-        "ath_high": safe_round(history["ath_high"]),
-        "near_52w_high": near_52w_high,
-        "near_ath": near_ath,
-        "ath_breakout_zone": ath_breakout_zone,
+        "trend": trend,
+        "volume_ratio": round(volume_ratio, 2),
         "data_quality": data_quality,
-        "risk_flags": risk_flags,
+        "risk_flags": risk_flags
     }
-
-
-# -------------------- endpoints --------------------
+    # -------------------- API --------------------
 @app.get("/")
 def home():
     return {
@@ -725,9 +721,9 @@ def trade_scan():
         "count": len(trades),
         "top_picks_count": len(top_picks),
         "watchlist_count": len(watchlist),
-        "rejected_count": len(rejected),
         "top_picks": top_picks,
         "watchlist": watchlist,
+        "rejected_count": len(rejected),
         "rejected": rejected
     }
 
