@@ -82,24 +82,54 @@ def latest_key_from_row(row: dict):
     return (publish_date, fiscal_year, fiscal_period)
 
 # -------------------------------
+# CSV reader ذكي
+# -------------------------------
+def read_csv_smart(path):
+    if not os.path.exists(path):
+        return []
+
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        sample = f.read(4096)
+        f.seek(0)
+
+        # 1) محاولة اكتشاف الفاصل تلقائيًا
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+            reader = csv.DictReader(f, dialect=dialect)
+            rows = [clean_row(r) for r in reader]
+            if rows:
+                return rows
+        except:
+            pass
+
+    # 2) fallback على ;
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        rows = [clean_row(r) for r in reader]
+        if rows and len(rows[0].keys()) > 1:
+            return rows
+
+    # 3) fallback على ,
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f, delimiter=",")
+        rows = [clean_row(r) for r in reader]
+        return rows
+
+# -------------------------------
 # تحميل Sector / Industry
 # -------------------------------
 def load_sector_industry():
     data = {}
     path = "data/sector_industry.csv"
-    if not os.path.exists(path):
-        return data
+    rows = read_csv_smart(path)
 
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=",")
-        for raw in reader:
-            row = clean_row(raw)
-            industry_id = str(row.get("IndustryId", "")).strip()
-            if industry_id:
-                data[industry_id] = {
-                    "industry": str(row.get("Industry", "")).strip(),
-                    "sector": str(row.get("Sector", "")).strip(),
-                }
+    for row in rows:
+        industry_id = str(row.get("IndustryId", "")).strip()
+        if industry_id:
+            data[industry_id] = {
+                "industry": str(row.get("Industry", "")).strip(),
+                "sector": str(row.get("Sector", "")).strip(),
+            }
     return data
 
 # -------------------------------
@@ -108,17 +138,13 @@ def load_sector_industry():
 def load_companies():
     data = {}
     path = "data/companies.csv"
-    if not os.path.exists(path):
-        return data
+    rows = read_csv_smart(path)
 
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=",")
-        for raw in reader:
-            row = clean_row(raw)
-            ticker = str(row.get("Ticker", "")).strip().upper()
-            if not ticker:
-                continue
-            data[ticker] = row
+    for row in rows:
+        ticker = str(row.get("Ticker", "")).strip().upper()
+        if not ticker:
+            continue
+        data[ticker] = row
     return data
 
 # -------------------------------
@@ -127,21 +153,17 @@ def load_companies():
 def load_latest_balance():
     data = {}
     path = "data/balance_sheet.csv"
-    if not os.path.exists(path):
-        return data
+    rows = read_csv_smart(path)
 
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=",")
-        for raw in reader:
-            row = clean_row(raw)
-            ticker = str(row.get("Ticker", "")).strip().upper()
-            if not ticker:
-                continue
+    for row in rows:
+        ticker = str(row.get("Ticker", "")).strip().upper()
+        if not ticker:
+            continue
 
-            key = latest_key_from_row(row)
-            if ticker not in data or key > data[ticker]["_latest_key"]:
-                row["_latest_key"] = key
-                data[ticker] = row
+        key = latest_key_from_row(row)
+        if ticker not in data or key > data[ticker]["_latest_key"]:
+            row["_latest_key"] = key
+            data[ticker] = row
 
     for ticker in list(data.keys()):
         data[ticker].pop("_latest_key", None)
@@ -154,21 +176,17 @@ def load_latest_balance():
 def load_latest_income():
     data = {}
     path = "data/income_statement.csv"
-    if not os.path.exists(path):
-        return data
+    rows = read_csv_smart(path)
 
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=",")
-        for raw in reader:
-            row = clean_row(raw)
-            ticker = str(row.get("Ticker", "")).strip().upper()
-            if not ticker:
-                continue
+    for row in rows:
+        ticker = str(row.get("Ticker", "")).strip().upper()
+        if not ticker:
+            continue
 
-            key = latest_key_from_row(row)
-            if ticker not in data or key > data[ticker]["_latest_key"]:
-                row["_latest_key"] = key
-                data[ticker] = row
+        key = latest_key_from_row(row)
+        if ticker not in data or key > data[ticker]["_latest_key"]:
+            row["_latest_key"] = key
+            data[ticker] = row
 
     for ticker in list(data.keys()):
         data[ticker].pop("_latest_key", None)
