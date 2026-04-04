@@ -2,7 +2,7 @@ from fastapi import FastAPI
 import requests
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = FastAPI()
 
@@ -14,6 +14,7 @@ SECTOR_DATA = {}
 COMPANIES_DATA = {}
 BALANCE_DATA = {}
 INCOME_DATA = {}
+HISTORY_CACHE = {}
 
 HARAM_SECTORS = {"financial services", "banks", "insurance"}
 
@@ -22,6 +23,9 @@ HARAM_INDUSTRY_KEYWORDS = [
     "gambling", "casino", "betting", "credit services",
     "mortgage", "reit mortgage", "asset management", "capital markets",
 ]
+
+LOW_PRICE_HARD_BLOCK = 2.0
+LOW_PRICE_WARNING = 3.0
 
 # -------------------- utils --------------------
 def clean_key(key):
@@ -144,6 +148,59 @@ def get_prev(symbol):
     except:
         return None
 
+def get_history_levels(symbol):
+    if symbol in HISTORY_CACHE:
+        return HISTORY_CACHE[symbol]
+
+    today = datetime.utcnow().date()
+    from_52w = (today - timedelta(days=365)).isoformat()
+    from_5y = (today - timedelta(days=365 * 5)).isoformat()
+    to_date = today.isoformat()
+
+    out = {
+        "year_high": 0.0,
+        "ath_high": 0.0,
+        "near_52w_high": False,
+        "near_ath": False,
+        "ath_breakout_zone": False,
+    }
+
+    try:
+        url_52w = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
+            f"{from_52w}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+        )
+        r52 = requests.get(url_52w, timeout=15).json()
+        highs_52 = [to_float(x.get("h")) for x in r52.get("results", []) if to_float(x.get("h")) > 0]
+        if highs_52:
+            out["year_high"] = max(highs_52)
+    except:
+        pass
+
+    try:
+        url_5y = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
+            f"{from_5y}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+        )
+        r5 = requests.get(url_5y, timeout=20).json()
+        highs_5 = [to_float(x.get("h")) for x in r5.get("results", []) if to_float(x.get("h")) > 0]
+        if highs_5:
+            out["ath_high"] = max(highs_5)
+    except:
+        pass
+
+    prev = get_prev(symbol)
+    if prev:
+        price = prev["price"]
+        if out["year_high"] > 0:
+            out["near_52w_high"] = price >= out["year_high"] * 0.97
+        if out["ath_high"] > 0:
+            out["near_ath"] = price >= out["ath_high"] * 0.97
+            out["ath_breakout_zone"] = price >= out["ath_high"] * 0.995
+
+    HISTORY_CACHE[symbol] = out
+    return out
+
 # -------------------- info --------------------
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
@@ -247,8 +304,10 @@ def base_analysis(symbol):
         momentum = "هابط"
 
     volume_signal = "ضعيفة"
-    if volume > 50_000_000:
+    if volume > 100_000_000:
         volume_signal = "عالية جدًا"
+    elif volume > 50_000_000:
+        volume_signal = "قوية جدًا"
     elif volume > 10_000_000:
         volume_signal = "قوية"
     elif volume > 2_000_000:
@@ -296,6 +355,14 @@ def trade_plan_pro(symbol):
     momentum = a["momentum"]
     location = a["location"]
 
+    # Low price policy
+    if price < LOW_PRICE_HARD_BLOCK:
+        return None
+
+    risk_flags = []
+    if LOW_PRICE_HARD_BLOCK <= price < LOW_PRICE_WARNING:
+        risk_flags.append("سهم منخفض السعر - مخاطرة عالية")
+
     # استبعاد الفرص الضعيفة جدًا
     if price <= 0 or high <= 0 or low <= 0:
         return None
@@ -306,6 +373,15 @@ def trade_plan_pro(symbol):
     # استبعاد التذبذب المبالغ فيه
     if range_pct > 0.15:
         return None
+
+    # ATH / 52W logic
+    history = get_history_levels(symbol)
+    near_52w_high = history["near_52w_high"]
+    near_ath = history["near_ath"]
+    ath_breakout_zone = history["ath_breakout_zone"]
+
+    if near_ath and momentum != "صاعد" and near_high:
+        risk_flags.append("قرب قمة تاريخية بدون زخم كافٍ")
 
     trade_type = None
     entry = None
@@ -345,23 +421,33 @@ def trade_plan_pro(symbol):
     rr_2 = (target_2 - entry) / risk if risk > 0 else 0
 
     # Quality Score
-    quality_score = 50
+    quality_score = 45
 
     # Volume quality
-    if volume > 100_000_000:
-        quality_score += 18
+    if volume > 120_000_000:
+        quality_score += 16
+    elif volume > 80_000_000:
+        quality_score += 13
     elif volume > 50_000_000:
-        quality_score += 14
-    elif volume > 10_000_000:
         quality_score += 10
+    elif volume > 10_000_000:
+        quality_score += 7
     elif volume > 2_000_000:
-        quality_score += 6
+        quality_score += 4
 
     # Momentum quality
-    if momentum == "صاعد":
-        quality_score += 15
-    elif momentum == "محايد":
-        quality_score += 5
+    if trade_type == "Breakout":
+        if momentum == "صاعد":
+            quality_score += 14
+        elif momentum == "محايد":
+            quality_score += 4
+        else:
+            quality_score -= 10
+    elif trade_type == "Pullback":
+        if momentum == "هابط":
+            quality_score += 3  # pullback طبيعي
+        elif momentum == "صاعد":
+            quality_score += 8
 
     # Position quality
     if trade_type == "Breakout" and location == "قرب مقاومة":
@@ -370,29 +456,49 @@ def trade_plan_pro(symbol):
         quality_score += 10
 
     # Risk quality
-    if risk_pct <= 0.02:
-        quality_score += 15
-    elif risk_pct <= 0.04:
+    if risk_pct <= 0.015:
+        quality_score += 14
+    elif risk_pct <= 0.025:
         quality_score += 10
+    elif risk_pct <= 0.04:
+        quality_score += 6
     elif risk_pct <= 0.06:
-        quality_score += 5
+        quality_score += 2
+    else:
+        quality_score -= 6
 
     # Range sanity
     if range_pct <= 0.03:
-        quality_score += 10
+        quality_score += 8
     elif range_pct <= 0.06:
-        quality_score += 6
+        quality_score += 5
     elif range_pct <= 0.10:
-        quality_score += 2
+        quality_score += 1
+    else:
+        quality_score -= 5
+
+    # ATH / 52W bonus/penalty
+    if ath_breakout_zone and trade_type == "Breakout" and momentum == "صاعد":
+        quality_score += 10
+        risk_flags.append("قرب/اختراق قمة تاريخية")
+    elif near_ath and trade_type == "Breakout":
+        quality_score += 5
+        risk_flags.append("قرب قمة تاريخية")
+    elif near_52w_high and trade_type == "Breakout":
+        quality_score += 3
+        risk_flags.append("قرب أعلى مستوى سنوي")
+
+    if near_ath and momentum == "هابط":
+        quality_score -= 10
 
     quality_score = min(100, max(1, quality_score))
 
     confidence = "ضعيف"
-    if quality_score >= 85:
+    if quality_score >= 88:
         confidence = "عالي جدًا 🔥"
-    elif quality_score >= 72:
+    elif quality_score >= 76:
         confidence = "عالي"
-    elif quality_score >= 60:
+    elif quality_score >= 63:
         confidence = "متوسط"
     else:
         confidence = "ضعيف"
@@ -420,7 +526,13 @@ def trade_plan_pro(symbol):
         "low": safe_round(low),
         "volume": int(volume),
         "momentum": momentum,
-        "location": location
+        "location": location,
+        "year_high": safe_round(history["year_high"]),
+        "ath_high": safe_round(history["ath_high"]),
+        "near_52w_high": near_52w_high,
+        "near_ath": near_ath,
+        "ath_breakout_zone": ath_breakout_zone,
+        "risk_flags": risk_flags,
     }
 
 # -------------------- endpoints --------------------
@@ -442,8 +554,20 @@ def scan():
     rejected = []
 
     for s in ALLOWED_TEST_SYMBOLS:
-        h = halal(s)
         info = get_info(s)
+        prev = get_prev(s)
+
+        if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
+            rejected.append({
+                "symbol": s,
+                "reason": f"سعر السهم أقل من {LOW_PRICE_HARD_BLOCK}$ - مرفوض بسبب المخاطرة",
+                "sector": info["sector"],
+                "industry": info["industry"],
+                "financials": {}
+            })
+            continue
+
+        h = halal(s)
 
         if not h["allowed"]:
             rejected.append({
@@ -457,6 +581,10 @@ def scan():
 
         base = base_analysis(s)
         if base:
+            warning = None
+            if base["price"] < LOW_PRICE_WARNING:
+                warning = "مخاطرة عالية - سهم منخفض السعر"
+
             results.append({
                 "symbol": s,
                 "companyName": info["company"],
@@ -469,6 +597,7 @@ def scan():
                 "momentumSignal": base["momentum"],
                 "volumeSignal": base["volume_signal"],
                 "locationSignal": base["location"],
+                "warning": warning,
                 "financials": h["financials"]
             })
 
@@ -483,17 +612,31 @@ def scan():
 @app.get("/trade-scan")
 def trade_scan():
     trades = []
+    rejected = []
 
     for s in ALLOWED_TEST_SYMBOLS:
+        info = get_info(s)
+        prev = get_prev(s)
+
+        if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
+            rejected.append({
+                "symbol": s,
+                "reason": f"سعر السهم أقل من {LOW_PRICE_HARD_BLOCK}$ - مرفوض بسبب المخاطرة العالية"
+            })
+            continue
+
         h = halal(s)
         if not h["allowed"]:
+            rejected.append({
+                "symbol": s,
+                "reason": h["reason"]
+            })
             continue
 
         plan = trade_plan_pro(s)
         if not plan:
             continue
 
-        info = get_info(s)
         plan["company"] = info["company"]
         plan["sector"] = info["sector"]
         plan["industry"] = info["industry"]
@@ -504,13 +647,30 @@ def trade_scan():
 
     return {
         "count": len(trades),
-        "trades": trades
+        "rejected_count": len(rejected),
+        "trades": trades,
+        "rejected": rejected
     }
 
 @app.get("/analyze/{symbol}")
 def analyze_single(symbol: str):
     symbol = symbol.upper()
     info = get_info(symbol)
+    prev = get_prev(symbol)
+
+    if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
+        return {
+            "symbol": symbol,
+            "company": info["company"],
+            "sector": info["sector"],
+            "industry": info["industry"],
+            "halal": {
+                "allowed": False,
+                "reason": f"سعر السهم أقل من {LOW_PRICE_HARD_BLOCK}$ - مرفوض بسبب المخاطرة العالية"
+            },
+            "trade_plan": None
+        }
+
     h = halal(symbol)
 
     if not h["allowed"]:
@@ -543,6 +703,7 @@ def debug_symbol(symbol: str):
         "sector_info": get_info(symbol),
         "balance": BALANCE_DATA.get(symbol, {}),
         "income": INCOME_DATA.get(symbol, {}),
+        "history_levels": get_history_levels(symbol),
         "halal_check": halal(symbol),
         "base_analysis": base_analysis(symbol),
         "trade_plan": trade_plan_pro(symbol),
