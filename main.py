@@ -348,14 +348,12 @@ def trade_plan_pro(symbol):
     high = a["high"]
     low = a["low"]
     volume = a["volume"]
-    day_range = a["day_range"]
     range_pct = a["range_pct"]
     near_high = a["near_high"]
     near_low = a["near_low"]
     momentum = a["momentum"]
     location = a["location"]
 
-    # Low price policy
     if price < LOW_PRICE_HARD_BLOCK:
         return None
 
@@ -363,18 +361,15 @@ def trade_plan_pro(symbol):
     if LOW_PRICE_HARD_BLOCK <= price < LOW_PRICE_WARNING:
         risk_flags.append("سهم منخفض السعر - مخاطرة عالية")
 
-    # استبعاد الفرص الضعيفة جدًا
     if price <= 0 or high <= 0 or low <= 0:
         return None
 
     if volume < 2_000_000:
         return None
 
-    # استبعاد التذبذب المبالغ فيه
     if range_pct > 0.15:
         return None
 
-    # ATH / 52W logic
     history = get_history_levels(symbol)
     near_52w_high = history["near_52w_high"]
     near_ath = history["near_ath"]
@@ -388,14 +383,11 @@ def trade_plan_pro(symbol):
     stop = None
     valid_for = None
 
-    # Breakout
     if near_high and momentum == "صاعد":
         trade_type = "Breakout"
         entry = high * 1.002
         stop = low * 0.995
         valid_for = "Intraday"
-
-    # Pullback
     elif near_low:
         trade_type = "Pullback"
         entry = price
@@ -411,7 +403,6 @@ def trade_plan_pro(symbol):
 
     risk_pct = risk / entry if entry > 0 else 0
 
-    # استبعاد الوقف الواسع جدًا
     if risk_pct > 0.08:
         return None
 
@@ -420,42 +411,43 @@ def trade_plan_pro(symbol):
     rr_1 = (target_1 - entry) / risk if risk > 0 else 0
     rr_2 = (target_2 - entry) / risk if risk > 0 else 0
 
-    # Quality Score
-    quality_score = 45
+    quality_score = 42
 
-    # Volume quality
+    # volume
     if volume > 120_000_000:
-        quality_score += 16
+        quality_score += 15
     elif volume > 80_000_000:
-        quality_score += 13
+        quality_score += 12
     elif volume > 50_000_000:
-        quality_score += 10
+        quality_score += 9
     elif volume > 10_000_000:
-        quality_score += 7
+        quality_score += 6
     elif volume > 2_000_000:
-        quality_score += 4
+        quality_score += 3
 
-    # Momentum quality
+    # momentum
     if trade_type == "Breakout":
         if momentum == "صاعد":
-            quality_score += 14
+            quality_score += 16
         elif momentum == "محايد":
             quality_score += 4
         else:
-            quality_score -= 10
+            quality_score -= 12
     elif trade_type == "Pullback":
-        if momentum == "هابط":
-            quality_score += 3  # pullback طبيعي
-        elif momentum == "صاعد":
+        if momentum == "صاعد":
             quality_score += 8
+        elif momentum == "محايد":
+            quality_score += 3
+        elif momentum == "هابط":
+            quality_score -= 8  # تشديد مهم
 
-    # Position quality
+    # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
         quality_score += 10
     if trade_type == "Pullback" and location == "قرب دعم":
-        quality_score += 10
+        quality_score += 8
 
-    # Risk quality
+    # risk
     if risk_pct <= 0.015:
         quality_score += 14
     elif risk_pct <= 0.025:
@@ -467,7 +459,7 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 6
 
-    # Range sanity
+    # range
     if range_pct <= 0.03:
         quality_score += 8
     elif range_pct <= 0.06:
@@ -477,39 +469,54 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 5
 
-    # ATH / 52W bonus/penalty
+    # ATH / 52W
     if ath_breakout_zone and trade_type == "Breakout" and momentum == "صاعد":
-        quality_score += 10
+        quality_score += 8
         risk_flags.append("قرب/اختراق قمة تاريخية")
-    elif near_ath and trade_type == "Breakout":
-        quality_score += 5
+    elif near_ath and trade_type == "Breakout" and momentum == "صاعد":
+        quality_score += 4
         risk_flags.append("قرب قمة تاريخية")
-    elif near_52w_high and trade_type == "Breakout":
-        quality_score += 3
+    elif near_52w_high and trade_type == "Breakout" and momentum == "صاعد":
+        quality_score += 2
         risk_flags.append("قرب أعلى مستوى سنوي")
 
     if near_ath and momentum == "هابط":
         quality_score -= 10
 
+    # extra pullback penalties
+    if trade_type == "Pullback":
+        if volume < 20_000_000:
+            quality_score -= 4
+        if range_pct > 0.06:
+            quality_score -= 4
+
     quality_score = min(100, max(1, quality_score))
+
+    # decision
+    if quality_score >= 82:
+        decision = "دخول"
+    elif quality_score >= 65:
+        decision = "مراقبة"
+    else:
+        decision = "تجنب"
 
     confidence = "ضعيف"
     if quality_score >= 88:
         confidence = "عالي جدًا 🔥"
-    elif quality_score >= 76:
+    elif quality_score >= 78:
         confidence = "عالي"
-    elif quality_score >= 63:
+    elif quality_score >= 65:
         confidence = "متوسط"
     else:
         confidence = "ضعيف"
 
-    # استبعاد الفرص الضعيفة
-    if quality_score < 60:
+    if quality_score < 65:
         return None
 
     return {
         "symbol": symbol,
         "type": trade_type,
+        "decision": decision,
         "entry": safe_round(entry),
         "stop_loss": safe_round(stop),
         "risk_per_share": safe_round(risk),
@@ -645,10 +652,16 @@ def trade_scan():
 
     trades = sorted(trades, key=lambda x: x["quality_score"], reverse=True)
 
+    top_picks = [x for x in trades if x["decision"] == "دخول"]
+    watchlist = [x for x in trades if x["decision"] == "مراقبة"]
+
     return {
         "count": len(trades),
+        "top_picks_count": len(top_picks),
+        "watchlist_count": len(watchlist),
         "rejected_count": len(rejected),
-        "trades": trades,
+        "top_picks": top_picks,
+        "watchlist": watchlist,
         "rejected": rejected
     }
 
