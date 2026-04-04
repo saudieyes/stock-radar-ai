@@ -8,7 +8,6 @@ app = FastAPI()
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
-# أول تشغيل نختبر على 4 أسهم فقط
 ALLOWED_TEST_SYMBOLS = ["AAPL", "NVDA", "JPM", "TSLA"]
 
 SECTOR_DATA = {}
@@ -92,7 +91,7 @@ def load_sector_industry():
         return data
 
     with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
+        reader = csv.DictReader(f, delimiter=",")
         for raw in reader:
             row = clean_row(raw)
             industry_id = str(row.get("IndustryId", "")).strip()
@@ -113,7 +112,7 @@ def load_companies():
         return data
 
     with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
+        reader = csv.DictReader(f, delimiter=",")
         for raw in reader:
             row = clean_row(raw)
             ticker = str(row.get("Ticker", "")).strip().upper()
@@ -132,7 +131,7 @@ def load_latest_balance():
         return data
 
     with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
+        reader = csv.DictReader(f, delimiter=",")
         for raw in reader:
             row = clean_row(raw)
             ticker = str(row.get("Ticker", "")).strip().upper()
@@ -159,7 +158,7 @@ def load_latest_income():
         return data
 
     with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
+        reader = csv.DictReader(f, delimiter=",")
         for raw in reader:
             row = clean_row(raw)
             ticker = str(row.get("Ticker", "")).strip().upper()
@@ -193,9 +192,6 @@ def home():
         }
     }
 
-# -------------------------------
-# الأسهم الحالية في وضع الاختبار
-# -------------------------------
 def get_test_symbols():
     return ALLOWED_TEST_SYMBOLS
 
@@ -238,8 +234,6 @@ def get_company_sector_info(symbol):
 
 # -------------------------------
 # الفلتر الشرعي
-# المرحلة 1: النشاط
-# المرحلة 2: المالي
 # -------------------------------
 def halal_filter(symbol):
     info = get_company_sector_info(symbol)
@@ -277,7 +271,6 @@ def halal_filter(symbol):
     long_term_debt = to_float(balance.get("Long Term Debt"))
     total_debt = short_term_debt + long_term_debt
 
-    # القيمة السوقية التقريبية = السعر الحالي × عدد الأسهم
     prev = get_polygon_prev(symbol)
     current_price = prev["price"] if prev else 0.0
 
@@ -303,7 +296,6 @@ def halal_filter(symbol):
         "cash_to_assets": cash_to_assets,
     }
 
-    # شرط الديون
     if debt_to_market_cap is not None and debt_to_market_cap > 0.33:
         return {
             "allowed": False,
@@ -313,7 +305,6 @@ def halal_filter(symbol):
             "financials": financials
         }
 
-    # شرط النقد / الأصول
     if cash_to_assets is not None and cash_to_assets > 0.50:
         return {
             "allowed": False,
