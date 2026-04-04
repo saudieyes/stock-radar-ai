@@ -9,9 +9,10 @@ app = FastAPI()
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
 ALLOWED_TEST_SYMBOLS = [
-    "AAPL", "NVDA", "TSLA", "JPM",
-    "BAC", "AMD", "AMZN", "PLTR",
-    "SOFI", "NIO", "RKLB", "GOOGL"
+    "AAPL", "NVDA", "TSLA", "JPM", "BAC", "AMD", "AMZN", "PLTR", "SOFI", "NIO",
+    "RKLB", "GOOGL", "MSFT", "META", "AVGO", "CRM", "ADBE", "NFLX", "ORCL", "INTC",
+    "QCOM", "MU", "ANET", "PANW", "CRWD", "SNOW", "SHOP", "UBER", "ABNB", "PYPL",
+    "COIN", "ROKU", "SQ", "TTD", "HIMS", "MARA", "RIOT", "OKLO", "ASTS", "MRVL"
 ]
 
 SECTOR_DATA = {}
@@ -255,8 +256,8 @@ def data_quality_check(symbol, info, financials):
         flags.append("عدد الأسهم غير متوفر")
 
     if financials.get("approx_market_cap", 0) == 0:
-        flags.append("القيمة السوقية التقريبية غير متوفرة")
         quality = "low"
+        flags.append("القيمة السوقية التقريبية غير متوفرة")
 
     return quality, flags
 
@@ -463,7 +464,6 @@ def trade_plan_pro(symbol):
 
     quality_score = 42
 
-    # volume
     if volume > 120_000_000:
         quality_score += 15
     elif volume > 80_000_000:
@@ -475,7 +475,6 @@ def trade_plan_pro(symbol):
     elif volume > 2_000_000:
         quality_score += 3
 
-    # momentum
     if trade_type == "Breakout":
         if momentum == "صاعد":
             quality_score += 16
@@ -491,13 +490,11 @@ def trade_plan_pro(symbol):
         elif momentum == "هابط":
             quality_score -= 8
 
-    # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
         quality_score += 10
     if trade_type == "Pullback" and location == "قرب دعم":
         quality_score += 8
 
-    # risk
     if risk_pct <= 0.015:
         quality_score += 14
     elif risk_pct <= 0.025:
@@ -509,7 +506,6 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 6
 
-    # range
     if range_pct <= 0.03:
         quality_score += 8
     elif range_pct <= 0.06:
@@ -519,7 +515,6 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 5
 
-    # ATH / 52W
     if ath_breakout_zone and trade_type == "Breakout" and momentum == "صاعد":
         quality_score += 8
         risk_flags.append("قرب/اختراق قمة تاريخية")
@@ -533,19 +528,16 @@ def trade_plan_pro(symbol):
     if near_ath and momentum == "هابط":
         quality_score -= 10
 
-    # extra pullback penalties
     if trade_type == "Pullback":
         if volume < 20_000_000:
             quality_score -= 4
         if range_pct > 0.06:
             quality_score -= 4
 
-    # penny trap
     if price < 5 and volume > 30_000_000:
         quality_score -= 5
         risk_flags.append("سهم مضاربي عالي الخطورة")
 
-    # data quality
     info = get_info(symbol)
     h = halal(symbol)
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
@@ -554,7 +546,6 @@ def trade_plan_pro(symbol):
     if data_quality == "low":
         quality_score -= 12
 
-    # ATH caution without breakout
     if near_ath and not ath_breakout_zone:
         quality_score -= 6
         risk_flags.append("قرب ATH بدون اختراق")
