@@ -233,6 +233,34 @@ def get_info(symbol):
     }
 
 
+# -------------------- data quality --------------------
+def data_quality_check(symbol, info, financials):
+    flags = []
+    quality = "high"
+
+    if not info["company"]:
+        quality = "low"
+        flags.append("اسم الشركة غير متوفر")
+
+    if not info["sector"] or not info["industry"]:
+        quality = "low"
+        flags.append("بيانات القطاع/الصناعة ناقصة")
+
+    if financials.get("total_assets", 0) == 0:
+        quality = "low"
+        flags.append("إجمالي الأصول غير متوفر")
+
+    if financials.get("shares", 0) == 0:
+        quality = "low"
+        flags.append("عدد الأسهم غير متوفر")
+
+    if financials.get("approx_market_cap", 0) == 0:
+        flags.append("القيمة السوقية التقريبية غير متوفرة")
+        quality = "low"
+
+    return quality, flags
+
+
 # -------------------- halal --------------------
 def halal(symbol):
     i = get_info(symbol)
@@ -512,6 +540,25 @@ def trade_plan_pro(symbol):
         if range_pct > 0.06:
             quality_score -= 4
 
+    # penny trap
+    if price < 5 and volume > 30_000_000:
+        quality_score -= 5
+        risk_flags.append("سهم مضاربي عالي الخطورة")
+
+    # data quality
+    info = get_info(symbol)
+    h = halal(symbol)
+    data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
+    risk_flags.extend(dq_flags)
+
+    if data_quality == "low":
+        quality_score -= 12
+
+    # ATH caution without breakout
+    if near_ath and not ath_breakout_zone:
+        quality_score -= 6
+        risk_flags.append("قرب ATH بدون اختراق")
+
     quality_score = min(100, max(1, quality_score))
 
     if quality_score >= 82:
@@ -520,6 +567,9 @@ def trade_plan_pro(symbol):
         decision = "مراقبة"
     else:
         decision = "تجنب"
+
+    if data_quality == "low" and decision == "دخول":
+        decision = "مراقبة"
 
     confidence = "ضعيف"
     if quality_score >= 88:
@@ -560,6 +610,7 @@ def trade_plan_pro(symbol):
         "near_52w_high": near_52w_high,
         "near_ath": near_ath,
         "ath_breakout_zone": ath_breakout_zone,
+        "data_quality": data_quality,
         "risk_flags": risk_flags,
     }
 
