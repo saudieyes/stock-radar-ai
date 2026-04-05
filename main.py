@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 import requests
 import os
 import csv
@@ -28,7 +29,9 @@ LOW_PRICE_HARD_BLOCK = 2.0
 LOW_PRICE_WARNING = 3.0
 
 
-# -------------------- utils --------------------
+# =========================
+# Utilities
+# =========================
 def clean_key(key):
     return str(key).replace("\ufeff", "").strip()
 
@@ -145,7 +148,9 @@ def estimate_validity(trade_type: str, trend: str, volume_ratio: float, catalyst
         return "مراقبة يومية"
 
 
-# -------------------- CSV reader --------------------
+# =========================
+# CSV Reading
+# =========================
 def read_csv(path):
     if not os.path.exists(path):
         return []
@@ -172,7 +177,9 @@ def read_csv(path):
     return []
 
 
-# -------------------- loaders --------------------
+# =========================
+# Loaders
+# =========================
 def load_sector():
     data = {}
     for r in read_csv("data/sector_industry.csv"):
@@ -215,7 +222,9 @@ BALANCE_DATA = load_latest("data/balance_sheet.csv")
 INCOME_DATA = load_latest("data/income_statement.csv")
 
 
-# -------------------- universe --------------------
+# =========================
+# Universe
+# =========================
 def get_active_universe(max_symbols: int = 60):
     try:
         return get_scan_universe(max_symbols=max_symbols)
@@ -223,14 +232,21 @@ def get_active_universe(max_symbols: int = 60):
         return []
 
 
-# -------------------- market data --------------------
+# =========================
+# Market Data
+# =========================
 def get_prev(symbol):
     try:
         r = requests.get(
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={POLYGON_API_KEY}",
             timeout=12
         ).json()
-        d = r["results"][0]
+
+        results = r.get("results", [])
+        if not results:
+            return None
+
+        d = results[0]
         return {
             "price": to_float(d.get("c")),
             "high": to_float(d.get("h")),
@@ -296,7 +312,9 @@ def get_history_levels(symbol):
     return out
 
 
-# -------------------- trend / volume AI --------------------
+# =========================
+# Trend / Volume AI
+# =========================
 def get_trend(symbol):
     try:
         url = (
@@ -351,7 +369,9 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
-# -------------------- info --------------------
+# =========================
+# Company Info
+# =========================
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
     industry_id = str(c.get("IndustryId", "")).strip()
@@ -364,7 +384,9 @@ def get_info(symbol):
     }
 
 
-# -------------------- news / catalyst --------------------
+# =========================
+# News / Catalyst
+# =========================
 def get_news_catalyst(symbol):
     try:
         info = get_info(symbol)
@@ -467,7 +489,9 @@ def get_news_catalyst(symbol):
         }
 
 
-# -------------------- data quality --------------------
+# =========================
+# Data Quality
+# =========================
 def data_quality_check(symbol, info, financials):
     flags = []
     quality = "high"
@@ -495,7 +519,9 @@ def data_quality_check(symbol, info, financials):
     return quality, flags
 
 
-# -------------------- halal / financial filter --------------------
+# =========================
+# Halal / Financial Filter
+# =========================
 def halal(symbol):
     info = get_info(symbol)
     text = f"{info['sector']} {info['industry']}".lower()
@@ -565,7 +591,9 @@ def halal(symbol):
     }
 
 
-# -------------------- base analysis --------------------
+# =========================
+# Base Analysis
+# =========================
 def base_analysis(symbol):
     prev = get_prev(symbol)
     if not prev:
@@ -622,7 +650,9 @@ def base_analysis(symbol):
     }
 
 
-# -------------------- professional trade engine --------------------
+# =========================
+# Professional Trade Engine
+# =========================
 def trade_plan_pro(symbol):
     a = base_analysis(symbol)
     if not a:
@@ -713,7 +743,6 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # ---------------- SMART VOLUME LOGIC ----------------
     breakout_failed = False
     breakout_weak = False
 
@@ -771,7 +800,6 @@ def trade_plan_pro(symbol):
         quality_score -= 6
         risk_flags.append("قرب ATH بدون اختراق")
 
-    # News / Catalyst
     quality_score += news["catalyst_score"]
     if news["catalyst_score"] >= 6:
         risk_flags.append("خبر إيجابي محفز")
@@ -788,7 +816,6 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
-    # ---------------- HARD GUARDRAILS ----------------
     force_cap_to_cautious = False
     force_cap_to_watch = False
 
@@ -895,9 +922,16 @@ def trade_plan_pro(symbol):
     }
 
 
-# -------------------- API --------------------
+# =========================
+# Routes
+# =========================
 @app.get("/")
 def home():
+    return FileResponse("index.html")
+
+
+@app.get("/health")
+def health():
     universe = get_active_universe(max_symbols=60)
     return {
         "message": "Stock Radar AI is running 🚀",
@@ -991,4 +1025,4 @@ def debug_symbol(symbol: str):
         "base_analysis": base_analysis(symbol),
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade_plan_pro(symbol),
-    }
+}
