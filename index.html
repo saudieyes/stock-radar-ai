@@ -6,40 +6,48 @@
   <title>Stock Radar AI</title>
   <style>
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       font-family: Tahoma, Arial, sans-serif;
       background: #0b1020;
       color: #f3f4f6;
     }
+
     .container {
-      max-width: 1250px;
+      max-width: 1280px;
       margin: 0 auto;
       padding: 20px;
     }
+
     .hero {
       background: linear-gradient(135deg, #111827, #1f2937);
       border: 1px solid #374151;
-      border-radius: 18px;
-      padding: 20px;
+      border-radius: 20px;
+      padding: 22px;
       margin-bottom: 18px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.25);
     }
+
     .hero h1 {
       margin: 0 0 8px;
-      font-size: 28px;
+      font-size: 30px;
     }
+
     .hero p {
       margin: 0;
       color: #cbd5e1;
-      line-height: 1.8;
+      line-height: 1.9;
+      font-size: 15px;
     }
+
     .toolbar {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-top: 16px;
+      margin-top: 18px;
     }
+
     button {
       background: #2563eb;
       color: white;
@@ -50,9 +58,18 @@
       font-size: 15px;
       font-weight: bold;
     }
-    button:hover { opacity: 0.92; }
-    .secondary-btn { background: #374151; }
-    .warning-btn { background: #b45309; }
+
+    button:hover {
+      opacity: 0.92;
+    }
+
+    .secondary-btn {
+      background: #374151;
+    }
+
+    .warning-btn {
+      background: #b45309;
+    }
 
     .stats {
       display: grid;
@@ -60,25 +77,29 @@
       gap: 12px;
       margin: 18px 0;
     }
+
     .stat {
       background: #111827;
       border: 1px solid #374151;
       border-radius: 16px;
       padding: 16px;
     }
+
     .stat .label {
       color: #9ca3af;
       font-size: 13px;
       margin-bottom: 8px;
     }
+
     .stat .value {
       font-size: 24px;
       font-weight: bold;
     }
 
     .section {
-      margin-top: 22px;
+      margin-top: 24px;
     }
+
     .section h2 {
       margin: 0 0 12px;
       font-size: 22px;
@@ -86,7 +107,7 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 14px;
     }
 
@@ -95,24 +116,27 @@
       border: 1px solid #374151;
       border-radius: 18px;
       padding: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
     }
+
     .card-header {
       display: flex;
-      align-items: start;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 8px;
       margin-bottom: 10px;
     }
+
     .symbol {
       font-size: 24px;
       font-weight: bold;
     }
+
     .company {
       color: #cbd5e1;
       font-size: 13px;
       margin-top: 4px;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     .badge {
@@ -123,10 +147,26 @@
       font-weight: bold;
       white-space: nowrap;
     }
-    .badge-strong { background: #14532d; color: #dcfce7; }
-    .badge-cautious { background: #78350f; color: #fde68a; }
-    .badge-watch { background: #1e3a8a; color: #dbeafe; }
-    .badge-rank { background: #3f3f46; color: #f4f4f5; }
+
+    .badge-strong {
+      background: #14532d;
+      color: #dcfce7;
+    }
+
+    .badge-cautious {
+      background: #78350f;
+      color: #fde68a;
+    }
+
+    .badge-watch {
+      background: #1e3a8a;
+      color: #dbeafe;
+    }
+
+    .badge-rank {
+      background: #3f3f46;
+      color: #f4f4f5;
+    }
 
     .meta-grid {
       display: grid;
@@ -134,17 +174,20 @@
       gap: 8px;
       margin-top: 12px;
     }
+
     .meta-item {
       background: #0f172a;
       border: 1px solid #1f2937;
       border-radius: 12px;
       padding: 10px;
     }
+
     .meta-title {
       color: #9ca3af;
       font-size: 12px;
       margin-bottom: 6px;
     }
+
     .meta-value {
       font-size: 14px;
       font-weight: bold;
@@ -168,6 +211,7 @@
       flex-wrap: wrap;
       gap: 8px;
     }
+
     .flag {
       background: #3f1d1d;
       color: #fecaca;
@@ -184,12 +228,14 @@
       padding: 16px;
       margin-top: 24px;
     }
+
     .search-row {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-top: 10px;
     }
+
     input {
       flex: 1;
       min-width: 220px;
@@ -213,6 +259,7 @@
       color: #cbd5e1;
       line-height: 1.8;
     }
+
     .error-box {
       border-color: #7f1d1d;
       color: #fecaca;
@@ -226,7 +273,9 @@
       line-height: 1.8;
     }
 
-    .footer-space { height: 30px; }
+    .footer-space {
+      height: 30px;
+    }
 
     @media (max-width: 700px) {
       .hero h1 { font-size: 22px; }
@@ -240,8 +289,8 @@
     <div class="hero">
       <h1>Stock Radar AI</h1>
       <p>
-        أداة فحص السوق وعرض فرص اليوم والفرص الواعدة، مع تحليل مختصر وشرح القرار،
-        بالإضافة إلى فحص أي سهم بشكل منفصل.
+        أداة فحص السوق الأمريكي وعرض فرص اليوم والفرص الواعدة، مع فحص سهم منفرد،
+        وشرح واضح لسبب القرار، والأهداف، ووقف الخسارة، وصلاحية الفرصة.
       </p>
 
       <div class="toolbar">
@@ -296,7 +345,7 @@
   </div>
 
   <script>
-    const API_BASE = "https://web-production-bff2a.up.railway.app";
+    const API_BASE = window.location.origin;
 
     function reloadPage() {
       window.location.reload();
@@ -315,6 +364,23 @@
       if (decision === "دخول قوي") return `<span class="badge badge-strong">${decision}</span>`;
       if (decision === "دخول بحذر") return `<span class="badge badge-cautious">${decision}</span>`;
       return `<span class="badge badge-watch">${decision}</span>`;
+    }
+
+    function formatNum(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      if (typeof v === "number") {
+        return Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
+      }
+      return v;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
 
     function cardHTML(item) {
@@ -421,21 +487,6 @@
           ${flagsHtml ? `<div class="flags">${flagsHtml}</div>` : ""}
         </div>
       `;
-    }
-
-    function formatNum(v) {
-      if (v === null || v === undefined || v === "") return "—";
-      if (typeof v === "number") return Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
-      return v;
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
     }
 
     function setStats(data) {
