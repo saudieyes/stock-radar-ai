@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Stock Radar AI</title>
+
   <style>
     * { box-sizing: border-box; }
 
@@ -330,7 +331,7 @@
     <div class="search-box" id="singleSearchBox">
       <h2 style="margin:0;">فحص سهم واحد</h2>
       <div class="small-note">
-        اكتب رمز السهم مثل: AAPL أو NFLX أو TSLA ثم اضغط فحص.
+        اكتب رمز السهم مثل: AAPL أو NFLX أو TSLA أو NVO أو IOT ثم اضغط فحص.
       </div>
 
       <div class="search-row">
@@ -489,6 +490,84 @@
       `;
     }
 
+    function overviewHTML(o) {
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="symbol">${escapeHtml(o.symbol || "—")}</div>
+              <div class="company">${escapeHtml(o.company || "—")}</div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <span class="badge badge-watch">تحليل عام</span>
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="meta-item">
+              <div class="meta-title">السعر الحالي</div>
+              <div class="meta-value">${formatNum(o.price)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الاتجاه</div>
+              <div class="meta-value">${escapeHtml(o.trend || "—")}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">Volume Ratio</div>
+              <div class="meta-value">${formatNum(o.volume_ratio)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الزخم</div>
+              <div class="meta-value">${escapeHtml(o.momentum || "—")}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">قمة 52 أسبوع</div>
+              <div class="meta-value">${formatNum(o.year_high)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">القمة التاريخية</div>
+              <div class="meta-value">${formatNum(o.ath_high)}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">Catalyst Score</div>
+              <div class="meta-value">${formatNum(o.catalyst_score)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الحالة الشرعية</div>
+              <div class="meta-value">${o.halal_allowed ? "مقبول مبدئيًا" : escapeHtml(o.halal_reason || "—")}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">القطاع</div>
+              <div class="meta-value">${escapeHtml(o.sector || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الصناعة</div>
+              <div class="meta-value">${escapeHtml(o.industry || "—")}</div>
+            </div>
+          </div>
+
+          <div class="summary">
+            <strong>وضع السهم:</strong><br>
+            ${escapeHtml(o.status || "لا يوجد وصف")}
+          </div>
+
+          <div class="summary">
+            <strong>الملخص:</strong><br>
+            ${escapeHtml(o.ai_summary || "—")}
+          </div>
+
+          <div class="summary">
+            <strong>الخبر/المحفز:</strong><br>
+            ${escapeHtml(o.news_note || "لا يوجد")}
+          </div>
+        </div>
+      `;
+    }
+
     function setStats(data) {
       document.getElementById("statsRow").innerHTML = `
         <div class="stat"><div class="label">Universe</div><div class="value">${data.universe_count ?? "—"}</div></div>
@@ -570,22 +649,26 @@
           throw new Error(data.detail || "فشل فحص السهم");
         }
 
-        const trade = data.trade_plan;
-        if (!trade) {
-          box.innerHTML = `
-            <div class="error-box">
-              لم يتم العثور على فرصة واضحة لهذا السهم الآن.
-            </div>
-          `;
+        if (data.trade_plan) {
+          const trade = data.trade_plan;
+          trade.company = data.sector_info?.company || "";
+          trade.sector = data.sector_info?.sector || "";
+          trade.industry = data.sector_info?.industry || "";
+          trade.financials = data.halal_check?.financials || {};
+          box.innerHTML = cardHTML(trade);
           return;
         }
 
-        trade.company = data.sector_info?.company || data.sector_info?.company_name || "";
-        trade.sector = data.sector_info?.sector || "";
-        trade.industry = data.sector_info?.industry || "";
-        trade.financials = data.halal_check?.financials || {};
+        if (data.overview && data.overview.found) {
+          box.innerHTML = overviewHTML(data.overview);
+          return;
+        }
 
-        box.innerHTML = cardHTML(trade);
+        box.innerHTML = `
+          <div class="error-box">
+            لم يتم العثور على بيانات واضحة لهذا السهم.
+          </div>
+        `;
       } catch (err) {
         box.innerHTML = `<div class="error-box">فشل فحص السهم: ${escapeHtml(err.message)}</div>`;
       }
