@@ -864,3 +864,4 @@ def debug_symbol(symbol: str):
         "reason": "مقبول مبدئيًا",
         "financials": financials
     }
+# force redeploy
