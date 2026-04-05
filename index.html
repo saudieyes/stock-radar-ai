@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Radar AI</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Tahoma, Arial, sans-serif;
+      background: #0b1020;
+      color: #f3f4f6;
+    }
+    .container {
+      max-width: 1250px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #111827, #1f2937);
+      border: 1px solid #374151;
+      border-radius: 18px;
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .hero p {
+      margin: 0;
+      color: #cbd5e1;
+      line-height: 1.8;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 11px 16px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: bold;
+    }
+    button:hover { opacity: 0.92; }
+    .secondary-btn { background: #374151; }
+    .warning-btn { background: #b45309; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .stat {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 16px;
+      padding: 16px;
+    }
+    .stat .label {
+      color: #9ca3af;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .stat .value {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .section {
+      margin-top: 22px;
+    }
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 22px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    .card-header {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .symbol {
+      font-size: 24px;
+      font-weight: bold;
+    }
+    .company {
+      color: #cbd5e1;
+      font-size: 13px;
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+    .badge-strong { background: #14532d; color: #dcfce7; }
+    .badge-cautious { background: #78350f; color: #fde68a; }
+    .badge-watch { background: #1e3a8a; color: #dbeafe; }
+    .badge-rank { background: #3f3f46; color: #f4f4f5; }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .meta-item {
+      background: #0f172a;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 10px;
+    }
+    .meta-title {
+      color: #9ca3af;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .meta-value {
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1.5;
+    }
+
+    .summary {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      background: #0f172a;
+      border: 1px solid #1f2937;
+      color: #e5e7eb;
+      line-height: 1.8;
+      font-size: 14px;
+    }
+
+    .flags {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .flag {
+      background: #3f1d1d;
+      color: #fecaca;
+      border: 1px solid #7f1d1d;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .search-box {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 18px;
+      padding: 16px;
+      margin-top: 24px;
+    }
+    .search-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    input {
+      flex: 1;
+      min-width: 220px;
+      background: #0f172a;
+      color: white;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 15px;
+    }
+
+    .single-result {
+      margin-top: 14px;
+    }
+
+    .loading, .empty, .error-box {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 16px;
+      padding: 16px;
+      color: #cbd5e1;
+      line-height: 1.8;
+    }
+    .error-box {
+      border-color: #7f1d1d;
+      color: #fecaca;
+      background: #2a1111;
+    }
+
+    .small-note {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-top: 8px;
+      line-height: 1.8;
+    }
+
+    .footer-space { height: 30px; }
+
+    @media (max-width: 700px) {
+      .hero h1 { font-size: 22px; }
+      .symbol { font-size: 20px; }
+      .meta-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <h1>Stock Radar AI</h1>
+      <p>
+        أداة فحص السوق وعرض فرص اليوم والفرص الواعدة، مع تحليل مختصر وشرح القرار،
+        بالإضافة إلى فحص أي سهم بشكل منفصل.
+      </p>
+
+      <div class="toolbar">
+        <button onclick="loadTradeScan()">تحديث السوق الآن</button>
+        <button class="secondary-btn" onclick="scrollToSingleSearch()">فحص سهم واحد</button>
+        <button class="warning-btn" onclick="reloadPage()">إعادة تحميل الصفحة</button>
+      </div>
+
+      <div class="small-note" id="lastUpdatedText">آخر تحديث: —</div>
+    </div>
+
+    <div class="stats" id="statsRow">
+      <div class="stat"><div class="label">Universe</div><div class="value">—</div></div>
+      <div class="stat"><div class="label">أفضل النتائج</div><div class="value">—</div></div>
+      <div class="stat"><div class="label">دخول قوي</div><div class="value">—</div></div>
+      <div class="stat"><div class="label">دخول بحذر</div><div class="value">—</div></div>
+      <div class="stat"><div class="label">مراقبة</div><div class="value">—</div></div>
+    </div>
+
+    <div id="statusBox" class="loading">جاري تحميل بيانات السوق...</div>
+
+    <div class="section">
+      <h2>أفضل 5 فرص</h2>
+      <div id="topRanked" class="grid"></div>
+    </div>
+
+    <div class="section">
+      <h2>فرص اليوم</h2>
+      <div id="todayOpportunities" class="grid"></div>
+    </div>
+
+    <div class="section">
+      <h2>الفرص الواعدة / المستقبلية</h2>
+      <div id="futureOpportunities" class="grid"></div>
+    </div>
+
+    <div class="search-box" id="singleSearchBox">
+      <h2 style="margin:0;">فحص سهم واحد</h2>
+      <div class="small-note">
+        اكتب رمز السهم مثل: AAPL أو NFLX أو TSLA ثم اضغط فحص.
+      </div>
+
+      <div class="search-row">
+        <input id="symbolInput" type="text" placeholder="مثال: AAPL" />
+        <button onclick="analyzeSingleSymbol()">فحص السهم</button>
+      </div>
+
+      <div class="single-result" id="singleResult"></div>
+    </div>
+
+    <div class="footer-space"></div>
+  </div>
+
+  <script>
+    const API_BASE = "https://web-production-bff2a.up.railway.app";
+
+    function reloadPage() {
+      window.location.reload();
+    }
+
+    function scrollToSingleSearch() {
+      document.getElementById("singleSearchBox").scrollIntoView({ behavior: "smooth" });
+    }
+
+    function nowText() {
+      const d = new Date();
+      return d.toLocaleString("ar-SA");
+    }
+
+    function decisionBadge(decision) {
+      if (decision === "دخول قوي") return `<span class="badge badge-strong">${decision}</span>`;
+      if (decision === "دخول بحذر") return `<span class="badge badge-cautious">${decision}</span>`;
+      return `<span class="badge badge-watch">${decision}</span>`;
+    }
+
+    function cardHTML(item) {
+      const flagsHtml = (item.risk_flags || [])
+        .map(flag => `<span class="flag">${escapeHtml(flag)}</span>`)
+        .join("");
+
+      const company = item.company ? escapeHtml(item.company) : "—";
+      const sector = item.sector ? escapeHtml(item.sector) : "—";
+      const industry = item.industry ? escapeHtml(item.industry) : "—";
+      const rankLabel = item.rank_label || "—";
+      const validFor = item.valid_for || "—";
+      const aiSummary = item.ai_summary || "—";
+      const newsNote = item.news_note || "—";
+
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="symbol">${escapeHtml(item.symbol || "—")}</div>
+              <div class="company">${company}</div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              ${decisionBadge(item.decision || "مراقبة")}
+              <span class="badge badge-rank">${escapeHtml(rankLabel)}</span>
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="meta-item">
+              <div class="meta-title">نوع الفرصة</div>
+              <div class="meta-value">${escapeHtml(item.type || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الصلاحية</div>
+              <div class="meta-value">${escapeHtml(validFor)}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">الدخول</div>
+              <div class="meta-value">${formatNum(item.entry)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">وقف الخسارة</div>
+              <div class="meta-value">${formatNum(item.stop_loss)}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">الهدف 1</div>
+              <div class="meta-value">${formatNum(item.target_1)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الهدف 2</div>
+              <div class="meta-value">${formatNum(item.target_2)}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">الدرجة</div>
+              <div class="meta-value">${formatNum(item.quality_score)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">المخاطرة %</div>
+              <div class="meta-value">${formatNum(item.risk_pct)}%</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">الاتجاه</div>
+              <div class="meta-value">${escapeHtml(item.trend || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">Volume Ratio</div>
+              <div class="meta-value">${formatNum(item.volume_ratio)}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">Catalyst Score</div>
+              <div class="meta-value">${formatNum(item.catalyst_score)}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">جودة البيانات</div>
+              <div class="meta-value">${escapeHtml(item.data_quality || "—")}</div>
+            </div>
+
+            <div class="meta-item">
+              <div class="meta-title">القطاع</div>
+              <div class="meta-value">${sector}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-title">الصناعة</div>
+              <div class="meta-value">${industry}</div>
+            </div>
+          </div>
+
+          <div class="summary">
+            <strong>ملخص القرار:</strong><br>
+            ${escapeHtml(aiSummary)}
+          </div>
+
+          <div class="summary">
+            <strong>الخبر/المحفز:</strong><br>
+            ${escapeHtml(newsNote)}
+          </div>
+
+          ${flagsHtml ? `<div class="flags">${flagsHtml}</div>` : ""}
+        </div>
+      `;
+    }
+
+    function formatNum(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      if (typeof v === "number") return Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
+      return v;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function setStats(data) {
+      document.getElementById("statsRow").innerHTML = `
+        <div class="stat"><div class="label">Universe</div><div class="value">${data.universe_count ?? "—"}</div></div>
+        <div class="stat"><div class="label">أفضل النتائج</div><div class="value">${data.top_ranked_count ?? "—"}</div></div>
+        <div class="stat"><div class="label">دخول قوي</div><div class="value">${data.strong_entries_count ?? "—"}</div></div>
+        <div class="stat"><div class="label">دخول بحذر</div><div class="value">${data.cautious_entries_count ?? "—"}</div></div>
+        <div class="stat"><div class="label">مراقبة</div><div class="value">${data.watchlist_count ?? "—"}</div></div>
+      `;
+    }
+
+    function renderList(containerId, items, emptyText) {
+      const container = document.getElementById(containerId);
+      if (!items || !items.length) {
+        container.innerHTML = `<div class="empty">${emptyText}</div>`;
+        return;
+      }
+      container.innerHTML = items.map(cardHTML).join("");
+    }
+
+    async function loadTradeScan() {
+      const statusBox = document.getElementById("statusBox");
+      statusBox.className = "loading";
+      statusBox.textContent = "جاري تحديث السوق...";
+
+      try {
+        const res = await fetch(`${API_BASE}/trade-scan`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || "فشل تحميل البيانات");
+        }
+
+        setStats(data);
+
+        const todayList = [
+          ...(data.strong_entries || []),
+          ...(data.cautious_entries || [])
+        ];
+
+        renderList("topRanked", data.top_ranked || [], "لا توجد نتائج في أفضل 5 حاليًا");
+        renderList("todayOpportunities", todayList, "لا توجد فرص يومية واضحة الآن");
+        renderList("futureOpportunities", data.watchlist || [], "لا توجد فرص واعدة حاليًا");
+
+        const errorsCount = data.errors_count || 0;
+        const rejectedCount = data.rejected_count || 0;
+
+        statusBox.className = "loading";
+        statusBox.innerHTML = `
+          تم التحديث بنجاح.<br>
+          عدد النتائج: <strong>${data.count ?? 0}</strong> |
+          المرفوض: <strong>${rejectedCount}</strong> |
+          الأخطاء: <strong>${errorsCount}</strong>
+        `;
+
+        document.getElementById("lastUpdatedText").textContent = `آخر تحديث: ${nowText()}`;
+      } catch (err) {
+        statusBox.className = "error-box";
+        statusBox.textContent = `فشل تحميل السوق: ${err.message}`;
+      }
+    }
+
+    async function analyzeSingleSymbol() {
+      const input = document.getElementById("symbolInput");
+      const symbol = input.value.trim().toUpperCase();
+      const box = document.getElementById("singleResult");
+
+      if (!symbol) {
+        box.innerHTML = `<div class="error-box">اكتب رمز السهم أولاً.</div>`;
+        return;
+      }
+
+      box.innerHTML = `<div class="loading">جاري فحص السهم ${escapeHtml(symbol)}...</div>`;
+
+      try {
+        const res = await fetch(`${API_BASE}/debug/${encodeURIComponent(symbol)}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || "فشل فحص السهم");
+        }
+
+        const trade = data.trade_plan;
+        if (!trade) {
+          box.innerHTML = `
+            <div class="error-box">
+              لم يتم العثور على فرصة واضحة لهذا السهم الآن.
+            </div>
+          `;
+          return;
+        }
+
+        trade.company = data.sector_info?.company || data.sector_info?.company_name || "";
+        trade.sector = data.sector_info?.sector || "";
+        trade.industry = data.sector_info?.industry || "";
+        trade.financials = data.halal_check?.financials || {};
+
+        box.innerHTML = cardHTML(trade);
+      } catch (err) {
+        box.innerHTML = `<div class="error-box">فشل فحص السهم: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    document.getElementById("symbolInput").addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        analyzeSingleSymbol();
+      }
+    });
+
+    loadTradeScan();
+  </script>
+</body>
+</html>
