@@ -650,7 +650,6 @@ def trade_plan_pro(symbol):
         return None
 
     risk_pct = risk / entry
-
     if risk_pct > 0.08:
         return None
 
@@ -686,41 +685,30 @@ def trade_plan_pro(symbol):
         quality_score -= 10
 
     # ---------------- SMART VOLUME LOGIC ----------------
-if trade_type == "Breakout":
+    if trade_type == "Breakout":
+        if volume_ratio >= 1.5:
+            quality_score += 8
+        elif volume_ratio >= 1.2:
+            quality_score += 4
+        elif volume_ratio >= 1.0:
+            quality_score -= 2
+            risk_flags.append("اختراق ضعيف")
+        elif volume_ratio >= 0.9:
+            quality_score -= 6
+            risk_flags.append("اختراق ضعيف بدون سيولة")
+        else:
+            quality_score -= 10
+            risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
 
-    if volume_ratio >= 1.5:
-        quality_score += 8
-
-    elif volume_ratio >= 1.2:
-        quality_score += 4
-
-    elif volume_ratio >= 1.0:
-        quality_score -= 2
-        risk_flags.append("اختراق ضعيف")
-
-    elif volume_ratio >= 0.9:
-        quality_score -= 6
-        risk_flags.append("اختراق ضعيف بدون سيولة")
-
-    else:
-        quality_score -= 10
-        risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
-
-elif trade_type == "Pullback":
-
-    if volume_ratio >= 1.3:
-        quality_score += 5
-
-    elif volume_ratio >= 1.0:
-        quality_score += 2
-
-    elif volume_ratio >= 0.8:
-        quality_score -= 2
-
-    else:
-        quality_score -= 5
-
-    
+    elif trade_type == "Pullback":
+        if volume_ratio >= 1.3:
+            quality_score += 5
+        elif volume_ratio >= 1.0:
+            quality_score += 2
+        elif volume_ratio >= 0.8:
+            quality_score -= 2
+        else:
+            quality_score -= 5
 
     # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
@@ -782,6 +770,42 @@ elif trade_type == "Pullback":
     if data_quality == "low" and decision in {"دخول قوي", "دخول بحذر"}:
         decision = "مراقبة"
 
+    # ---------------- AI Explanation ----------------
+    reasons = []
+
+    if trend == "صاعد قوي":
+        reasons.append("الاتجاه صاعد قوي")
+    elif trend == "صاعد":
+        reasons.append("الاتجاه إيجابي")
+    elif trend == "هابط":
+        reasons.append("الاتجاه سلبي")
+    else:
+        reasons.append("الاتجاه متذبذب")
+
+    if volume_ratio < 1:
+        reasons.append("السيولة ضعيفة")
+    elif volume_ratio >= 1.5:
+        reasons.append("السيولة قوية")
+    elif volume_ratio >= 1.0:
+        reasons.append("السيولة مقبولة")
+
+    if news["catalyst_score"] > 0:
+        reasons.append("يوجد محفز إيجابي")
+    elif news["catalyst_score"] < 0:
+        reasons.append("يوجد خبر سلبي")
+    else:
+        reasons.append("لا يوجد محفز قوي")
+
+    if trade_type == "Breakout":
+        reasons.append("محاولة اختراق")
+    elif trade_type == "Pullback":
+        reasons.append("ارتداد من دعم")
+
+    if data_quality == "low":
+        reasons.append("جودة البيانات ضعيفة")
+
+    ai_summary = " - ".join(reasons) if reasons else "لا يوجد وضوح كافي"
+
     return {
         "symbol": symbol,
         "type": trade_type,
@@ -797,7 +821,8 @@ elif trade_type == "Pullback":
         "data_quality": data_quality,
         "catalyst_score": news["catalyst_score"],
         "news_note": news["note"],
-        "risk_flags": risk_flags
+        "risk_flags": risk_flags,
+        "ai_summary": ai_summary
     }
 
 
