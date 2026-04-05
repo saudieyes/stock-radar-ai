@@ -148,6 +148,16 @@ def estimate_validity(trade_type: str, trend: str, volume_ratio: float, catalyst
         return "مراقبة يومية"
 
 
+def decision_priority(decision: str) -> int:
+    if decision == "دخول قوي":
+        return 3
+    if decision == "دخول بحذر":
+        return 2
+    if decision == "مراقبة":
+        return 1
+    return 0
+
+
 # =========================
 # CSV Reading
 # =========================
@@ -414,7 +424,10 @@ def get_news_catalyst(symbol):
             "nasdaq", "dow jones", "why investors", "what to know",
             "best stocks", "should you buy", "index fund", "etf",
             "top-ranked stocks", "stocks to buy now", "long term",
-            "consumer tech news", "weekly recap", "roundup", "news recap"
+            "consumer tech news", "weekly recap", "roundup", "news recap",
+            "worth buying", "worth holding", "bullish on", "best way to buy",
+            "compare", "comparison", "vs.", "versus", "top picks", "3 stocks",
+            "5 stocks", "10 stocks", "owns over", "entire u.s. market"
         ]
 
         strong_keywords = [
@@ -424,8 +437,7 @@ def get_news_catalyst(symbol):
             "acquisition", "merger",
             "approval", "fda", "launch",
             "record revenue", "strong growth",
-            "buyback", "dividend increase",
-            "worth buying", "worth owning", "bullish"
+            "buyback", "dividend increase"
         ]
 
         negative_keywords = [
@@ -459,6 +471,9 @@ def get_news_catalyst(symbol):
 
             if any(k in title_lower for k in negative_keywords):
                 score -= 6
+
+            if score == 0:
+                continue
 
             try:
                 news_date = datetime.strptime(published[:10], "%Y-%m-%d")
@@ -651,6 +666,91 @@ def base_analysis(symbol):
 
 
 # =========================
+# Single Stock Analysis
+# =========================
+def analyze_symbol_overview(symbol):
+    symbol = symbol.upper().strip()
+
+    prev = get_prev(symbol)
+    info = get_info(symbol)
+    trend_data = get_trend(symbol)
+    volume_ratio = get_volume_ratio(symbol)
+    history = get_history_levels(symbol)
+    news = get_news_catalyst(symbol)
+    halal_result = halal(symbol)
+
+    if not prev:
+        return {
+            "symbol": symbol,
+            "found": False,
+            "message": "تعذر جلب بيانات السهم"
+        }
+
+    price = prev["price"]
+    high = prev["high"]
+    low = prev["low"]
+    open_price = prev["open"]
+
+    momentum = "محايد"
+    if price > open_price:
+        momentum = "صاعد"
+    elif price < open_price:
+        momentum = "هابط"
+
+    status = "لا توجد فرصة واضحة الآن"
+    if trend_data["trend"] == "صاعد قوي" and volume_ratio >= 1.0:
+        status = "السهم إيجابي ويستحق المتابعة"
+    elif trend_data["trend"] == "هابط":
+        status = "السهم ضعيف حاليًا"
+
+    reasons = []
+    reasons.append(f"الاتجاه: {trend_data['trend']}")
+    reasons.append(f"الزخم: {momentum}")
+
+    if volume_ratio < 0.9:
+        reasons.append("السيولة ضعيفة")
+    elif volume_ratio >= 1.2:
+        reasons.append("السيولة جيدة")
+
+    if news["catalyst_score"] > 0:
+        reasons.append("يوجد محفز إيجابي")
+    elif news["catalyst_score"] < 0:
+        reasons.append("يوجد خبر سلبي")
+    else:
+        reasons.append("لا يوجد محفز قوي")
+
+    if history["near_ath"]:
+        reasons.append("قريب من القمة التاريخية")
+
+    ai_summary = " - ".join(reasons)
+
+    return {
+        "symbol": symbol,
+        "found": True,
+        "company": info["company"],
+        "sector": info["sector"],
+        "industry": info["industry"],
+        "price": safe_round(price),
+        "high": safe_round(high),
+        "low": safe_round(low),
+        "open": safe_round(open_price),
+        "trend": trend_data["trend"],
+        "volume_ratio": round(volume_ratio, 2),
+        "momentum": momentum,
+        "year_high": safe_round(history["year_high"]),
+        "ath_high": safe_round(history["ath_high"]),
+        "near_ath": history["near_ath"],
+        "catalyst_score": news["catalyst_score"],
+        "news_note": news["note"],
+        "halal_allowed": halal_result["allowed"],
+        "halal_reason": halal_result["reason"],
+        "financials": halal_result["financials"],
+        "status": status,
+        "ai_summary": ai_summary
+    }
+
+
+# =========================
 # Professional Trade Engine
 # =========================
 def trade_plan_pro(symbol):
@@ -744,7 +844,6 @@ def trade_plan_pro(symbol):
         quality_score -= 10
 
     breakout_failed = False
-    breakout_weak = False
 
     if trade_type == "Breakout":
         if volume_ratio >= 1.5:
@@ -753,11 +852,9 @@ def trade_plan_pro(symbol):
             quality_score += 4
         elif volume_ratio >= 1.0:
             quality_score -= 2
-            breakout_weak = True
             risk_flags.append("اختراق ضعيف")
         elif volume_ratio >= 0.9:
             quality_score -= 6
-            breakout_weak = True
             risk_flags.append("اختراق ضعيف بدون سيولة")
         else:
             quality_score -= 10
@@ -987,7 +1084,11 @@ def trade_scan():
             })
             continue
 
-    trades = sorted(trades, key=lambda x: x["quality_score"], reverse=True)
+    trades = sorted(
+        trades,
+        key=lambda x: (decision_priority(x["decision"]), x["quality_score"]),
+        reverse=True
+    )
 
     top_ranked = trades[:5]
     strong_entries = [x for x in trades if x["decision"] == "دخول قوي"]
@@ -1015,6 +1116,9 @@ def trade_scan():
 @app.get("/debug/{symbol}")
 def debug_symbol(symbol: str):
     symbol = symbol.upper()
+    overview = analyze_symbol_overview(symbol)
+    trade = trade_plan_pro(symbol)
+
     return {
         "symbol": symbol,
         "sector_info": get_info(symbol),
@@ -1024,5 +1128,6 @@ def debug_symbol(symbol: str):
         "halal_check": halal(symbol),
         "base_analysis": base_analysis(symbol),
         "news_catalyst": get_news_catalyst(symbol),
-        "trade_plan": trade_plan_pro(symbol),
-}
+        "trade_plan": trade,
+        "overview": overview
+            }
