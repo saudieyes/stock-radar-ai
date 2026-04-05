@@ -75,7 +75,7 @@ def latest_key(row):
 
 def normalize_text(text: str) -> str:
     text = str(text).lower().strip()
-    text = re.sub(r"[^a-z0-9\s&.-]", " ", text)
+    text = re.sub(r"[^a-z0-9\s&.\-]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -90,8 +90,9 @@ def get_company_name_variants(company_name: str) -> list[str]:
     noise = [
         " inc", " inc.", " corp", " corp.", " corporation", " co", " co.",
         " ltd", " ltd.", " limited", " plc", " holdings", " holding",
-        " group", " technologies", " technology", " systems", " international",
-        " company", " companies", " class a", " class c", " common stock"
+        " group", " technologies", " technology", " systems", " system",
+        " international", " company", " companies", " class a", " class c",
+        " common stock"
     ]
 
     for n in noise:
@@ -110,8 +111,7 @@ def get_company_name_variants(company_name: str) -> list[str]:
         if len(v) >= 3:
             cleaned.append(v)
 
-    cleaned = list(dict.fromkeys(cleaned))
-    return cleaned
+    return list(dict.fromkeys(cleaned))
 
 
 # -------------------- CSV reader --------------------
@@ -333,7 +333,7 @@ def get_info(symbol):
     }
 
 
-# -------------------- news / catalyst (clean final) --------------------
+# -------------------- news / catalyst --------------------
 def get_news_catalyst(symbol):
     try:
         info = get_info(symbol)
@@ -427,11 +427,11 @@ def get_news_catalyst(symbol):
             "note": best_note if best_note else "لا يوجد محفز قوي"
         }
 
-    except:
+    except Exception as e:
         return {
             "has_news": False,
             "catalyst_score": 0,
-            "note": "خطأ في الأخبار"
+            "note": f"خطأ في الأخبار: {str(e)}"
         }
 
 
@@ -525,7 +525,15 @@ def halal(symbol):
             "reason": f"نسبة النقد إلى الأصول مرتفعة: {cash_to_assets:.2%}",
             "financials": financials
         }
-        # -------------------- base analysis --------------------
+
+    return {
+        "allowed": True,
+        "reason": "مقبول مبدئيًا",
+        "financials": financials
+    }
+
+
+# -------------------- base analysis --------------------
 def base_analysis(symbol):
     prev = get_prev(symbol)
     if not prev:
@@ -624,18 +632,15 @@ def trade_plan_pro(symbol):
     trade_type = None
     entry = None
     stop = None
-    valid_for = None
 
     if near_high and momentum == "صاعد":
         trade_type = "Breakout"
         entry = high * 1.002
         stop = low * 0.995
-        valid_for = "Intraday"
     elif near_low:
         trade_type = "Pullback"
         entry = price
         stop = low * 0.99
-        valid_for = "1-3 days"
 
     if not trade_type:
         return None
@@ -801,28 +806,43 @@ def home():
 def trade_scan():
     trades = []
     rejected = []
+    errors = []
 
     universe = get_active_universe(max_symbols=60)
 
     for s in universe:
-        prev = get_prev(s)
-        if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
-            rejected.append({"symbol": s, "reason": f"سعر أقل من {LOW_PRICE_HARD_BLOCK}$"})
-            continue
+        try:
+            prev = get_prev(s)
+            if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
+                rejected.append({
+                    "symbol": s,
+                    "reason": f"سعر أقل من {LOW_PRICE_HARD_BLOCK}$"
+                })
+                continue
 
-        h = halal(s)
-        if not h["allowed"]:
-            rejected.append({"symbol": s, "reason": h["reason"]})
-            continue
+            h = halal(s)
+            if not h["allowed"]:
+                rejected.append({
+                    "symbol": s,
+                    "reason": h["reason"]
+                })
+                continue
 
-        t = trade_plan_pro(s)
-        if t:
-            info = get_info(s)
-            t["company"] = info["company"]
-            t["sector"] = info["sector"]
-            t["industry"] = info["industry"]
-            t["financials"] = h["financials"]
-            trades.append(t)
+            t = trade_plan_pro(s)
+            if t:
+                info = get_info(s)
+                t["company"] = info["company"]
+                t["sector"] = info["sector"]
+                t["industry"] = info["industry"]
+                t["financials"] = h["financials"]
+                trades.append(t)
+
+        except Exception as e:
+            errors.append({
+                "symbol": s,
+                "error": str(e)
+            })
+            continue
 
     trades = sorted(trades, key=lambda x: x["quality_score"], reverse=True)
 
@@ -840,7 +860,9 @@ def trade_scan():
         "cautious_entries": cautious_entries,
         "watchlist": watch,
         "rejected_count": len(rejected),
-        "rejected": rejected[:30]
+        "rejected": rejected[:30],
+        "errors_count": len(errors),
+        "errors": errors[:20]
     }
 
 
@@ -858,10 +880,3 @@ def debug_symbol(symbol: str):
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade_plan_pro(symbol),
     }
-
-    return {
-        "allowed": True,
-        "reason": "مقبول مبدئيًا",
-        "financials": financials
-    }
-# force redeploy
