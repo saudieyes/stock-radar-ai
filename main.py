@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import requests
 import os
 import csv
+import re
 from datetime import datetime, timedelta
 from scanner import get_scan_universe
 
@@ -70,6 +71,47 @@ def latest_key(row):
         int(to_float(row.get("Fiscal Year", 0))),
         period_rank(row.get("Fiscal Period", ""))
     )
+
+
+def normalize_text(text: str) -> str:
+    text = str(text).lower().strip()
+    text = re.sub(r"[^a-z0-9\s&.-]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def get_company_name_variants(company_name: str) -> list[str]:
+    name = normalize_text(company_name)
+    if not name:
+        return []
+
+    variants = {name}
+
+    noise = [
+        " inc", " inc.", " corp", " corp.", " corporation", " co", " co.",
+        " ltd", " ltd.", " limited", " plc", " holdings", " holding",
+        " group", " technologies", " technology", " systems", " international",
+        " company", " companies", " class a", " class c", " common stock"
+    ]
+
+    for n in noise:
+        if name.endswith(n):
+            variants.add(name[: -len(n)].strip())
+
+    parts = name.split()
+    if len(parts) >= 2:
+        variants.add(" ".join(parts[:2]))
+    if len(parts) >= 1:
+        variants.add(parts[0])
+
+    cleaned = []
+    for v in variants:
+        v = v.strip()
+        if len(v) >= 3:
+            cleaned.append(v)
+
+    cleaned = list(dict.fromkeys(cleaned))
+    return cleaned
 
 
 # -------------------- CSV reader --------------------
@@ -278,9 +320,25 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
-# -------------------- news / catalyst (improved) --------------------
+# -------------------- info --------------------
+def get_info(symbol):
+    c = COMPANIES_DATA.get(symbol, {})
+    industry_id = str(c.get("IndustryId", "")).strip()
+    s = SECTOR_DATA.get(industry_id, {})
+    return {
+        "company": str(c.get("Company Name", "")).strip(),
+        "sector": str(s.get("sector", "")).strip(),
+        "industry": str(s.get("industry", "")).strip(),
+        "industry_id": industry_id
+    }
+
+
+# -------------------- news / catalyst (cleaned) --------------------
 def get_news_catalyst(symbol):
     try:
+        info = get_info(symbol)
+        company_name = info["company"]
+
         url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&apiKey={POLYGON_API_KEY}"
         r = requests.get(url, timeout=12).json()
 
@@ -295,41 +353,53 @@ def get_news_catalyst(symbol):
         best_score = 0
         best_note = ""
 
-        for item in news[:5]:
+        symbol_lower = symbol.lower()
+        company_variants = get_company_name_variants(company_name)
+
+        weak_patterns = [
+            "top stocks", "market update", "stock market", "s&p 500",
+            "nasdaq", "dow jones", "why investors", "what to know",
+            "best stocks", "should you buy", "index fund", "etf",
+            "top-ranked stocks", "stocks to buy now", "long term"
+        ]
+
+        strong_keywords = [
+            "earnings", "beats", "guidance", "raises outlook",
+            "upgrade", "initiated", "outperform",
+            "partnership", "deal", "contract",
+            "acquisition", "merger",
+            "approval", "fda", "launch",
+            "record revenue", "strong growth",
+            "buyback", "dividend increase"
+        ]
+
+        negative_keywords = [
+            "downgrade", "miss", "cuts forecast",
+            "lawsuit", "fraud", "investigation",
+            "delay", "recall", "decline", "warning"
+        ]
+
+        for item in news[:7]:
             title = str(item.get("title", "")).strip()
             published = str(item.get("published_utc", "")).strip()
 
             if not title:
                 continue
 
-            title_lower = title.lower()
+            title_lower = normalize_text(title)
 
-            weak_patterns = [
-                "top stocks", "market update", "stock market",
-                "s&p 500", "nasdaq", "dow jones",
-                "why investors", "what to know",
-                "best stocks", "should you buy"
-            ]
-
+            # استبعاد الأخبار العامة
             if any(w in title_lower for w in weak_patterns):
                 continue
 
+            # يجب أن يكون الخبر متعلقًا بالسهم نفسه
+            symbol_match = re.search(rf"\b{re.escape(symbol_lower)}\b", title_lower) is not None
+            company_match = any(v in title_lower for v in company_variants if len(v) >= 4)
+
+            if not symbol_match and not company_match:
+                continue
+
             score = 0
-
-            strong_keywords = [
-                "earnings", "beats", "guidance", "raises outlook",
-                "upgrade", "initiated", "outperform",
-                "partnership", "deal", "contract",
-                "acquisition", "merger",
-                "approval", "fda", "launch",
-                "record revenue", "strong growth"
-            ]
-
-            negative_keywords = [
-                "downgrade", "miss", "cuts forecast",
-                "lawsuit", "fraud", "investigation",
-                "delay", "recall", "decline"
-            ]
 
             if any(k in title_lower for k in strong_keywords):
                 score += 6
@@ -364,19 +434,6 @@ def get_news_catalyst(symbol):
             "catalyst_score": 0,
             "note": "خطأ في الأخبار"
         }
-
-
-# -------------------- info --------------------
-def get_info(symbol):
-    c = COMPANIES_DATA.get(symbol, {})
-    industry_id = str(c.get("IndustryId", "")).strip()
-    s = SECTOR_DATA.get(industry_id, {})
-    return {
-        "company": str(c.get("Company Name", "")).strip(),
-        "sector": str(s.get("sector", "")).strip(),
-        "industry": str(s.get("industry", "")).strip(),
-        "industry_id": industry_id
-    }
 
 
 # -------------------- data quality --------------------
