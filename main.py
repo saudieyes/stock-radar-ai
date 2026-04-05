@@ -57,19 +57,19 @@ def parse_date_safe(v):
         return datetime.min
 
 
+def safe_round(x, digits=2):
+    try:
+        return round(float(x), digits)
+    except:
+        return x
+
+
 def latest_key(row):
     return (
         parse_date_safe(row.get("Publish Date", "")),
         int(to_float(row.get("Fiscal Year", 0))),
         period_rank(row.get("Fiscal Period", ""))
     )
-
-
-def safe_round(x, digits=2):
-    try:
-        return round(float(x), digits)
-    except:
-        return x
 
 
 # -------------------- CSV reader --------------------
@@ -278,6 +278,71 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
+# -------------------- news / catalyst --------------------
+def get_news_catalyst(symbol):
+    try:
+        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=5&apiKey={POLYGON_API_KEY}"
+        r = requests.get(url, timeout=12).json()
+
+        news = r.get("results", [])
+        if not news:
+            return {
+                "has_news": False,
+                "catalyst_score": 0,
+                "note": "لا يوجد أخبار"
+            }
+
+        latest = news[0]
+        title = str(latest.get("title", "")).strip()
+        published = str(latest.get("published_utc", "")).strip()
+
+        recent = False
+        try:
+            news_date_text = published[:10]
+            news_time = datetime.strptime(news_date_text, "%Y-%m-%d")
+            if (datetime.utcnow() - news_time).days <= 2:
+                recent = True
+        except:
+            pass
+
+        score = 0
+
+        positive_keywords = [
+            "earnings", "beats", "guidance", "upgrade", "growth",
+            "profit", "record", "strong", "surge", "expands",
+            "partnership", "deal", "launch", "approval"
+        ]
+
+        negative_keywords = [
+            "downgrade", "miss", "lawsuit", "fraud", "drop",
+            "weak", "decline", "cuts", "delay", "probe"
+        ]
+
+        title_lower = title.lower()
+
+        if any(k in title_lower for k in positive_keywords):
+            score += 6
+
+        if any(k in title_lower for k in negative_keywords):
+            score -= 6
+
+        if recent:
+            score += 4
+
+        return {
+            "has_news": True,
+            "catalyst_score": score,
+            "note": title[:120] if title else "خبر متوفر"
+        }
+
+    except:
+        return {
+            "has_news": False,
+            "catalyst_score": 0,
+            "note": "خطأ في جلب الأخبار"
+        }
+
+
 # -------------------- info --------------------
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
@@ -483,6 +548,8 @@ def trade_plan_pro(symbol):
     near_ath = history["near_ath"]
     ath_breakout_zone = history["ath_breakout_zone"]
 
+    news = get_news_catalyst(symbol)
+
     trade_type = None
     entry = None
     stop = None
@@ -542,7 +609,7 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # volume ratio AI (0.9 to 1.1 neutral)
+    # volume ratio AI (0.9 - 1.1 neutral)
     if volume_ratio >= 2.0:
         quality_score += 8
     elif volume_ratio >= 1.5:
@@ -563,8 +630,6 @@ def trade_plan_pro(symbol):
             risk_flags.append("اختراق ضعيف (بدون سيولة كافية)")
         elif volume_ratio < 1.1:
             risk_flags.append("اختراق يحتاج تأكيد سيولة")
-        elif volume_ratio < 1.2:
-            quality_score += 0
 
     # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
@@ -595,6 +660,13 @@ def trade_plan_pro(symbol):
     elif near_ath:
         quality_score -= 6
         risk_flags.append("قرب ATH بدون اختراق")
+
+    # News / Catalyst
+    quality_score += news["catalyst_score"]
+    if news["catalyst_score"] >= 6:
+        risk_flags.append("خبر إيجابي محفز")
+    elif news["catalyst_score"] <= -6:
+        risk_flags.append("خبر سلبي ⚠️")
 
     # data quality
     info = get_info(symbol)
@@ -633,6 +705,8 @@ def trade_plan_pro(symbol):
         "trend": trend,
         "volume_ratio": round(volume_ratio, 2),
         "data_quality": data_quality,
+        "catalyst_score": news["catalyst_score"],
+        "news_note": news["note"],
         "risk_flags": risk_flags
     }
 
@@ -711,5 +785,6 @@ def debug_symbol(symbol: str):
         "history_levels": get_history_levels(symbol),
         "halal_check": halal(symbol),
         "base_analysis": base_analysis(symbol),
+        "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade_plan_pro(symbol),
     }
