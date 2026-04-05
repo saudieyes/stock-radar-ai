@@ -685,27 +685,42 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # volume ratio AI
-    if volume_ratio >= 2.0:
+    # ---------------- SMART VOLUME LOGIC ----------------
+if trade_type == "Breakout":
+
+    if volume_ratio >= 1.5:
         quality_score += 8
-    elif volume_ratio >= 1.5:
-        quality_score += 5
+
     elif volume_ratio >= 1.2:
-        quality_score += 2
+        quality_score += 4
+
+    elif volume_ratio >= 1.0:
+        quality_score -= 2
+        risk_flags.append("اختراق ضعيف")
+
     elif volume_ratio >= 0.9:
-        quality_score += 0
+        quality_score -= 6
+        risk_flags.append("اختراق ضعيف بدون سيولة")
+
+    else:
+        quality_score -= 10
+        risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
+
+elif trade_type == "Pullback":
+
+    if volume_ratio >= 1.3:
+        quality_score += 5
+
+    elif volume_ratio >= 1.0:
+        quality_score += 2
+
     elif volume_ratio >= 0.8:
         quality_score -= 2
+
     else:
         quality_score -= 5
 
-    # breakout confidence
-    if trade_type == "Breakout":
-        if volume_ratio < 0.9:
-            quality_score -= 6
-            risk_flags.append("اختراق ضعيف (بدون سيولة كافية)")
-        elif volume_ratio < 1.1:
-            risk_flags.append("اختراق يحتاج تأكيد سيولة")
+    
 
     # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
