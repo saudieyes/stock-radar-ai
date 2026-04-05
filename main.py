@@ -114,6 +114,37 @@ def get_company_name_variants(company_name: str) -> list[str]:
     return list(dict.fromkeys(cleaned))
 
 
+def make_rank_label(score: float) -> str:
+    if score >= 88:
+        return "A+"
+    if score >= 82:
+        return "A"
+    if score >= 76:
+        return "B+"
+    if score >= 72:
+        return "B"
+    if score >= 66:
+        return "C+"
+    if score >= 62:
+        return "C"
+    return "D"
+
+
+def estimate_validity(trade_type: str, trend: str, volume_ratio: float, catalyst_score: float) -> str:
+    if trade_type == "Breakout":
+        if volume_ratio >= 1.3 and catalyst_score > 0:
+            return "صالح اليوم وحتى الجلسة القادمة"
+        if volume_ratio >= 1.0:
+            return "صالح اليوم فقط"
+        return "يحتاج تأكيد بعد الافتتاح"
+    else:
+        if trend == "صاعد قوي" and volume_ratio >= 1.0:
+            return "1-3 أيام"
+        if trend == "صاعد":
+            return "1-2 يوم"
+        return "مراقبة يومية"
+
+
 # -------------------- CSV reader --------------------
 def read_csv(path):
     if not os.path.exists(path):
@@ -371,7 +402,8 @@ def get_news_catalyst(symbol):
             "acquisition", "merger",
             "approval", "fda", "launch",
             "record revenue", "strong growth",
-            "buyback", "dividend increase"
+            "buyback", "dividend increase",
+            "worth buying", "worth owning", "bullish"
         ]
 
         negative_keywords = [
@@ -658,7 +690,6 @@ def trade_plan_pro(symbol):
 
     quality_score = 42
 
-    # volume strength
     if volume > 120_000_000:
         quality_score += 15
     elif volume > 80_000_000:
@@ -670,13 +701,11 @@ def trade_plan_pro(symbol):
     else:
         quality_score += 3
 
-    # momentum
     if momentum == "صاعد":
         quality_score += 12
     else:
         quality_score -= 6
 
-    # trend AI
     if trend == "صاعد قوي":
         quality_score += 10
     elif trend == "صاعد":
@@ -684,7 +713,6 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # ---------------- SMART VOLUME LOGIC ----------------
     if trade_type == "Breakout":
         if volume_ratio >= 1.5:
             quality_score += 8
@@ -710,13 +738,11 @@ def trade_plan_pro(symbol):
         else:
             quality_score -= 5
 
-    # position
     if trade_type == "Breakout" and location == "قرب مقاومة":
         quality_score += 10
     elif trade_type == "Pullback" and location == "قرب دعم":
         quality_score += 8
 
-    # risk
     if risk_pct <= 0.02:
         quality_score += 10
     elif risk_pct <= 0.04:
@@ -724,7 +750,6 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 5
 
-    # range
     if range_pct <= 0.03:
         quality_score += 6
     elif range_pct <= 0.06:
@@ -732,7 +757,6 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 5
 
-    # ATH logic
     if ath_breakout_zone and momentum == "صاعد":
         quality_score += 8
         risk_flags.append("قرب اختراق ATH")
@@ -740,14 +764,12 @@ def trade_plan_pro(symbol):
         quality_score -= 6
         risk_flags.append("قرب ATH بدون اختراق")
 
-    # News / Catalyst
     quality_score += news["catalyst_score"]
     if news["catalyst_score"] >= 6:
         risk_flags.append("خبر إيجابي محفز")
     elif news["catalyst_score"] <= -6:
         risk_flags.append("خبر سلبي ⚠️")
 
-    # data quality
     info = get_info(symbol)
     h = halal(symbol)
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
@@ -770,7 +792,6 @@ def trade_plan_pro(symbol):
     if data_quality == "low" and decision in {"دخول قوي", "دخول بحذر"}:
         decision = "مراقبة"
 
-    # ---------------- AI Explanation ----------------
     reasons = []
 
     if trend == "صاعد قوي":
@@ -806,6 +827,15 @@ def trade_plan_pro(symbol):
 
     ai_summary = " - ".join(reasons) if reasons else "لا يوجد وضوح كافي"
 
+    valid_for = estimate_validity(
+        trade_type=trade_type,
+        trend=trend,
+        volume_ratio=volume_ratio,
+        catalyst_score=news["catalyst_score"]
+    )
+
+    rank_label = make_rank_label(quality_score)
+
     return {
         "symbol": symbol,
         "type": trade_type,
@@ -816,6 +846,8 @@ def trade_plan_pro(symbol):
         "target_2": safe_round(target_2),
         "risk_pct": safe_round(risk_pct * 100),
         "quality_score": quality_score,
+        "rank_label": rank_label,
+        "valid_for": valid_for,
         "trend": trend,
         "volume_ratio": round(volume_ratio, 2),
         "data_quality": data_quality,
@@ -886,6 +918,7 @@ def trade_scan():
 
     trades = sorted(trades, key=lambda x: x["quality_score"], reverse=True)
 
+    top_ranked = trades[:5]
     strong_entries = [x for x in trades if x["decision"] == "دخول قوي"]
     cautious_entries = [x for x in trades if x["decision"] == "دخول بحذر"]
     watch = [x for x in trades if x["decision"] == "مراقبة"]
@@ -896,6 +929,8 @@ def trade_scan():
         "strong_entries_count": len(strong_entries),
         "cautious_entries_count": len(cautious_entries),
         "watchlist_count": len(watch),
+        "top_ranked_count": len(top_ranked),
+        "top_ranked": top_ranked,
         "strong_entries": strong_entries,
         "cautious_entries": cautious_entries,
         "watchlist": watch,
@@ -919,4 +954,4 @@ def debug_symbol(symbol: str):
         "base_analysis": base_analysis(symbol),
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade_plan_pro(symbol),
-    }
+                }
