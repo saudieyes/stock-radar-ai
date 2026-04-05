@@ -278,10 +278,10 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
-# -------------------- news / catalyst --------------------
+# -------------------- news / catalyst (improved) --------------------
 def get_news_catalyst(symbol):
     try:
-        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=5&apiKey={POLYGON_API_KEY}"
+        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&apiKey={POLYGON_API_KEY}"
         r = requests.get(url, timeout=12).json()
 
         news = r.get("results", [])
@@ -292,54 +292,77 @@ def get_news_catalyst(symbol):
                 "note": "لا يوجد أخبار"
             }
 
-        latest = news[0]
-        title = str(latest.get("title", "")).strip()
-        published = str(latest.get("published_utc", "")).strip()
+        best_score = 0
+        best_note = ""
 
-        recent = False
-        try:
-            news_date_text = published[:10]
-            news_time = datetime.strptime(news_date_text, "%Y-%m-%d")
-            if (datetime.utcnow() - news_time).days <= 2:
-                recent = True
-        except:
-            pass
+        for item in news[:5]:
+            title = str(item.get("title", "")).strip()
+            published = str(item.get("published_utc", "")).strip()
 
-        score = 0
+            if not title:
+                continue
 
-        positive_keywords = [
-            "earnings", "beats", "guidance", "upgrade", "growth",
-            "profit", "record", "strong", "surge", "expands",
-            "partnership", "deal", "launch", "approval"
-        ]
+            title_lower = title.lower()
 
-        negative_keywords = [
-            "downgrade", "miss", "lawsuit", "fraud", "drop",
-            "weak", "decline", "cuts", "delay", "probe"
-        ]
+            weak_patterns = [
+                "top stocks", "market update", "stock market",
+                "s&p 500", "nasdaq", "dow jones",
+                "why investors", "what to know",
+                "best stocks", "should you buy"
+            ]
 
-        title_lower = title.lower()
+            if any(w in title_lower for w in weak_patterns):
+                continue
 
-        if any(k in title_lower for k in positive_keywords):
-            score += 6
+            score = 0
 
-        if any(k in title_lower for k in negative_keywords):
-            score -= 6
+            strong_keywords = [
+                "earnings", "beats", "guidance", "raises outlook",
+                "upgrade", "initiated", "outperform",
+                "partnership", "deal", "contract",
+                "acquisition", "merger",
+                "approval", "fda", "launch",
+                "record revenue", "strong growth"
+            ]
 
-        if recent:
-            score += 4
+            negative_keywords = [
+                "downgrade", "miss", "cuts forecast",
+                "lawsuit", "fraud", "investigation",
+                "delay", "recall", "decline"
+            ]
+
+            if any(k in title_lower for k in strong_keywords):
+                score += 6
+
+            if any(k in title_lower for k in negative_keywords):
+                score -= 6
+
+            try:
+                news_date = datetime.strptime(published[:10], "%Y-%m-%d")
+                days_diff = (datetime.utcnow() - news_date).days
+
+                if days_diff <= 1:
+                    score += 5
+                elif days_diff <= 2:
+                    score += 3
+            except:
+                pass
+
+            if abs(score) > abs(best_score):
+                best_score = score
+                best_note = title[:120]
 
         return {
-            "has_news": True,
-            "catalyst_score": score,
-            "note": title[:120] if title else "خبر متوفر"
+            "has_news": best_score != 0,
+            "catalyst_score": best_score,
+            "note": best_note if best_note else "لا يوجد محفز قوي"
         }
 
     except:
         return {
             "has_news": False,
             "catalyst_score": 0,
-            "note": "خطأ في جلب الأخبار"
+            "note": "خطأ في الأخبار"
         }
 
 
@@ -609,7 +632,7 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # volume ratio AI (0.9 - 1.1 neutral)
+    # volume ratio AI
     if volume_ratio >= 2.0:
         quality_score += 8
     elif volume_ratio >= 1.5:
@@ -679,7 +702,6 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
-    # 3-tier decisions
     if quality_score >= 82:
         decision = "دخول قوي"
     elif quality_score >= 72:
