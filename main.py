@@ -713,6 +713,10 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
+    # ---------------- SMART VOLUME LOGIC ----------------
+    breakout_failed = False
+    breakout_weak = False
+
     if trade_type == "Breakout":
         if volume_ratio >= 1.5:
             quality_score += 8
@@ -720,12 +724,15 @@ def trade_plan_pro(symbol):
             quality_score += 4
         elif volume_ratio >= 1.0:
             quality_score -= 2
+            breakout_weak = True
             risk_flags.append("اختراق ضعيف")
         elif volume_ratio >= 0.9:
             quality_score -= 6
+            breakout_weak = True
             risk_flags.append("اختراق ضعيف بدون سيولة")
         else:
             quality_score -= 10
+            breakout_failed = True
             risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
 
     elif trade_type == "Pullback":
@@ -764,6 +771,7 @@ def trade_plan_pro(symbol):
         quality_score -= 6
         risk_flags.append("قرب ATH بدون اختراق")
 
+    # News / Catalyst
     quality_score += news["catalyst_score"]
     if news["catalyst_score"] >= 6:
         risk_flags.append("خبر إيجابي محفز")
@@ -780,6 +788,28 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
+    # ---------------- HARD GUARDRAILS ----------------
+    force_cap_to_cautious = False
+    force_cap_to_watch = False
+
+    if trade_type == "Breakout" and breakout_failed:
+        force_cap_to_watch = True
+
+    if trade_type == "Breakout" and trend == "متذبذب" and volume_ratio < 0.9:
+        force_cap_to_watch = True
+
+    if trade_type == "Breakout" and volume_ratio < 0.8:
+        force_cap_to_watch = True
+
+    if trade_type == "Breakout" and volume_ratio < 0.9 and news["catalyst_score"] > 0:
+        force_cap_to_cautious = True
+
+    if trade_type == "Breakout" and trend == "متذبذب" and volume_ratio < 1.0:
+        force_cap_to_cautious = True
+
+    if data_quality == "low":
+        force_cap_to_watch = True
+
     if quality_score >= 82:
         decision = "دخول قوي"
     elif quality_score >= 72:
@@ -789,8 +819,12 @@ def trade_plan_pro(symbol):
     else:
         return None
 
-    if data_quality == "low" and decision in {"دخول قوي", "دخول بحذر"}:
-        decision = "مراقبة"
+    if force_cap_to_watch:
+        if decision in {"دخول قوي", "دخول بحذر"}:
+            decision = "مراقبة"
+    elif force_cap_to_cautious:
+        if decision == "دخول قوي":
+            decision = "دخول بحذر"
 
     reasons = []
 
@@ -821,6 +855,9 @@ def trade_plan_pro(symbol):
         reasons.append("محاولة اختراق")
     elif trade_type == "Pullback":
         reasons.append("ارتداد من دعم")
+
+    if breakout_failed:
+        reasons.append("الاختراق غير مؤكد فنيًا")
 
     if data_quality == "low":
         reasons.append("جودة البيانات ضعيفة")
@@ -954,4 +991,4 @@ def debug_symbol(symbol: str):
         "base_analysis": base_analysis(symbol),
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade_plan_pro(symbol),
-                }
+    }
