@@ -3,17 +3,11 @@ import requests
 import os
 import csv
 from datetime import datetime, timedelta
+from scanner import get_scan_universe
 
 app = FastAPI()
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
-
-ALLOWED_TEST_SYMBOLS = [
-    "AAPL", "NVDA", "TSLA", "AMD", "AMZN", "META", "MSFT", "GOOGL", "AVGO", "CRM",
-    "ADBE", "NFLX", "ORCL", "INTC", "QCOM", "MU", "ANET", "PANW", "CRWD", "SNOW",
-    "SHOP", "UBER", "ABNB", "PYPL", "COIN", "ROKU", "SQ", "TTD", "HIMS", "MARA",
-    "RIOT", "OKLO", "ASTS", "MRVL", "NIO", "RKLB", "BAC", "JPM", "SOFI", "PLTR"
-]
 
 SECTOR_DATA = {}
 COMPANIES_DATA = {}
@@ -146,6 +140,14 @@ SECTOR_DATA = load_sector()
 COMPANIES_DATA = load_companies()
 BALANCE_DATA = load_latest("data/balance_sheet.csv")
 INCOME_DATA = load_latest("data/income_statement.csv")
+
+
+# -------------------- universe --------------------
+def get_active_universe(max_symbols: int = 60):
+    try:
+        return get_scan_universe(max_symbols=max_symbols)
+    except:
+        return []
 
 
 # -------------------- market data --------------------
@@ -540,7 +542,7 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 10
 
-    # volume ratio AI
+    # volume ratio AI (0.9 to 1.1 neutral)
     if volume_ratio >= 2.0:
         quality_score += 8
     elif volume_ratio >= 1.5:
@@ -605,7 +607,7 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
-    # 3-tier decision
+    # 3-tier decisions
     if quality_score >= 82:
         decision = "دخول قوي"
     elif quality_score >= 72:
@@ -615,9 +617,7 @@ def trade_plan_pro(symbol):
     else:
         return None
 
-    if data_quality == "low" and decision == "دخول قوي":
-        decision = "مراقبة"
-    elif data_quality == "low" and decision == "دخول بحذر":
+    if data_quality == "low" and decision in {"دخول قوي", "دخول بحذر"}:
         decision = "مراقبة"
 
     return {
@@ -640,6 +640,7 @@ def trade_plan_pro(symbol):
 # -------------------- API --------------------
 @app.get("/")
 def home():
+    universe = get_active_universe(max_symbols=60)
     return {
         "message": "Stock Radar AI is running 🚀",
         "loaded": {
@@ -647,7 +648,8 @@ def home():
             "sector_industry": len(SECTOR_DATA),
             "balance_rows": len(BALANCE_DATA),
             "income_rows": len(INCOME_DATA),
-        }
+        },
+        "universe_count": len(universe)
     }
 
 
@@ -656,7 +658,9 @@ def trade_scan():
     trades = []
     rejected = []
 
-    for s in ALLOWED_TEST_SYMBOLS:
+    universe = get_active_universe(max_symbols=60)
+
+    for s in universe:
         prev = get_prev(s)
         if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
             rejected.append({"symbol": s, "reason": f"سعر أقل من {LOW_PRICE_HARD_BLOCK}$"})
@@ -669,6 +673,11 @@ def trade_scan():
 
         t = trade_plan_pro(s)
         if t:
+            info = get_info(s)
+            t["company"] = info["company"]
+            t["sector"] = info["sector"]
+            t["industry"] = info["industry"]
+            t["financials"] = h["financials"]
             trades.append(t)
 
     trades = sorted(trades, key=lambda x: x["quality_score"], reverse=True)
@@ -678,6 +687,7 @@ def trade_scan():
     watch = [x for x in trades if x["decision"] == "مراقبة"]
 
     return {
+        "universe_count": len(universe),
         "count": len(trades),
         "strong_entries_count": len(strong_entries),
         "cautious_entries_count": len(cautious_entries),
@@ -686,7 +696,7 @@ def trade_scan():
         "cautious_entries": cautious_entries,
         "watchlist": watch,
         "rejected_count": len(rejected),
-        "rejected": rejected
+        "rejected": rejected[:30]
     }
 
 
