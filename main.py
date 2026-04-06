@@ -873,6 +873,11 @@ def trade_plan_pro(symbol):
 
     breakout_failed = False
 
+    if trade_type == "Breakout" and trend == "هابط":
+        quality_score -= 15
+        risk_flags.append("اختراق عكس الاتجاه")
+        breakout_failed = True
+
     if trade_type == "Breakout":
         if volume_ratio >= 1.5:
             quality_score += 8
@@ -961,7 +966,7 @@ def trade_plan_pro(symbol):
     if trade_type == "Breakout" and trend == "متذبذب" and volume_ratio < 0.9:
         force_cap_to_watch = True
 
-    if trade_type == "Breakout" and volume_ratio < 0.8:
+    if trade_type == "Breakout" and volume_ratio < 1.0:
         force_cap_to_watch = True
 
     if trade_type == "Breakout" and volume_ratio < 0.9 and news["catalyst_score"] > 0:
@@ -1178,4 +1183,4 @@ def debug_symbol(symbol: str):
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade,
         "overview": overview
-    }
+            }
