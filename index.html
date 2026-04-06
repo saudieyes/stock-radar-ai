@@ -54,6 +54,7 @@
     button:hover { opacity: 0.92; }
     .secondary-btn { background: #374151; }
     .warning-btn { background: #b45309; }
+
     .stats {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -75,6 +76,7 @@
       font-size: 24px;
       font-weight: bold;
     }
+
     .section {
       margin-top: 24px;
     }
@@ -82,11 +84,13 @@
       margin: 0 0 12px;
       font-size: 22px;
     }
+
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 14px;
     }
+
     .card {
       background: #111827;
       border: 1px solid #374151;
@@ -94,6 +98,7 @@
       padding: 16px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.18);
     }
+
     .card-header {
       display: flex;
       align-items: flex-start;
@@ -101,16 +106,19 @@
       gap: 8px;
       margin-bottom: 10px;
     }
+
     .symbol {
       font-size: 24px;
       font-weight: bold;
     }
+
     .company {
       color: #cbd5e1;
       font-size: 13px;
       margin-top: 4px;
       line-height: 1.6;
     }
+
     .badge {
       display: inline-block;
       padding: 6px 10px;
@@ -119,6 +127,7 @@
       font-weight: bold;
       white-space: nowrap;
     }
+
     .badge-strong { background: #14532d; color: #dcfce7; }
     .badge-cautious { background: #78350f; color: #fde68a; }
     .badge-watch { background: #1e3a8a; color: #dbeafe; }
@@ -126,28 +135,33 @@
     .badge-ready { background: #166534; color: #dcfce7; }
     .badge-wait { background: #92400e; color: #fef3c7; }
     .badge-avoid { background: #7f1d1d; color: #fecaca; }
+
     .meta-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       margin-top: 12px;
     }
+
     .meta-item {
       background: #0f172a;
       border: 1px solid #1f2937;
       border-radius: 12px;
       padding: 10px;
     }
+
     .meta-title {
       color: #9ca3af;
       font-size: 12px;
       margin-bottom: 6px;
     }
+
     .meta-value {
       font-size: 14px;
       font-weight: bold;
-      line-height: 1.5;
+      line-height: 1.6;
     }
+
     .summary {
       margin-top: 12px;
       padding: 12px;
@@ -158,12 +172,14 @@
       line-height: 1.8;
       font-size: 14px;
     }
+
     .flags {
       margin-top: 10px;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
     }
+
     .flag {
       background: #3f1d1d;
       color: #fecaca;
@@ -172,6 +188,7 @@
       padding: 6px 10px;
       font-size: 12px;
     }
+
     .search-box {
       background: #111827;
       border: 1px solid #374151;
@@ -179,12 +196,14 @@
       padding: 16px;
       margin-top: 24px;
     }
+
     .search-row {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-top: 10px;
     }
+
     input {
       flex: 1;
       min-width: 220px;
@@ -195,7 +214,9 @@
       padding: 12px 14px;
       font-size: 15px;
     }
+
     .single-result { margin-top: 14px; }
+
     .loading, .empty, .error-box {
       background: #111827;
       border: 1px solid #374151;
@@ -204,18 +225,22 @@
       color: #cbd5e1;
       line-height: 1.8;
     }
+
     .error-box {
       border-color: #7f1d1d;
       color: #fecaca;
       background: #2a1111;
     }
+
     .small-note {
       color: #94a3b8;
       font-size: 13px;
       margin-top: 8px;
       line-height: 1.8;
     }
+
     .footer-space { height: 30px; }
+
     @media (max-width: 700px) {
       .hero h1 { font-size: 22px; }
       .symbol { font-size: 20px; }
@@ -231,11 +256,13 @@
         أداة فحص السوق الأمريكي وعرض فرص اليوم والفرص الواعدة، مع فحص سهم منفرد،
         وشرح واضح لسبب القرار، والأهداف، ووقف الخسارة، وصلاحية الفرصة، وحالة التنفيذ.
       </p>
+
       <div class="toolbar">
         <button onclick="loadTradeScan()">تحديث السوق الآن</button>
         <button class="secondary-btn" onclick="scrollToSingleSearch()">فحص سهم واحد</button>
         <button class="warning-btn" onclick="reloadPage()">إعادة تحميل الصفحة</button>
       </div>
+
       <div class="small-note" id="lastUpdatedText">آخر تحديث: —</div>
     </div>
 
@@ -340,7 +367,7 @@
       const aiSummary = item.ai_summary || "—";
       const newsNote = item.news_note || "—";
       const breakoutQuality = item.breakout_quality || "—";
-      const ownerAction = item.owner_action || "—";
+      const ownerAction = item.owner_action && item.owner_action.trim() ? item.owner_action : "لا توجد توصية ملكية الآن";
 
       return `
         <div class="card">
@@ -446,6 +473,8 @@
     }
 
     function overviewHTML(o) {
+      const ownerAction = o.owner_action && o.owner_action.trim() ? o.owner_action : "لا توجد توصية ملكية الآن";
+
       return `
         <div class="card">
           <div class="card-header">
@@ -502,7 +531,7 @@
             </div>
             <div class="meta-item">
               <div class="meta-title">إذا كنت تملك السهم</div>
-              <div class="meta-value">${escapeHtml(o.owner_action || "—")}</div>
+              <div class="meta-value">${escapeHtml(ownerAction)}</div>
             </div>
 
             <div class="meta-item">
