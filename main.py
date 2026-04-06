@@ -283,10 +283,7 @@ INCOME_DATA = load_latest("data/income_statement.csv")
 
 
 def get_active_universe(max_symbols: int = 60):
-    try:
-        return get_scan_universe(max_symbols=max_symbols)
-    except:
-        return []
+    return get_scan_universe(max_symbols=max_symbols)
 
 
 def get_prev(symbol):
