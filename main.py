@@ -29,9 +29,6 @@ LOW_PRICE_HARD_BLOCK = 2.0
 LOW_PRICE_WARNING = 3.0
 
 
-# =========================
-# Utilities
-# =========================
 def clean_key(key):
     return str(key).replace("\ufeff", "").strip()
 
@@ -158,9 +155,38 @@ def decision_priority(decision: str) -> int:
     return 0
 
 
-# =========================
-# CSV Reading
-# =========================
+def compute_execution_status(decision: str, trend: str, volume_ratio: float, catalyst_score: float, breakout_quality: str) -> str:
+    if breakout_quality == "FAILED":
+        return "AVOID"
+    if decision == "دخول قوي" and trend == "صاعد قوي" and volume_ratio >= 1.2 and catalyst_score > 0:
+        return "READY"
+    if decision in {"دخول قوي", "دخول بحذر"}:
+        return "WAIT"
+    return "AVOID"
+
+
+def owner_decision(decision: str, trend: str, breakout_quality: str, volume_ratio: float, catalyst_score: float) -> str:
+    if breakout_quality == "FAILED":
+        return "لا تزد الكمية الآن - الأفضل الاحتفاظ بحذر أو التخفيف إذا كسر الدعم"
+    if decision == "دخول قوي" and trend == "صاعد قوي" and volume_ratio >= 1.2:
+        return "يمكن الشراء أو زيادة الكمية بشكل جزئي"
+    if decision == "دخول بحذر":
+        return "احتفاظ أو زيادة جزئية بحذر بعد تأكيد الحركة"
+    if trend == "هابط":
+        return "الأفضل عدم زيادة الكمية ومراقبة الدعم"
+    return "احتفاظ ومراقبة - لا توجد زيادة واضحة الآن"
+
+
+def breakout_quality_label(trade_type: str, momentum: str, body_strength: float, close_strength: float, volume_ratio: float) -> str:
+    if trade_type != "Breakout":
+        return "N/A"
+    if momentum == "صاعد" and body_strength >= 0.6 and close_strength >= 0.75 and volume_ratio >= 1.2:
+        return "STRONG"
+    if body_strength < 0.35 or close_strength < 0.5 or volume_ratio < 0.8:
+        return "FAILED"
+    return "WEAK"
+
+
 def read_csv(path):
     if not os.path.exists(path):
         return []
@@ -187,9 +213,6 @@ def read_csv(path):
     return []
 
 
-# =========================
-# Loaders
-# =========================
 def load_sector():
     data = {}
     for r in read_csv("data/sector_industry.csv"):
@@ -232,9 +255,6 @@ BALANCE_DATA = load_latest("data/balance_sheet.csv")
 INCOME_DATA = load_latest("data/income_statement.csv")
 
 
-# =========================
-# Universe
-# =========================
 def get_active_universe(max_symbols: int = 60):
     try:
         return get_scan_universe(max_symbols=max_symbols)
@@ -242,9 +262,6 @@ def get_active_universe(max_symbols: int = 60):
         return []
 
 
-# =========================
-# Market Data
-# =========================
 def get_prev(symbol):
     try:
         r = requests.get(
@@ -322,9 +339,6 @@ def get_history_levels(symbol):
     return out
 
 
-# =========================
-# Trend / Volume AI
-# =========================
 def get_trend(symbol):
     try:
         url = (
@@ -379,9 +393,6 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
-# =========================
-# Company Info
-# =========================
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
     industry_id = str(c.get("IndustryId", "")).strip()
@@ -394,9 +405,6 @@ def get_info(symbol):
     }
 
 
-# =========================
-# News / Catalyst
-# =========================
 def get_news_catalyst(symbol):
     try:
         info = get_info(symbol)
@@ -504,9 +512,6 @@ def get_news_catalyst(symbol):
         }
 
 
-# =========================
-# Data Quality
-# =========================
 def data_quality_check(symbol, info, financials):
     flags = []
     quality = "high"
@@ -534,9 +539,6 @@ def data_quality_check(symbol, info, financials):
     return quality, flags
 
 
-# =========================
-# Halal / Financial Filter
-# =========================
 def halal(symbol):
     info = get_info(symbol)
     text = f"{info['sector']} {info['industry']}".lower()
@@ -606,9 +608,6 @@ def halal(symbol):
     }
 
 
-# =========================
-# Base Analysis
-# =========================
 def base_analysis(symbol):
     prev = get_prev(symbol)
     if not prev:
@@ -628,6 +627,9 @@ def base_analysis(symbol):
         momentum = "صاعد"
     elif price < open_price:
         momentum = "هابط"
+
+    body_strength = abs(price - open_price) / day_range if day_range > 0 else 0.0
+    close_strength = (price - low) / day_range if day_range > 0 else 0.0
 
     volume_signal = "ضعيفة"
     if volume > 100_000_000:
@@ -658,6 +660,8 @@ def base_analysis(symbol):
         "day_range": day_range,
         "range_pct": range_pct,
         "momentum": momentum,
+        "body_strength": body_strength,
+        "close_strength": close_strength,
         "volume_signal": volume_signal,
         "location": location,
         "near_high": near_high,
@@ -665,9 +669,6 @@ def base_analysis(symbol):
     }
 
 
-# =========================
-# Single Stock Analysis
-# =========================
 def analyze_symbol_overview(symbol):
     symbol = symbol.upper().strip()
 
@@ -678,8 +679,9 @@ def analyze_symbol_overview(symbol):
     history = get_history_levels(symbol)
     news = get_news_catalyst(symbol)
     halal_result = halal(symbol)
+    base = base_analysis(symbol)
 
-    if not prev:
+    if not prev or not base:
         return {
             "symbol": symbol,
             "found": False,
@@ -691,11 +693,13 @@ def analyze_symbol_overview(symbol):
     low = prev["low"]
     open_price = prev["open"]
 
-    momentum = "محايد"
-    if price > open_price:
-        momentum = "صاعد"
-    elif price < open_price:
-        momentum = "هابط"
+    breakout_quality = breakout_quality_label(
+        trade_type="Breakout" if base["near_high"] and base["momentum"] == "صاعد" else "None",
+        momentum=base["momentum"],
+        body_strength=base["body_strength"],
+        close_strength=base["close_strength"],
+        volume_ratio=volume_ratio
+    )
 
     status = "لا توجد فرصة واضحة الآن"
     if trend_data["trend"] == "صاعد قوي" and volume_ratio >= 1.0:
@@ -705,7 +709,7 @@ def analyze_symbol_overview(symbol):
 
     reasons = []
     reasons.append(f"الاتجاه: {trend_data['trend']}")
-    reasons.append(f"الزخم: {momentum}")
+    reasons.append(f"الزخم: {base['momentum']}")
 
     if volume_ratio < 0.9:
         reasons.append("السيولة ضعيفة")
@@ -722,6 +726,20 @@ def analyze_symbol_overview(symbol):
     if history["near_ath"]:
         reasons.append("قريب من القمة التاريخية")
 
+    owner_action = owner_decision(
+        decision="مراقبة",
+        trend=trend_data["trend"],
+        breakout_quality=breakout_quality,
+        volume_ratio=volume_ratio,
+        catalyst_score=news["catalyst_score"]
+    )
+
+    execution_status = "WAIT"
+    if breakout_quality == "FAILED" or trend_data["trend"] == "هابط":
+        execution_status = "AVOID"
+    elif trend_data["trend"] == "صاعد قوي" and volume_ratio >= 1.2 and news["catalyst_score"] > 0:
+        execution_status = "READY"
+
     ai_summary = " - ".join(reasons)
 
     return {
@@ -736,7 +754,7 @@ def analyze_symbol_overview(symbol):
         "open": safe_round(open_price),
         "trend": trend_data["trend"],
         "volume_ratio": round(volume_ratio, 2),
-        "momentum": momentum,
+        "momentum": base["momentum"],
         "year_high": safe_round(history["year_high"]),
         "ath_high": safe_round(history["ath_high"]),
         "near_ath": history["near_ath"],
@@ -746,13 +764,13 @@ def analyze_symbol_overview(symbol):
         "halal_reason": halal_result["reason"],
         "financials": halal_result["financials"],
         "status": status,
-        "ai_summary": ai_summary
+        "ai_summary": ai_summary,
+        "breakout_quality": breakout_quality,
+        "execution_status": execution_status,
+        "owner_action": owner_action
     }
 
 
-# =========================
-# Professional Trade Engine
-# =========================
 def trade_plan_pro(symbol):
     a = base_analysis(symbol)
     if not a:
@@ -767,6 +785,8 @@ def trade_plan_pro(symbol):
     near_low = a["near_low"]
     momentum = a["momentum"]
     location = a["location"]
+    body_strength = a["body_strength"]
+    close_strength = a["close_strength"]
 
     if price < LOW_PRICE_HARD_BLOCK:
         return None
@@ -818,6 +838,14 @@ def trade_plan_pro(symbol):
     target_1 = entry + risk * 1.5
     target_2 = entry + risk * 2.0
 
+    breakout_quality = breakout_quality_label(
+        trade_type=trade_type,
+        momentum=momentum,
+        body_strength=body_strength,
+        close_strength=close_strength,
+        volume_ratio=volume_ratio
+    )
+
     quality_score = 42
 
     if volume > 120_000_000:
@@ -860,6 +888,17 @@ def trade_plan_pro(symbol):
             quality_score -= 10
             breakout_failed = True
             risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
+
+        if breakout_quality == "STRONG":
+            quality_score += 8
+            risk_flags.append("اختراق قوي")
+        elif breakout_quality == "WEAK":
+            quality_score -= 4
+            risk_flags.append("شمعة اختراق ضعيفة")
+        elif breakout_quality == "FAILED":
+            quality_score -= 12
+            breakout_failed = True
+            risk_flags.append("سلوك اختراق فاشل")
 
     elif trade_type == "Pullback":
         if volume_ratio >= 1.3:
@@ -983,6 +1022,13 @@ def trade_plan_pro(symbol):
     if breakout_failed:
         reasons.append("الاختراق غير مؤكد فنيًا")
 
+    if breakout_quality == "STRONG":
+        reasons.append("شمعة الاختراق قوية")
+    elif breakout_quality == "WEAK":
+        reasons.append("شمعة الاختراق ضعيفة")
+    elif breakout_quality == "FAILED":
+        reasons.append("شمعة الاختراق فشلت")
+
     if data_quality == "low":
         reasons.append("جودة البيانات ضعيفة")
 
@@ -996,6 +1042,8 @@ def trade_plan_pro(symbol):
     )
 
     rank_label = make_rank_label(quality_score)
+    execution_status = compute_execution_status(decision, trend, volume_ratio, news["catalyst_score"], breakout_quality)
+    owner_action = owner_decision(decision, trend, breakout_quality, volume_ratio, news["catalyst_score"])
 
     return {
         "symbol": symbol,
@@ -1015,13 +1063,13 @@ def trade_plan_pro(symbol):
         "catalyst_score": news["catalyst_score"],
         "news_note": news["note"],
         "risk_flags": risk_flags,
-        "ai_summary": ai_summary
+        "ai_summary": ai_summary,
+        "breakout_quality": breakout_quality,
+        "execution_status": execution_status,
+        "owner_action": owner_action
     }
 
 
-# =========================
-# Routes
-# =========================
 @app.get("/")
 def home():
     return FileResponse("index.html")
@@ -1130,4 +1178,4 @@ def debug_symbol(symbol: str):
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade,
         "overview": overview
-            }
+    }
