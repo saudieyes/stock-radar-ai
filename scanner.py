@@ -4,7 +4,20 @@ from datetime import datetime, timedelta
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
-MIN_PRICE = 2.0
+EXCLUDED_TYPES = {
+    "ETF", "ETN", "ETV", "WARRANT", "RIGHT", "UNIT",
+    "PREFERRED", "FUND", "TRUST", "INDEX", "SPAC"
+}
+
+EXCLUDED_SUFFIXES = (
+    "W", "WS", "WT", "R", "U"
+)
+
+MIN_PRICE = 1.5
+MIN_VOLUME = 500_000
+MIN_DOLLAR_VOLUME = 5_000_000
+MAX_RANGE_PCT = 0.40
+MIN_RANGE_PCT = 0.02
 
 
 def safe_get_json(url: str, timeout: int = 20):
@@ -23,17 +36,85 @@ def previous_business_day() -> str:
     return d.isoformat()
 
 
-def get_seed_universe() -> list[str]:
-    return [
-        "AAPL", "NVDA", "TSLA", "AMD", "AMZN", "META", "MSFT", "GOOGL", "AVGO", "CRM",
-        "ADBE", "NFLX", "ORCL", "INTC", "QCOM", "MU", "ANET", "PANW", "CRWD", "SNOW",
-        "SHOP", "UBER", "ABNB", "PYPL", "COIN", "ROKU", "SQ", "TTD", "HIMS", "MARA",
-        "RIOT", "OKLO", "ASTS", "MRVL", "NIO", "RKLB", "BAC", "JPM", "SOFI", "PLTR",
-        "SMCI", "ARM", "DELL", "CSCO", "KLAC", "AMAT", "LRCX", "TXN", "ADI", "INTU",
-        "NOW", "MDB", "PATH", "SOUN", "AI", "COST", "WMT", "DIS", "PYPL", "CRM",
-        "AAL", "UAL", "DAL", "F", "GM", "NVO", "LLY", "ISRG", "VRTX", "REGN",
-        "SLNO", "AEHR", "RCMT", "ODD", "LWLG", "OPTX", "CLNN", "AGL"
+def is_clean_common_stock(item: dict) -> bool:
+    ticker = str(item.get("ticker", "")).upper().strip()
+    name = str(item.get("name", "")).upper().strip()
+    market = str(item.get("market", "")).upper().strip()
+    locale = str(item.get("locale", "")).lower().strip()
+    active = item.get("active", False)
+    type_ = str(item.get("type", "")).upper().strip()
+
+    if not ticker:
+        return False
+    if not active:
+        return False
+    if locale != "us":
+        return False
+    if market != "STOCKS":
+        return False
+    if type_ in EXCLUDED_TYPES:
+        return False
+
+    for suf in EXCLUDED_SUFFIXES:
+        if ticker.endswith(suf):
+            return False
+
+    bad_words = [
+        "ETF", "TRUST", "FUND", "WARRANT", "RIGHT", "UNIT",
+        "PREFERRED", "DEPOSITARY", "ADR", "SPAC"
     ]
+    if any(word in name for word in bad_words):
+        return False
+
+    return True
+
+
+def get_reference_tickers(limit_pages: int = 12, page_limit: int = 1000) -> list[str]:
+    if not POLYGON_API_KEY:
+        return []
+
+    base_url = "https://api.polygon.io/v3/reference/tickers"
+    params = {
+        "market": "stocks",
+        "active": "true",
+        "limit": page_limit,
+        "apiKey": POLYGON_API_KEY,
+    }
+
+    tickers = []
+    next_url = None
+    pages_read = 0
+
+    while pages_read < limit_pages:
+        if next_url:
+            data = safe_get_json(next_url)
+        else:
+            query = "&".join([f"{k}={v}" for k, v in params.items()])
+            data = safe_get_json(f"{base_url}?{query}")
+
+        results = data.get("results", [])
+        for item in results:
+            if is_clean_common_stock(item):
+                ticker = str(item.get("ticker", "")).upper().strip()
+                if ticker:
+                    tickers.append(ticker)
+
+        next_url = data.get("next_url")
+        if next_url and "apiKey=" not in next_url:
+            next_url = f"{next_url}&apiKey={POLYGON_API_KEY}"
+
+        pages_read += 1
+        if not next_url:
+            break
+
+    seen = set()
+    cleaned = []
+    for t in tickers:
+        if t not in seen:
+            seen.add(t)
+            cleaned.append(t)
+
+    return cleaned
 
 
 def get_grouped_daily_map(date_str: str) -> dict:
@@ -52,116 +133,156 @@ def get_grouped_daily_map(date_str: str) -> dict:
         if not ticker:
             continue
 
+        close_price = float(item.get("c", 0) or 0)
+        open_price = float(item.get("o", 0) or 0)
+        high_price = float(item.get("h", 0) or 0)
+        low_price = float(item.get("l", 0) or 0)
+        volume = float(item.get("v", 0) or 0)
+
         out[ticker] = {
-            "price": float(item.get("c", 0) or 0),
-            "open": float(item.get("o", 0) or 0),
-            "high": float(item.get("h", 0) or 0),
-            "low": float(item.get("l", 0) or 0),
-            "volume": float(item.get("v", 0) or 0),
+            "price": close_price,
+            "open": open_price,
+            "high": high_price,
+            "low": low_price,
+            "volume": volume,
         }
 
     return out
 
 
-def score_stock(d: dict) -> float:
+def score_candidate(ticker: str, d: dict) -> float:
     price = float(d.get("price", 0) or 0)
     open_price = float(d.get("open", 0) or 0)
     high = float(d.get("high", 0) or 0)
     low = float(d.get("low", 0) or 0)
     volume = float(d.get("volume", 0) or 0)
 
-    if price <= 0 or high <= 0 or low <= 0:
-        return -1
-
-    if price < MIN_PRICE:
-        return -1
-
-    score = 0.0
+    if price <= 0 or high <= 0 or low <= 0 or volume <= 0:
+        return -9999
 
     dollar_volume = price * volume
     day_range = max(high - low, 0.0001)
     range_pct = day_range / price if price > 0 else 0
     day_change_pct = ((price - open_price) / open_price) if open_price > 0 else 0
+    gap_pct = day_change_pct
+    near_high = price >= high * 0.985
 
-    # volume
-    if volume > 100_000_000:
-        score += 30
-    elif volume > 20_000_000:
-        score += 20
-    elif volume > 5_000_000:
-        score += 10
-    elif volume > 1_000_000:
-        score += 4
-    else:
-        score += 1
+    if price < MIN_PRICE:
+        return -9999
+    if volume < MIN_VOLUME:
+        return -9999
+    if dollar_volume < MIN_DOLLAR_VOLUME:
+        return -9999
+    if range_pct > MAX_RANGE_PCT:
+        return -9999
+    if range_pct < MIN_RANGE_PCT:
+        return -9999
+    if volume < 800_000:
+        return -9999
+    if day_change_pct < -0.02:
+        return -9999
 
-    # dollar volume
+    score = 0.0
+
     if dollar_volume > 1_000_000_000:
-        score += 25
-    elif dollar_volume > 250_000_000:
-        score += 15
-    elif dollar_volume > 50_000_000:
-        score += 8
+        score += 35
+    elif dollar_volume > 500_000_000:
+        score += 28
+    elif dollar_volume > 200_000_000:
+        score += 22
+    elif dollar_volume > 100_000_000:
+        score += 16
     else:
-        score += 2
-
-    # move
-    if day_change_pct > 0.10:
-        score += 25
-    elif day_change_pct > 0.05:
-        score += 18
-    elif day_change_pct > 0.02:
-        score += 12
-    elif day_change_pct > 0:
-        score += 5
-    elif day_change_pct < -0.05:
-        score -= 6
-
-    # range
-    if 0.02 <= range_pct <= 0.12:
         score += 10
-    elif range_pct > 0.12:
-        score += 4
 
-    # near high
-    if price >= high * 0.985:
+    if volume > 100_000_000:
+        score += 18
+    elif volume > 50_000_000:
+        score += 14
+    elif volume > 20_000_000:
+        score += 10
+    elif volume > 5_000_000:
+        score += 6
+    else:
+        score += 3
+
+    if day_change_pct > 0.04:
+        score += 12
+    elif day_change_pct > 0.02:
         score += 8
+    elif day_change_pct > 0:
+        score += 4
+    elif day_change_pct < -0.04:
+        score -= 8
+    elif day_change_pct < -0.02:
+        score -= 4
+
+    if gap_pct > 0.08:
+        score += 25
+    elif gap_pct > 0.05:
+        score += 18
+    elif gap_pct > 0.03:
+        score += 10
+
+    avg_volume = 20_000_000
+    volume_ratio = volume / avg_volume if avg_volume > 0 else 0
+
+    if volume_ratio > 2:
+        score += 15
+    elif volume_ratio > 1.5:
+        score += 10
+    elif volume_ratio > 1:
+        score += 5
+
+    if near_high:
+        score += 10
+
+    if 0.02 <= range_pct <= 0.06:
+        score += 10
+    elif 0.06 < range_pct <= 0.10:
+        score += 4
 
     return score
 
 
-def get_scan_universe(max_symbols: int = 300) -> list[str]:
-    """
-    نسخة مستقرة:
-    - تحاول قراءة السوق الكامل من grouped daily
-    - إذا فشل المصدر، ترجع seed universe بدل 0
-    - لا تقتل الأداة بسبب endpoint واحد
-    """
-    seed = get_seed_universe()
+def get_seed_universe() -> list[str]:
+    return [
+        "AAPL", "NVDA", "TSLA", "AMD", "AMZN", "META", "MSFT", "GOOGL", "AVGO", "CRM",
+        "ADBE", "NFLX", "ORCL", "INTC", "QCOM", "MU", "ANET", "PANW", "CRWD", "SNOW",
+        "SHOP", "UBER", "ABNB", "PYPL", "COIN", "ROKU", "SQ", "TTD", "HIMS", "MARA",
+        "RIOT", "OKLO", "ASTS", "MRVL", "NIO", "RKLB", "BAC", "JPM", "SOFI", "PLTR"
+    ]
+
+
+def get_scan_universe(max_symbols: int = 60) -> list[str]:
+    reference_tickers = get_reference_tickers(limit_pages=12, page_limit=1000)
+    if not reference_tickers:
+        seed = get_seed_universe()
+        return seed[:max_symbols]
 
     market_date = previous_business_day()
     grouped_map = get_grouped_daily_map(market_date)
-
-    # fallback قوي
     if not grouped_map:
+        seed = get_seed_universe()
         return seed[:max_symbols]
 
     scored = []
-    for ticker, daily in grouped_map.items():
-        score = score_stock(daily)
-        if score < 0:
+    for ticker in reference_tickers:
+        daily = grouped_map.get(ticker)
+        if not daily:
             continue
+
+        score = score_candidate(ticker, daily)
+        if score == -9999:
+            continue
+
         scored.append((ticker, score))
 
     if not scored:
+        seed = get_seed_universe()
         return seed[:max_symbols]
 
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    result = [ticker for ticker, _ in scored[:max_symbols]]
+    return [ticker for ticker, _ in scored[:max_symbols]]
 
-    # fallback إضافي لو صار شيء غريب
-    if not result:
-        return seed[:max_symbols]
-
-    return result
