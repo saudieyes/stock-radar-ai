@@ -100,3 +100,4 @@ def get_scan_universe(max_symbols: int = 300):
     scored.sort(key=lambda x: x[1], reverse=True)
 
     return [t for t, _ in scored[:max_symbols]]
+    # force redeploy
