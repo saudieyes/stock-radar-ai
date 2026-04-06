@@ -155,14 +155,41 @@ def decision_priority(decision: str) -> int:
     return 0
 
 
-def compute_execution_status(decision: str, trend: str, volume_ratio: float, catalyst_score: float, breakout_quality: str) -> str:
+def compute_execution_status(trade_type: str, decision: str, trend: str, volume_ratio: float, catalyst_score: float, breakout_quality: str) -> str:
     if breakout_quality == "FAILED":
         return "AVOID"
-    if decision == "دخول قوي" and trend == "صاعد قوي" and volume_ratio >= 1.2 and catalyst_score > 0:
+
+    if trend == "هابط" and volume_ratio < 1:
+        return "AVOID"
+
+    if decision == "مراقبة" and trend == "هابط":
+        return "AVOID"
+
+    if (
+        trend == "صاعد قوي"
+        and volume_ratio >= 1.2
+        and breakout_quality == "STRONG"
+        and decision in {"دخول قوي", "دخول بحذر"}
+        and catalyst_score > 0
+    ):
         return "READY"
-    if decision in {"دخول قوي", "دخول بحذر"}:
+
+    if trade_type == "Breakout" and volume_ratio < 1.1:
         return "WAIT"
-    return "AVOID"
+
+    if trend == "متذبذب":
+        return "WAIT"
+
+    if decision == "دخول بحذر":
+        return "WAIT"
+
+    if 0.9 <= volume_ratio < 1.2:
+        return "WAIT"
+
+    if decision == "مراقبة":
+        return "WAIT"
+
+    return "WAIT"
 
 
 def owner_decision(decision: str, trend: str, breakout_quality: str, volume_ratio: float, catalyst_score: float) -> str:
@@ -734,11 +761,14 @@ def analyze_symbol_overview(symbol):
         catalyst_score=news["catalyst_score"]
     )
 
-    execution_status = "WAIT"
-    if breakout_quality == "FAILED" or trend_data["trend"] == "هابط":
-        execution_status = "AVOID"
-    elif trend_data["trend"] == "صاعد قوي" and volume_ratio >= 1.2 and news["catalyst_score"] > 0:
-        execution_status = "READY"
+    execution_status = compute_execution_status(
+        trade_type="Breakout" if base["near_high"] and base["momentum"] == "صاعد" else "None",
+        decision="مراقبة",
+        trend=trend_data["trend"],
+        volume_ratio=volume_ratio,
+        catalyst_score=news["catalyst_score"],
+        breakout_quality=breakout_quality
+    )
 
     ai_summary = " - ".join(reasons)
 
@@ -1047,7 +1077,14 @@ def trade_plan_pro(symbol):
     )
 
     rank_label = make_rank_label(quality_score)
-    execution_status = compute_execution_status(decision, trend, volume_ratio, news["catalyst_score"], breakout_quality)
+    execution_status = compute_execution_status(
+        trade_type=trade_type,
+        decision=decision,
+        trend=trend,
+        volume_ratio=volume_ratio,
+        catalyst_score=news["catalyst_score"],
+        breakout_quality=breakout_quality
+    )
     owner_action = owner_decision(decision, trend, breakout_quality, volume_ratio, news["catalyst_score"])
 
     return {
@@ -1183,4 +1220,4 @@ def debug_symbol(symbol: str):
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade,
         "overview": overview
-            }
+    }
