@@ -97,7 +97,7 @@ def get_company_name_variants(company_name: str) -> list[str]:
 
     for n in noise:
         if name.endswith(n):
-            variants.add(name[: -len(n)].strip())
+            variants.add(name[:-len(n)].strip())
 
     parts = name.split()
     if len(parts) >= 2:
@@ -130,19 +130,33 @@ def make_rank_label(score: float) -> str:
     return "D"
 
 
+def is_market_open_now() -> bool:
+    now = datetime.utcnow()
+    if now.weekday() >= 5:
+        return False
+
+    minutes = now.hour * 60 + now.minute
+    open_min = 13 * 60 + 30   # 13:30 UTC تقريبًا
+    close_min = 20 * 60       # 20:00 UTC تقريبًا
+    return open_min <= minutes <= close_min
+
+
 def estimate_validity(trade_type: str, trend: str, volume_ratio: float, catalyst_score: float) -> str:
     if trade_type == "Breakout":
         if volume_ratio >= 1.3 and catalyst_score > 0:
             return "صالح اليوم وحتى الجلسة القادمة"
         if volume_ratio >= 1.0:
             return "صالح اليوم فقط"
-        return "يحتاج تأكيد بعد الافتتاح"
-    else:
+        return "يحتاج تأكيد أثناء التداول" if is_market_open_now() else "يحتاج تأكيد بعد الافتتاح"
+
+    if trade_type == "Pullback":
         if trend == "صاعد قوي" and volume_ratio >= 1.0:
             return "1-3 أيام"
         if trend == "صاعد":
             return "1-2 يوم"
         return "مراقبة يومية"
+
+    return "مراقبة مشروطة"
 
 
 def decision_priority(decision: str) -> int:
@@ -156,26 +170,16 @@ def decision_priority(decision: str) -> int:
 
 
 def compute_execution_status(trade_type: str, decision: str, trend: str, volume_ratio: float, catalyst_score: float, breakout_quality: str) -> str:
-    if breakout_quality == "FAILED":
+    if breakout_quality == "FAILED" and trade_type == "Breakout":
         return "AVOID"
 
-    if decision == "مراقبة" and trend == "هابط" and volume_ratio < 1:
-        return "AVOID"
-
-    if (
-        trade_type == "Breakout"
-        and decision == "دخول قوي"
-        and trend == "صاعد قوي"
-        and volume_ratio >= 1.2
-        and breakout_quality == "STRONG"
-        and catalyst_score >= 3
-    ):
+    if decision == "دخول قوي" and trend == "صاعد قوي" and volume_ratio >= 1.2 and breakout_quality in {"STRONG", "WEAK"} and catalyst_score >= 0:
         return "READY"
 
     if decision in {"دخول قوي", "دخول بحذر"}:
         return "WAIT"
 
-    if decision == "مراقبة" and trend in {"صاعد", "صاعد قوي", "متذبذب"}:
+    if decision == "مراقبة":
         return "WAIT"
 
     return "AVOID"
@@ -362,7 +366,6 @@ def get_trend(symbol):
         data = r.get("results", [])
 
         closes = [to_float(x.get("c")) for x in data if to_float(x.get("c")) > 0]
-
         if len(closes) < 50:
             return {"trend": "unknown", "ma20": 0.0, "ma50": 0.0}
 
@@ -394,13 +397,11 @@ def get_volume_ratio(symbol):
         data = r.get("results", [])
 
         volumes = [to_float(x.get("v")) for x in data if to_float(x.get("v")) > 0]
-
         if len(volumes) < 20:
             return 1.0
 
         avg_volume = sum(volumes[-20:]) / 20
         today_volume = volumes[-1]
-
         return today_volume / avg_volume if avg_volume > 0 else 1.0
     except:
         return 1.0
@@ -470,40 +471,33 @@ def get_news_catalyst(symbol):
         for item in news[:7]:
             title = str(item.get("title", "")).strip()
             published = str(item.get("published_utc", "")).strip()
-
             if not title:
                 continue
 
             title_lower = normalize_text(title)
-
             if any(w in title_lower for w in weak_patterns):
                 continue
 
             symbol_match = re.search(rf"\b{re.escape(symbol_lower)}\b", title_lower) is not None
             company_match = any(v in title_lower for v in company_variants if len(v) >= 4)
-
             if not symbol_match and not company_match:
                 continue
 
             score = 0
-
             if any(k in title_lower for k in strong_keywords):
                 score += 6
-
             if any(k in title_lower for k in negative_keywords):
                 score -= 6
-
             if score == 0:
                 continue
 
             try:
                 news_date = datetime.strptime(published[:10], "%Y-%m-%d")
                 days_diff = (datetime.utcnow() - news_date).days
-
                 if days_diff <= 1:
-                    score += 5
+                    score += 5 if score > 0 else -5
                 elif days_diff <= 2:
-                    score += 3
+                    score += 3 if score > 0 else -3
             except:
                 pass
 
@@ -516,7 +510,6 @@ def get_news_catalyst(symbol):
             "catalyst_score": best_score,
             "note": best_note if best_note else "لا يوجد محفز قوي"
         }
-
     except Exception as e:
         return {
             "has_news": False,
@@ -532,19 +525,15 @@ def data_quality_check(symbol, info, financials):
     if not info["company"]:
         quality = "low"
         flags.append("اسم الشركة غير متوفر")
-
     if not info["sector"] or not info["industry"]:
         quality = "low"
         flags.append("بيانات القطاع/الصناعة ناقصة")
-
     if financials.get("total_assets", 0) == 0:
         quality = "low"
         flags.append("إجمالي الأصول غير متوفر")
-
     if financials.get("shares", 0) == 0:
         quality = "low"
         flags.append("عدد الأسهم غير متوفر")
-
     if financials.get("approx_market_cap", 0) == 0:
         quality = "low"
         flags.append("القيمة السوقية التقريبية غير متوفرة")
@@ -644,16 +633,6 @@ def base_analysis(symbol):
     body_strength = abs(price - open_price) / day_range if day_range > 0 else 0.0
     close_strength = (price - low) / day_range if day_range > 0 else 0.0
 
-    volume_signal = "ضعيفة"
-    if volume > 100_000_000:
-        volume_signal = "عالية جدًا"
-    elif volume > 50_000_000:
-        volume_signal = "قوية جدًا"
-    elif volume > 10_000_000:
-        volume_signal = "قوية"
-    elif volume > 2_000_000:
-        volume_signal = "متوسطة"
-
     near_high = high > 0 and price >= high * 0.985
     near_low = low > 0 and price <= low * 1.02
 
@@ -675,7 +654,6 @@ def base_analysis(symbol):
         "momentum": momentum,
         "body_strength": body_strength,
         "close_strength": close_strength,
-        "volume_signal": volume_signal,
         "location": location,
         "near_high": near_high,
         "near_low": near_low
@@ -706,8 +684,10 @@ def analyze_symbol_overview(symbol):
     low = prev["low"]
     open_price = prev["open"]
 
+    trade_type = "Breakout" if base["near_high"] and base["momentum"] == "صاعد" else ("Pullback" if base["near_low"] else "Watch")
+
     breakout_quality = breakout_quality_label(
-        trade_type="Breakout" if base["near_high"] and base["momentum"] == "صاعد" else "None",
+        trade_type=trade_type,
         momentum=base["momentum"],
         body_strength=base["body_strength"],
         close_strength=base["close_strength"],
@@ -720,9 +700,7 @@ def analyze_symbol_overview(symbol):
     elif trend_data["trend"] == "هابط":
         status = "السهم ضعيف حاليًا"
 
-    reasons = []
-    reasons.append(f"الاتجاه: {trend_data['trend']}")
-    reasons.append(f"الزخم: {base['momentum']}")
+    reasons = [f"الاتجاه: {trend_data['trend']}", f"الزخم: {base['momentum']}"]
 
     if volume_ratio < 0.9:
         reasons.append("السيولة ضعيفة")
@@ -748,7 +726,7 @@ def analyze_symbol_overview(symbol):
     )
 
     execution_status = compute_execution_status(
-        trade_type="Breakout" if base["near_high"] and base["momentum"] == "صاعد" else "None",
+        trade_type=trade_type,
         decision="مراقبة",
         trend=trend_data["trend"],
         volume_ratio=volume_ratio,
@@ -823,9 +801,9 @@ def trade_plan_pro(symbol):
 
     news = get_news_catalyst(symbol)
 
-    trade_type = None
-    entry = None
-    stop = None
+    trade_type = "Watch"
+    entry = price
+    stop = low * 0.99 if low > 0 else price * 0.95
 
     if near_high and momentum == "صاعد":
         trade_type = "Breakout"
@@ -835,10 +813,6 @@ def trade_plan_pro(symbol):
         trade_type = "Pullback"
         entry = price
         stop = low * 0.99
-    else:
-        trade_type = "Watch"
-        entry = price
-        stop = low * 0.99 if low > 0 else price * 0.95
 
     risk = entry - stop
     if risk <= 0:
@@ -857,9 +831,9 @@ def trade_plan_pro(symbol):
         volume_ratio=volume_ratio
     )
 
-    quality_score = 28
+    quality_score = 32
 
-    # volume absolute
+    # absolute daily volume
     if volume > 100_000_000:
         quality_score += 14
     elif volume > 50_000_000:
@@ -869,24 +843,22 @@ def trade_plan_pro(symbol):
     elif volume > 2_000_000:
         quality_score += 3
     else:
-        quality_score -= 10
+        quality_score -= 9
         risk_flags.append("سيولة يومية ضعيفة")
 
-    # price action
+    # momentum of the day
     if momentum == "صاعد":
-        quality_score += 10
+        quality_score += 9
     elif momentum == "هابط":
         quality_score -= 6
 
     # trend
     if trend == "صاعد قوي":
-        quality_score += 14
+        quality_score += 13
     elif trend == "صاعد":
-        quality_score += 8
-    elif trend == "متذبذب":
-        quality_score += 0
+        quality_score += 7
     elif trend == "هابط":
-        quality_score -= 14
+        quality_score -= 13
 
     # setup type
     if trade_type == "Breakout":
@@ -894,65 +866,72 @@ def trade_plan_pro(symbol):
     elif trade_type == "Pullback":
         quality_score += 5
     else:
-        quality_score -= 4
+        quality_score -= 3
 
-    # breakout vs trend
+    # breakout against trend
     if trade_type == "Breakout" and trend == "هابط":
-        quality_score -= 18
+        quality_score -= 16
         risk_flags.append("اختراق عكس الاتجاه")
         hard_block = True
 
-    # volume ratio
+    # relative volume
     if trade_type == "Breakout":
         if volume_ratio >= 1.5:
-            quality_score += 10
+            quality_score += 9
         elif volume_ratio >= 1.2:
-            quality_score += 6
+            quality_score += 5
         elif volume_ratio >= 1.0:
             quality_score += 1
             risk_flags.append("اختراق يحتاج تأكيد")
-        elif volume_ratio >= 0.9:
-            quality_score -= 6
+        elif volume_ratio >= 0.8:
+            quality_score -= 4
             risk_flags.append("اختراق ضعيف بدون سيولة")
         else:
-            quality_score -= 14
+            quality_score -= 12
             risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
             hard_block = True
-    else:
+    elif trade_type == "Pullback":
         if volume_ratio >= 1.3:
             quality_score += 4
         elif volume_ratio >= 1.0:
             quality_score += 1
         elif volume_ratio < 0.8:
-            quality_score -= 6
+            quality_score -= 5
+    else:
+        if volume_ratio >= 1.3:
+            quality_score += 2
+        elif volume_ratio < 0.8:
+            quality_score -= 5
 
-    # candle behavior
+    # breakout candle
     if breakout_quality == "STRONG":
-        quality_score += 10
+        quality_score += 9
         risk_flags.append("اختراق قوي")
     elif breakout_quality == "WEAK":
-        quality_score -= 5
+        quality_score -= 4
         if trade_type == "Breakout":
             risk_flags.append("شمعة اختراق ضعيفة")
     elif breakout_quality == "FAILED":
-        quality_score -= 15
+        quality_score -= 13
         risk_flags.append("سلوك اختراق فاشل")
-        hard_block = True
+        if trade_type == "Breakout":
+            hard_block = True
 
-    # location / ATH
+    # location
     if trade_type == "Breakout" and location == "قرب مقاومة":
-        quality_score += 6
+        quality_score += 5
     elif trade_type == "Pullback" and location == "قرب دعم":
         quality_score += 6
 
+    # ATH behavior
     if ath_breakout_zone and momentum == "صاعد":
         quality_score += 6
         risk_flags.append("قرب اختراق ATH")
     elif near_ath and trade_type == "Breakout" and breakout_quality != "STRONG":
-        quality_score -= 4
+        quality_score -= 3
         risk_flags.append("قرب ATH بدون تأكيد")
 
-    # risk
+    # risk size
     if risk_pct <= 0.02:
         quality_score += 8
     elif risk_pct <= 0.04:
@@ -960,65 +939,70 @@ def trade_plan_pro(symbol):
     elif risk_pct <= 0.07:
         quality_score -= 2
     else:
-        quality_score -= 10
+        quality_score -= 8
         risk_flags.append("مخاطرة مرتفعة")
         hard_block = True
 
-    # range
+    # daily range
     if 0.02 <= range_pct <= 0.08:
         quality_score += 5
     elif range_pct > 0.15:
-        quality_score -= 8
+        quality_score -= 7
         risk_flags.append("ذبذبة يومية عالية")
 
-    # news
-    quality_score += news["catalyst_score"]
+    # news - تأثير أخف للمقالات الضعيفة
+    if abs(news["catalyst_score"]) >= 6:
+        quality_score += news["catalyst_score"]
+    elif abs(news["catalyst_score"]) >= 3:
+        quality_score += news["catalyst_score"] * 0.5
+    else:
+        quality_score += 0
+
     if news["catalyst_score"] >= 6:
         risk_flags.append("خبر إيجابي محفز")
     elif news["catalyst_score"] <= -6:
         risk_flags.append("خبر سلبي ⚠️")
-        hard_block = True
 
-    # halal + quality
     info = get_info(symbol)
     h = halal(symbol)
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
     risk_flags.extend(dq_flags)
 
     if data_quality == "low":
-        quality_score -= 10
+        quality_score -= 9
 
     quality_score = max(1, min(100, quality_score))
 
-    if hard_block:
+    # القرار النهائي
+    if hard_block and quality_score < 70:
         decision = "مراقبة"
-    elif quality_score >= 84:
+    elif quality_score >= 78:
         decision = "دخول قوي"
-    elif quality_score >= 72:
+    elif quality_score >= 70:
         decision = "دخول بحذر"
-    elif quality_score >= 60:
+    elif quality_score >= 58:
         decision = "مراقبة"
     else:
         return None
 
-    # extra caps
-    if trade_type == "Breakout" and volume_ratio < 1.0:
+    # caps أخف من السابق
+    if trade_type == "Breakout" and volume_ratio < 0.8:
         if decision in {"دخول قوي", "دخول بحذر"}:
             decision = "مراقبة"
 
-    if trend == "هابط":
-        if decision in {"دخول قوي", "دخول بحذر"}:
-            decision = "مراقبة"
+    if trend == "هابط" and decision == "دخول قوي":
+        decision = "مراقبة"
+    elif trend == "هابط" and decision == "دخول بحذر":
+        decision = "مراقبة"
 
     if data_quality == "low" and decision == "دخول قوي":
         decision = "دخول بحذر"
 
-    # final pruning - very weak watches disappear
-    if decision == "مراقبة" and quality_score < 62 and trade_type == "Watch":
+    # watch setups الضعيفة جدًا تختفي
+    if decision == "مراقبة" and quality_score < 60 and trade_type == "Watch":
         return None
 
     reasons = []
-
     if trend == "صاعد قوي":
         reasons.append("الاتجاه صاعد قوي")
     elif trend == "صاعد":
@@ -1047,7 +1031,7 @@ def trade_plan_pro(symbol):
     elif trade_type == "Pullback":
         reasons.append("ارتداد من دعم")
     else:
-        reasons.append("إشارة متابعة فقط")
+        reasons.append("فرصة واعدة مشروطة")
 
     if breakout_quality == "STRONG":
         reasons.append("شمعة الاختراق قوية")
