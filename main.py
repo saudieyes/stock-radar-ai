@@ -688,16 +688,19 @@ def compute_breakout_levels(current_price: float, high_price: float, low_price: 
     if trade_type == "Breakout":
         if breakout_price <= 0:
             breakout_price = float(current_price or 0)
+
         if breakout_price < 5:
-            confirmation_price = breakout_price * 1.01
-            late_entry_price = confirmation_price * 1.03
+            confirmation_price = breakout_price * 1.008
+            entry_price_real = confirmation_price * 1.006
+            late_entry_price = entry_price_real * 1.018
         elif breakout_price < 20:
-            confirmation_price = breakout_price * 1.006
-            late_entry_price = confirmation_price * 1.02
+            confirmation_price = breakout_price * 1.0045
+            entry_price_real = confirmation_price * 1.0035
+            late_entry_price = entry_price_real * 1.015
         else:
-            confirmation_price = breakout_price * 1.0035
-            late_entry_price = confirmation_price * 1.015
-        entry_price_real = confirmation_price
+            confirmation_price = breakout_price * 1.0025
+            entry_price_real = confirmation_price * 1.0025
+            late_entry_price = entry_price_real * 1.01
     else:
         confirmation_price = breakout_price
         entry_price_real = current_price
@@ -709,8 +712,10 @@ def compute_breakout_levels(current_price: float, high_price: float, low_price: 
             breakout_status = "قبل الاختراق"
         elif current_price < confirmation_price:
             breakout_status = "بعد الكسر وقبل التأكيد"
+        elif current_price <= entry_price_real:
+            breakout_status = "تأكيد الاختراق"
         elif current_price <= late_entry_price:
-            breakout_status = "اختراق مؤكد"
+            breakout_status = "اختراق مؤكد - دخول بحذر"
         else:
             breakout_status = "اختراق متأخر"
 
@@ -1545,4 +1550,3 @@ def debug_symbol(symbol: str):
         "overview": overview,
         "market_open_now": is_market_open_now()
     }
-
