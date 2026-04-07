@@ -552,47 +552,25 @@ def apply_late_move_filter(stock: dict) -> dict:
 def assign_execution_mode(stock: dict) -> dict:
     try:
         trade_type = str(stock.get("type", "") or "")
-        decision = str(stock.get("decision", "") or "")
-        execution_status = str(stock.get("execution_status", "") or "")
-        breakout_quality = str(stock.get("breakout_quality", "") or "").upper()
-        trend = str(stock.get("trend", "") or "")
         current_price = float(stock.get("current_price_live", 0) or 0)
         entry = float(stock.get("entry", 0) or 0)
         stop_loss = float(stock.get("stop_loss", 0) or 0)
         target_1 = float(stock.get("target_1", 0) or 0)
+        volume_ratio = float(stock.get("volume_ratio", 0) or 0)
+        trend = str(stock.get("trend", "") or "")
+        breakout_quality = str(stock.get("breakout_quality", "") or "").upper()
+        risk_pct = float(stock.get("risk_pct", 0) or 0)
+        late_move_flag = str(stock.get("late_move_flag", "OK") or "OK")
+        execution_status = str(stock.get("execution_status", "") or "")
         intraday = stock.get("intraday", {}) or {}
-        market_open = bool(intraday.get("market_open", False))
 
-        execution_mode = "WATCH"
-        execution_note = "مراقبة فقط"
+        intraday_available = bool(intraday.get("available", False))
+        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
+        above_vwap = bool(intraday.get("above_vwap_proxy", False))
+        opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
 
-        if execution_status in {"SKIP_LATE_MOVE", "SKIP_FAR_FROM_ENTRY", "AVOID"}:
-            execution_mode = "AVOID"
-            execution_note = "تجاهل هذه الفرصة الآن"
-        elif trade_type == "Pullback":
-            execution_mode = "PULLBACK"
-            execution_note = "انتظر رجوعًا منظمًا ثم راقب الارتداد"
-        elif execution_status == "EXECUTE":
-            execution_mode = "READY"
-            execution_note = "دخول الآن ممكن وفق الخطة"
-        elif execution_status == "READY":
-            execution_mode = "READY"
-            execution_note = "جاهز للدخول عند تأكيد بسيط"
-        elif execution_status in {"WAIT_INTRADAY_CONFIRM", "WAIT_VWAP", "WAIT_OPENING"}:
-            execution_mode = "WAIT_CONFIRM"
-            execution_note = "انتظر تأكيد لحظي أفضل قبل الدخول"
-        elif execution_status == "WAIT_BREAKOUT":
-            execution_mode = "WAIT_BREAKOUT"
-            execution_note = "انتظر كسر نقطة الدخول والثبات فوقها"
-        elif decision == "مراقبة":
-            execution_mode = "WATCH"
-            execution_note = "تحت المراقبة فقط"
-        elif decision in {"دخول قوي", "دخول بحذر"} and breakout_quality in {"STRONG", "WEAK"} and trend in {"صاعد", "صاعد قوي"}:
-            execution_mode = "WAIT_BREAKOUT"
-            execution_note = "مرشح جيد لكنه يحتاج تنفيذ سعري"
-
-        stock["execution_mode"] = execution_mode
-        stock["execution_note"] = execution_note
+        execution_mode = "انتظار تأكيد 📊"
+        execution_note = "الاختراق غير مؤكد أو السيولة ما زالت غير كافية"
 
         rr = 0.0
         if entry > 0 and stop_loss > 0 and target_1 > 0 and entry > stop_loss:
@@ -602,22 +580,81 @@ def assign_execution_mode(stock: dict) -> dict:
         stock["rr_1"] = round(rr, 2)
 
         distance_to_entry = 0.0
+        distance_from_entry = 0.0
         if current_price > 0 and entry > 0:
             distance_to_entry = ((entry - current_price) / entry) * 100
-        stock["distance_to_entry_pct"] = round(distance_to_entry, 2)
+            distance_from_entry = ((current_price - entry) / entry) * 100
 
-        if execution_mode == "READY" and market_open and current_price >= entry:
+        stock["distance_to_entry_pct"] = round(distance_to_entry, 2)
+        stock["distance_from_entry_pct"] = round(distance_from_entry, 2)
+
+        # 1) تجاهل فوري إذا السهم متأخر أو عالي المخاطرة
+        if late_move_flag in {"LATE_FROM_OPEN", "FAR_FROM_ENTRY"} or execution_status in {"SKIP_LATE_MOVE", "SKIP_FAR_FROM_ENTRY", "AVOID"}:
+            execution_mode = "تجنب ❌"
+            execution_note = "السهم متأخر أو ابتعد عن نقطة الدخول"
+        elif risk_pct > 25:
+            execution_mode = "تجنب ❌"
+            execution_note = "المخاطرة مرتفعة جدًا ولا تناسب الدخول"
+        elif trade_type == "Breakout" and trend == "هابط":
+            execution_mode = "تجنب ❌"
+            execution_note = "اختراق عكس الاتجاه العام"
+
+        # 2) جاهز للدخول
+        elif (
+            entry > 0
+            and current_price >= entry
+            and current_price <= entry * 1.03
+            and trend in {"صاعد", "صاعد قوي"}
+            and breakout_quality in {"STRONG", "WEAK"}
+            and (
+                volume_ratio >= 1.2
+                or (intraday_available and intraday_ratio >= 1.15)
+            )
+            and (
+                not intraday_available
+                or (above_vwap and opening_drive != "هابط")
+            )
+        ):
+            execution_mode = "جاهز 🔥"
+            execution_note = "تم الاختراق مع دعم جيد من السيولة"
+
+        # 3) قريب جدًا من الاختراق
+        elif (
+            entry > 0
+            and current_price < entry
+            and current_price >= entry * 0.98
+            and trend in {"صاعد", "صاعد قوي"}
+            and breakout_quality in {"STRONG", "WEAK"}
+        ):
+            execution_mode = "انتظار اختراق ⏳"
+            execution_note = f"راقب كسر {round(entry, 2)} والثبات فوقها"
+
+        # 4) يحتاج تأكيد لحظي / سيولة / VWAP
+        elif execution_status in {"WAIT_VOLUME", "WAIT_VWAP", "WAIT_INTRADAY_CONFIRM", "WAIT_OPENING"}:
+            execution_mode = "انتظار تأكيد 📊"
+            execution_note = "ينتظر تأكيدًا لحظيًا أفضل من السيولة أو VWAP"
+
+        # 5) الارتداد
+        elif trade_type == "Pullback":
+            execution_mode = "انتظار تأكيد 📊"
+            execution_note = "فرصة ارتداد، انتظر تأكيد الارتداد قبل الدخول"
+
+        # 6) الافتراضي
+        else:
+            execution_mode = "انتظار تأكيد 📊"
+            execution_note = "ما زال يحتاج تأكيدًا إضافيًا قبل التنفيذ"
+
+        stock["execution_mode"] = execution_mode
+        stock["execution_note"] = execution_note
+
+        if execution_mode == "جاهز 🔥":
             stock["owner_action"] = f"✅ دخول ممكن الآن | دخول: {round(entry,2)} | وقف: {round(stop_loss,2)} | هدف1: {round(target_1,2)}"
-        elif execution_mode == "WAIT_BREAKOUT":
+        elif execution_mode == "انتظار اختراق ⏳":
             stock["owner_action"] = f"⏳ انتظر كسر {round(entry,2)} والثبات فوقها قبل الدخول"
-        elif execution_mode == "PULLBACK":
-            stock["owner_action"] = f"↘️ لا تطارد السهم، انتظر رجوعًا قريبًا من الدعم/المنطقة ثم تأكيد ارتداد"
-        elif execution_mode == "WAIT_CONFIRM":
-            stock["owner_action"] = "⏳ انتظر تحسن التأكيد اللحظي والسيولة قبل الدخول"
-        elif execution_mode == "AVOID":
+        elif execution_mode == "انتظار تأكيد 📊":
+            stock["owner_action"] = execution_note
+        elif execution_mode == "تجنب ❌":
             stock["owner_action"] = "🚫 تجاهل هذه الفرصة الآن"
-        elif execution_mode == "WATCH":
-            stock["owner_action"] = "👀 تحت المراقبة فقط"
 
         return stock
     except:
@@ -715,3 +752,4 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         return get_seed_universe()[:max_symbols]
 
     return final_universe[:max_symbols]
+
