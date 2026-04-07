@@ -144,6 +144,72 @@ def is_market_open_now() -> bool:
         return False
 
 
+def get_market_phase() -> str:
+    try:
+        ny = ZoneInfo("America/New_York")
+        now_ny = datetime.now(ny)
+        if now_ny.weekday() >= 5:
+            return "closed"
+
+        current_minutes = now_ny.hour * 60 + now_ny.minute
+        if (9 * 60 + 30) <= current_minutes <= (16 * 60):
+            return "open"
+        if (16 * 60) < current_minutes <= (20 * 60):
+            return "after_hours"
+        if (4 * 60) <= current_minutes < (9 * 60 + 30):
+            return "pre_market"
+        return "closed"
+    except:
+        return "closed"
+
+
+def market_phase_label(phase: str) -> str:
+    mapping = {
+        "open": "مفتوح",
+        "after_hours": "بعد الإغلاق",
+        "pre_market": "قبل الافتتاح",
+        "closed": "مغلق",
+    }
+    return mapping.get(str(phase or "closed"), "مغلق")
+
+
+def get_snapshot_data(symbol):
+    symbol = str(symbol).upper().strip()
+    if not symbol:
+        return {}
+
+    try:
+        url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
+        r = requests.get(url, timeout=12).json()
+        data = r.get("ticker") or r.get("results") or {}
+        last_trade = data.get("lastTrade", {}) or {}
+        prev_day = data.get("prevDay", {}) or {}
+        day = data.get("day", {}) or {}
+
+        last_price = to_float(last_trade.get("p"))
+        prev_close = to_float(prev_day.get("c"))
+        prev_open = to_float(prev_day.get("o"))
+        day_open = to_float(day.get("o"))
+        day_high = to_float(day.get("h"))
+        day_low = to_float(day.get("l"))
+        day_close = to_float(day.get("c"))
+        day_volume = to_float(day.get("v"))
+
+        return {
+            "last_price": last_price,
+            "prev_close": prev_close,
+            "prev_open": prev_open,
+            "day_open": day_open,
+            "day_high": day_high,
+            "day_low": day_low,
+            "day_close": day_close,
+            "day_volume": day_volume,
+            "updated": data.get("updated", 0),
+        }
+    except:
+        return {}
+
+
 def estimate_validity(trade_type: str, trend: str, volume_ratio: float, catalyst_score: float) -> str:
     if trade_type == "Breakout":
         if volume_ratio >= 1.3 and catalyst_score > 0:
@@ -1285,7 +1351,7 @@ def trade_plan_pro(symbol):
     if data_quality == "low":
         reasons.append("جودة البيانات ضعيفة")
 
-    live_block = build_live_price_block(a, intraday)
+    live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
 
     return {
@@ -1332,6 +1398,7 @@ def analyze_symbol_overview(symbol):
     history = get_history_levels(symbol)
     intraday = get_intraday_snapshot(symbol)
     halal_check = halal(symbol)
+    live_block = build_live_price_block(symbol, prev, intraday)
 
     return {
         "symbol": symbol,
@@ -1354,7 +1421,8 @@ def analyze_symbol_overview(symbol):
         "ath_breakout_zone": history.get("ath_breakout_zone", False),
         "intraday": intraday,
         "halal": halal_check.get("allowed", False),
-        "halal_reason": halal_check.get("reason", "")
+        "halal_reason": halal_check.get("reason", ""),
+        **live_block
     }
 
 
@@ -1373,7 +1441,9 @@ def health():
             "balance_rows": len(BALANCE_DATA),
             "income_rows": len(INCOME_DATA),
         },
-        "market_open_now": is_market_open_now()
+        "market_open_now": is_market_open_now(),
+        "market_phase": get_market_phase(),
+        "market_phase_label": market_phase_label(get_market_phase())
     }
 
 
@@ -1421,7 +1491,11 @@ def trade_scan():
     cautious_entries = [x for x in trades if x["decision"] == "دخول بحذر"]
     watch = [x for x in trades if x["decision"] == "مراقبة"]
 
+    phase = get_market_phase()
     return {
+        "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
         "universe_count": len(universe),
         "count": len(trades),
         "strong_entries_count": len(strong_entries),
@@ -1548,5 +1622,8 @@ def debug_symbol(symbol: str):
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade,
         "overview": overview,
-        "market_open_now": is_market_open_now()
+        "market_open_now": is_market_open_now(),
+        "market_phase": get_market_phase(),
+        "market_phase_label": market_phase_label(get_market_phase())
     }
+
