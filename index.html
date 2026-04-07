@@ -356,7 +356,7 @@
             <div class="badges">
               ${badgeDecision(stock.decision)}
               <span class="badge badge-rank">${safeText(stock.rank_label)}</span>
-              <span class="badge badge-exec">${safeText(stock.execution_status)}</span>
+              <span class="badge badge-exec">${safeText(stock.execution_status)}</span>${stock.late_move_flag && stock.late_move_flag !== "OK" ? `<span class="badge badge-cautious">Late Move</span>` : ""}
             </div>
           </div>
 
@@ -399,6 +399,10 @@
               <div class="detail-box">
                 <div class="detail-label">Volume Ratio</div>
                 <div class="detail-value">${formatNumber(stock.volume_ratio)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">البعد عن نقطة الدخول</div>
+                <div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div>
               </div>
               <div class="detail-box">
                 <div class="detail-label">الترند</div>
