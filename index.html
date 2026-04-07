@@ -356,7 +356,7 @@
             <div class="badges">
               ${badgeDecision(stock.decision)}
               <span class="badge badge-rank">${safeText(stock.rank_label)}</span>
-              <span class="badge badge-exec">${safeText(stock.execution_status)}</span>${stock.late_move_flag && stock.late_move_flag !== "OK" ? `<span class="badge badge-cautious">Late Move</span>` : ""}
+              <span class="badge badge-exec">${safeText(stock.execution_status)}</span>${stock.late_move_flag && stock.late_move_flag !== "OK" && stock.late_move_flag !== "NO_PRICE_DATA" ? `<span class="badge badge-cautious">Late Move</span>` : ""}${["READY","EXECUTE"].includes(stock.execution_status) ? `<span class="badge badge-strong">جاهز</span>` : ""}
             </div>
           </div>
 
