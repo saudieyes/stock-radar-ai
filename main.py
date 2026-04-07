@@ -18,6 +18,7 @@ BALANCE_DATA = {}
 INCOME_DATA = {}
 HISTORY_CACHE = {}
 REF_INFO_CACHE = {}
+INTRADAY_CACHE = {}
 
 HARAM_SECTORS = {"financial services", "banks", "insurance"}
 
@@ -88,7 +89,6 @@ def get_company_name_variants(company_name: str) -> list[str]:
         return []
 
     variants = {name}
-
     noise = [
         " inc", " inc.", " corp", " corp.", " corporation", " co", " co.",
         " ltd", " ltd.", " limited", " plc", " holdings", " holding",
@@ -138,7 +138,6 @@ def is_market_open_now() -> bool:
         now_ny = datetime.now(ny)
         if now_ny.weekday() >= 5:
             return False
-
         current_minutes = now_ny.hour * 60 + now_ny.minute
         open_minutes = 9 * 60 + 30
         close_minutes = 16 * 60
@@ -308,6 +307,69 @@ def get_prev(symbol):
         return None
 
 
+def get_reference_info(symbol):
+    symbol = str(symbol).upper().strip()
+    if not symbol:
+        return {"company": "", "sector": "", "industry": "", "industry_id": ""}
+
+    if symbol in REF_INFO_CACHE:
+        return REF_INFO_CACHE[symbol]
+
+    out = {"company": "", "sector": "", "industry": "", "industry_id": ""}
+    try:
+        url = f"https://api.polygon.io/v3/reference/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
+        r = requests.get(url, timeout=12).json()
+        res = r.get("results", {}) or {}
+
+        sic_description = str(res.get("sic_description", "")).strip()
+        sector = ""
+        industry = sic_description
+
+        if " - " in sic_description:
+            parts = [p.strip() for p in sic_description.split(" - ") if p.strip()]
+            if len(parts) >= 2:
+                sector = parts[0]
+                industry = parts[-1]
+
+        out = {
+            "company": str(res.get("name", "")).strip(),
+            "sector": sector,
+            "industry": industry,
+            "industry_id": ""
+        }
+    except:
+        pass
+
+    REF_INFO_CACHE[symbol] = out
+    return out
+
+
+def get_info(symbol):
+    c = COMPANIES_DATA.get(symbol, {})
+    industry_id = str(c.get("IndustryId", "")).strip()
+    s = SECTOR_DATA.get(industry_id, {})
+
+    company = str(c.get("Company Name", "")).strip()
+    sector = str(s.get("sector", "")).strip()
+    industry = str(s.get("industry", "")).strip()
+
+    if company and sector and industry:
+        return {
+            "company": company,
+            "sector": sector,
+            "industry": industry,
+            "industry_id": industry_id
+        }
+
+    ref = get_reference_info(symbol)
+    return {
+        "company": company or ref["company"],
+        "sector": sector or ref["sector"],
+        "industry": industry or ref["industry"],
+        "industry_id": industry_id
+    }
+
+
 def get_history_levels(symbol):
     if symbol in HISTORY_CACHE:
         return HISTORY_CACHE[symbol]
@@ -413,70 +475,110 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
-
-def get_reference_info(symbol):
+def get_intraday_snapshot(symbol):
     symbol = str(symbol).upper().strip()
-    if not symbol:
-        return {"company": "", "sector": "", "industry": "", "industry_id": ""}
+    market_open = is_market_open_now()
 
-    if symbol in REF_INFO_CACHE:
-        return REF_INFO_CACHE[symbol]
+    cache_key = f"{symbol}:{'open' if market_open else 'closed'}"
+    if cache_key in INTRADAY_CACHE:
+        return INTRADAY_CACHE[cache_key]
 
-    out = {"company": "", "sector": "", "industry": "", "industry_id": ""}
+    out = {
+        "available": False,
+        "market_open": market_open,
+        "current_price": 0.0,
+        "session_open": 0.0,
+        "session_high": 0.0,
+        "session_low": 0.0,
+        "session_volume": 0.0,
+        "avg_5m_volume": 0.0,
+        "latest_5m_volume": 0.0,
+        "intraday_volume_ratio": 0.0,
+        "vwap_proxy": 0.0,
+        "above_vwap_proxy": False,
+        "opening_drive": "unknown",
+        "near_breakout_early": False,
+        "bars_count": 0
+    }
+
+    if not market_open:
+        INTRADAY_CACHE[cache_key] = out
+        return out
+
     try:
-        url = f"https://api.polygon.io/v3/reference/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=12).json()
-        res = r.get("results", {}) or {}
+        ny = ZoneInfo("America/New_York")
+        now_ny = datetime.now(ny)
+        today_ny = now_ny.date().isoformat()
 
-        sic_description = str(res.get("sic_description", "")).strip()
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/5/minute/"
+            f"{today_ny}/{today_ny}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+        )
+        r = requests.get(url, timeout=15).json()
+        bars = r.get("results", [])
 
-        sector = ""
-        industry = sic_description
+        if not bars:
+            INTRADAY_CACHE[cache_key] = out
+            return out
 
-        if " - " in sic_description:
-            parts = [p.strip() for p in sic_description.split(" - ") if p.strip()]
-            if len(parts) >= 2:
-                sector = parts[0]
-                industry = parts[-1]
+        latest = bars[-1]
+        volumes = [to_float(x.get("v")) for x in bars if to_float(x.get("v")) > 0]
+        closes = [to_float(x.get("c")) for x in bars if to_float(x.get("c")) > 0]
+
+        if not volumes or not closes:
+            INTRADAY_CACHE[cache_key] = out
+            return out
+
+        session_open = to_float(bars[0].get("o"))
+        session_high = max(to_float(x.get("h")) for x in bars)
+        session_low = min(to_float(x.get("l")) for x in bars if to_float(x.get("l")) > 0)
+        session_volume = sum(volumes)
+        latest_5m_volume = volumes[-1]
+        avg_5m_volume = sum(volumes) / len(volumes) if volumes else 0.0
+        intraday_volume_ratio = latest_5m_volume / avg_5m_volume if avg_5m_volume > 0 else 0.0
+
+        weighted_total = 0.0
+        volume_total = 0.0
+        for bar in bars:
+            typical = (to_float(bar.get("h")) + to_float(bar.get("l")) + to_float(bar.get("c"))) / 3
+            vol = to_float(bar.get("v"))
+            if vol > 0:
+                weighted_total += typical * vol
+                volume_total += vol
+
+        vwap_proxy = weighted_total / volume_total if volume_total > 0 else closes[-1]
+        current_price = closes[-1]
+        first_close = to_float(bars[0].get("c"))
+
+        if current_price > session_open and current_price >= first_close:
+            opening_drive = "صاعد"
+        elif current_price < session_open and current_price <= first_close:
+            opening_drive = "هابط"
+        else:
+            opening_drive = "متذبذب"
 
         out = {
-            "company": str(res.get("name", "")).strip(),
-            "sector": sector,
-            "industry": industry,
-            "industry_id": ""
+            "available": True,
+            "market_open": market_open,
+            "current_price": current_price,
+            "session_open": session_open,
+            "session_high": session_high,
+            "session_low": session_low,
+            "session_volume": session_volume,
+            "avg_5m_volume": avg_5m_volume,
+            "latest_5m_volume": latest_5m_volume,
+            "intraday_volume_ratio": intraday_volume_ratio,
+            "vwap_proxy": vwap_proxy,
+            "above_vwap_proxy": current_price >= vwap_proxy if vwap_proxy > 0 else False,
+            "opening_drive": opening_drive,
+            "near_breakout_early": False,
+            "bars_count": len(bars)
         }
     except:
         pass
 
-    REF_INFO_CACHE[symbol] = out
+    INTRADAY_CACHE[cache_key] = out
     return out
-
-
-def get_info(symbol):
-    c = COMPANIES_DATA.get(symbol, {})
-    industry_id = str(c.get("IndustryId", "")).strip()
-    s = SECTOR_DATA.get(industry_id, {})
-
-    company = str(c.get("Company Name", "")).strip()
-    sector = str(s.get("sector", "")).strip()
-    industry = str(s.get("industry", "")).strip()
-
-    if company and sector and industry:
-        return {
-            "company": company,
-            "sector": sector,
-            "industry": industry,
-            "industry_id": industry_id
-        }
-
-    ref = get_reference_info(symbol)
-
-    return {
-        "company": company or ref["company"],
-        "sector": sector or ref["sector"],
-        "industry": industry or ref["industry"],
-        "industry_id": industry_id
-    }
 
 
 def get_news_catalyst(symbol):
@@ -486,14 +588,9 @@ def get_news_catalyst(symbol):
 
         url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&apiKey={POLYGON_API_KEY}"
         r = requests.get(url, timeout=12).json()
-
         news = r.get("results", [])
         if not news:
-            return {
-                "has_news": False,
-                "catalyst_score": 0,
-                "note": "لا يوجد أخبار"
-            }
+            return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"}
 
         best_score = 0
         best_note = ""
@@ -514,18 +611,14 @@ def get_news_catalyst(symbol):
 
         strong_keywords = [
             "earnings", "beats", "guidance", "raises outlook",
-            "upgrade", "initiated", "outperform",
-            "partnership", "deal", "contract",
-            "acquisition", "merger",
-            "approval", "fda", "launch",
-            "record revenue", "strong growth",
-            "buyback", "dividend increase"
+            "upgrade", "initiated", "outperform", "partnership", "deal",
+            "contract", "acquisition", "merger", "approval", "fda", "launch",
+            "record revenue", "strong growth", "buyback", "dividend increase"
         ]
 
         negative_keywords = [
-            "downgrade", "miss", "cuts forecast",
-            "lawsuit", "fraud", "investigation",
-            "delay", "recall", "decline", "warning",
+            "downgrade", "miss", "cuts forecast", "lawsuit", "fraud",
+            "investigation", "delay", "recall", "decline", "warning",
             "investor alert", "substantial losses", "law firm"
         ]
 
@@ -566,17 +659,9 @@ def get_news_catalyst(symbol):
                 best_score = score
                 best_note = title[:120]
 
-        return {
-            "has_news": best_score != 0,
-            "catalyst_score": best_score,
-            "note": best_note if best_note else "لا يوجد محفز قوي"
-        }
+        return {"has_news": best_score != 0, "catalyst_score": best_score, "note": best_note if best_note else "لا يوجد محفز قوي"}
     except Exception as e:
-        return {
-            "has_news": False,
-            "catalyst_score": 0,
-            "note": f"خطأ في الأخبار: {str(e)}"
-        }
+        return {"has_news": False, "catalyst_score": 0, "note": f"خطأ في الأخبار: {str(e)}"}
 
 
 def data_quality_check(symbol, info, financials):
@@ -607,19 +692,11 @@ def halal(symbol):
     text = f"{info['sector']} {info['industry']}".lower()
 
     if info["sector"].lower() in HARAM_SECTORS:
-        return {
-            "allowed": False,
-            "reason": f"قطاع محرم: {info['sector']}",
-            "financials": {}
-        }
+        return {"allowed": False, "reason": f"قطاع محرم: {info['sector']}", "financials": {}}
 
     for word in HARAM_INDUSTRY_KEYWORDS:
         if word in text:
-            return {
-                "allowed": False,
-                "reason": f"نشاط محرم: {word}",
-                "financials": {}
-            }
+            return {"allowed": False, "reason": f"نشاط محرم: {word}", "financials": {}}
 
     balance = BALANCE_DATA.get(symbol, {})
     income = INCOME_DATA.get(symbol, {})
@@ -651,24 +728,12 @@ def halal(symbol):
     }
 
     if debt_to_market_cap is not None and debt_to_market_cap > 0.33:
-        return {
-            "allowed": False,
-            "reason": f"نسبة الدين إلى القيمة السوقية مرتفعة: {debt_to_market_cap:.2%}",
-            "financials": financials
-        }
+        return {"allowed": False, "reason": f"نسبة الدين إلى القيمة السوقية مرتفعة: {debt_to_market_cap:.2%}", "financials": financials}
 
     if cash_to_assets is not None and cash_to_assets > 0.50:
-        return {
-            "allowed": False,
-            "reason": f"نسبة النقد إلى الأصول مرتفعة: {cash_to_assets:.2%}",
-            "financials": financials
-        }
+        return {"allowed": False, "reason": f"نسبة النقد إلى الأصول مرتفعة: {cash_to_assets:.2%}", "financials": financials}
 
-    return {
-        "allowed": True,
-        "reason": "مقبول مبدئيًا",
-        "financials": financials
-    }
+    return {"allowed": True, "reason": "مقبول مبدئيًا", "financials": financials}
 
 
 def base_analysis(symbol):
@@ -732,13 +797,10 @@ def analyze_symbol_overview(symbol):
     news = get_news_catalyst(symbol)
     halal_result = halal(symbol)
     base = base_analysis(symbol)
+    intraday = get_intraday_snapshot(symbol)
 
     if not prev or not base:
-        return {
-            "symbol": symbol,
-            "found": False,
-            "message": "تعذر جلب بيانات السهم"
-        }
+        return {"symbol": symbol, "found": False, "message": "تعذر جلب بيانات السهم"}
 
     price = prev["price"]
     high = prev["high"]
@@ -763,6 +825,11 @@ def analyze_symbol_overview(symbol):
 
     reasons = [f"الاتجاه: {trend_data['trend']}", f"الزخم: {base['momentum']}"]
 
+    if intraday["available"]:
+        reasons.append(f"افتتاح اليوم: {intraday['opening_drive']}")
+        if intraday["intraday_volume_ratio"] >= 1.3:
+            reasons.append("السيولة اللحظية قوية")
+
     if volume_ratio < 0.9:
         reasons.append("السيولة ضعيفة")
     elif volume_ratio >= 1.2:
@@ -778,23 +845,8 @@ def analyze_symbol_overview(symbol):
     if history["near_ath"]:
         reasons.append("قريب من القمة التاريخية")
 
-    owner_action = owner_decision(
-        decision="مراقبة",
-        trend=trend_data["trend"],
-        breakout_quality=breakout_quality,
-        volume_ratio=volume_ratio,
-        catalyst_score=news["catalyst_score"]
-    )
-
-    execution_status = compute_execution_status(
-        trade_type=trade_type,
-        decision="مراقبة",
-        trend=trend_data["trend"],
-        volume_ratio=volume_ratio,
-        catalyst_score=news["catalyst_score"],
-        breakout_quality=breakout_quality
-    )
-
+    owner_action = owner_decision("مراقبة", trend_data["trend"], breakout_quality, volume_ratio, news["catalyst_score"])
+    execution_status = compute_execution_status(trade_type, "مراقبة", trend_data["trend"], volume_ratio, news["catalyst_score"], breakout_quality)
     ai_summary = " - ".join(reasons)
 
     return {
@@ -822,8 +874,55 @@ def analyze_symbol_overview(symbol):
         "ai_summary": ai_summary,
         "breakout_quality": breakout_quality,
         "execution_status": execution_status,
-        "owner_action": owner_action
+        "owner_action": owner_action,
+        "intraday": intraday
     }
+
+
+def execution_filter(stock: dict) -> dict:
+    entry = to_float(stock.get("entry", 0))
+    current = to_float(stock.get("financials", {}).get("current_price", 0))
+    volume_ratio = to_float(stock.get("volume_ratio", 0))
+    breakout_quality = str(stock.get("breakout_quality", "")).upper()
+    trade_type = str(stock.get("type", ""))
+    decision = str(stock.get("decision", ""))
+    existing_status = str(stock.get("execution_status", ""))
+    intraday = stock.get("intraday", {}) or {}
+
+    if existing_status == "AVOID":
+        return stock
+
+    if intraday.get("available"):
+        current = to_float(intraday.get("current_price", current))
+
+    is_above_entry = current > entry * 1.003 if entry > 0 and current > 0 else False
+    daily_volume_ok = volume_ratio >= 1.0
+    intraday_volume_ok = to_float(intraday.get("intraday_volume_ratio", 0)) >= 1.2 if intraday else False
+    has_volume = daily_volume_ok or intraday_volume_ok
+    acceptable_breakout = breakout_quality in {"STRONG", "WEAK"}
+    above_vwap = bool(intraday.get("above_vwap_proxy", False)) if intraday else False
+    opening_drive = str(intraday.get("opening_drive", "unknown"))
+
+    if trade_type == "Breakout":
+        if is_above_entry and has_volume and acceptable_breakout and decision in {"دخول قوي", "دخول بحذر"} and (above_vwap or not intraday.get("available")):
+            stock["execution_status"] = "EXECUTE"
+            stock["owner_action"] = "🔥 دخول فوري - تحقق تأكيد بعد الافتتاح"
+        elif is_above_entry and not has_volume:
+            stock["execution_status"] = "WAIT_VOLUME"
+            stock["owner_action"] = "انتظر دخول سيولة أوضح"
+        elif intraday.get("available") and not above_vwap:
+            stock["execution_status"] = "WAIT_VWAP"
+            stock["owner_action"] = "انتظر الثبات فوق متوسط اليوم"
+        elif intraday.get("available") and opening_drive == "هابط":
+            stock["execution_status"] = "WAIT_OPENING"
+            stock["owner_action"] = "انتظر تحسن افتتاح السهم أولاً"
+        elif not is_above_entry:
+            stock["execution_status"] = "WAIT_BREAKOUT"
+            stock["owner_action"] = "لم يتم تأكيد الاختراق فعليًا بعد"
+        else:
+            stock["execution_status"] = "WAIT"
+
+    return stock
 
 
 def trade_plan_pro(symbol):
@@ -861,15 +960,23 @@ def trade_plan_pro(symbol):
     ath_breakout_zone = history["ath_breakout_zone"]
 
     news = get_news_catalyst(symbol)
+    intraday = get_intraday_snapshot(symbol)
 
     trade_type = "Watch"
     entry = price
     stop = low * 0.99 if low > 0 else price * 0.95
 
+    early_momentum = False
     if near_high and momentum == "صاعد":
         trade_type = "Breakout"
         entry = high * 1.002
         stop = low * 0.995
+    elif near_high and trend in {"صاعد", "صاعد قوي"} and volume_ratio >= 1.1:
+        trade_type = "Breakout"
+        entry = high * 1.001
+        stop = low * 0.995
+        early_momentum = True
+        risk_flags.append("اقتراب مبكر من الاختراق")
     elif near_low:
         trade_type = "Pullback"
         entry = price
@@ -884,13 +991,7 @@ def trade_plan_pro(symbol):
     target_1 = entry + risk * 1.5
     target_2 = entry + risk * 2.0
 
-    breakout_quality = breakout_quality_label(
-        trade_type=trade_type,
-        momentum=momentum,
-        body_strength=body_strength,
-        close_strength=close_strength,
-        volume_ratio=volume_ratio
-    )
+    breakout_quality = breakout_quality_label(trade_type, momentum, body_strength, close_strength, volume_ratio)
 
     quality_score = 32
 
@@ -924,6 +1025,30 @@ def trade_plan_pro(symbol):
         quality_score += 5
     else:
         quality_score -= 3
+
+    if early_momentum:
+        quality_score += 6
+
+    if intraday["available"]:
+        if intraday["intraday_volume_ratio"] >= 1.5:
+            quality_score += 8
+            risk_flags.append("سيولة لحظية قوية")
+        elif intraday["intraday_volume_ratio"] >= 1.2:
+            quality_score += 4
+
+        if intraday["above_vwap_proxy"]:
+            quality_score += 4
+        else:
+            quality_score -= 3
+
+        if intraday["opening_drive"] == "صاعد":
+            quality_score += 4
+        elif intraday["opening_drive"] == "هابط":
+            quality_score -= 4
+
+        if entry > 0 and intraday["current_price"] >= entry * 0.985:
+            quality_score += 4
+            risk_flags.append("قريب جدًا من الاختراق")
 
     if trade_type == "Breakout" and trend == "هابط":
         quality_score -= 16
@@ -1015,7 +1140,6 @@ def trade_plan_pro(symbol):
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
     risk_flags.extend(dq_flags)
 
-    # تخفيف عقوبة نقص البيانات قليلاً لو كان السهم جيداً فنياً
     if data_quality == "low":
         if volume_ratio >= 1.0 and trend in {"صاعد", "صاعد قوي"}:
             quality_score -= 5
@@ -1045,7 +1169,6 @@ def trade_plan_pro(symbol):
         else:
             return None
 
-    # السماح ببعض فرص الدخول بحذر إذا كانت الشروط متماسكة
     if (
         decision == "مراقبة"
         and risk_pct <= 0.065
@@ -1087,6 +1210,11 @@ def trade_plan_pro(symbol):
     elif volume_ratio >= 1.0:
         reasons.append("السيولة مقبولة")
 
+    if intraday["available"]:
+        reasons.append(f"افتتاح اليوم: {intraday['opening_drive']}")
+        if intraday["intraday_volume_ratio"] >= 1.2:
+            reasons.append("السيولة اللحظية داعمة")
+
     if news["catalyst_score"] > 0:
         reasons.append("يوجد محفز إيجابي")
     elif news["catalyst_score"] < 0:
@@ -1101,6 +1229,9 @@ def trade_plan_pro(symbol):
     else:
         reasons.append("فرصة واعدة مشروطة")
 
+    if early_momentum:
+        reasons.append("بداية زخم مبكرة")
+
     if breakout_quality == "STRONG":
         reasons.append("شمعة الاختراق قوية")
     elif breakout_quality == "WEAK":
@@ -1113,22 +1244,9 @@ def trade_plan_pro(symbol):
 
     ai_summary = " - ".join(reasons) if reasons else "لا يوجد وضوح كافي"
 
-    valid_for = estimate_validity(
-        trade_type=trade_type,
-        trend=trend,
-        volume_ratio=volume_ratio,
-        catalyst_score=news["catalyst_score"]
-    )
-
+    valid_for = estimate_validity(trade_type, trend, volume_ratio, news["catalyst_score"])
     rank_label = make_rank_label(quality_score)
-    execution_status = compute_execution_status(
-        trade_type=trade_type,
-        decision=decision,
-        trend=trend,
-        volume_ratio=volume_ratio,
-        catalyst_score=news["catalyst_score"],
-        breakout_quality=breakout_quality
-    )
+    execution_status = compute_execution_status(trade_type, decision, trend, volume_ratio, news["catalyst_score"], breakout_quality)
     owner_action = owner_decision(decision, trend, breakout_quality, volume_ratio, news["catalyst_score"])
 
     return {
@@ -1152,7 +1270,8 @@ def trade_plan_pro(symbol):
         "ai_summary": ai_summary,
         "breakout_quality": breakout_quality,
         "execution_status": execution_status,
-        "owner_action": owner_action
+        "owner_action": owner_action,
+        "intraday": intraday
     }
 
 
@@ -1172,7 +1291,8 @@ def health():
             "balance_rows": len(BALANCE_DATA),
             "income_rows": len(INCOME_DATA),
         },
-        "universe_count": len(universe)
+        "universe_count": len(universe),
+        "market_open_now": is_market_open_now()
     }
 
 
@@ -1188,23 +1308,16 @@ def trade_scan():
         try:
             prev = get_prev(s)
             if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
-                rejected.append({
-                    "symbol": s,
-                    "reason": f"سعر أقل من {LOW_PRICE_HARD_BLOCK}$"
-                })
+                rejected.append({"symbol": s, "reason": f"سعر أقل من {LOW_PRICE_HARD_BLOCK}$"})
                 continue
 
             h = halal(s)
             if not h["allowed"]:
-                rejected.append({
-                    "symbol": s,
-                    "reason": h["reason"]
-                })
+                rejected.append({"symbol": s, "reason": h["reason"]})
                 continue
 
             t = trade_plan_pro(s)
             if t:
-                # استبعاد الأسهم الفاشلة من قائمة الفرص الرئيسية
                 if t["breakout_quality"] == "FAILED" or t["execution_status"] == "AVOID":
                     continue
 
@@ -1213,20 +1326,15 @@ def trade_scan():
                 t["sector"] = info["sector"]
                 t["industry"] = info["industry"]
                 t["financials"] = h["financials"]
+
+                t = execution_filter(t)
                 trades.append(t)
 
         except Exception as e:
-            errors.append({
-                "symbol": s,
-                "error": str(e)
-            })
+            errors.append({"symbol": s, "error": str(e)})
             continue
 
-    trades = sorted(
-        trades,
-        key=lambda x: (decision_priority(x["decision"]), x["quality_score"]),
-        reverse=True
-    )
+    trades = sorted(trades, key=lambda x: (decision_priority(x["decision"]), x["quality_score"]), reverse=True)
 
     top_ranked = trades[:5]
     strong_entries = [x for x in trades if x["decision"] == "دخول قوي"]
@@ -1257,6 +1365,15 @@ def debug_symbol(symbol: str):
     overview = analyze_symbol_overview(symbol)
     trade = trade_plan_pro(symbol)
 
+    if trade:
+        info = get_info(symbol)
+        h = halal(symbol)
+        trade["company"] = info["company"]
+        trade["sector"] = info["sector"]
+        trade["industry"] = info["industry"]
+        trade["financials"] = h["financials"]
+        trade = execution_filter(trade)
+
     return {
         "symbol": symbol,
         "sector_info": get_info(symbol),
@@ -1267,5 +1384,6 @@ def debug_symbol(symbol: str):
         "base_analysis": base_analysis(symbol),
         "news_catalyst": get_news_catalyst(symbol),
         "trade_plan": trade,
-        "overview": overview
+        "overview": overview,
+        "market_open_now": is_market_open_now()
     }
