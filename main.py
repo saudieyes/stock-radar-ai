@@ -6,7 +6,7 @@ import csv
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from scanner import get_scan_universe
+from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels
 
 app = FastAPI()
 
@@ -604,11 +604,130 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
     except:
         return float(volume_ratio or 0)
 
+
+def next_business_day(d):
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
+def prev_business_day(d):
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+def count_business_days_exclusive(start_date, end_date):
+    days = 0
+    d = start_date + timedelta(days=1)
+    while d <= end_date:
+        if d.weekday() < 5:
+            days += 1
+        d += timedelta(days=1)
+    return days
+
+def trading_sessions_since_news(published_utc: str) -> int:
+    try:
+        ny = ZoneInfo("America/New_York")
+        now_ny = datetime.now(ny)
+        current_trade_date = now_ny.date()
+        if current_trade_date.weekday() >= 5:
+            current_trade_date = prev_business_day(current_trade_date)
+        elif (now_ny.hour * 60 + now_ny.minute) < (9 * 60 + 30):
+            current_trade_date = prev_business_day(current_trade_date - timedelta(days=1))
+
+        published = datetime.fromisoformat(str(published_utc).replace("Z", "+00:00"))
+        pub_ny = published.astimezone(ny)
+        reaction_date = pub_ny.date()
+        minutes = pub_ny.hour * 60 + pub_ny.minute
+
+        if reaction_date.weekday() >= 5:
+            reaction_date = next_business_day(reaction_date)
+        elif minutes >= 16 * 60:
+            reaction_date = next_business_day(reaction_date + timedelta(days=1))
+        else:
+            reaction_date = next_business_day(reaction_date)
+
+        return count_business_days_exclusive(reaction_date, current_trade_date)
+    except:
+        return 999
+
+def classify_news_impact(title_lower: str, sessions_since: int):
+    positive_keywords = [
+        "earnings", "beats", "guidance", "raises outlook", "upgrade", "initiated", "outperform",
+        "partnership", "deal", "contract", "acquisition", "merger", "approval", "fda", "launch",
+        "record revenue", "strong growth", "buyback", "dividend increase", "wins", "winning"
+    ]
+    negative_keywords = [
+        "downgrade", "miss", "cuts forecast", "lawsuit", "fraud", "investigation", "delay", "recall",
+        "decline", "warning", "investor alert", "substantial losses", "law firm", "slumps", "falls"
+    ]
+
+    is_positive = any(k in title_lower for k in positive_keywords)
+    is_negative = any(k in title_lower for k in negative_keywords)
+
+    if not is_positive and not is_negative:
+        return 0, "لا يوجد محفز حديث", "NONE"
+
+    if is_positive:
+        if sessions_since <= 1:
+            return 12, "محفز إيجابي حديث", "POSITIVE_FRESH"
+        if sessions_since == 2:
+            return 5, "محفز إيجابي ضعيف", "POSITIVE_WEAK"
+        return 0, "خبر إيجابي قديم - لا يعتمد عليه", "POSITIVE_OLD"
+
+    if is_negative:
+        if sessions_since <= 2:
+            return -12, "خبر سلبي حديث", "NEGATIVE_FRESH"
+        if sessions_since <= 5:
+            return -6, "خبر سلبي ما زال مؤثرًا", "NEGATIVE_MEDIUM"
+        return 0, "خبر سلبي قديم", "NEGATIVE_OLD"
+
+    return 0, "لا يوجد محفز حديث", "NONE"
+
+def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str):
+    breakout_price = float(high_price or current_price or 0)
+    if trade_type == "Breakout":
+        if breakout_price <= 0:
+            breakout_price = float(current_price or 0)
+        if breakout_price < 5:
+            confirmation_price = breakout_price * 1.01
+            late_entry_price = confirmation_price * 1.03
+        elif breakout_price < 20:
+            confirmation_price = breakout_price * 1.006
+            late_entry_price = confirmation_price * 1.02
+        else:
+            confirmation_price = breakout_price * 1.0035
+            late_entry_price = confirmation_price * 1.015
+        entry_price_real = confirmation_price
+    else:
+        confirmation_price = breakout_price
+        entry_price_real = current_price
+        late_entry_price = current_price * 1.02 if current_price > 0 else 0
+
+    breakout_status = "لا ينطبق"
+    if trade_type == "Breakout":
+        if current_price < breakout_price:
+            breakout_status = "قبل الاختراق"
+        elif current_price < confirmation_price:
+            breakout_status = "بعد الكسر وقبل التأكيد"
+        elif current_price <= late_entry_price:
+            breakout_status = "اختراق مؤكد"
+        else:
+            breakout_status = "اختراق متأخر"
+
+    return {
+        "breakout_price": safe_round(breakout_price),
+        "confirmation_price": safe_round(confirmation_price),
+        "entry_price_real": safe_round(entry_price_real),
+        "late_entry_price": safe_round(late_entry_price),
+        "breakout_status": breakout_status
+    }
+
 def get_news_catalyst(symbol):
     try:
         return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"} if not POLYGON_API_KEY else _news_impl(symbol)
     except Exception as e:
         return {"has_news": False, "catalyst_score": 0, "note": f"خطأ في الأخبار: {str(e)}"}
+
 
 
 def _news_impl(symbol):
@@ -618,38 +737,21 @@ def _news_impl(symbol):
     r = requests.get(url, timeout=12).json()
     news = r.get("results", [])
     if not news:
-        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"}
+        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد محفز حديث", "freshness_label": "NONE", "sessions_since": None}
 
-    best_score = 0
-    best_note = ""
     symbol_lower = symbol.lower()
     company_variants = get_company_name_variants(company_name)
-
     weak_patterns = [
-        "top stocks", "market update", "stock market", "s&p 500",
-        "nasdaq", "dow jones", "why investors", "what to know",
-        "best stocks", "should you buy", "index fund", "etf",
-        "top-ranked stocks", "stocks to buy now", "long term",
-        "consumer tech news", "weekly recap", "roundup", "news recap",
-        "worth buying", "worth holding", "bullish on", "best way to buy",
-        "compare", "comparison", "vs.", "versus", "top picks", "3 stocks",
-        "5 stocks", "10 stocks", "owns over", "entire u.s. market"
+        "top stocks", "market update", "stock market", "s&p 500", "nasdaq", "dow jones", "why investors",
+        "what to know", "best stocks", "should you buy", "index fund", "etf", "top-ranked stocks",
+        "stocks to buy now", "long term", "consumer tech news", "weekly recap", "roundup", "news recap",
+        "worth buying", "worth holding", "bullish on", "best way to buy", "compare", "comparison", "vs.",
+        "versus", "top picks", "3 stocks", "5 stocks", "10 stocks"
     ]
 
-    strong_keywords = [
-        "earnings", "beats", "guidance", "raises outlook",
-        "upgrade", "initiated", "outperform", "partnership", "deal",
-        "contract", "acquisition", "merger", "approval", "fda", "launch",
-        "record revenue", "strong growth", "buyback", "dividend increase"
-    ]
+    best = {"score": 0, "note": "لا يوجد محفز حديث", "freshness_label": "NONE", "sessions_since": None, "freshness_note": "لا يوجد محفز حديث", "has_news": False}
 
-    negative_keywords = [
-        "downgrade", "miss", "cuts forecast", "lawsuit", "fraud",
-        "investigation", "delay", "recall", "decline", "warning",
-        "investor alert", "substantial losses", "law firm"
-    ]
-
-    for item in news[:7]:
+    for item in news[:10]:
         title = str(item.get("title", "")).strip()
         published = str(item.get("published_utc", "")).strip()
         if not title:
@@ -659,34 +761,37 @@ def _news_impl(symbol):
         if any(w in title_lower for w in weak_patterns):
             continue
 
-        symbol_match = re.search(rf"{re.escape(symbol_lower)}", title_lower) is not None
+        symbol_match = re.search(rf"\b{re.escape(symbol_lower)}\b", title_lower) is not None
         company_match = any(v in title_lower for v in company_variants if len(v) >= 4)
         if not symbol_match and not company_match:
             continue
 
-        score = 0
-        if any(k in title_lower for k in strong_keywords):
-            score += 6
-        if any(k in title_lower for k in negative_keywords):
-            score -= 6
+        sessions_since = trading_sessions_since_news(published)
+        score, freshness_note, freshness_label = classify_news_impact(title_lower, sessions_since)
         if score == 0:
             continue
 
-        try:
-            news_date = datetime.strptime(published[:10], "%Y-%m-%d")
-            days_diff = (datetime.utcnow() - news_date).days
-            if days_diff <= 1:
-                score += 5 if score > 0 else -5
-            elif days_diff <= 2:
-                score += 3 if score > 0 else -3
-        except:
-            pass
+        if abs(score) > abs(best["score"]):
+            best = {
+                "score": score,
+                "note": title[:120],
+                "freshness_label": freshness_label,
+                "sessions_since": sessions_since,
+                "freshness_note": freshness_note,
+                "has_news": True
+            }
 
-        if abs(score) > abs(best_score):
-            best_score = score
-            best_note = title[:120]
+    if not best["has_news"]:
+        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد محفز حديث", "freshness_label": "NONE", "sessions_since": None}
 
-    return {"has_news": best_score != 0, "catalyst_score": best_score, "note": best_note if best_note else "لا يوجد محفز قوي"}
+    return {
+        "has_news": True,
+        "catalyst_score": best["score"],
+        "note": f'{best["note"]} | {best["freshness_note"]}',
+        "freshness_label": best["freshness_label"],
+        "sessions_since": best["sessions_since"],
+        "freshness_note": best["freshness_note"]
+    }
 
 
 def data_quality_check(symbol, info, financials):
@@ -767,11 +872,11 @@ def base_analysis(symbol):
     intraday = get_intraday_snapshot(symbol)
 
     if intraday.get("available"):
-        price = intraday.get("current_price", 0.0)
-        high = intraday.get("session_high", 0.0)
-        low = intraday.get("session_low", 0.0)
-        open_price = intraday.get("session_open", 0.0)
-        volume = intraday.get("session_volume", 0.0)
+        price = intraday.get("current_price", prev["price"])
+        high = max(prev["high"], intraday.get("session_high", 0))
+        low = min(prev["low"], intraday.get("session_low", prev["low"])) if intraday.get("session_low", 0) > 0 else prev["low"]
+        volume = max(prev["volume"], intraday.get("session_volume", 0))
+        open_price = intraday.get("session_open", prev["open"])
     else:
         price = prev["price"]
         high = prev["high"]
@@ -853,8 +958,8 @@ def execution_filter(stock: dict) -> dict:
             stock["execution_status"] = "WAIT_VWAP"
             stock["owner_action"] = "انتظر الثبات فوق متوسط اليوم"
         elif intraday.get("available") and opening_drive == "هابط":
-            stock["execution_status"] = "WAIT_CONFIRM"
-            stock["owner_action"] = "السوق مفتوح الآن - انتظر تحسن التأكيد اللحظي أولاً"
+            stock["execution_status"] = "WAIT_OPENING"
+            stock["owner_action"] = "انتظر تحسن افتتاح السهم أولاً"
         elif not is_above_entry:
             stock["execution_status"] = "WAIT_BREAKOUT"
             stock["owner_action"] = "لم يتم تأكيد الاختراق فعليًا بعد"
@@ -863,232 +968,6 @@ def execution_filter(stock: dict) -> dict:
 
     return stock
 
-
-
-def build_breakout_plan(trade_type: str, base_data: dict, intraday: dict):
-    high = to_float(base_data.get("high", 0))
-    current_price = to_float(intraday.get("current_price", 0)) if intraday.get("available") else to_float(base_data.get("price", 0))
-    breakout_price = safe_round(high)
-    entry_price_real = safe_round(high * 1.002) if high > 0 else safe_round(current_price)
-    confirmation_price = safe_round(high * 1.003) if high > 0 else safe_round(current_price)
-    breakout_status = "لا ينطبق"
-
-    if trade_type == "Breakout":
-        if intraday.get("available"):
-            intraday_ratio = to_float(intraday.get("intraday_volume_ratio", 0))
-            above_vwap = bool(intraday.get("above_vwap_proxy", False))
-            if current_price >= confirmation_price and intraday_ratio >= 1.15 and above_vwap:
-                breakout_status = "اختراق مؤكد 🔥"
-            elif current_price >= breakout_price:
-                breakout_status = "اختراق أولي يحتاج ثبات"
-            else:
-                breakout_status = "بانتظار الاختراق"
-        else:
-            if current_price >= breakout_price:
-                breakout_status = "فوق المقاومة لكن يحتاج متابعة"
-            else:
-                breakout_status = "بانتظار الاختراق"
-    elif trade_type == "Pullback":
-        breakout_price = safe_round(base_data.get("low", 0))
-        entry_price_real = safe_round(current_price)
-        confirmation_price = safe_round(current_price)
-        breakout_status = "فرصة ارتداد"
-    else:
-        breakout_status = "مراقبة عامة"
-
-    return {
-        "breakout_price": breakout_price,
-        "entry_price_real": entry_price_real,
-        "confirmation_price": confirmation_price,
-        "breakout_status": breakout_status
-    }
-
-
-def apply_late_move_filter(stock: dict) -> dict:
-    try:
-        current_price = float(stock.get("current_price_live", 0) or 0)
-        open_price = float(stock.get("open_price_live", 0) or 0)
-        entry = float(stock.get("entry", 0) or 0)
-
-        if current_price <= 0 or open_price <= 0 or entry <= 0:
-            stock["late_move_flag"] = "NO_PRICE_DATA"
-            return stock
-
-        change_from_open = ((current_price - open_price) / open_price) * 100 if open_price > 0 else 0
-        distance_from_entry = ((current_price - entry) / entry) * 100 if entry > 0 else 0
-
-        stock["late_move_flag"] = "OK"
-        stock["distance_from_entry_pct"] = round(distance_from_entry, 2)
-
-        if change_from_open > 8:
-            stock["late_move_flag"] = "LATE_FROM_OPEN"
-            stock["execution_status"] = "SKIP_LATE_MOVE"
-            stock["owner_action"] = "السهم تحرك بقوة من الافتتاح - متأخر للدخول الآن"
-            stock["decision"] = "مراقبة"
-            stock.setdefault("risk_flags", []).append("تحرك متأخر من الافتتاح")
-            return stock
-
-        if distance_from_entry > 5:
-            stock["late_move_flag"] = "FAR_FROM_ENTRY"
-            stock["execution_status"] = "SKIP_FAR_FROM_ENTRY"
-            stock["owner_action"] = "السعر ابتعد كثيرًا عن نقطة الدخول - الأفضل الانتظار"
-            stock["decision"] = "مراقبة"
-            stock.setdefault("risk_flags", []).append("بعيد عن نقطة الدخول")
-            return stock
-
-        return stock
-    except:
-        return stock
-
-
-def assign_execution_mode(stock: dict) -> dict:
-    try:
-        trade_type = str(stock.get("type", "") or "")
-        current_price = float(stock.get("current_price_live", 0) or 0)
-        entry = float(stock.get("entry", 0) or 0)
-        stop_loss = float(stock.get("stop_loss", 0) or 0)
-        target_1 = float(stock.get("target_1", 0) or 0)
-        volume_ratio = float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)) or 0)
-        trend = str(stock.get("trend", "") or "")
-        breakout_quality = str(stock.get("breakout_quality", "") or "").upper()
-        risk_pct = float(stock.get("risk_pct", 0) or 0)
-        late_move_flag = str(stock.get("late_move_flag", "OK") or "OK")
-        execution_status = str(stock.get("execution_status", "") or "")
-        intraday = stock.get("intraday", {}) or {}
-
-        intraday_available = bool(intraday.get("available", False))
-        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
-        above_vwap = bool(intraday.get("above_vwap_proxy", False))
-        opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
-        market_open = bool(intraday.get("market_open", False))
-
-        execution_mode = "انتظار تأكيد 📊"
-        execution_note = "الاختراق غير مؤكد أو السيولة ما زالت غير كافية"
-
-        rr = 0.0
-        if entry > 0 and stop_loss > 0 and target_1 > 0 and entry > stop_loss:
-            risk = entry - stop_loss
-            reward = target_1 - entry
-            rr = reward / risk if risk > 0 else 0.0
-        stock["rr_1"] = round(rr, 2)
-
-        distance_to_entry = 0.0
-        distance_from_entry = 0.0
-        if current_price > 0 and entry > 0:
-            distance_to_entry = ((entry - current_price) / entry) * 100
-            distance_from_entry = ((current_price - entry) / entry) * 100
-
-        stock["distance_to_entry_pct"] = round(distance_to_entry, 2)
-        stock["distance_from_entry_pct"] = round(distance_from_entry, 2)
-
-        if late_move_flag in {"LATE_FROM_OPEN", "FAR_FROM_ENTRY"} or execution_status in {"SKIP_LATE_MOVE", "SKIP_FAR_FROM_ENTRY", "AVOID"}:
-            execution_mode = "تجنب ❌"
-            execution_note = "السهم متأخر أو ابتعد عن نقطة الدخول"
-        elif risk_pct > 25:
-            execution_mode = "تجنب ❌"
-            execution_note = "المخاطرة مرتفعة جدًا ولا تناسب الدخول"
-        elif (
-            entry > 0
-            and current_price >= entry
-            and current_price <= entry * 1.035
-            and trend in {"صاعد", "صاعد قوي"}
-            and breakout_quality in {"STRONG", "WEAK"}
-            and (volume_ratio >= 1.0 or (intraday_available and intraday_ratio >= 1.05))
-            and (not intraday_available or (above_vwap or opening_drive != "هابط"))
-        ):
-            execution_mode = "جاهز 🔥"
-            execution_note = "تم الاختراق مع دعم جيد من السيولة"
-        elif (
-            entry > 0
-            and current_price < entry
-            and current_price >= entry * 0.965
-            and trend in {"صاعد", "صاعد قوي"}
-            and breakout_quality in {"STRONG", "WEAK"}
-        ):
-            execution_mode = "انتظار اختراق ⏳"
-            execution_note = f"راقب كسر {round(entry, 2)} والثبات فوقها"
-        elif execution_status in {"WAIT_VOLUME", "WAIT_VWAP", "WAIT_INTRADAY_CONFIRM", "WAIT_OPENING", "WAIT_CONFIRM"}:
-            execution_mode = "انتظار تأكيد 📊"
-            execution_note = "ينتظر تأكيدًا لحظيًا أفضل من السيولة أو VWAP"
-        elif trade_type == "Pullback":
-            execution_mode = "انتظار تأكيد 📊"
-            execution_note = "فرصة ارتداد، انتظر تأكيد الارتداد قبل الدخول"
-        else:
-            execution_mode = "انتظار تأكيد 📊"
-            execution_note = "ما زال يحتاج تأكيدًا إضافيًا قبل التنفيذ"
-
-        stock["execution_mode"] = execution_mode
-        stock["execution_note"] = execution_note
-
-        if execution_mode == "جاهز 🔥":
-            stock["owner_action"] = f"✅ دخول ممكن الآن | دخول: {round(entry,2)} | وقف: {round(stop_loss,2)} | هدف1: {round(target_1,2)}"
-        elif execution_mode == "انتظار اختراق ⏳":
-            stock["owner_action"] = f"⏳ انتظر كسر {round(entry,2)} والثبات فوقها قبل الدخول"
-        elif execution_mode == "انتظار تأكيد 📊":
-            if market_open:
-                stock["owner_action"] = "📊 السوق مفتوح الآن - انتظر تأكيدًا لحظيًا أفضل"
-            else:
-                stock["owner_action"] = execution_note
-        elif execution_mode == "تجنب ❌":
-            stock["owner_action"] = "🚫 تجاهل هذه الفرصة الآن"
-
-        return stock
-    except:
-        return stock
-
-
-def normalize_execution_labels(stock: dict) -> dict:
-    try:
-        intraday = stock.get("intraday", {}) or {}
-        market_open = bool(intraday.get("market_open", False))
-        status = str(stock.get("execution_status", "") or "")
-        mode = str(stock.get("execution_mode", "") or "")
-        note = str(stock.get("execution_note", "") or "")
-        owner_action = str(stock.get("owner_action", "") or "")
-
-        if market_open and status == "WAIT_OPENING":
-            status = "WAIT_CONFIRM"
-            if not mode or "الافتتاح" in mode:
-                mode = "انتظار تأكيد 📊"
-            if not note or "الافتتاح" in note:
-                note = "السوق مفتوح الآن - انتظر تأكيدًا لحظيًا أفضل"
-            if not owner_action or "الافتتاح" in owner_action:
-                owner_action = "السوق مفتوح الآن - انتظر تحسن التأكيد اللحظي والسيولة"
-
-        mapping = {
-            "READY": "جاهز 🔥",
-            "EXECUTE": "جاهز 🔥",
-            "WAIT_BREAKOUT": "انتظار اختراق ⏳",
-            "WAIT_CONFIRM": "انتظار تأكيد 📊",
-            "WAIT_INTRADAY_CONFIRM": "انتظار تأكيد 📊",
-            "WAIT_VWAP": "انتظار تأكيد 📊",
-            "WAIT_VOLUME": "انتظار تأكيد 📊",
-            "WAIT_OPENING": "انتظار تأكيد 📊" if market_open else "انتظار الافتتاح ⏰",
-            "WAIT": "انتظار تأكيد 📊",
-            "WATCH": "مراقبة",
-            "AVOID": "تجنب ❌",
-            "SKIP_LATE_MOVE": "تجنب ❌",
-            "SKIP_FAR_FROM_ENTRY": "تجنب ❌",
-        }
-
-        stock["execution_status"] = status
-        stock["execution_status_ar"] = mapping.get(status, status)
-        if mode:
-            stock["execution_mode"] = mode
-        else:
-            stock["execution_mode"] = mapping.get(status, "مراقبة")
-
-        if market_open and stock["execution_mode"] == "انتظار الافتتاح ⏰":
-            stock["execution_mode"] = "انتظار تأكيد 📊"
-
-        if note:
-            stock["execution_note"] = note
-        if owner_action:
-            stock["owner_action"] = owner_action
-
-        return stock
-    except:
-        return stock
 
 def trade_plan_pro(symbol):
     a = base_analysis(symbol)
@@ -1362,11 +1241,11 @@ def trade_plan_pro(symbol):
     else:
         reasons.append("الاتجاه متذبذب")
 
-    if effective_volume_ratio < 1:
+    if volume_ratio < 1:
         reasons.append("السيولة ضعيفة")
-    elif effective_volume_ratio >= 1.5:
+    elif volume_ratio >= 1.5:
         reasons.append("السيولة قوية")
-    elif effective_volume_ratio >= 1.0:
+    elif volume_ratio >= 1.0:
         reasons.append("السيولة مقبولة")
 
     if intraday["available"]:
@@ -1375,11 +1254,11 @@ def trade_plan_pro(symbol):
             reasons.append("السيولة اللحظية داعمة")
 
     if news["catalyst_score"] > 0:
-        reasons.append("يوجد محفز إيجابي")
+        reasons.append(news.get("freshness_note", "محفز إيجابي حديث"))
     elif news["catalyst_score"] < 0:
-        reasons.append("يوجد خبر سلبي")
+        reasons.append(news.get("freshness_note", "خبر سلبي حديث"))
     else:
-        reasons.append("لا يوجد محفز قوي")
+        reasons.append("لا يوجد محفز حديث")
 
     if trade_type == "Breakout":
         reasons.append("محاولة اختراق")
@@ -1402,7 +1281,7 @@ def trade_plan_pro(symbol):
         reasons.append("جودة البيانات ضعيفة")
 
     live_block = build_live_price_block(a, intraday)
-    breakout_plan = build_breakout_plan(trade_type, a, intraday)
+    levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
 
     return {
         "symbol": symbol,
@@ -1415,23 +1294,22 @@ def trade_plan_pro(symbol):
         "risk_pct": safe_round(risk_pct * 100),
         "quality_score": quality_score,
         "rank_label": make_rank_label(quality_score),
-        "valid_for": estimate_validity(trade_type, trend, volume_ratio, news["catalyst_score"]),
+        "valid_for": estimate_validity(trade_type, trend, effective_volume_ratio, news["catalyst_score"]),
         "trend": trend,
         "volume_ratio": round(volume_ratio, 2),
         "effective_volume_ratio": round(effective_volume_ratio, 2),
         "data_quality": data_quality,
         "catalyst_score": news["catalyst_score"],
         "news_note": news["note"],
+        "news_freshness_label": news.get("freshness_label", "NONE"),
+        "news_sessions_since": news.get("sessions_since", None),
         "risk_flags": risk_flags,
         "ai_summary": " - ".join(reasons) if reasons else "لا يوجد وضوح كافي",
         "breakout_quality": breakout_quality,
         "execution_status": compute_execution_status(trade_type, decision, trend, effective_volume_ratio, news["catalyst_score"], breakout_quality),
         "owner_action": owner_decision(decision, trend, breakout_quality, effective_volume_ratio, news["catalyst_score"]),
         "intraday": intraday,
-        "breakout_price": breakout_plan["breakout_price"],
-        "entry_price_real": breakout_plan["entry_price_real"],
-        "confirmation_price": breakout_plan["confirmation_price"],
-        "breakout_status": breakout_plan["breakout_status"],
+        **levels,
         **live_block
     }
 
@@ -1465,12 +1343,11 @@ def analyze_symbol_overview(symbol):
         "volume_ratio": safe_round(volume_ratio),
         "news_note": news.get("note", ""),
         "catalyst_score": news.get("catalyst_score", 0),
+        "news_freshness_label": news.get("freshness_label", "NONE"),
+        "news_sessions_since": news.get("sessions_since", None),
         "near_ath": history.get("near_ath", False),
         "ath_breakout_zone": history.get("ath_breakout_zone", False),
         "intraday": intraday,
-        "current_price_live": safe_round(intraday.get("current_price", prev.get("price", 0)) if intraday.get("available") else prev.get("price", 0)),
-        "open_price_live": safe_round(intraday.get("session_open", prev.get("open", 0)) if intraday.get("available") else prev.get("open", 0)),
-        "change_from_open_pct": safe_round((((intraday.get("current_price", prev.get("price", 0)) if intraday.get("available") else prev.get("price", 0)) - (intraday.get("session_open", prev.get("open", 0)) if intraday.get("available") else prev.get("open", 0))) / ((intraday.get("session_open", prev.get("open", 0)) if intraday.get("available") else prev.get("open", 0)) or 1)) * 100),
         "halal": halal_check.get("allowed", False),
         "halal_reason": halal_check.get("reason", "")
     }
@@ -1600,8 +1477,20 @@ def single_stock(symbol: str):
 
             try:
                 trade = execution_filter(trade)
+            except Exception:
+                pass
+
+            try:
                 trade = apply_late_move_filter(trade)
+            except Exception:
+                pass
+
+            try:
                 trade = assign_execution_mode(trade)
+            except Exception:
+                pass
+
+            try:
                 trade = normalize_execution_labels(trade)
             except Exception:
                 pass
