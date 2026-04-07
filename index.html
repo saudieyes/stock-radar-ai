@@ -166,6 +166,7 @@
             <div class="metric"><div class="metric-label">السعر الحالي</div><div class="metric-value">${formatNumber(currentPrice)}</div></div>
             <div class="metric"><div class="metric-label">التغير من الافتتاح</div><div class="metric-value">${formatPercent(changePct)}</div></div>
             <div class="metric"><div class="metric-label">الدخول</div><div class="metric-value">${formatNumber(stock.entry)}</div></div>
+            <div class="metric"><div class="metric-label">اختراق عند</div><div class="metric-value">${formatNumber(stock.breakout_price)}</div></div>
             <div class="metric"><div class="metric-label">وقف الخسارة</div><div class="metric-value">${formatNumber(stock.stop_loss)}</div></div>
             <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
             <div class="metric"><div class="metric-label">المخاطرة</div><div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div></div>
@@ -179,10 +180,15 @@
             <div class="details-grid">
               <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div>
               <div class="detail-box"><div class="detail-label">Volume Ratio</div><div class="detail-value">${formatNumber(stock.volume_ratio)}</div></div>
+              <div class="detail-box"><div class="detail-label">Effective Volume</div><div class="detail-value">${formatNumber(stock.effective_volume_ratio)}</div></div>
               <div class="detail-box"><div class="detail-label">البعد عن نقطة الدخول</div><div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">المسافة إلى الدخول</div><div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">الترند</div><div class="detail-value">${safeText(stock.trend)}</div></div>
               <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
+              <div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div>
+              <div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real)}</div></div>
+              <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
+              <div class="detail-box"><div class="detail-label">حالة الاختراق</div><div class="detail-value">${safeText(stock.breakout_status)}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div>
               <div class="detail-box"><div class="detail-label">R/R إلى الهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
@@ -263,4 +269,3 @@
   </script>
 </body>
 </html>
-
