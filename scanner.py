@@ -595,24 +595,21 @@ def assign_execution_mode(stock: dict) -> dict:
         elif risk_pct > 25:
             execution_mode = "تجنب ❌"
             execution_note = "المخاطرة مرتفعة جدًا ولا تناسب الدخول"
-        elif trade_type == "Breakout" and trend == "هابط":
-            execution_mode = "تجنب ❌"
-            execution_note = "اختراق عكس الاتجاه العام"
 
         # 2) جاهز للدخول
         elif (
             entry > 0
             and current_price >= entry
-            and current_price <= entry * 1.03
+            and current_price <= entry * 1.035
             and trend in {"صاعد", "صاعد قوي"}
             and breakout_quality in {"STRONG", "WEAK"}
             and (
-                volume_ratio >= 1.2
-                or (intraday_available and intraday_ratio >= 1.15)
+                volume_ratio >= 1.0
+                or (intraday_available and intraday_ratio >= 1.05)
             )
             and (
                 not intraday_available
-                or (above_vwap and opening_drive != "هابط")
+                or (above_vwap or opening_drive != "هابط")
             )
         ):
             execution_mode = "جاهز 🔥"
@@ -622,7 +619,7 @@ def assign_execution_mode(stock: dict) -> dict:
         elif (
             entry > 0
             and current_price < entry
-            and current_price >= entry * 0.98
+            and current_price >= entry * 0.965
             and trend in {"صاعد", "صاعد قوي"}
             and breakout_quality in {"STRONG", "WEAK"}
         ):
