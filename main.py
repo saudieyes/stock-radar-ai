@@ -1176,6 +1176,43 @@ def trade_plan_pro(symbol):
     }
 
 
+def analyze_symbol_overview(symbol):
+    symbol = str(symbol).upper().strip()
+    prev = get_prev(symbol)
+    if not prev:
+        return {"symbol": symbol, "available": False}
+
+    info = get_info(symbol)
+    trend_data = get_trend(symbol)
+    volume_ratio = get_volume_ratio(symbol)
+    news = get_news_catalyst(symbol)
+    history = get_history_levels(symbol)
+    intraday = get_intraday_snapshot(symbol)
+    halal_check = halal(symbol)
+
+    return {
+        "symbol": symbol,
+        "available": True,
+        "company": info.get("company", ""),
+        "sector": info.get("sector", ""),
+        "industry": info.get("industry", ""),
+        "price": safe_round(prev.get("price", 0)),
+        "open": safe_round(prev.get("open", 0)),
+        "high": safe_round(prev.get("high", 0)),
+        "low": safe_round(prev.get("low", 0)),
+        "volume": safe_round(prev.get("volume", 0)),
+        "trend": trend_data.get("trend", "unknown"),
+        "volume_ratio": safe_round(volume_ratio),
+        "news_note": news.get("note", ""),
+        "catalyst_score": news.get("catalyst_score", 0),
+        "near_ath": history.get("near_ath", False),
+        "ath_breakout_zone": history.get("ath_breakout_zone", False),
+        "intraday": intraday,
+        "halal": halal_check.get("allowed", False),
+        "halal_reason": halal_check.get("reason", "")
+    }
+
+
 @app.get("/")
 def home():
     return FileResponse("index.html")
@@ -1257,6 +1294,33 @@ def trade_scan():
     }
 
 
+
+@app.get("/single-stock")
+def single_stock(symbol: str):
+    symbol = str(symbol).upper().strip()
+    if not symbol:
+        return {"error": "يرجى إدخال رمز السهم"}
+
+    overview = analyze_symbol_overview(symbol)
+    trade = trade_plan_pro(symbol)
+
+    if trade:
+        info = get_info(symbol)
+        h = halal(symbol)
+        trade["company"] = info["company"]
+        trade["sector"] = info["sector"]
+        trade["industry"] = info["industry"]
+        trade["financials"] = h["financials"]
+        trade = execution_filter(trade)
+        trade = apply_late_move_filter(trade)
+        trade = assign_execution_mode(trade)
+
+    return {
+        "symbol": symbol,
+        "overview": overview,
+        "trade_plan": trade
+    }
+
 @app.get("/debug/{symbol}")
 def debug_symbol(symbol: str):
     symbol = symbol.upper()
@@ -1285,4 +1349,3 @@ def debug_symbol(symbol: str):
         "overview": overview,
         "market_open_now": is_market_open_now()
     }
-
