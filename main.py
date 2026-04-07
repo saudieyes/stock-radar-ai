@@ -1,17 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# استيراد ملفاتك
-from scanner import run_trade_scan
-from analyzer import analyze_symbol_overview
-from trade_plan import trade_plan_pro
-from data_provider import get_info
-from halal_filter import halal
-from execution_engine import execution_filter, apply_late_move_filter, assign_execution_mode
-
 app = FastAPI()
 
-# السماح للواجهة
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,94 +16,77 @@ app.add_middleware(
 # -------------------------
 @app.get("/")
 def home():
-    return {"status": "Stock Radar AI يعمل بنجاح 🚀"}
+    return {"status": "Stock Radar AI يعمل 🚀"}
 
 # -------------------------
-# Health Check
+# Health
 # -------------------------
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 # -------------------------
-# Trade Scan
+# Trade Scan (نسخة آمنة)
 # -------------------------
 @app.get("/trade-scan")
 def trade_scan():
     try:
+        from scanner import run_trade_scan
+
         data = run_trade_scan()
-
-        # تطبيق execution logic
-        for stock in data.get("top_ranked", []):
-            try:
-                stock = execution_filter(stock)
-                stock = apply_late_move_filter(stock)
-                stock = assign_execution_mode(stock)
-            except:
-                pass
-
         return data
 
     except Exception as e:
-        return {"error": f"خطأ في trade-scan: {str(e)}"}
+        return {"error": f"trade-scan error: {str(e)}"}
 
 # -------------------------
-# Single Stock (مهم جداً 🔥)
+# Single Stock (نسخة آمنة جداً)
 # -------------------------
 @app.get("/single-stock")
 def single_stock(symbol: str):
     try:
         symbol = str(symbol).upper().strip()
 
-        if not symbol:
-            return {"error": "يرجى إدخال رمز السهم"}
+        result = {
+            "symbol": symbol,
+            "overview": {},
+            "trade_plan": None
+        }
 
         # overview
-        overview = {}
         try:
-            overview = analyze_symbol_overview(symbol)
-        except:
-            overview = {}
+            from analyzer import analyze_symbol_overview
+            result["overview"] = analyze_symbol_overview(symbol)
+        except Exception as e:
+            result["overview_error"] = str(e)
 
         # trade plan
-        trade = None
         try:
+            from trade_plan import trade_plan_pro
             trade = trade_plan_pro(symbol)
-        except:
+        except Exception as e:
             trade = None
+            result["trade_error"] = str(e)
 
         if trade:
             try:
+                from data_provider import get_info
                 info = get_info(symbol)
+                trade["company"] = info.get("company", "")
             except:
-                info = {}
+                pass
 
             try:
-                h = halal(symbol)
-            except:
-                h = {"financials": {}}
-
-            # إضافة البيانات
-            trade["company"] = info.get("company", "")
-            trade["sector"] = info.get("sector", "")
-            trade["industry"] = info.get("industry", "")
-            trade["financials"] = h.get("financials", {})
-
-            # execution system
-            try:
+                from execution_engine import execution_filter, apply_late_move_filter, assign_execution_mode
                 trade = execution_filter(trade)
                 trade = apply_late_move_filter(trade)
                 trade = assign_execution_mode(trade)
             except:
                 pass
 
-        return {
-            "symbol": symbol,
-            "overview": overview,
-            "trade_plan": trade
-        }
+        result["trade_plan"] = trade
+
+        return result
 
     except Exception as e:
-        return {
-            "error": f"حدث خطأ في السيرفر: {str(e)}"
-        }
+        return {"error": f"server crash: {str(e)}"}
