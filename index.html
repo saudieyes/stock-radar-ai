@@ -157,7 +157,7 @@
               ${badgeDecision(stock.decision)}
               <span class="badge badge-rank">${safeText(stock.rank_label)}</span>
               <span class="badge badge-exec">${safeText(stock.execution_mode || stock.execution_status_ar || stock.execution_status)}</span>
-              ${stock.late_move_flag && stock.late_move_flag !== "OK" && stock.late_move_flag !== "NO_PRICE_DATA" ? `<span class="badge badge-cautious">متأخر</span>` : ""}
+              ${stock.execution_mode === "متأخر ⚠️" ? `<span class="badge badge-cautious">متأخر</span>` : ""}
               ${stock.execution_mode === "جاهز 🔥" ? `<span class="badge badge-strong">جاهز</span>` : ""}
             </div>
           </div>
@@ -183,15 +183,15 @@
               <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
               <div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real ?? stock.entry)}</div></div>
               <div class="detail-box"><div class="detail-label">آخر دخول مناسب</div><div class="detail-value">${formatNumber(stock.late_entry_price)}</div></div>
-              <div class="detail-box"><div class="detail-label">Volume Ratio</div><div class="detail-value">${formatNumber(stock.volume_ratio)}</div></div>
-              <div class="detail-box"><div class="detail-label">Effective Volume</div><div class="detail-value">${formatNumber(stock.effective_volume_ratio)}</div></div>
+              <div class="detail-box"><div class="detail-label">السيولة اليومية</div><div class="detail-value">${formatNumber(stock.volume_ratio)}</div></div>
+              <div class="detail-box"><div class="detail-label">السيولة الفعلية</div><div class="detail-value">${formatNumber(stock.effective_volume_ratio)}</div></div>
               <div class="detail-box"><div class="detail-label">البعد عن نقطة الدخول</div><div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">المسافة إلى الدخول</div><div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">الترند</div><div class="detail-value">${safeText(stock.trend)}</div></div>
               <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div>
-              <div class="detail-box"><div class="detail-label">R/R إلى الهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
+              <div class="detail-box"><div class="detail-label">العائد/المخاطرة للهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
               <div class="detail-box"><div class="detail-label">صالح لمدة</div><div class="detail-value">${safeText(stock.valid_for)}</div></div>
               <div class="detail-box"><div class="detail-label">جودة البيانات</div><div class="detail-value">${safeText(stock.data_quality)}</div></div>
               <div class="detail-box full"><div class="detail-label">الإجراء المقترح</div><div class="detail-value">${safeText(stock.owner_action)}</div></div>
