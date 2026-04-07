@@ -429,12 +429,20 @@ def get_reference_info(symbol):
         res = r.get("results", {}) or {}
 
         sic_description = str(res.get("sic_description", "")).strip()
-        market = str(res.get("market", "")).strip()
+
+        sector = ""
+        industry = sic_description
+
+        if " - " in sic_description:
+            parts = [p.strip() for p in sic_description.split(" - ") if p.strip()]
+            if len(parts) >= 2:
+                sector = parts[0]
+                industry = parts[-1]
 
         out = {
             "company": str(res.get("name", "")).strip(),
-            "sector": market,
-            "industry": sic_description,
+            "sector": sector,
+            "industry": industry,
             "industry_id": ""
         }
     except:
