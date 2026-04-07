@@ -17,6 +17,7 @@ COMPANIES_DATA = {}
 BALANCE_DATA = {}
 INCOME_DATA = {}
 HISTORY_CACHE = {}
+REF_INFO_CACHE = {}
 
 HARAM_SECTORS = {"financial services", "banks", "insurance"}
 
@@ -412,14 +413,60 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
+
+def get_reference_info(symbol):
+    symbol = str(symbol).upper().strip()
+    if not symbol:
+        return {"company": "", "sector": "", "industry": "", "industry_id": ""}
+
+    if symbol in REF_INFO_CACHE:
+        return REF_INFO_CACHE[symbol]
+
+    out = {"company": "", "sector": "", "industry": "", "industry_id": ""}
+    try:
+        url = f"https://api.polygon.io/v3/reference/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
+        r = requests.get(url, timeout=12).json()
+        res = r.get("results", {}) or {}
+
+        sic_description = str(res.get("sic_description", "")).strip()
+        market = str(res.get("market", "")).strip()
+
+        out = {
+            "company": str(res.get("name", "")).strip(),
+            "sector": market,
+            "industry": sic_description,
+            "industry_id": ""
+        }
+    except:
+        pass
+
+    REF_INFO_CACHE[symbol] = out
+    return out
+
+
 def get_info(symbol):
     c = COMPANIES_DATA.get(symbol, {})
     industry_id = str(c.get("IndustryId", "")).strip()
     s = SECTOR_DATA.get(industry_id, {})
+
+    company = str(c.get("Company Name", "")).strip()
+    sector = str(s.get("sector", "")).strip()
+    industry = str(s.get("industry", "")).strip()
+
+    if company and sector and industry:
+        return {
+            "company": company,
+            "sector": sector,
+            "industry": industry,
+            "industry_id": industry_id
+        }
+
+    ref = get_reference_info(symbol)
+
     return {
-        "company": str(c.get("Company Name", "")).strip(),
-        "sector": str(s.get("sector", "")).strip(),
-        "industry": str(s.get("industry", "")).strip(),
+        "company": company or ref["company"],
+        "sector": sector or ref["sector"],
+        "industry": industry or ref["industry"],
         "industry_id": industry_id
     }
 
