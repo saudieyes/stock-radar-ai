@@ -19,11 +19,11 @@ MIN_DOLLAR_VOLUME = 2_000_000
 MAX_RANGE_PCT = 0.45
 MIN_RANGE_PCT = 0.015
 
-TOTAL_UNIVERSE = 80
+TOTAL_UNIVERSE = 60
 BIG_CAP_LIMIT = 5
-MOMENTUM_LIMIT = 35
-EMERGING_LIMIT = 25
-SMALL_CAP_LIMIT = 15
+MOMENTUM_LIMIT = 25
+EMERGING_LIMIT = 20
+SMALL_CAP_LIMIT = 10
 
 BIG_CAPS = [
     "AAPL", "NVDA", "MSFT", "AMZN", "META",
@@ -80,7 +80,7 @@ def is_clean_common_stock(item: dict) -> bool:
     return True
 
 
-def get_reference_tickers(limit_pages: int = 12, page_limit: int = 1000) -> list[str]:
+def get_reference_tickers(limit_pages: int = 8, page_limit: int = 1000) -> list[str]:
     if not POLYGON_API_KEY:
         return []
 
@@ -159,7 +159,7 @@ def get_reference_details(ticker: str) -> dict:
         return {}
 
     url = f"https://api.polygon.io/v3/reference/tickers/{ticker}?apiKey={POLYGON_API_KEY}"
-    data = safe_get_json(url, timeout=12)
+    data = safe_get_json(url, timeout=10)
     return data.get("results", {}) or {}
 
 
@@ -210,6 +210,47 @@ def base_filters(d: dict) -> bool:
     if m["day_change_pct"] < -0.08:
         return False
     return True
+
+
+def quick_score_candidate(ticker: str, d: dict) -> float:
+    if not base_filters(d):
+        return -9999
+
+    m = calc_metrics(d)
+    score = 0.0
+
+    if m["day_change_pct"] > 0.08:
+        score += 20
+    elif m["day_change_pct"] > 0.05:
+        score += 15
+    elif m["day_change_pct"] > 0.02:
+        score += 10
+
+    if m["gap_like_pct"] > 0.08:
+        score += 12
+    elif m["gap_like_pct"] > 0.04:
+        score += 8
+
+    if m["near_high"]:
+        score += 10
+    if m["close_strength"] > 0.7:
+        score += 8
+    if m["body_strength"] > 0.5:
+        score += 6
+
+    if m["volume"] > 20_000_000:
+        score += 12
+    elif m["volume"] > 5_000_000:
+        score += 8
+    elif m["volume"] > 1_000_000:
+        score += 4
+
+    if m["dollar_volume"] > 300_000_000:
+        score += 10
+    elif m["dollar_volume"] > 50_000_000:
+        score += 6
+
+    return score
 
 
 def score_big_cap(ticker: str, d: dict) -> float:
@@ -373,7 +414,6 @@ def score_small_cap_candidate(ticker: str, d: dict, ref: dict) -> float:
 
     if market_cap <= 0 or market_cap > 2_000_000_000:
         return -9999
-
     if m["price"] < 1.2:
         return -9999
     if m["volume"] < 200_000:
@@ -453,8 +493,8 @@ def get_seed_universe() -> list[str]:
     ]
 
 
-def get_scan_universe(max_symbols: int = 60) -> list[str]:
-    reference_tickers = get_reference_tickers(limit_pages=12, page_limit=1000)
+def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
+    reference_tickers = get_reference_tickers(limit_pages=8, page_limit=1000)
     if not reference_tickers:
         return get_seed_universe()[:max_symbols]
 
@@ -466,17 +506,16 @@ def get_scan_universe(max_symbols: int = 60) -> list[str]:
     big_caps_scored = []
     momentum_scored = []
     emerging_scored = []
-    small_cap_scored = []
+    fast_pool = []
 
     for ticker in reference_tickers:
         daily = grouped_map.get(ticker)
         if not daily:
             continue
 
-        ref = {}
-        need_ref = ticker not in BIG_CAPS
-        if need_ref:
-            ref = get_reference_details(ticker)
+        quick = quick_score_candidate(ticker, daily)
+        if quick != -9999:
+            fast_pool.append((ticker, quick))
 
         s_big = score_big_cap(ticker, daily)
         if s_big != -9999:
@@ -490,13 +529,23 @@ def get_scan_universe(max_symbols: int = 60) -> list[str]:
         if s_emg != -9999:
             emerging_scored.append((ticker, s_emg))
 
+    big_caps_scored.sort(key=lambda x: x[1], reverse=True)
+    momentum_scored.sort(key=lambda x: x[1], reverse=True)
+    emerging_scored.sort(key=lambda x: x[1], reverse=True)
+    fast_pool.sort(key=lambda x: x[1], reverse=True)
+
+    small_cap_candidates = [t for t, _ in fast_pool[:160]]
+    small_cap_scored = []
+
+    for ticker in small_cap_candidates:
+        daily = grouped_map.get(ticker)
+        if not daily:
+            continue
+        ref = get_reference_details(ticker)
         s_small = score_small_cap_candidate(ticker, daily, ref)
         if s_small != -9999:
             small_cap_scored.append((ticker, s_small))
 
-    big_caps_scored.sort(key=lambda x: x[1], reverse=True)
-    momentum_scored.sort(key=lambda x: x[1], reverse=True)
-    emerging_scored.sort(key=lambda x: x[1], reverse=True)
     small_cap_scored.sort(key=lambda x: x[1], reverse=True)
 
     big_caps_final = [t for t, _ in big_caps_scored[:BIG_CAP_LIMIT]]
