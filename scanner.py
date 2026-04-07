@@ -477,8 +477,18 @@ def apply_late_move_filter(stock: dict) -> dict:
         current_price = float(stock.get("current_price_live", 0) or 0)
         open_price = float(stock.get("open_price_live", 0) or 0)
         entry = float(stock.get("entry", 0) or 0)
+        volume_ratio = float(stock.get("volume_ratio", 0) or 0)
+        decision = str(stock.get("decision", "") or "")
+        trend = str(stock.get("trend", "") or "")
+        breakout_quality = str(stock.get("breakout_quality", "") or "").upper()
+        intraday = stock.get("intraday", {}) or {}
+        above_vwap = bool(intraday.get("above_vwap_proxy", False))
+        intraday_available = bool(intraday.get("available", False))
+        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
+        opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
 
         if current_price <= 0 or open_price <= 0 or entry <= 0:
+            stock["late_move_flag"] = "NO_PRICE_DATA"
             return stock
 
         change_from_open = ((current_price - open_price) / open_price) * 100 if open_price > 0 else 0
@@ -487,7 +497,8 @@ def apply_late_move_filter(stock: dict) -> dict:
         stock["late_move_flag"] = "OK"
         stock["distance_from_entry_pct"] = round(distance_from_entry, 2)
 
-        if change_from_open > 12:
+        # Step 3: منع الأسهم المتأخرة
+        if change_from_open > 8:
             stock["late_move_flag"] = "LATE_FROM_OPEN"
             stock["execution_status"] = "SKIP_LATE_MOVE"
             stock["owner_action"] = "السهم تحرك بقوة من الافتتاح - متأخر للدخول الآن"
@@ -502,6 +513,34 @@ def apply_late_move_filter(stock: dict) -> dict:
             stock["decision"] = "مراقبة"
             stock.setdefault("risk_flags", []).append("بعيد عن نقطة الدخول")
             return stock
+
+        # Step 4: تحويل WAIT_BREAKOUT إلى READY/EXECUTE عندما تكون الشروط مناسبة
+        near_entry = -1.5 <= distance_from_entry <= 1.2
+        strong_daily_volume = volume_ratio >= 1.0
+        strong_intraday_volume = intraday_ratio >= 1.15
+        has_volume_support = strong_daily_volume or strong_intraday_volume
+        acceptable_breakout = breakout_quality in {"STRONG", "WEAK"}
+        strong_context = decision in {"دخول قوي", "دخول بحذر"} and trend in {"صاعد", "صاعد قوي"}
+
+        if strong_context and acceptable_breakout and near_entry and has_volume_support:
+            if intraday_available:
+                if above_vwap and opening_drive != "هابط":
+                    if current_price >= entry:
+                        stock["execution_status"] = "EXECUTE"
+                        stock["owner_action"] = "✅ دخول ممكن الآن - تحقق الاختراق مع دعم سيولة"
+                    else:
+                        stock["execution_status"] = "READY"
+                        stock["owner_action"] = "⏳ جاهز للدخول - انتظر لمس/اختراق نقطة الدخول"
+                else:
+                    stock["execution_status"] = "WAIT_INTRADAY_CONFIRM"
+                    stock["owner_action"] = "انتظر تأكيد لحظي أفضل فوق VWAP أو تحسن الافتتاح"
+            else:
+                if current_price >= entry * 0.992:
+                    stock["execution_status"] = "READY"
+                    stock["owner_action"] = "جاهز للمتابعة عند الافتتاح - السهم قريب من نقطة الدخول"
+                else:
+                    stock["execution_status"] = "WAIT_BREAKOUT"
+                    stock["owner_action"] = "السهم جيد لكن يحتاج الوصول لنقطة الدخول أولًا"
 
         return stock
     except:
