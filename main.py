@@ -5,6 +5,7 @@ import os
 import csv
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from scanner import get_scan_universe
 
 app = FastAPI()
@@ -131,14 +132,18 @@ def make_rank_label(score: float) -> str:
 
 
 def is_market_open_now() -> bool:
-    now = datetime.utcnow()
-    if now.weekday() >= 5:
-        return False
+    try:
+        ny = ZoneInfo("America/New_York")
+        now_ny = datetime.now(ny)
+        if now_ny.weekday() >= 5:
+            return False
 
-    minutes = now.hour * 60 + now.minute
-    open_min = 13 * 60 + 30   # 13:30 UTC تقريبًا
-    close_min = 20 * 60       # 20:00 UTC تقريبًا
-    return open_min <= minutes <= close_min
+        current_minutes = now_ny.hour * 60 + now_ny.minute
+        open_minutes = 9 * 60 + 30
+        close_minutes = 16 * 60
+        return open_minutes <= current_minutes <= close_minutes
+    except:
+        return False
 
 
 def estimate_validity(trade_type: str, trend: str, volume_ratio: float, catalyst_score: float) -> str:
@@ -465,7 +470,8 @@ def get_news_catalyst(symbol):
         negative_keywords = [
             "downgrade", "miss", "cuts forecast",
             "lawsuit", "fraud", "investigation",
-            "delay", "recall", "decline", "warning"
+            "delay", "recall", "decline", "warning",
+            "investor alert", "substantial losses", "law firm"
         ]
 
         for item in news[:7]:
@@ -833,7 +839,6 @@ def trade_plan_pro(symbol):
 
     quality_score = 32
 
-    # absolute daily volume
     if volume > 100_000_000:
         quality_score += 14
     elif volume > 50_000_000:
@@ -846,13 +851,11 @@ def trade_plan_pro(symbol):
         quality_score -= 9
         risk_flags.append("سيولة يومية ضعيفة")
 
-    # momentum of the day
     if momentum == "صاعد":
         quality_score += 9
     elif momentum == "هابط":
         quality_score -= 6
 
-    # trend
     if trend == "صاعد قوي":
         quality_score += 13
     elif trend == "صاعد":
@@ -860,7 +863,6 @@ def trade_plan_pro(symbol):
     elif trend == "هابط":
         quality_score -= 13
 
-    # setup type
     if trade_type == "Breakout":
         quality_score += 8
     elif trade_type == "Pullback":
@@ -868,13 +870,11 @@ def trade_plan_pro(symbol):
     else:
         quality_score -= 3
 
-    # breakout against trend
     if trade_type == "Breakout" and trend == "هابط":
         quality_score -= 16
         risk_flags.append("اختراق عكس الاتجاه")
         hard_block = True
 
-    # relative volume
     if trade_type == "Breakout":
         if volume_ratio >= 1.5:
             quality_score += 9
@@ -903,7 +903,6 @@ def trade_plan_pro(symbol):
         elif volume_ratio < 0.8:
             quality_score -= 5
 
-    # breakout candle
     if breakout_quality == "STRONG":
         quality_score += 9
         risk_flags.append("اختراق قوي")
@@ -917,13 +916,11 @@ def trade_plan_pro(symbol):
         if trade_type == "Breakout":
             hard_block = True
 
-    # location
     if trade_type == "Breakout" and location == "قرب مقاومة":
         quality_score += 5
     elif trade_type == "Pullback" and location == "قرب دعم":
         quality_score += 6
 
-    # ATH behavior
     if ath_breakout_zone and momentum == "صاعد":
         quality_score += 6
         risk_flags.append("قرب اختراق ATH")
@@ -931,7 +928,6 @@ def trade_plan_pro(symbol):
         quality_score -= 3
         risk_flags.append("قرب ATH بدون تأكيد")
 
-    # risk size
     if risk_pct <= 0.02:
         quality_score += 8
     elif risk_pct <= 0.04:
@@ -943,20 +939,16 @@ def trade_plan_pro(symbol):
         risk_flags.append("مخاطرة مرتفعة")
         hard_block = True
 
-    # daily range
     if 0.02 <= range_pct <= 0.08:
         quality_score += 5
     elif range_pct > 0.15:
         quality_score -= 7
         risk_flags.append("ذبذبة يومية عالية")
 
-    # news - تأثير أخف للمقالات الضعيفة
     if abs(news["catalyst_score"]) >= 6:
         quality_score += news["catalyst_score"]
     elif abs(news["catalyst_score"]) >= 3:
         quality_score += news["catalyst_score"] * 0.5
-    else:
-        quality_score += 0
 
     if news["catalyst_score"] >= 6:
         risk_flags.append("خبر إيجابي محفز")
@@ -973,32 +965,38 @@ def trade_plan_pro(symbol):
 
     quality_score = max(1, min(100, quality_score))
 
-    # القرار النهائي
-    if hard_block and quality_score < 70:
+    # ربط القرار بالمخاطرة بشكل صارم
+    if risk_pct > 0.10:
         decision = "مراقبة"
-    elif quality_score >= 78:
-        decision = "دخول قوي"
-    elif quality_score >= 70:
-        decision = "دخول بحذر"
-    elif quality_score >= 58:
-        decision = "مراقبة"
+    elif risk_pct > 0.08:
+        if quality_score >= 70:
+            decision = "دخول بحذر"
+        elif quality_score >= 56:
+            decision = "مراقبة"
+        else:
+            return None
     else:
-        return None
+        if hard_block and quality_score < 70:
+            decision = "مراقبة"
+        elif quality_score >= 78:
+            decision = "دخول قوي"
+        elif quality_score >= 68:
+            decision = "دخول بحذر"
+        elif quality_score >= 56:
+            decision = "مراقبة"
+        else:
+            return None
 
-    # caps أخف من السابق
     if trade_type == "Breakout" and volume_ratio < 0.8:
         if decision in {"دخول قوي", "دخول بحذر"}:
             decision = "مراقبة"
 
-    if trend == "هابط" and decision == "دخول قوي":
-        decision = "مراقبة"
-    elif trend == "هابط" and decision == "دخول بحذر":
+    if trend == "هابط" and decision in {"دخول قوي", "دخول بحذر"}:
         decision = "مراقبة"
 
     if data_quality == "low" and decision == "دخول قوي":
         decision = "دخول بحذر"
 
-    # watch setups الضعيفة جدًا تختفي
     if decision == "مراقبة" and quality_score < 60 and trade_type == "Watch":
         return None
 
