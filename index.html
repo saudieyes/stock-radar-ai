@@ -128,21 +128,31 @@
       return String(value);
     }
     function renderStatusbar(data) {
-      const marketOpen = data && data.top_ranked && data.top_ranked[0] && data.top_ranked[0].intraday
-        ? data.top_ranked[0].intraday.market_open
-        : false;
+      const phase = data?.market_phase || "closed";
+      const phaseLabel = data?.market_phase_label || (phase === "open" ? "مفتوح" : "مغلق");
+      const isOpen = phase === "open";
       document.getElementById("statusbar").innerHTML = `
         <div class="stat"><div class="stat-label">عدد الأسهم في Universe</div><div class="stat-value">${formatNumber(data.universe_count)}</div></div>
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
         <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">${formatNumber(data.strong_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">مراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
-        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${marketOpen ? 'green' : 'yellow'}">${marketOpen ? "مفتوح" : "مغلق"}</div></div>`;
+        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>`;
     }
     function createCard(stock) {
       const currentPrice = stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const openPrice = stock.open_price_live ?? 0;
-      const changePct = stock.change_from_open_pct ?? 0;
+      const marketPhase = stock.market_phase || "closed";
+      const changeLabel = marketPhase === "open"
+        ? "التغير من الافتتاح"
+        : marketPhase === "after_hours"
+          ? "التغير بعد الإغلاق"
+          : marketPhase === "pre_market"
+            ? "التغير قبل الافتتاح"
+            : "التغير عن الإغلاق";
+      const changePct = marketPhase === "open"
+        ? (stock.change_from_open_pct ?? 0)
+        : (stock.change_vs_prev_close_pct ?? 0);
       const riskPct = stock.risk_pct ?? 0;
       const company = stock.company || stock.symbol;
       const flags = Array.isArray(stock.risk_flags) ? stock.risk_flags : [];
@@ -164,7 +174,7 @@
 
           <div class="metrics">
             <div class="metric"><div class="metric-label">السعر الحالي</div><div class="metric-value">${formatNumber(currentPrice)}</div></div>
-            <div class="metric"><div class="metric-label">التغير من الافتتاح</div><div class="metric-value">${formatPercent(changePct)}</div></div>
+            <div class="metric"><div class="metric-label">${safeText(changeLabel)}</div><div class="metric-value">${formatPercent(changePct)}</div></div>
             <div class="metric"><div class="metric-label">الدخول الفعلي</div><div class="metric-value">${formatNumber(stock.entry_price_real ?? stock.entry)}</div></div>
             <div class="metric"><div class="metric-label">وقف الخسارة</div><div class="metric-value">${formatNumber(stock.stop_loss)}</div></div>
             <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
@@ -179,6 +189,7 @@
             <summary>عرض التفاصيل</summary>
             <div class="details-grid">
               <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div>
+              <div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div>
               <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
               <div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real ?? stock.entry)}</div></div>
@@ -189,6 +200,7 @@
               <div class="detail-box"><div class="detail-label">المسافة إلى الدخول</div><div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">الترند</div><div class="detail-value">${safeText(stock.trend)}</div></div>
               <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
+              <div class="detail-box"><div class="detail-label">حالة السوق</div><div class="detail-value">${safeText(stock.market_phase_label || stock.market_phase || "-")}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div>
               <div class="detail-box"><div class="detail-label">العائد/المخاطرة للهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
