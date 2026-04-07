@@ -960,23 +960,26 @@ def trade_plan_pro(symbol):
     data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
     risk_flags.extend(dq_flags)
 
+    # تخفيف عقوبة نقص البيانات قليلاً لو كان السهم جيداً فنياً
     if data_quality == "low":
-        quality_score -= 9
+        if volume_ratio >= 1.0 and trend in {"صاعد", "صاعد قوي"}:
+            quality_score -= 5
+        else:
+            quality_score -= 9
 
     quality_score = max(1, min(100, quality_score))
 
-    # ربط القرار بالمخاطرة بشكل صارم
     if risk_pct > 0.10:
         decision = "مراقبة"
     elif risk_pct > 0.08:
-        if quality_score >= 70:
+        if quality_score >= 68:
             decision = "دخول بحذر"
         elif quality_score >= 56:
             decision = "مراقبة"
         else:
             return None
     else:
-        if hard_block and quality_score < 70:
+        if hard_block and quality_score < 68:
             decision = "مراقبة"
         elif quality_score >= 78:
             decision = "دخول قوي"
@@ -986,6 +989,18 @@ def trade_plan_pro(symbol):
             decision = "مراقبة"
         else:
             return None
+
+    # السماح ببعض فرص الدخول بحذر إذا كانت الشروط متماسكة
+    if (
+        decision == "مراقبة"
+        and risk_pct <= 0.065
+        and trend in {"صاعد", "صاعد قوي"}
+        and volume_ratio >= 1.0
+        and breakout_quality == "WEAK"
+        and trade_type == "Breakout"
+        and not hard_block
+    ):
+        decision = "دخول بحذر"
 
     if trade_type == "Breakout" and volume_ratio < 0.8:
         if decision in {"دخول قوي", "دخول بحذر"}:
@@ -1134,6 +1149,10 @@ def trade_scan():
 
             t = trade_plan_pro(s)
             if t:
+                # استبعاد الأسهم الفاشلة من قائمة الفرص الرئيسية
+                if t["breakout_quality"] == "FAILED" or t["execution_status"] == "AVOID":
+                    continue
+
                 info = get_info(s)
                 t["company"] = info["company"]
                 t["sector"] = info["sector"]
