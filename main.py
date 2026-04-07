@@ -1297,29 +1297,77 @@ def trade_scan():
 
 @app.get("/single-stock")
 def single_stock(symbol: str):
-    symbol = str(symbol).upper().strip()
-    if not symbol:
-        return {"error": "يرجى إدخال رمز السهم"}
+    try:
+        symbol = str(symbol).upper().strip()
+        if not symbol:
+            return {"error": "يرجى إدخال رمز السهم"}
 
-    overview = analyze_symbol_overview(symbol)
-    trade = trade_plan_pro(symbol)
+        overview = {}
+        trade = None
+        overview_error = None
+        trade_error = None
 
-    if trade:
-        info = get_info(symbol)
-        h = halal(symbol)
-        trade["company"] = info["company"]
-        trade["sector"] = info["sector"]
-        trade["industry"] = info["industry"]
-        trade["financials"] = h["financials"]
-        trade = execution_filter(trade)
-        trade = apply_late_move_filter(trade)
-        trade = assign_execution_mode(trade)
+        try:
+            overview = analyze_symbol_overview(symbol)
+        except Exception as e:
+            overview = {}
+            overview_error = str(e)
 
-    return {
-        "symbol": symbol,
-        "overview": overview,
-        "trade_plan": trade
-    }
+        try:
+            trade = trade_plan_pro(symbol)
+        except Exception as e:
+            trade = None
+            trade_error = str(e)
+
+        if trade:
+            try:
+                info = get_info(symbol) or {}
+            except Exception:
+                info = {}
+
+            try:
+                h = halal(symbol) or {}
+            except Exception:
+                h = {}
+
+            trade["company"] = info.get("company", trade.get("company", ""))
+            trade["sector"] = info.get("sector", trade.get("sector", ""))
+            trade["industry"] = info.get("industry", trade.get("industry", ""))
+            trade["financials"] = h.get("financials", trade.get("financials", {}))
+
+            try:
+                trade = execution_filter(trade)
+            except Exception:
+                pass
+
+            try:
+                trade = apply_late_move_filter(trade)
+            except Exception:
+                pass
+
+            try:
+                trade = assign_execution_mode(trade)
+            except Exception:
+                pass
+
+        response = {
+            "symbol": symbol,
+            "overview": overview,
+            "trade_plan": trade
+        }
+
+        if overview_error:
+            response["overview_error"] = overview_error
+        if trade_error:
+            response["trade_error"] = trade_error
+
+        return response
+
+    except Exception as e:
+        return {
+            "error": f"single-stock server error: {str(e)}",
+            "symbol": str(symbol).upper().strip() if symbol else ""
+        }
 
 @app.get("/debug/{symbol}")
 def debug_symbol(symbol: str):
