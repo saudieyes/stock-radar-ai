@@ -1285,4 +1285,3 @@ def debug_symbol(symbol: str):
         "overview": overview,
         "market_open_now": is_market_open_now()
     }
-
