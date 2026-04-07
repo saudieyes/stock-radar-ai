@@ -6,246 +6,65 @@
   <title>Stock Radar AI</title>
   <style>
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #0b1220;
-      color: #e5e7eb;
-    }
-    .container {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 16px;
-    }
-    .topbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-    .title {
-      font-size: 28px;
-      font-weight: 700;
-      color: #f8fafc;
-    }
-    .subtitle {
-      color: #94a3b8;
-      font-size: 14px;
-      margin-top: 4px;
-    }
-    .actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
+    body { margin:0; font-family: Arial, sans-serif; background:#0b1220; color:#e5e7eb; }
+    .container { max-width:1280px; margin:0 auto; padding:16px; }
+    .topbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    .title { font-size:28px; font-weight:700; color:#f8fafc; }
+    .subtitle { color:#94a3b8; font-size:14px; margin-top:4px; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; }
     button {
-      border: none;
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 14px;
-      cursor: pointer;
-      background: #1e293b;
-      color: #f8fafc;
+      border:none; border-radius:10px; padding:10px 14px; font-size:14px; cursor:pointer;
+      background:#1e293b; color:#f8fafc;
     }
-    button.primary {
-      background: #2563eb;
+    button.primary { background:#2563eb; }
+    button:hover { opacity:.95; }
+    input[type="text"]{
+      width:100%; background:#0f172a; color:#f8fafc; border:1px solid #1f2937;
+      border-radius:10px; padding:12px 14px; font-size:15px;
     }
-    button:hover { opacity: 0.95; }
-    .statusbar {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
+    .statusbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+    .stat,.search-box,.single-result,.loading,.error,.empty,.card {
+      background:#111827; border:1px solid #1f2937; border-radius:14px;
     }
-    .stat {
-      background: #111827;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      padding: 14px;
-    }
-    .stat-label {
-      color: #94a3b8;
-      font-size: 13px;
-      margin-bottom: 8px;
-    }
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #f8fafc;
-    }
-    .section {
-      margin-bottom: 18px;
-    }
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 10px;
-    }
-    .section-title {
-      font-size: 20px;
-      font-weight: 700;
-    }
-    .section-count {
-      color: #94a3b8;
-      font-size: 13px;
-    }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-      gap: 14px;
-    }
-    .card {
-      background: #111827;
-      border: 1px solid #1f2937;
-      border-radius: 16px;
-      padding: 14px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
-    }
-    .card-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: flex-start;
-      margin-bottom: 10px;
-    }
-    .symbol {
-      font-size: 24px;
-      font-weight: 800;
-      color: #f8fafc;
-      line-height: 1;
-    }
-    .company {
-      color: #9ca3af;
-      font-size: 12px;
-      margin-top: 6px;
-    }
-    .badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      justify-content: flex-start;
-    }
-    .badge {
-      border-radius: 999px;
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 700;
-      display: inline-block;
-      white-space: nowrap;
-    }
-    .badge-strong { background: #14532d; color: #dcfce7; }
-    .badge-cautious { background: #78350f; color: #fef3c7; }
-    .badge-watch { background: #1e3a8a; color: #dbeafe; }
-    .badge-rank { background: #312e81; color: #e0e7ff; }
-    .badge-exec { background: #3f3f46; color: #f4f4f5; }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin: 12px 0;
-    }
-    .metric {
-      background: #0f172a;
-      border-radius: 12px;
-      padding: 10px;
-      border: 1px solid #1e293b;
-    }
-    .metric-label {
-      font-size: 12px;
-      color: #94a3b8;
-      margin-bottom: 6px;
-    }
-    .metric-value {
-      font-size: 17px;
-      font-weight: 700;
-      color: #f8fafc;
-    }
-    .green { color: #22c55e; }
-    .red { color: #ef4444; }
-    .yellow { color: #f59e0b; }
-    .summary {
-      background: #0f172a;
-      border-radius: 12px;
-      padding: 12px;
-      border: 1px solid #1e293b;
-      font-size: 14px;
-      color: #cbd5e1;
-      line-height: 1.8;
-      margin-bottom: 10px;
-    }
-    .details-toggle {
-      width: 100%;
-      margin-top: 8px;
-      background: #172554;
-    }
-    details {
-      margin-top: 10px;
-      background: #0f172a;
-      border: 1px solid #1e293b;
-      border-radius: 12px;
-      padding: 10px;
-    }
-    details summary {
-      cursor: pointer;
-      font-weight: 700;
-      color: #e5e7eb;
-      outline: none;
-    }
-    .details-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 12px;
-    }
-    .detail-box {
-      background: #111827;
-      border-radius: 10px;
-      padding: 10px;
-      border: 1px solid #1f2937;
-    }
-    .detail-box.full {
-      grid-column: 1 / -1;
-    }
-    .detail-label {
-      color: #94a3b8;
-      font-size: 12px;
-      margin-bottom: 6px;
-    }
-    .detail-value {
-      color: #f8fafc;
-      font-size: 14px;
-      line-height: 1.7;
-      word-break: break-word;
-    }
-    .flags {
-      margin: 8px 0 0;
-      padding-right: 18px;
-      color: #cbd5e1;
-      font-size: 13px;
-    }
-    .loading, .error, .empty {
-      background: #111827;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      padding: 18px;
-      text-align: center;
-      color: #cbd5e1;
-    }
-    .error { color: #fecaca; border-color: #7f1d1d; }
-    .footer-note {
-      margin-top: 20px;
-      color: #94a3b8;
-      font-size: 12px;
-      text-align: center;
-    }
-    @media (max-width: 700px) {
-      .metrics, .details-grid { grid-template-columns: 1fr; }
-      .title { font-size: 24px; }
-      .symbol { font-size: 22px; }
+    .stat { padding:14px; }
+    .stat-label { color:#94a3b8; font-size:13px; margin-bottom:8px; }
+    .stat-value { font-size:22px; font-weight:700; color:#f8fafc; }
+    .section { margin-bottom:18px; }
+    .section-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+    .section-title { font-size:20px; font-weight:700; }
+    .section-count { color:#94a3b8; font-size:13px; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
+    .card { padding:14px; box-shadow:0 6px 18px rgba(0,0,0,0.18); }
+    .card-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:10px; }
+    .symbol { font-size:24px; font-weight:800; color:#f8fafc; line-height:1; }
+    .company { color:#9ca3af; font-size:12px; margin-top:6px; }
+    .badges { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-start; }
+    .badge { border-radius:999px; padding:5px 10px; font-size:12px; font-weight:700; display:inline-block; white-space:nowrap; }
+    .badge-strong { background:#14532d; color:#dcfce7; }
+    .badge-cautious { background:#78350f; color:#fef3c7; }
+    .badge-watch { background:#1e3a8a; color:#dbeafe; }
+    .badge-rank { background:#312e81; color:#e0e7ff; }
+    .badge-exec { background:#3f3f46; color:#f4f4f5; }
+    .metrics,.details-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .metrics { margin:12px 0; }
+    .metric,.detail-box,.summary,.search-box,.single-result { background:#0f172a; border-radius:12px; padding:12px; border:1px solid #1e293b; }
+    .metric-label,.detail-label { font-size:12px; color:#94a3b8; margin-bottom:6px; }
+    .metric-value { font-size:17px; font-weight:700; color:#f8fafc; }
+    .detail-value { color:#f8fafc; font-size:14px; line-height:1.7; word-break:break-word; }
+    .detail-box.full { grid-column:1 / -1; }
+    .summary { font-size:14px; color:#cbd5e1; line-height:1.8; margin-bottom:10px; }
+    .green { color:#22c55e; } .red { color:#ef4444; } .yellow { color:#f59e0b; }
+    details { margin-top:10px; background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:10px; }
+    details summary { cursor:pointer; font-weight:700; color:#e5e7eb; outline:none; }
+    .flags { margin:8px 0 0; padding-right:18px; color:#cbd5e1; font-size:13px; }
+    .loading,.error,.empty { padding:18px; text-align:center; color:#cbd5e1; }
+    .error { color:#fecaca; border-color:#7f1d1d; }
+    .search-section { margin:20px 0; }
+    .search-row { display:grid; grid-template-columns: 1fr auto; gap:10px; margin-top:10px; }
+    .footer-note { margin-top:20px; color:#94a3b8; font-size:12px; text-align:center; }
+    @media (max-width:700px) {
+      .metrics,.details-grid,.search-row { grid-template-columns:1fr; }
+      .title { font-size:24px; } .symbol { font-size:22px; }
     }
   </style>
 </head>
@@ -265,26 +84,32 @@
     </div>
 
     <div id="statusbar" class="statusbar"></div>
+    <div id="content"><div class="loading">جاري تحميل البيانات...</div></div>
 
-    <div id="content">
-      <div class="loading">جاري تحميل البيانات...</div>
+    <div class="search-section">
+      <div class="section-header">
+        <div class="section-title">فحص سهم واحد</div>
+      </div>
+      <div class="search-box">
+        <div class="subtitle" style="margin:0 0 10px 0;">اكتب رمز السهم مثل: AAPL أو TSLA أو NVO أو IOT</div>
+        <div class="search-row">
+          <input id="singleSymbol" type="text" placeholder="مثال: AAPL" />
+          <button class="primary" onclick="scanSingleStock()">فحص السهم</button>
+        </div>
+      </div>
+      <div id="singleStockResult" style="margin-top:12px;"></div>
     </div>
 
-    <div class="footer-note">
-      البطاقة تعرض أهم المعلومات أولًا، والتفاصيل الكاملة تظهر عند الضغط على "عرض التفاصيل".
-    </div>
+    <div class="footer-note">البطاقة تعرض أهم المعلومات أولًا، والتفاصيل الكاملة تظهر عند الضغط على "عرض التفاصيل".</div>
   </div>
 
   <script>
-    let latestData = null;
-
     function formatNumber(value) {
       if (value === null || value === undefined || value === "") return "-";
       const num = Number(value);
       if (Number.isNaN(num)) return value;
       return num.toLocaleString("en-US", { maximumFractionDigits: 2 });
     }
-
     function formatPercent(value) {
       if (value === null || value === undefined || value === "") return "-";
       const num = Number(value);
@@ -293,51 +118,27 @@
       const sign = num > 0 ? "+" : "";
       return `<span class="${cls}">${sign}${num.toFixed(2)}%</span>`;
     }
-
     function badgeDecision(decision) {
       if (decision === "دخول قوي") return '<span class="badge badge-strong">دخول قوي</span>';
       if (decision === "دخول بحذر") return '<span class="badge badge-cautious">دخول بحذر</span>';
       return '<span class="badge badge-watch">مراقبة</span>';
     }
-
     function safeText(value) {
       if (value === null || value === undefined || value === "") return "-";
       return String(value);
     }
-
     function renderStatusbar(data) {
       const marketOpen = data && data.top_ranked && data.top_ranked[0] && data.top_ranked[0].intraday
         ? data.top_ranked[0].intraday.market_open
         : false;
-
       document.getElementById("statusbar").innerHTML = `
-        <div class="stat">
-          <div class="stat-label">عدد الأسهم في Universe</div>
-          <div class="stat-value">${formatNumber(data.universe_count)}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">إجمالي الفرص</div>
-          <div class="stat-value">${formatNumber(data.count)}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">دخول قوي</div>
-          <div class="stat-value">${formatNumber(data.strong_entries_count)}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">دخول بحذر</div>
-          <div class="stat-value">${formatNumber(data.cautious_entries_count)}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">مراقبة</div>
-          <div class="stat-value">${formatNumber(data.watchlist_count)}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">حالة السوق</div>
-          <div class="stat-value ${marketOpen ? 'green' : 'yellow'}">${marketOpen ? "مفتوح" : "مغلق"}</div>
-        </div>
-      `;
+        <div class="stat"><div class="stat-label">عدد الأسهم في Universe</div><div class="stat-value">${formatNumber(data.universe_count)}</div></div>
+        <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
+        <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">${formatNumber(data.strong_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">مراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
+        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${marketOpen ? 'green' : 'yellow'}">${marketOpen ? "مفتوح" : "مغلق"}</div></div>`;
     }
-
     function createCard(stock) {
       const currentPrice = stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const openPrice = stock.open_price_live ?? 0;
@@ -345,7 +146,6 @@
       const riskPct = stock.risk_pct ?? 0;
       const company = stock.company || stock.symbol;
       const flags = Array.isArray(stock.risk_flags) ? stock.risk_flags : [];
-
       return `
         <div class="card">
           <div class="card-top">
@@ -356,150 +156,61 @@
             <div class="badges">
               ${badgeDecision(stock.decision)}
               <span class="badge badge-rank">${safeText(stock.rank_label)}</span>
-              <span class="badge badge-exec">${safeText(stock.execution_mode || stock.execution_status)}</span>${stock.late_move_flag && stock.late_move_flag !== "OK" && stock.late_move_flag !== "NO_PRICE_DATA" ? `<span class="badge badge-cautious">متأخر</span>` : ""}${stock.execution_mode === "جاهز 🔥" ? `<span class="badge badge-strong">جاهز</span>` : ""}
+              <span class="badge badge-exec">${safeText(stock.execution_mode || stock.execution_status)}</span>
+              ${stock.late_move_flag && stock.late_move_flag !== "OK" && stock.late_move_flag !== "NO_PRICE_DATA" ? `<span class="badge badge-cautious">متأخر</span>` : ""}
+              ${stock.execution_mode === "جاهز 🔥" ? `<span class="badge badge-strong">جاهز</span>` : ""}
             </div>
           </div>
 
           <div class="metrics">
-            <div class="metric">
-              <div class="metric-label">السعر الحالي</div>
-              <div class="metric-value">${formatNumber(currentPrice)}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">التغير من الافتتاح</div>
-              <div class="metric-value">${formatPercent(changePct)}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">الدخول</div>
-              <div class="metric-value">${formatNumber(stock.entry)}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">وقف الخسارة</div>
-              <div class="metric-value">${formatNumber(stock.stop_loss)}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">الجودة</div>
-              <div class="metric-value">${formatNumber(stock.quality_score)}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">المخاطرة</div>
-              <div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div>
-            </div>
+            <div class="metric"><div class="metric-label">السعر الحالي</div><div class="metric-value">${formatNumber(currentPrice)}</div></div>
+            <div class="metric"><div class="metric-label">التغير من الافتتاح</div><div class="metric-value">${formatPercent(changePct)}</div></div>
+            <div class="metric"><div class="metric-label">الدخول</div><div class="metric-value">${formatNumber(stock.entry)}</div></div>
+            <div class="metric"><div class="metric-label">وقف الخسارة</div><div class="metric-value">${formatNumber(stock.stop_loss)}</div></div>
+            <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
+            <div class="metric"><div class="metric-label">المخاطرة</div><div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div></div>
           </div>
 
-          <div class="summary">${safeText(stock.ai_summary)}</div><div class="summary"><strong>وضع التنفيذ:</strong> ${safeText(stock.execution_note || stock.owner_action)}</div>
+          <div class="summary">${safeText(stock.ai_summary)}</div>
+          <div class="summary"><strong>وضع التنفيذ:</strong> ${safeText(stock.execution_note || stock.owner_action)}</div>
 
           <details>
             <summary>عرض التفاصيل</summary>
             <div class="details-grid">
-              <div class="detail-box">
-                <div class="detail-label">سعر الافتتاح</div>
-                <div class="detail-value">${formatNumber(openPrice)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">Volume Ratio</div>
-                <div class="detail-value">${formatNumber(stock.volume_ratio)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">البعد عن نقطة الدخول</div>
-                <div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">الترند</div>
-                <div class="detail-value">${safeText(stock.trend)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">نوع الفرصة</div>
-                <div class="detail-value">${safeText(stock.type)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">الهدف الأول</div>
-                <div class="detail-value">${formatNumber(stock.target_1)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">الهدف الثاني</div>
-                <div class="detail-value">${formatNumber(stock.target_2)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">R/R إلى الهدف 1</div>
-                <div class="detail-value">${formatNumber(stock.rr_1)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">المسافة إلى الدخول</div>
-                <div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">صالح لمدة</div>
-                <div class="detail-value">${safeText(stock.valid_for)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">جودة البيانات</div>
-                <div class="detail-value">${safeText(stock.data_quality)}</div>
-              </div>
-              <div class="detail-box full">
-                <div class="detail-label">الإجراء المقترح</div>
-                <div class="detail-value">${safeText(stock.owner_action)}</div>
-              </div>
-              <div class="detail-box full">
-                <div class="detail-label">الخبر / المحفز</div>
-                <div class="detail-value">${safeText(stock.news_note)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">الشركة</div>
-                <div class="detail-value">${safeText(stock.company)}</div>
-              </div>
-              <div class="detail-box">
-                <div class="detail-label">القطاع / الصناعة</div>
-                <div class="detail-value">${safeText(stock.sector)} / ${safeText(stock.industry)}</div>
-              </div>
-              <div class="detail-box full">
-                <div class="detail-label">الإشارات التحذيرية</div>
-                <div class="detail-value">
-                  ${flags.length ? `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>` : "لا يوجد"}
-                </div>
-              </div>
+              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div>
+              <div class="detail-box"><div class="detail-label">Volume Ratio</div><div class="detail-value">${formatNumber(stock.volume_ratio)}</div></div>
+              <div class="detail-box"><div class="detail-label">البعد عن نقطة الدخول</div><div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div></div>
+              <div class="detail-box"><div class="detail-label">المسافة إلى الدخول</div><div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div></div>
+              <div class="detail-box"><div class="detail-label">الترند</div><div class="detail-value">${safeText(stock.trend)}</div></div>
+              <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
+              <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
+              <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div>
+              <div class="detail-box"><div class="detail-label">R/R إلى الهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
+              <div class="detail-box"><div class="detail-label">صالح لمدة</div><div class="detail-value">${safeText(stock.valid_for)}</div></div>
+              <div class="detail-box"><div class="detail-label">جودة البيانات</div><div class="detail-value">${safeText(stock.data_quality)}</div></div>
+              <div class="detail-box full"><div class="detail-label">الإجراء المقترح</div><div class="detail-value">${safeText(stock.owner_action)}</div></div>
+              <div class="detail-box full"><div class="detail-label">الخبر / المحفز</div><div class="detail-value">${safeText(stock.news_note)}</div></div>
+              <div class="detail-box"><div class="detail-label">الشركة</div><div class="detail-value">${safeText(stock.company)}</div></div>
+              <div class="detail-box"><div class="detail-label">القطاع / الصناعة</div><div class="detail-value">${safeText(stock.sector)} / ${safeText(stock.industry)}</div></div>
+              <div class="detail-box full"><div class="detail-label">الإشارات التحذيرية</div><div class="detail-value">${flags.length ? `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>` : "لا يوجد"}</div></div>
             </div>
           </details>
-        </div>
-      `;
+        </div>`;
     }
-
     function renderSection(id, title, items) {
       if (!items || !items.length) {
-        return `
-          <div class="section" id="${id}">
-            <div class="section-header">
-              <div class="section-title">${title}</div>
-              <div class="section-count">0</div>
-            </div>
-            <div class="empty">لا توجد أسهم في هذا القسم</div>
-          </div>
-        `;
+        return `<div class="section" id="${id}"><div class="section-header"><div class="section-title">${title}</div><div class="section-count">0</div></div><div class="empty">لا توجد أسهم في هذا القسم</div></div>`;
       }
-
-      return `
-        <div class="section" id="${id}">
-          <div class="section-header">
-            <div class="section-title">${title}</div>
-            <div class="section-count">${items.length}</div>
-          </div>
-          <div class="cards">
-            ${items.map(createCard).join("")}
-          </div>
-        </div>
-      `;
+      return `<div class="section" id="${id}"><div class="section-header"><div class="section-title">${title}</div><div class="section-count">${items.length}</div></div><div class="cards">${items.map(createCard).join("")}</div></div>`;
     }
-
     function renderContent(data) {
       const html = [
         renderSection("top-ranked-section", "الأعلى ترتيبًا", data.top_ranked || []),
         renderSection("cautious-section", "دخول بحذر", data.cautious_entries || []),
         renderSection("watch-section", "قائمة المراقبة", data.watchlist || []),
       ].join("");
-
       document.getElementById("content").innerHTML = html;
     }
-
     function toggleSection(id) {
       const el = document.getElementById(id);
       if (!el) return;
@@ -507,27 +218,49 @@
       if (!cards) return;
       cards.style.display = cards.style.display === "none" ? "" : "none";
     }
-
     async function loadScan() {
       document.getElementById("content").innerHTML = '<div class="loading">جاري تحديث الفرص...</div>';
       try {
         const response = await fetch("/trade-scan", { cache: "no-store" });
         const data = await response.json();
-        latestData = data;
-
         if (data.error) {
           document.getElementById("content").innerHTML = `<div class="error">حدث خطأ: ${safeText(data.error)}</div>`;
           return;
         }
-
         renderStatusbar(data);
         renderContent(data);
       } catch (err) {
         document.getElementById("content").innerHTML = `<div class="error">تعذر تحميل البيانات: ${safeText(err.message)}</div>`;
       }
     }
-
+    async function scanSingleStock() {
+      const symbol = (document.getElementById("singleSymbol").value || "").trim().toUpperCase();
+      const result = document.getElementById("singleStockResult");
+      if (!symbol) {
+        result.innerHTML = '<div class="error">اكتب رمز السهم أولاً</div>';
+        return;
+      }
+      result.innerHTML = '<div class="loading">جاري فحص السهم...</div>';
+      try {
+        const res = await fetch(`/single-stock?symbol=${encodeURIComponent(symbol)}`, { cache: "no-store" });
+        const data = await res.json();
+        if (data.error) {
+          result.innerHTML = `<div class="error">${safeText(data.error)}</div>`;
+          return;
+        }
+        if (data.trade_plan) {
+          result.innerHTML = `<div class="single-result">${createCard(data.trade_plan)}</div>`;
+        } else if (data.overview && data.overview.available) {
+          result.innerHTML = `<div class="single-result"><div class="summary"><strong>${safeText(data.overview.symbol)}</strong> - ${safeText(data.overview.company)}</div><div class="summary">لا توجد فرصة تداول حالية واضحة لهذا السهم، لكن يمكنك مراقبته.</div></div>`;
+        } else {
+          result.innerHTML = `<div class="error">لم أتمكن من جلب بيانات هذا السهم</div>`;
+        }
+      } catch (err) {
+        result.innerHTML = `<div class="error">تعذر فحص السهم: ${safeText(err.message)}</div>`;
+      }
+    }
     loadScan();
   </script>
 </body>
 </html>
+
