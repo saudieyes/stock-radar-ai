@@ -8,673 +8,515 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: Tahoma, Arial, sans-serif;
-      background: #0b1020;
-      color: #f3f4f6;
+      font-family: Arial, sans-serif;
+      background: #0b1220;
+      color: #e5e7eb;
     }
     .container {
       max-width: 1280px;
       margin: 0 auto;
-      padding: 20px;
+      padding: 16px;
     }
-    .hero {
-      background: linear-gradient(135deg, #111827, #1f2937);
-      border: 1px solid #374151;
-      border-radius: 20px;
-      padding: 22px;
-      margin-bottom: 18px;
-      box-shadow: 0 10px 28px rgba(0,0,0,0.25);
-    }
-    .hero h1 {
-      margin: 0 0 8px;
-      font-size: 30px;
-    }
-    .hero p {
-      margin: 0;
-      color: #cbd5e1;
-      line-height: 1.9;
-      font-size: 15px;
-    }
-    .toolbar {
+    .topbar {
       display: flex;
       flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .actions {
+      display: flex;
       gap: 10px;
-      margin-top: 18px;
+      flex-wrap: wrap;
     }
     button {
-      background: #2563eb;
-      color: white;
       border: none;
-      padding: 11px 16px;
-      border-radius: 12px;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
       cursor: pointer;
-      font-size: 15px;
-      font-weight: bold;
+      background: #1e293b;
+      color: #f8fafc;
     }
-    button:hover { opacity: 0.92; }
-    .secondary-btn { background: #374151; }
-    .warning-btn { background: #b45309; }
-
-    .stats {
+    button.primary {
+      background: #2563eb;
+    }
+    button:hover { opacity: 0.95; }
+    .statusbar {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       gap: 12px;
-      margin: 18px 0;
+      margin-bottom: 16px;
     }
     .stat {
       background: #111827;
-      border: 1px solid #374151;
-      border-radius: 16px;
-      padding: 16px;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      padding: 14px;
     }
-    .stat .label {
-      color: #9ca3af;
+    .stat-label {
+      color: #94a3b8;
       font-size: 13px;
       margin-bottom: 8px;
     }
-    .stat .value {
-      font-size: 24px;
-      font-weight: bold;
-    }
-
-    .section {
-      margin-top: 24px;
-    }
-    .section h2 {
-      margin: 0 0 12px;
+    .stat-value {
       font-size: 22px;
+      font-weight: 700;
+      color: #f8fafc;
     }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 14px;
+    .section {
+      margin-bottom: 18px;
     }
-
-    .card {
-      background: #111827;
-      border: 1px solid #374151;
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-    }
-
-    .card-header {
+    .section-header {
       display: flex;
-      align-items: flex-start;
       justify-content: space-between;
-      gap: 8px;
+      align-items: center;
+      gap: 12px;
       margin-bottom: 10px;
     }
-
+    .section-title {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .section-count {
+      color: #94a3b8;
+      font-size: 13px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
     .symbol {
       font-size: 24px;
-      font-weight: bold;
+      font-weight: 800;
+      color: #f8fafc;
+      line-height: 1;
     }
-
     .company {
-      color: #cbd5e1;
-      font-size: 13px;
-      margin-top: 4px;
-      line-height: 1.6;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 6px 10px;
-      border-radius: 999px;
+      color: #9ca3af;
       font-size: 12px;
-      font-weight: bold;
+      margin-top: 6px;
+    }
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-start;
+    }
+    .badge {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-block;
       white-space: nowrap;
     }
-
     .badge-strong { background: #14532d; color: #dcfce7; }
-    .badge-cautious { background: #78350f; color: #fde68a; }
+    .badge-cautious { background: #78350f; color: #fef3c7; }
     .badge-watch { background: #1e3a8a; color: #dbeafe; }
-    .badge-rank { background: #3f3f46; color: #f4f4f5; }
-    .badge-ready { background: #166534; color: #dcfce7; }
-    .badge-wait { background: #92400e; color: #fef3c7; }
-    .badge-avoid { background: #7f1d1d; color: #fecaca; }
-
-    .meta-grid {
+    .badge-rank { background: #312e81; color: #e0e7ff; }
+    .badge-exec { background: #3f3f46; color: #f4f4f5; }
+    .metrics {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 12px;
+      gap: 10px;
+      margin: 12px 0;
     }
-
-    .meta-item {
+    .metric {
       background: #0f172a;
-      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 10px;
+      border: 1px solid #1e293b;
+    }
+    .metric-label {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .metric-value {
+      font-size: 17px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+    .yellow { color: #f59e0b; }
+    .summary {
+      background: #0f172a;
+      border-radius: 12px;
+      padding: 12px;
+      border: 1px solid #1e293b;
+      font-size: 14px;
+      color: #cbd5e1;
+      line-height: 1.8;
+      margin-bottom: 10px;
+    }
+    .details-toggle {
+      width: 100%;
+      margin-top: 8px;
+      background: #172554;
+    }
+    details {
+      margin-top: 10px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
       border-radius: 12px;
       padding: 10px;
     }
-
-    .meta-title {
-      color: #9ca3af;
+    details summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: #e5e7eb;
+      outline: none;
+    }
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .detail-box {
+      background: #111827;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid #1f2937;
+    }
+    .detail-box.full {
+      grid-column: 1 / -1;
+    }
+    .detail-label {
+      color: #94a3b8;
       font-size: 12px;
       margin-bottom: 6px;
     }
-
-    .meta-value {
+    .detail-value {
+      color: #f8fafc;
       font-size: 14px;
-      font-weight: bold;
-      line-height: 1.6;
+      line-height: 1.7;
+      word-break: break-word;
     }
-
-    .summary {
-      margin-top: 12px;
-      padding: 12px;
-      border-radius: 12px;
-      background: #0f172a;
-      border: 1px solid #1f2937;
-      color: #e5e7eb;
-      line-height: 1.8;
-      font-size: 14px;
-    }
-
     .flags {
-      margin-top: 10px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .flag {
-      background: #3f1d1d;
-      color: #fecaca;
-      border: 1px solid #7f1d1d;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-    }
-
-    .search-box {
-      background: #111827;
-      border: 1px solid #374151;
-      border-radius: 18px;
-      padding: 16px;
-      margin-top: 24px;
-    }
-
-    .search-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 10px;
-    }
-
-    input {
-      flex: 1;
-      min-width: 220px;
-      background: #0f172a;
-      color: white;
-      border: 1px solid #374151;
-      border-radius: 12px;
-      padding: 12px 14px;
-      font-size: 15px;
-    }
-
-    .single-result { margin-top: 14px; }
-
-    .loading, .empty, .error-box {
-      background: #111827;
-      border: 1px solid #374151;
-      border-radius: 16px;
-      padding: 16px;
+      margin: 8px 0 0;
+      padding-right: 18px;
       color: #cbd5e1;
-      line-height: 1.8;
-    }
-
-    .error-box {
-      border-color: #7f1d1d;
-      color: #fecaca;
-      background: #2a1111;
-    }
-
-    .small-note {
-      color: #94a3b8;
       font-size: 13px;
-      margin-top: 8px;
-      line-height: 1.8;
     }
-
-    .footer-space { height: 30px; }
-
+    .loading, .error, .empty {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      padding: 18px;
+      text-align: center;
+      color: #cbd5e1;
+    }
+    .error { color: #fecaca; border-color: #7f1d1d; }
+    .footer-note {
+      margin-top: 20px;
+      color: #94a3b8;
+      font-size: 12px;
+      text-align: center;
+    }
     @media (max-width: 700px) {
-      .hero h1 { font-size: 22px; }
-      .symbol { font-size: 20px; }
-      .meta-grid { grid-template-columns: 1fr; }
+      .metrics, .details-grid { grid-template-columns: 1fr; }
+      .title { font-size: 24px; }
+      .symbol { font-size: 22px; }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="hero">
-      <h1>Stock Radar AI</h1>
-      <p>
-        أداة فحص السوق الأمريكي وعرض فرص اليوم والفرص الواعدة، مع فحص سهم منفرد،
-        وشرح واضح لسبب القرار، والأهداف، ووقف الخسارة، وصلاحية الفرصة، وحالة التنفيذ.
-      </p>
-
-      <div class="toolbar">
-        <button onclick="loadTradeScan()">تحديث السوق الآن</button>
-        <button class="secondary-btn" onclick="scrollToSingleSearch()">فحص سهم واحد</button>
-        <button class="warning-btn" onclick="reloadPage()">إعادة تحميل الصفحة</button>
+    <div class="topbar">
+      <div>
+        <div class="title">Stock Radar AI</div>
+        <div class="subtitle">لوحة عرض مبسطة للفرص مع بطاقات قابلة للتوسيع</div>
       </div>
-
-      <div class="small-note" id="lastUpdatedText">آخر تحديث: —</div>
-    </div>
-
-    <div class="stats" id="statsRow">
-      <div class="stat"><div class="label">Universe</div><div class="value">—</div></div>
-      <div class="stat"><div class="label">أفضل النتائج</div><div class="value">—</div></div>
-      <div class="stat"><div class="label">دخول قوي</div><div class="value">—</div></div>
-      <div class="stat"><div class="label">دخول بحذر</div><div class="value">—</div></div>
-      <div class="stat"><div class="label">مراقبة</div><div class="value">—</div></div>
-    </div>
-
-    <div id="statusBox" class="loading">جاري تحميل بيانات السوق...</div>
-
-    <div class="section">
-      <h2>أفضل 5 فرص</h2>
-      <div id="topRanked" class="grid"></div>
-    </div>
-
-    <div class="section">
-      <h2>فرص اليوم</h2>
-      <div id="todayOpportunities" class="grid"></div>
-    </div>
-
-    <div class="section">
-      <h2>الفرص الواعدة / المستقبلية</h2>
-      <div id="futureOpportunities" class="grid"></div>
-    </div>
-
-    <div class="search-box" id="singleSearchBox">
-      <h2 style="margin:0;">فحص سهم واحد</h2>
-      <div class="small-note">
-        اكتب رمز السهم مثل: AAPL أو NFLX أو TSLA أو NVO أو IOT ثم اضغط فحص.
+      <div class="actions">
+        <button class="primary" onclick="loadScan()">تحديث الفرص</button>
+        <button onclick="toggleSection('top-ranked-section')">إظهار / إخفاء الأعلى ترتيبًا</button>
+        <button onclick="toggleSection('cautious-section')">إظهار / إخفاء دخول بحذر</button>
+        <button onclick="toggleSection('watch-section')">إظهار / إخفاء المراقبة</button>
       </div>
-
-      <div class="search-row">
-        <input id="symbolInput" type="text" placeholder="مثال: AAPL" />
-        <button onclick="analyzeSingleSymbol()">فحص السهم</button>
-      </div>
-
-      <div class="single-result" id="singleResult"></div>
     </div>
 
-    <div class="footer-space"></div>
+    <div id="statusbar" class="statusbar"></div>
+
+    <div id="content">
+      <div class="loading">جاري تحميل البيانات...</div>
+    </div>
+
+    <div class="footer-note">
+      البطاقة تعرض أهم المعلومات أولًا، والتفاصيل الكاملة تظهر عند الضغط على "عرض التفاصيل".
+    </div>
   </div>
 
   <script>
-    const API_BASE = window.location.origin;
+    let latestData = null;
 
-    function reloadPage() {
-      window.location.reload();
+    function formatNumber(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const num = Number(value);
+      if (Number.isNaN(num)) return value;
+      return num.toLocaleString("en-US", { maximumFractionDigits: 2 });
     }
 
-    function scrollToSingleSearch() {
-      document.getElementById("singleSearchBox").scrollIntoView({ behavior: "smooth" });
+    function formatPercent(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const num = Number(value);
+      if (Number.isNaN(num)) return value;
+      const cls = num > 0 ? "green" : num < 0 ? "red" : "";
+      const sign = num > 0 ? "+" : "";
+      return `<span class="${cls}">${sign}${num.toFixed(2)}%</span>`;
     }
 
-    function nowText() {
-      const d = new Date();
-      return d.toLocaleString("ar-SA");
+    function badgeDecision(decision) {
+      if (decision === "دخول قوي") return '<span class="badge badge-strong">دخول قوي</span>';
+      if (decision === "دخول بحذر") return '<span class="badge badge-cautious">دخول بحذر</span>';
+      return '<span class="badge badge-watch">مراقبة</span>';
     }
 
-    function decisionBadge(decision) {
-      if (decision === "دخول قوي") return `<span class="badge badge-strong">${decision}</span>`;
-      if (decision === "دخول بحذر") return `<span class="badge badge-cautious">${decision}</span>`;
-      return `<span class="badge badge-watch">${decision}</span>`;
+    function safeText(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      return String(value);
     }
 
-    function executionBadge(status) {
-      if (status === "READY") return `<span class="badge badge-ready">READY</span>`;
-      if (status === "WAIT") return `<span class="badge badge-wait">WAIT</span>`;
-      if (status === "AVOID") return `<span class="badge badge-avoid">AVOID</span>`;
-      return `<span class="badge badge-watch">—</span>`;
-    }
+    function renderStatusbar(data) {
+      const marketOpen = data && data.top_ranked && data.top_ranked[0] && data.top_ranked[0].intraday
+        ? data.top_ranked[0].intraday.market_open
+        : false;
 
-    function formatNum(v) {
-      if (v === null || v === undefined || v === "") return "—";
-      if (typeof v === "number") {
-        return Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
-      }
-      return v;
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    function cardHTML(item) {
-      const flagsHtml = (item.risk_flags || [])
-        .map(flag => `<span class="flag">${escapeHtml(flag)}</span>`)
-        .join("");
-
-      const company = item.company ? escapeHtml(item.company) : "—";
-      const sector = item.sector ? escapeHtml(item.sector) : "—";
-      const industry = item.industry ? escapeHtml(item.industry) : "—";
-      const rankLabel = item.rank_label || "—";
-      const validFor = item.valid_for || "—";
-      const aiSummary = item.ai_summary || "—";
-      const newsNote = item.news_note || "—";
-      const breakoutQuality = item.breakout_quality || "—";
-      const ownerAction = item.owner_action && item.owner_action.trim() ? item.owner_action : "لا توجد توصية ملكية الآن";
-
-      return `
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="symbol">${escapeHtml(item.symbol || "—")}</div>
-              <div class="company">${company}</div>
-            </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              ${decisionBadge(item.decision || "مراقبة")}
-              ${executionBadge(item.execution_status || "")}
-              <span class="badge badge-rank">${escapeHtml(rankLabel)}</span>
-            </div>
-          </div>
-
-          <div class="meta-grid">
-            <div class="meta-item">
-              <div class="meta-title">نوع الفرصة</div>
-              <div class="meta-value">${escapeHtml(item.type || "—")}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الصلاحية</div>
-              <div class="meta-value">${escapeHtml(validFor)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">الدخول</div>
-              <div class="meta-value">${formatNum(item.entry)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">وقف الخسارة</div>
-              <div class="meta-value">${formatNum(item.stop_loss)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">الهدف 1</div>
-              <div class="meta-value">${formatNum(item.target_1)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الهدف 2</div>
-              <div class="meta-value">${formatNum(item.target_2)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">الدرجة</div>
-              <div class="meta-value">${formatNum(item.quality_score)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">المخاطرة %</div>
-              <div class="meta-value">${formatNum(item.risk_pct)}%</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">الاتجاه</div>
-              <div class="meta-value">${escapeHtml(item.trend || "—")}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">Volume Ratio</div>
-              <div class="meta-value">${formatNum(item.volume_ratio)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">Catalyst Score</div>
-              <div class="meta-value">${formatNum(item.catalyst_score)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">جودة البيانات</div>
-              <div class="meta-value">${escapeHtml(item.data_quality || "—")}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">جودة الاختراق</div>
-              <div class="meta-value">${escapeHtml(breakoutQuality)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">إذا كنت تملك السهم</div>
-              <div class="meta-value">${escapeHtml(ownerAction)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">القطاع</div>
-              <div class="meta-value">${sector}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الصناعة</div>
-              <div class="meta-value">${industry}</div>
-            </div>
-          </div>
-
-          <div class="summary">
-            <strong>ملخص القرار:</strong><br>
-            ${escapeHtml(aiSummary)}
-          </div>
-
-          <div class="summary">
-            <strong>الخبر/المحفز:</strong><br>
-            ${escapeHtml(newsNote)}
-          </div>
-
-          ${flagsHtml ? `<div class="flags">${flagsHtml}</div>` : ""}
+      document.getElementById("statusbar").innerHTML = `
+        <div class="stat">
+          <div class="stat-label">عدد الأسهم في Universe</div>
+          <div class="stat-value">${formatNumber(data.universe_count)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">إجمالي الفرص</div>
+          <div class="stat-value">${formatNumber(data.count)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">دخول قوي</div>
+          <div class="stat-value">${formatNumber(data.strong_entries_count)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">دخول بحذر</div>
+          <div class="stat-value">${formatNumber(data.cautious_entries_count)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">مراقبة</div>
+          <div class="stat-value">${formatNumber(data.watchlist_count)}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">حالة السوق</div>
+          <div class="stat-value ${marketOpen ? 'green' : 'yellow'}">${marketOpen ? "مفتوح" : "مغلق"}</div>
         </div>
       `;
     }
 
-    function overviewHTML(o) {
-      const ownerAction = o.owner_action && o.owner_action.trim() ? o.owner_action : "لا توجد توصية ملكية الآن";
+    function createCard(stock) {
+      const currentPrice = stock.current_price_live ?? stock.financials?.current_price ?? 0;
+      const openPrice = stock.open_price_live ?? 0;
+      const changePct = stock.change_from_open_pct ?? 0;
+      const riskPct = stock.risk_pct ?? 0;
+      const company = stock.company || stock.symbol;
+      const flags = Array.isArray(stock.risk_flags) ? stock.risk_flags : [];
 
       return `
         <div class="card">
-          <div class="card-header">
+          <div class="card-top">
             <div>
-              <div class="symbol">${escapeHtml(o.symbol || "—")}</div>
-              <div class="company">${escapeHtml(o.company || "—")}</div>
+              <div class="symbol">${safeText(stock.symbol)}</div>
+              <div class="company">${safeText(company)}</div>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              ${executionBadge(o.execution_status || "")}
-              <span class="badge badge-watch">تحليل عام</span>
-            </div>
-          </div>
-
-          <div class="meta-grid">
-            <div class="meta-item">
-              <div class="meta-title">السعر الحالي</div>
-              <div class="meta-value">${formatNum(o.price)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الاتجاه</div>
-              <div class="meta-value">${escapeHtml(o.trend || "—")}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">Volume Ratio</div>
-              <div class="meta-value">${formatNum(o.volume_ratio)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الزخم</div>
-              <div class="meta-value">${escapeHtml(o.momentum || "—")}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">قمة 52 أسبوع</div>
-              <div class="meta-value">${formatNum(o.year_high)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">القمة التاريخية</div>
-              <div class="meta-value">${formatNum(o.ath_high)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">Catalyst Score</div>
-              <div class="meta-value">${formatNum(o.catalyst_score)}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الحالة الشرعية</div>
-              <div class="meta-value">${o.halal_allowed ? "مقبول مبدئيًا" : escapeHtml(o.halal_reason || "—")}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">جودة الاختراق</div>
-              <div class="meta-value">${escapeHtml(o.breakout_quality || "—")}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">إذا كنت تملك السهم</div>
-              <div class="meta-value">${escapeHtml(ownerAction)}</div>
-            </div>
-
-            <div class="meta-item">
-              <div class="meta-title">القطاع</div>
-              <div class="meta-value">${escapeHtml(o.sector || "—")}</div>
-            </div>
-            <div class="meta-item">
-              <div class="meta-title">الصناعة</div>
-              <div class="meta-value">${escapeHtml(o.industry || "—")}</div>
+            <div class="badges">
+              ${badgeDecision(stock.decision)}
+              <span class="badge badge-rank">${safeText(stock.rank_label)}</span>
+              <span class="badge badge-exec">${safeText(stock.execution_status)}</span>
             </div>
           </div>
 
-          <div class="summary">
-            <strong>وضع السهم:</strong><br>
-            ${escapeHtml(o.status || "لا يوجد وصف")}
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">السعر الحالي</div>
+              <div class="metric-value">${formatNumber(currentPrice)}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">التغير من الافتتاح</div>
+              <div class="metric-value">${formatPercent(changePct)}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">الدخول</div>
+              <div class="metric-value">${formatNumber(stock.entry)}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">وقف الخسارة</div>
+              <div class="metric-value">${formatNumber(stock.stop_loss)}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">الجودة</div>
+              <div class="metric-value">${formatNumber(stock.quality_score)}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">المخاطرة</div>
+              <div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div>
+            </div>
           </div>
 
-          <div class="summary">
-            <strong>الملخص:</strong><br>
-            ${escapeHtml(o.ai_summary || "—")}
-          </div>
+          <div class="summary">${safeText(stock.ai_summary)}</div>
 
-          <div class="summary">
-            <strong>الخبر/المحفز:</strong><br>
-            ${escapeHtml(o.news_note || "لا يوجد")}
-          </div>
+          <details>
+            <summary>عرض التفاصيل</summary>
+            <div class="details-grid">
+              <div class="detail-box">
+                <div class="detail-label">سعر الافتتاح</div>
+                <div class="detail-value">${formatNumber(openPrice)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">Volume Ratio</div>
+                <div class="detail-value">${formatNumber(stock.volume_ratio)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">الترند</div>
+                <div class="detail-value">${safeText(stock.trend)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">نوع الفرصة</div>
+                <div class="detail-value">${safeText(stock.type)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">الهدف الأول</div>
+                <div class="detail-value">${formatNumber(stock.target_1)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">الهدف الثاني</div>
+                <div class="detail-value">${formatNumber(stock.target_2)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">صالح لمدة</div>
+                <div class="detail-value">${safeText(stock.valid_for)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">جودة البيانات</div>
+                <div class="detail-value">${safeText(stock.data_quality)}</div>
+              </div>
+              <div class="detail-box full">
+                <div class="detail-label">الإجراء المقترح</div>
+                <div class="detail-value">${safeText(stock.owner_action)}</div>
+              </div>
+              <div class="detail-box full">
+                <div class="detail-label">الخبر / المحفز</div>
+                <div class="detail-value">${safeText(stock.news_note)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">الشركة</div>
+                <div class="detail-value">${safeText(stock.company)}</div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-label">القطاع / الصناعة</div>
+                <div class="detail-value">${safeText(stock.sector)} / ${safeText(stock.industry)}</div>
+              </div>
+              <div class="detail-box full">
+                <div class="detail-label">الإشارات التحذيرية</div>
+                <div class="detail-value">
+                  ${flags.length ? `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>` : "لا يوجد"}
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
       `;
     }
 
-    function setStats(data) {
-      document.getElementById("statsRow").innerHTML = `
-        <div class="stat"><div class="label">Universe</div><div class="value">${data.universe_count ?? "—"}</div></div>
-        <div class="stat"><div class="label">أفضل النتائج</div><div class="value">${data.top_ranked_count ?? "—"}</div></div>
-        <div class="stat"><div class="label">دخول قوي</div><div class="value">${data.strong_entries_count ?? "—"}</div></div>
-        <div class="stat"><div class="label">دخول بحذر</div><div class="value">${data.cautious_entries_count ?? "—"}</div></div>
-        <div class="stat"><div class="label">مراقبة</div><div class="value">${data.watchlist_count ?? "—"}</div></div>
-      `;
-    }
-
-    function renderList(containerId, items, emptyText) {
-      const container = document.getElementById(containerId);
+    function renderSection(id, title, items) {
       if (!items || !items.length) {
-        container.innerHTML = `<div class="empty">${emptyText}</div>`;
-        return;
-      }
-      container.innerHTML = items.map(cardHTML).join("");
-    }
-
-    async function loadTradeScan() {
-      const statusBox = document.getElementById("statusBox");
-      statusBox.className = "loading";
-      statusBox.textContent = "جاري تحديث السوق...";
-
-      try {
-        const res = await fetch(`${API_BASE}/trade-scan`);
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.detail || "فشل تحميل البيانات");
-        }
-
-        setStats(data);
-
-        const todayList = [
-          ...(data.strong_entries || []),
-          ...(data.cautious_entries || [])
-        ];
-
-        renderList("topRanked", data.top_ranked || [], "لا توجد نتائج في أفضل 5 حاليًا");
-        renderList("todayOpportunities", todayList, "لا توجد فرص يومية واضحة الآن");
-        renderList("futureOpportunities", data.watchlist || [], "لا توجد فرص واعدة حاليًا");
-
-        const errorsCount = data.errors_count || 0;
-        const rejectedCount = data.rejected_count || 0;
-
-        statusBox.className = "loading";
-        statusBox.innerHTML = `
-          تم التحديث بنجاح.<br>
-          عدد النتائج: <strong>${data.count ?? 0}</strong> |
-          المرفوض: <strong>${rejectedCount}</strong> |
-          الأخطاء: <strong>${errorsCount}</strong>
-        `;
-
-        document.getElementById("lastUpdatedText").textContent = `آخر تحديث: ${nowText()}`;
-      } catch (err) {
-        statusBox.className = "error-box";
-        statusBox.textContent = `فشل تحميل السوق: ${err.message}`;
-      }
-    }
-
-    async function analyzeSingleSymbol() {
-      const input = document.getElementById("symbolInput");
-      const symbol = input.value.trim().toUpperCase();
-      const box = document.getElementById("singleResult");
-
-      if (!symbol) {
-        box.innerHTML = `<div class="error-box">اكتب رمز السهم أولاً.</div>`;
-        return;
-      }
-
-      box.innerHTML = `<div class="loading">جاري فحص السهم ${escapeHtml(symbol)}...</div>`;
-
-      try {
-        const res = await fetch(`${API_BASE}/debug/${encodeURIComponent(symbol)}`);
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.detail || "فشل فحص السهم");
-        }
-
-        if (data.trade_plan) {
-          const trade = data.trade_plan;
-          trade.company = data.sector_info?.company || "";
-          trade.sector = data.sector_info?.sector || "";
-          trade.industry = data.sector_info?.industry || "";
-          trade.financials = data.halal_check?.financials || {};
-          box.innerHTML = cardHTML(trade);
-          return;
-        }
-
-        if (data.overview && data.overview.found) {
-          box.innerHTML = overviewHTML(data.overview);
-          return;
-        }
-
-        box.innerHTML = `
-          <div class="error-box">
-            لم يتم العثور على بيانات واضحة لهذا السهم.
+        return `
+          <div class="section" id="${id}">
+            <div class="section-header">
+              <div class="section-title">${title}</div>
+              <div class="section-count">0</div>
+            </div>
+            <div class="empty">لا توجد أسهم في هذا القسم</div>
           </div>
         `;
+      }
+
+      return `
+        <div class="section" id="${id}">
+          <div class="section-header">
+            <div class="section-title">${title}</div>
+            <div class="section-count">${items.length}</div>
+          </div>
+          <div class="cards">
+            ${items.map(createCard).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderContent(data) {
+      const html = [
+        renderSection("top-ranked-section", "الأعلى ترتيبًا", data.top_ranked || []),
+        renderSection("cautious-section", "دخول بحذر", data.cautious_entries || []),
+        renderSection("watch-section", "قائمة المراقبة", data.watchlist || []),
+      ].join("");
+
+      document.getElementById("content").innerHTML = html;
+    }
+
+    function toggleSection(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const cards = el.querySelector(".cards") || el.querySelector(".empty");
+      if (!cards) return;
+      cards.style.display = cards.style.display === "none" ? "" : "none";
+    }
+
+    async function loadScan() {
+      document.getElementById("content").innerHTML = '<div class="loading">جاري تحديث الفرص...</div>';
+      try {
+        const response = await fetch("/trade-scan", { cache: "no-store" });
+        const data = await response.json();
+        latestData = data;
+
+        if (data.error) {
+          document.getElementById("content").innerHTML = `<div class="error">حدث خطأ: ${safeText(data.error)}</div>`;
+          return;
+        }
+
+        renderStatusbar(data);
+        renderContent(data);
       } catch (err) {
-        box.innerHTML = `<div class="error-box">فشل فحص السهم: ${escapeHtml(err.message)}</div>`;
+        document.getElementById("content").innerHTML = `<div class="error">تعذر تحميل البيانات: ${safeText(err.message)}</div>`;
       }
     }
 
-    document.getElementById("symbolInput").addEventListener("keydown", function(e) {
-      if (e.key === "Enter") {
-        analyzeSingleSymbol();
-      }
-    });
-
-    loadTradeScan();
+    loadScan();
   </script>
 </body>
 </html>
+
