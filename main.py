@@ -586,6 +586,24 @@ def build_live_price_block(prev_data, intraday_data):
     }
 
 
+
+def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
+    try:
+        effective = float(volume_ratio or 0)
+        if intraday and intraday.get("available"):
+            intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
+            if intraday_ratio >= 2.0:
+                effective = max(effective, 1.3)
+            elif intraday_ratio >= 1.5:
+                effective = max(effective, 1.15)
+            elif intraday_ratio >= 1.2:
+                effective = max(effective, 1.0)
+            elif intraday_ratio >= 1.0:
+                effective = max(effective, 0.9)
+        return effective
+    except:
+        return float(volume_ratio or 0)
+
 def get_news_catalyst(symbol):
     try:
         return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"} if not POLYGON_API_KEY else _news_impl(symbol)
@@ -870,6 +888,7 @@ def trade_plan_pro(symbol):
     ath_breakout_zone = history["ath_breakout_zone"]
     news = get_news_catalyst(symbol)
     intraday = get_intraday_snapshot(symbol)
+    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
 
     trade_type = "Watch"
     entry = price
@@ -900,7 +919,7 @@ def trade_plan_pro(symbol):
     target_1 = entry + risk * 1.5
     target_2 = entry + risk * 2.0
 
-    breakout_quality = breakout_quality_label(trade_type, momentum, body_strength, close_strength, volume_ratio)
+    breakout_quality = breakout_quality_label(trade_type, momentum, body_strength, close_strength, effective_volume_ratio)
     quality_score = 32
 
     if volume > 100_000_000:
@@ -961,31 +980,32 @@ def trade_plan_pro(symbol):
         hard_block = True
 
     if trade_type == "Breakout":
-        if volume_ratio >= 1.5:
+        if effective_volume_ratio >= 1.5:
             quality_score += 9
-        elif volume_ratio >= 1.2:
+        elif effective_volume_ratio >= 1.2:
             quality_score += 5
-        elif volume_ratio >= 1.0:
+        elif effective_volume_ratio >= 1.0:
             quality_score += 1
             risk_flags.append("اختراق يحتاج تأكيد")
-        elif volume_ratio >= 0.8:
-            quality_score -= 4
+        elif effective_volume_ratio >= 0.85:
+            quality_score -= 2
             risk_flags.append("اختراق ضعيف بدون سيولة")
         else:
-            quality_score -= 12
+            quality_score -= 6
             risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
-            hard_block = True
+            if not (intraday.get("available") and float(intraday.get("intraday_volume_ratio", 0) or 0) >= 1.2):
+                hard_block = True
     elif trade_type == "Pullback":
-        if volume_ratio >= 1.3:
+        if effective_volume_ratio >= 1.3:
             quality_score += 4
-        elif volume_ratio >= 1.0:
+        elif effective_volume_ratio >= 1.0:
             quality_score += 1
-        elif volume_ratio < 0.8:
+        elif effective_volume_ratio < 0.8:
             quality_score -= 5
     else:
-        if volume_ratio >= 1.3:
+        if effective_volume_ratio >= 1.3:
             quality_score += 2
-        elif volume_ratio < 0.8:
+        elif effective_volume_ratio < 0.8:
             quality_score -= 5
 
     if breakout_quality == "STRONG":
@@ -1046,7 +1066,7 @@ def trade_plan_pro(symbol):
     risk_flags.extend(dq_flags)
 
     if data_quality == "low":
-        if volume_ratio >= 1.0 and trend in {"صاعد", "صاعد قوي"}:
+        if effective_volume_ratio >= 1.0 and trend in {"صاعد", "صاعد قوي"}:
             quality_score -= 5
         else:
             quality_score -= 9
@@ -1061,7 +1081,7 @@ def trade_plan_pro(symbol):
         elif quality_score >= 56:
             decision = "مراقبة"
         else:
-            return None
+            decision = "مراقبة"
     else:
         if hard_block and quality_score < 68:
             decision = "مراقبة"
@@ -1072,7 +1092,7 @@ def trade_plan_pro(symbol):
         elif quality_score >= 56:
             decision = "مراقبة"
         else:
-            return None
+            decision = "مراقبة"
 
     if (
         decision == "مراقبة"
@@ -1095,8 +1115,6 @@ def trade_plan_pro(symbol):
     if data_quality == "low" and decision == "دخول قوي":
         decision = "دخول بحذر"
 
-    if decision == "مراقبة" and quality_score < 60 and trade_type == "Watch":
-        return None
 
     reasons = []
     if trend == "صاعد قوي":
@@ -1163,6 +1181,7 @@ def trade_plan_pro(symbol):
         "valid_for": estimate_validity(trade_type, trend, volume_ratio, news["catalyst_score"]),
         "trend": trend,
         "volume_ratio": round(volume_ratio, 2),
+        "effective_volume_ratio": round(effective_volume_ratio, 2),
         "data_quality": data_quality,
         "catalyst_score": news["catalyst_score"],
         "news_note": news["note"],
@@ -1254,9 +1273,6 @@ def trade_scan():
 
             t = trade_plan_pro(s)
             if t:
-                if t["breakout_quality"] == "FAILED" or t["execution_status"] == "AVOID":
-                    continue
-
                 info = get_info(s)
                 t["company"] = info["company"]
                 t["sector"] = info["sector"]
