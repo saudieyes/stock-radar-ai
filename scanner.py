@@ -658,6 +658,80 @@ def assign_execution_mode(stock: dict) -> dict:
         return stock
 
 
+
+
+def normalize_execution_labels(stock: dict) -> dict:
+    try:
+        intraday = stock.get("intraday", {}) or {}
+        market_open = bool(intraday.get("market_open", False))
+        status = str(stock.get("execution_status", "") or "")
+        mode = str(stock.get("execution_mode", "") or "")
+        note = str(stock.get("execution_note", "") or "")
+        owner_action = str(stock.get("owner_action", "") or "")
+
+        # إذا السوق مفتوح لا نريد "انتظار الافتتاح"
+        if market_open and status == "WAIT_OPENING":
+            status = "WAIT_CONFIRM"
+            if not mode or "الافتتاح" in mode:
+                mode = "انتظار تأكيد 📊"
+            if not note or "الافتتاح" in note:
+                note = "السوق مفتوح الآن - انتظر تأكيدًا لحظيًا أفضل"
+            if not owner_action or "الافتتاح" in owner_action:
+                owner_action = "السوق مفتوح الآن - انتظر تحسن التأكيد اللحظي والسيولة"
+
+        mapping = {
+            "READY": "جاهز 🔥",
+            "EXECUTE": "جاهز 🔥",
+            "WAIT_BREAKOUT": "انتظار اختراق ⏳",
+            "WAIT_CONFIRM": "انتظار تأكيد 📊",
+            "WAIT_INTRADAY_CONFIRM": "انتظار تأكيد 📊",
+            "WAIT_VWAP": "انتظار تأكيد 📊",
+            "WAIT_VOLUME": "انتظار تأكيد 📊",
+            "WAIT_OPENING": "انتظار تأكيد 📊" if market_open else "انتظار الافتتاح ⏰",
+            "WATCH": "مراقبة",
+            "AVOID": "تجنب ❌",
+            "SKIP_LATE_MOVE": "تجنب ❌",
+            "SKIP_FAR_FROM_ENTRY": "تجنب ❌",
+        }
+
+        mode_map = {
+            "READY": "جاهز 🔥",
+            "EXECUTE": "جاهز 🔥",
+            "WAIT_BREAKOUT": "انتظار اختراق ⏳",
+            "WAIT_CONFIRM": "انتظار تأكيد 📊",
+            "WAIT_INTRADAY_CONFIRM": "انتظار تأكيد 📊",
+            "WAIT_VWAP": "انتظار تأكيد 📊",
+            "WAIT_VOLUME": "انتظار تأكيد 📊",
+            "WAIT_OPENING": "انتظار تأكيد 📊" if market_open else "انتظار الافتتاح ⏰",
+            "WATCH": "مراقبة",
+            "AVOID": "تجنب ❌",
+            "SKIP_LATE_MOVE": "تجنب ❌",
+            "SKIP_FAR_FROM_ENTRY": "تجنب ❌",
+            "جاهز 🔥": "جاهز 🔥",
+            "انتظار اختراق ⏳": "انتظار اختراق ⏳",
+            "انتظار تأكيد 📊": "انتظار تأكيد 📊",
+            "انتظار الافتتاح ⏰": "انتظار الافتتاح ⏰",
+            "مراقبة": "مراقبة",
+            "تجنب ❌": "تجنب ❌",
+        }
+
+        stock["execution_status"] = status
+        stock["execution_status_ar"] = mapping.get(status, status)
+        stock["execution_mode"] = mode_map.get(mode, mapping.get(status, mode if mode else mapping.get(status, "مراقبة")))
+
+        if market_open and stock["execution_mode"] == "انتظار الافتتاح ⏰":
+            stock["execution_mode"] = "انتظار تأكيد 📊"
+
+        if note:
+            stock["execution_note"] = note
+        if owner_action:
+            stock["owner_action"] = owner_action
+
+        return stock
+    except:
+        return stock
+
+
 def unique_keep_order(items: list[str]) -> list[str]:
     seen = set()
     out = []
