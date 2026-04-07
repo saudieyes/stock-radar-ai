@@ -470,6 +470,44 @@ def score_small_cap_candidate(ticker: str, d: dict, ref: dict) -> float:
     return score
 
 
+
+
+def apply_late_move_filter(stock: dict) -> dict:
+    try:
+        current_price = float(stock.get("current_price_live", 0) or 0)
+        open_price = float(stock.get("open_price_live", 0) or 0)
+        entry = float(stock.get("entry", 0) or 0)
+
+        if current_price <= 0 or open_price <= 0 or entry <= 0:
+            return stock
+
+        change_from_open = ((current_price - open_price) / open_price) * 100 if open_price > 0 else 0
+        distance_from_entry = ((current_price - entry) / entry) * 100 if entry > 0 else 0
+
+        stock["late_move_flag"] = "OK"
+        stock["distance_from_entry_pct"] = round(distance_from_entry, 2)
+
+        if change_from_open > 12:
+            stock["late_move_flag"] = "LATE_FROM_OPEN"
+            stock["execution_status"] = "SKIP_LATE_MOVE"
+            stock["owner_action"] = "السهم تحرك بقوة من الافتتاح - متأخر للدخول الآن"
+            stock["decision"] = "مراقبة"
+            stock.setdefault("risk_flags", []).append("تحرك متأخر من الافتتاح")
+            return stock
+
+        if distance_from_entry > 5:
+            stock["late_move_flag"] = "FAR_FROM_ENTRY"
+            stock["execution_status"] = "SKIP_FAR_FROM_ENTRY"
+            stock["owner_action"] = "السعر ابتعد كثيرًا عن نقطة الدخول - الأفضل الانتظار"
+            stock["decision"] = "مراقبة"
+            stock.setdefault("risk_flags", []).append("بعيد عن نقطة الدخول")
+            return stock
+
+        return stock
+    except:
+        return stock
+
+
 def unique_keep_order(items: list[str]) -> list[str]:
     seen = set()
     out = []
