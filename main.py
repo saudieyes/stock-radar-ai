@@ -564,91 +564,116 @@ def get_intraday_snapshot(symbol):
     return out
 
 
+def build_live_price_block(prev_data, intraday_data):
+    prev_price = to_float(prev_data.get("price", 0)) if prev_data else 0.0
+    prev_open = to_float(prev_data.get("open", 0)) if prev_data else 0.0
+
+    if intraday_data.get("available"):
+        current_price = to_float(intraday_data.get("current_price", 0))
+        open_price = to_float(intraday_data.get("session_open", 0))
+    else:
+        current_price = prev_price
+        open_price = prev_open
+
+    change_pct = 0.0
+    if open_price > 0:
+        change_pct = ((current_price - open_price) / open_price) * 100
+
+    return {
+        "current_price_live": safe_round(current_price),
+        "open_price_live": safe_round(open_price),
+        "change_from_open_pct": safe_round(change_pct)
+    }
+
+
 def get_news_catalyst(symbol):
     try:
-        info = get_info(symbol)
-        company_name = info["company"]
-        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=12).json()
-        news = r.get("results", [])
-        if not news:
-            return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"}
-
-        best_score = 0
-        best_note = ""
-        symbol_lower = symbol.lower()
-        company_variants = get_company_name_variants(company_name)
-
-        weak_patterns = [
-            "top stocks", "market update", "stock market", "s&p 500",
-            "nasdaq", "dow jones", "why investors", "what to know",
-            "best stocks", "should you buy", "index fund", "etf",
-            "top-ranked stocks", "stocks to buy now", "long term",
-            "consumer tech news", "weekly recap", "roundup", "news recap",
-            "worth buying", "worth holding", "bullish on", "best way to buy",
-            "compare", "comparison", "vs.", "versus", "top picks", "3 stocks",
-            "5 stocks", "10 stocks", "owns over", "entire u.s. market"
-        ]
-
-        strong_keywords = [
-            "earnings", "beats", "guidance", "raises outlook",
-            "upgrade", "initiated", "outperform", "partnership", "deal",
-            "contract", "acquisition", "merger", "approval", "fda", "launch",
-            "record revenue", "strong growth", "buyback", "dividend increase"
-        ]
-
-        negative_keywords = [
-            "downgrade", "miss", "cuts forecast", "lawsuit", "fraud",
-            "investigation", "delay", "recall", "decline", "warning",
-            "investor alert", "substantial losses", "law firm"
-        ]
-
-        for item in news[:7]:
-            title = str(item.get("title", "")).strip()
-            published = str(item.get("published_utc", "")).strip()
-            if not title:
-                continue
-
-            title_lower = normalize_text(title)
-            if any(w in title_lower for w in weak_patterns):
-                continue
-
-            symbol_match = re.search(rf"\b{re.escape(symbol_lower)}\b", title_lower) is not None
-            company_match = any(v in title_lower for v in company_variants if len(v) >= 4)
-            if not symbol_match and not company_match:
-                continue
-
-            score = 0
-            if any(k in title_lower for k in strong_keywords):
-                score += 6
-            if any(k in title_lower for k in negative_keywords):
-                score -= 6
-            if score == 0:
-                continue
-
-            try:
-                news_date = datetime.strptime(published[:10], "%Y-%m-%d")
-                days_diff = (datetime.utcnow() - news_date).days
-                if days_diff <= 1:
-                    score += 5 if score > 0 else -5
-                elif days_diff <= 2:
-                    score += 3 if score > 0 else -3
-            except:
-                pass
-
-            if abs(score) > abs(best_score):
-                best_score = score
-                best_note = title[:120]
-
-        return {"has_news": best_score != 0, "catalyst_score": best_score, "note": best_note if best_note else "لا يوجد محفز قوي"}
+        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"} if not POLYGON_API_KEY else _news_impl(symbol)
     except Exception as e:
         return {"has_news": False, "catalyst_score": 0, "note": f"خطأ في الأخبار: {str(e)}"}
+
+
+def _news_impl(symbol):
+    info = get_info(symbol)
+    company_name = info["company"]
+    url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&apiKey={POLYGON_API_KEY}"
+    r = requests.get(url, timeout=12).json()
+    news = r.get("results", [])
+    if not news:
+        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"}
+
+    best_score = 0
+    best_note = ""
+    symbol_lower = symbol.lower()
+    company_variants = get_company_name_variants(company_name)
+
+    weak_patterns = [
+        "top stocks", "market update", "stock market", "s&p 500",
+        "nasdaq", "dow jones", "why investors", "what to know",
+        "best stocks", "should you buy", "index fund", "etf",
+        "top-ranked stocks", "stocks to buy now", "long term",
+        "consumer tech news", "weekly recap", "roundup", "news recap",
+        "worth buying", "worth holding", "bullish on", "best way to buy",
+        "compare", "comparison", "vs.", "versus", "top picks", "3 stocks",
+        "5 stocks", "10 stocks", "owns over", "entire u.s. market"
+    ]
+
+    strong_keywords = [
+        "earnings", "beats", "guidance", "raises outlook",
+        "upgrade", "initiated", "outperform", "partnership", "deal",
+        "contract", "acquisition", "merger", "approval", "fda", "launch",
+        "record revenue", "strong growth", "buyback", "dividend increase"
+    ]
+
+    negative_keywords = [
+        "downgrade", "miss", "cuts forecast", "lawsuit", "fraud",
+        "investigation", "delay", "recall", "decline", "warning",
+        "investor alert", "substantial losses", "law firm"
+    ]
+
+    for item in news[:7]:
+        title = str(item.get("title", "")).strip()
+        published = str(item.get("published_utc", "")).strip()
+        if not title:
+            continue
+
+        title_lower = normalize_text(title)
+        if any(w in title_lower for w in weak_patterns):
+            continue
+
+        symbol_match = re.search(rf"{re.escape(symbol_lower)}", title_lower) is not None
+        company_match = any(v in title_lower for v in company_variants if len(v) >= 4)
+        if not symbol_match and not company_match:
+            continue
+
+        score = 0
+        if any(k in title_lower for k in strong_keywords):
+            score += 6
+        if any(k in title_lower for k in negative_keywords):
+            score -= 6
+        if score == 0:
+            continue
+
+        try:
+            news_date = datetime.strptime(published[:10], "%Y-%m-%d")
+            days_diff = (datetime.utcnow() - news_date).days
+            if days_diff <= 1:
+                score += 5 if score > 0 else -5
+            elif days_diff <= 2:
+                score += 3 if score > 0 else -3
+        except:
+            pass
+
+        if abs(score) > abs(best_score):
+            best_score = score
+            best_note = title[:120]
+
+    return {"has_news": best_score != 0, "catalyst_score": best_score, "note": best_note if best_note else "لا يوجد محفز قوي"}
 
 
 def data_quality_check(symbol, info, financials):
     flags = []
     quality = "high"
-
     if not info["company"]:
         quality = "low"
         flags.append("اسم الشركة غير متوفر")
@@ -664,7 +689,6 @@ def data_quality_check(symbol, info, financials):
     if financials.get("approx_market_cap", 0) == 0:
         quality = "low"
         flags.append("القيمة السوقية التقريبية غير متوفرة")
-
     return quality, flags
 
 
@@ -710,7 +734,6 @@ def halal(symbol):
 
     if debt_to_market_cap is not None and debt_to_market_cap > 0.33:
         return {"allowed": False, "reason": f"نسبة الدين إلى القيمة السوقية مرتفعة: {debt_to_market_cap:.2%}", "financials": financials}
-
     if cash_to_assets is not None and cash_to_assets > 0.50:
         return {"allowed": False, "reason": f"نسبة النقد إلى الأصول مرتفعة: {cash_to_assets:.2%}", "financials": financials}
 
@@ -920,17 +943,14 @@ def trade_plan_pro(symbol):
             risk_flags.append("سيولة لحظية قوية")
         elif intraday["intraday_volume_ratio"] >= 1.2:
             quality_score += 4
-
         if intraday["above_vwap_proxy"]:
             quality_score += 4
         else:
             quality_score -= 3
-
         if intraday["opening_drive"] == "صاعد":
             quality_score += 4
         elif intraday["opening_drive"] == "هابط":
             quality_score -= 4
-
         if entry > 0 and intraday["current_price"] >= entry * 0.985:
             quality_score += 4
             risk_flags.append("قريب جدًا من الاختراق")
@@ -1127,6 +1147,8 @@ def trade_plan_pro(symbol):
     if data_quality == "low":
         reasons.append("جودة البيانات ضعيفة")
 
+    live_block = build_live_price_block(a, intraday)
+
     return {
         "symbol": symbol,
         "type": trade_type,
@@ -1149,7 +1171,8 @@ def trade_plan_pro(symbol):
         "breakout_quality": breakout_quality,
         "execution_status": compute_execution_status(trade_type, decision, trend, volume_ratio, news["catalyst_score"], breakout_quality),
         "owner_action": owner_decision(decision, trend, breakout_quality, volume_ratio, news["catalyst_score"]),
-        "intraday": intraday
+        "intraday": intraday,
+        **live_block
     }
 
 
@@ -1262,4 +1285,3 @@ def debug_symbol(symbol: str):
         "overview": overview,
         "market_open_now": is_market_open_now()
     }
-
