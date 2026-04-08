@@ -512,6 +512,7 @@ def apply_late_move_filter(stock: dict) -> dict:
 
 
 
+
 def assign_execution_mode(stock: dict) -> dict:
     try:
         trade_type = str(stock.get("type", "") or "")
@@ -531,6 +532,9 @@ def assign_execution_mode(stock: dict) -> dict:
         above_vwap = bool(intraday.get("above_vwap_proxy", False))
         opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
         market_open = bool(intraday.get("market_open", False))
+        timing_signal = str(stock.get("timing_signal", "") or "")
+        timing_reason = str(stock.get("timing_reason", "") or "")
+        market_phase = str(stock.get("market_phase", "") or "")
 
         rr = 0.0
         if entry_price_real > 0 and stop_loss > 0 and target_1 > 0 and entry_price_real > stop_loss:
@@ -545,45 +549,49 @@ def assign_execution_mode(stock: dict) -> dict:
         stock["distance_to_entry_pct"] = round(distance_to_entry, 2)
 
         execution_mode = "انتظار تأكيد 📊"
-        execution_note = "يحتاج السهم إلى تأكيد إضافي"
+        execution_note = timing_reason or "يحتاج السهم إلى تأكيد إضافي"
 
+        # أولوية طبقة التوقيت الذكية
+        if timing_signal:
+            execution_mode = timing_signal
+            execution_note = timing_reason or execution_note
+
+        # منع أحكام خاطئة
         if risk_pct > 25:
             execution_mode = "تجنب ❌"
             execution_note = "المخاطرة مرتفعة جدًا"
+        elif late_move_flag in {"CONFIRMED_LATE"} or execution_status in {"SKIP_FAR_FROM_ENTRY"}:
+            execution_mode = "متأخر ⚠️"
+            execution_note = "السهم تجاوز آخر دخول مناسب - لا تطارد السعر"
         elif trade_type == "Breakout":
             has_good_volume = effective_volume_ratio >= 1.0 or intraday_ratio >= 1.1
-            has_strong_volume = effective_volume_ratio >= 1.15 or intraday_ratio >= 1.25
             intraday_ok = (not market_open) or (above_vwap and opening_drive != "هابط")
 
             if current_price < breakout_price:
                 execution_mode = "انتظار اختراق ⏳"
-                execution_note = f"راقب كسر {round(breakout_price, 2)}"
+                execution_note = f"⏳ انتظر اختراق {round(breakout_price,2)} ثم تأكيد {round(confirmation_price,2)}"
             elif breakout_price <= current_price < confirmation_price:
                 execution_mode = "انتظار تأكيد 📊"
-                execution_note = f"تم الكسر الأولي ويحتاج الثبات فوق {round(confirmation_price, 2)}"
+                execution_note = f"📊 يحتاج الثبات فوق {round(confirmation_price,2)}"
             elif confirmation_price <= current_price <= entry_price_real:
-                if has_good_volume and intraday_ok:
-                    execution_mode = "جاهز 🔥"
-                    execution_note = f"اختراق مؤكد ويمكن الدخول قرب {round(entry_price_real, 2)}"
+                if market_phase == "open":
+                    if has_good_volume and intraday_ok:
+                        execution_mode = "جاهز 🔥"
+                        execution_note = f"✅ دخول ممكن الآن قرب {round(entry_price_real,2)}"
+                    else:
+                        execution_mode = "انتظار تأكيد 📊"
+                        execution_note = "السعر في منطقة جيدة لكن يحتاج سيولة/VWAP أفضل"
                 else:
                     execution_mode = "انتظار تأكيد 📊"
-                    execution_note = "السعر في منطقة جيدة لكن يحتاج سيولة/VWAP أفضل"
+                    execution_note = "السهم في منطقة جيدة، والقرار الأفضل يكون مع افتتاح السوق"
             elif entry_price_real < current_price <= late_entry_price:
-                if has_strong_volume and intraday_ok:
-                    execution_mode = "دخول بحذر 🟠"
-                    execution_note = f"الدخول ما زال ممكنًا بحذر حتى {round(late_entry_price, 2)}"
-                else:
-                    execution_mode = "انتظار تأكيد 📊"
-                    execution_note = "تم تجاوز الدخول المثالي لكن التأكيد اللحظي غير كافٍ"
+                execution_mode = "دخول بحذر 🟠"
+                execution_note = f"🟠 دخول بحذر - آخر دخول مناسب حتى {round(late_entry_price,2)}"
             elif late_entry_price > 0 and current_price > late_entry_price:
                 execution_mode = "متأخر ⚠️"
                 execution_note = "السهم تجاوز آخر دخول مناسب"
 
-            # فقط هنا نسمح لحكم التأخر أن يطغى
-            if late_move_flag in {"CONFIRMED_LATE"} or execution_status in {"SKIP_FAR_FROM_ENTRY"}:
-                execution_mode = "متأخر ⚠️"
-                execution_note = "السهم تجاوز آخر دخول مناسب - لا تطارد السعر"
-            elif execution_status == "WAIT_VWAP" and execution_mode in {"جاهز 🔥", "دخول بحذر 🟠"}:
+            if execution_status == "WAIT_VWAP" and execution_mode in {"جاهز 🔥", "دخول بحذر 🟠"}:
                 execution_mode = "انتظار تأكيد 📊"
                 execution_note = "السعر مناسب لكن يحتاج الثبات فوق VWAP"
             elif execution_status == "WAIT_VOLUME" and execution_mode in {"جاهز 🔥", "دخول بحذر 🟠"}:
@@ -615,7 +623,6 @@ def assign_execution_mode(stock: dict) -> dict:
         return stock
     except:
         return stock
-
 
 
 def normalize_execution_labels(stock: dict) -> dict:
