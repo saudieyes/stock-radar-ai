@@ -829,6 +829,98 @@ def classify_news_impact(title_lower: str, sessions_since: int):
 
     return 0, "لا يوجد محفز حديث", "NONE"
 
+
+
+def compute_timing_layer(current_price: float, intraday: dict, effective_volume_ratio: float, levels: dict, market_phase: str):
+    breakout_price = float(levels.get("breakout_price", 0) or 0)
+    confirmation_price = float(levels.get("confirmation_price", 0) or 0)
+    entry_price_real = float(levels.get("entry_price_real", 0) or 0)
+    late_entry_price = float(levels.get("late_entry_price", 0) or 0)
+
+    intraday_ratio = float((intraday or {}).get("intraday_volume_ratio", 0) or 0)
+    vwap_proxy = float((intraday or {}).get("vwap_proxy", 0) or 0)
+    above_vwap = bool((intraday or {}).get("above_vwap_proxy", False))
+    opening_drive = str((intraday or {}).get("opening_drive", "unknown") or "unknown")
+    market_open = bool((intraday or {}).get("market_open", False))
+
+    strong_volume = effective_volume_ratio >= 1.1 or intraday_ratio >= 1.2
+    excellent_volume = effective_volume_ratio >= 1.25 or intraday_ratio >= 1.5
+
+    if market_phase == "open":
+        if market_open and vwap_proxy > 0:
+            vwap_status = "فوق VWAP ✅" if above_vwap else "تحت VWAP ❌"
+        else:
+            vwap_status = "VWAP غير متاح"
+    else:
+        vwap_status = "VWAP يكتمل أثناء السوق"
+
+    if excellent_volume:
+        volume_status = "سيولة قوية جدًا ✅"
+    elif strong_volume:
+        volume_status = "سيولة داعمة ✅"
+    elif effective_volume_ratio >= 0.9 or intraday_ratio >= 0.95:
+        volume_status = "سيولة متوسطة ⚠️"
+    else:
+        volume_status = "سيولة ضعيفة ❌"
+
+    timing_signal = "مراقبة 👀"
+    timing_reason = "تحت المراقبة"
+    smart_entry_price = entry_price_real if entry_price_real > 0 else confirmation_price
+    smart_stop_price = 0.0
+    smart_target_1 = 0.0
+
+    if confirmation_price > 0:
+        if current_price < breakout_price:
+            timing_signal = "انتظار اختراق ⏳"
+            timing_reason = f"السعر ما زال تحت الاختراق {safe_round(breakout_price)}"
+            smart_entry_price = confirmation_price
+        elif breakout_price <= current_price < confirmation_price:
+            timing_signal = "انتظار تأكيد 📊"
+            timing_reason = f"تم الكسر الأولي ويحتاج الثبات فوق {safe_round(confirmation_price)}"
+            smart_entry_price = confirmation_price
+        elif confirmation_price <= current_price <= entry_price_real:
+            if market_phase == "open":
+                if above_vwap and strong_volume and opening_drive != "هابط":
+                    timing_signal = "جاهز 🔥"
+                    timing_reason = "السعر فوق التأكيد وفوق VWAP والسيولة داعمة"
+                elif strong_volume:
+                    timing_signal = "دخول بحذر 🟠"
+                    timing_reason = "السعر فوق التأكيد لكن يحتاج ثباتًا لحظيًا أفضل"
+                else:
+                    timing_signal = "انتظار تأكيد 📊"
+                    timing_reason = "السعر في منطقة جيدة لكن السيولة ليست كافية بعد"
+            else:
+                timing_signal = "انتظار تأكيد 📊"
+                timing_reason = "السهم في منطقة جيدة، وقرار التنفيذ الأفضل يكون مع افتتاح السوق"
+            smart_entry_price = entry_price_real
+        elif entry_price_real < current_price <= late_entry_price:
+            if market_phase == "open" and above_vwap and excellent_volume:
+                timing_signal = "دخول بحذر 🟠"
+                timing_reason = "السعر تجاوز الدخول المثالي لكن ما زال ضمن آخر دخول مناسب"
+            else:
+                timing_signal = "متأخر ⚠️"
+                timing_reason = "السعر تجاوز الدخول المثالي وأصبح أقل جاذبية"
+            smart_entry_price = late_entry_price
+        elif late_entry_price > 0 and current_price > late_entry_price:
+            timing_signal = "متأخر ⚠️"
+            timing_reason = "السعر تجاوز آخر دخول مناسب - لا تطارد"
+            smart_entry_price = late_entry_price
+
+    if entry_price_real > 0:
+        smart_stop_price = max(0.0, entry_price_real * 0.97)
+        smart_target_1 = entry_price_real * 1.04
+
+    return {
+        "timing_signal": timing_signal,
+        "timing_reason": timing_reason,
+        "vwap_status": vwap_status,
+        "volume_status": volume_status,
+        "smart_entry_price": safe_round(smart_entry_price),
+        "smart_stop_price": safe_round(smart_stop_price),
+        "smart_target_1": safe_round(smart_target_1),
+    }
+
+
 def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str):
     breakout_price = float(high_price or current_price or 0)
     if trade_type == "Breakout":
@@ -1433,6 +1525,7 @@ def trade_plan_pro(symbol):
 
     live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
+    timing = compute_timing_layer(live_block["current_price_live"], intraday, effective_volume_ratio, levels, live_block.get("market_phase", "closed"))
 
     return {
         "symbol": symbol,
@@ -1461,6 +1554,7 @@ def trade_plan_pro(symbol):
         "owner_action": owner_decision(decision, trend, breakout_quality, effective_volume_ratio, news["catalyst_score"]),
         "intraday": intraday,
         **levels,
+        **timing,
         **live_block
     }
 
@@ -1478,6 +1572,7 @@ def build_fallback_trade(symbol: str):
     effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
     live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], a.get("high", 0), a.get("low", 0), intraday, "Breakout")
+    timing = compute_timing_layer(live_block["current_price_live"], intraday, effective_volume_ratio, levels, live_block.get("market_phase", "closed"))
     current = float(live_block.get("current_price_live", 0) or 0)
     breakout = float(levels.get("breakout_price", 0) or 0)
     confirm = float(levels.get("confirmation_price", 0) or 0)
@@ -1547,6 +1642,7 @@ def build_fallback_trade(symbol: str):
         "industry": info.get("industry", ""),
         "financials": h.get("financials", {}),
         **levels,
+        **timing,
         **live_block,
     }
     out = normalize_execution_labels(assign_execution_mode(apply_late_move_filter(out)))
