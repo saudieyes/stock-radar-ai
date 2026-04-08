@@ -182,13 +182,13 @@
           </div>
 
           <div class="summary">${safeText(stock.ai_summary)}</div>
-          <div class="summary"><strong>وضع التنفيذ:</strong> ${safeText(stock.execution_note || stock.owner_action)}</div>
+          <div class="summary"><strong>وضع التنفيذ:</strong> ${safeText(stock.execution_note || stock.owner_action)}</div><div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "-")} | <strong>إشارة التوقيت:</strong> ${safeText(stock.timing_signal || stock.execution_mode || "-")}</div>
           <div class="summary"><strong>حالة الاختراق:</strong> ${safeText(stock.breakout_status || "-")}</div>
 
           <details>
             <summary>عرض التفاصيل</summary>
             <div class="details-grid">
-              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div>
+              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div><div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live)}</div></div><div class="detail-box"><div class="detail-label">نوع المرحلة</div><div class="detail-value">${safeText(stock.market_phase_label)}</div></div>
               <div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div>
               <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
@@ -202,7 +202,7 @@
               <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
               <div class="detail-box"><div class="detail-label">حالة السوق</div><div class="detail-value">${safeText(stock.market_phase_label || stock.market_phase || "-")}</div></div>
               <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
-              <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div>
+              <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div><div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div><div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div><div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real)}</div></div><div class="detail-box"><div class="detail-label">آخر دخول مناسب</div><div class="detail-value">${formatNumber(stock.late_entry_price)}</div></div><div class="detail-box"><div class="detail-label">حالة الاختراق</div><div class="detail-value">${safeText(stock.breakout_status)}</div></div><div class="detail-box"><div class="detail-label">VWAP اللحظي</div><div class="detail-value">${safeText(stock.vwap_status)}</div></div><div class="detail-box"><div class="detail-label">حالة السيولة</div><div class="detail-value">${safeText(stock.volume_status)}</div></div><div class="detail-box"><div class="detail-label">دخول ذكي</div><div class="detail-value">${formatNumber(stock.smart_entry_price)}</div></div><div class="detail-box"><div class="detail-label">وقف ذكي</div><div class="detail-value">${formatNumber(stock.smart_stop_price)}</div></div><div class="detail-box"><div class="detail-label">هدف ذكي</div><div class="detail-value">${formatNumber(stock.smart_target_1)}</div></div>
               <div class="detail-box"><div class="detail-label">العائد/المخاطرة للهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
               <div class="detail-box"><div class="detail-label">صالح لمدة</div><div class="detail-value">${safeText(stock.valid_for)}</div></div>
               <div class="detail-box"><div class="detail-label">جودة البيانات</div><div class="detail-value">${safeText(stock.data_quality)}</div></div>
