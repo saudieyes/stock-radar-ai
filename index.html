@@ -6,65 +6,114 @@
   <title>Stock Radar AI</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin:0; font-family: Arial, sans-serif; background:#0b1220; color:#e5e7eb; }
-    .container { max-width:1280px; margin:0 auto; padding:16px; }
-    .topbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
-    .title { font-size:28px; font-weight:700; color:#f8fafc; }
-    .subtitle { color:#94a3b8; font-size:14px; margin-top:4px; }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; }
+    :root {
+      --bg: #07111f;
+      --panel: #0d1b2d;
+      --panel-2: #101f35;
+      --line: #1c2f4b;
+      --text: #eef4ff;
+      --muted: #97a8c4;
+      --blue: #2f6df6;
+      --green: #22c55e;
+      --orange: #f59e0b;
+      --red: #ef4444;
+      --purple: #4338ca;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(180deg, #04101d 0%, #081424 100%);
+      color: var(--text);
+    }
+    .container { max-width: 1280px; margin: 0 auto; padding: 18px 14px 36px; }
+    .topbar {
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .title { font-size: 34px; font-weight: 800; }
+    .subtitle { color: var(--muted); font-size: 15px; margin-top: 6px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
     button {
-      border:none; border-radius:10px; padding:10px 14px; font-size:14px; cursor:pointer;
-      background:#1e293b; color:#f8fafc;
+      border: none; border-radius: 16px; padding: 12px 18px; font-size: 16px; cursor: pointer;
+      background: #182742; color: var(--text); box-shadow: 0 8px 22px rgba(0,0,0,.18);
     }
-    button.primary { background:#2563eb; }
-    button:hover { opacity:.95; }
-    input[type="text"]{
-      width:100%; background:#0f172a; color:#f8fafc; border:1px solid #1f2937;
-      border-radius:10px; padding:12px 14px; font-size:15px;
+    button.primary { background: var(--blue); }
+    button:hover { opacity: .96; }
+    input[type="text"] {
+      width: 100%; background: #081426; color: var(--text); border: 1px solid var(--line);
+      border-radius: 16px; padding: 14px 16px; font-size: 17px;
     }
-    .statusbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
-    .stat,.search-box,.single-result,.loading,.error,.empty,.card {
-      background:#111827; border:1px solid #1f2937; border-radius:14px;
+    .statusbar {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;
     }
-    .stat { padding:14px; }
-    .stat-label { color:#94a3b8; font-size:13px; margin-bottom:8px; }
-    .stat-value { font-size:22px; font-weight:700; color:#f8fafc; }
-    .section { margin-bottom:18px; }
-    .section-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
-    .section-title { font-size:20px; font-weight:700; }
-    .section-count { color:#94a3b8; font-size:13px; }
-    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
-    .card { padding:14px; box-shadow:0 6px 18px rgba(0,0,0,0.18); }
-    .card-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:10px; }
-    .symbol { font-size:24px; font-weight:800; color:#f8fafc; line-height:1; }
-    .company { color:#9ca3af; font-size:12px; margin-top:6px; }
-    .badges { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-start; }
-    .badge { border-radius:999px; padding:5px 10px; font-size:12px; font-weight:700; display:inline-block; white-space:nowrap; }
-    .badge-strong { background:#14532d; color:#dcfce7; }
-    .badge-cautious { background:#78350f; color:#fef3c7; }
-    .badge-watch { background:#1e3a8a; color:#dbeafe; }
-    .badge-rank { background:#312e81; color:#e0e7ff; }
-    .badge-exec { background:#3f3f46; color:#f4f4f5; }
-    .metrics,.details-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-    .metrics { margin:12px 0; }
-    .metric,.detail-box,.summary,.search-box,.single-result { background:#0f172a; border-radius:12px; padding:12px; border:1px solid #1e293b; }
-    .metric-label,.detail-label { font-size:12px; color:#94a3b8; margin-bottom:6px; }
-    .metric-value { font-size:17px; font-weight:700; color:#f8fafc; }
-    .detail-value { color:#f8fafc; font-size:14px; line-height:1.7; word-break:break-word; }
-    .detail-box.full { grid-column:1 / -1; }
-    .summary { font-size:14px; color:#cbd5e1; line-height:1.8; margin-bottom:10px; }
-    .green { color:#22c55e; } .red { color:#ef4444; } .yellow { color:#f59e0b; }
-    details { margin-top:10px; background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:10px; }
-    details summary { cursor:pointer; font-weight:700; color:#e5e7eb; outline:none; }
-    .flags { margin:8px 0 0; padding-right:18px; color:#cbd5e1; font-size:13px; }
-    .loading,.error,.empty { padding:18px; text-align:center; color:#cbd5e1; }
-    .error { color:#fecaca; border-color:#7f1d1d; }
-    .search-section { margin:20px 0; }
-    .search-row { display:grid; grid-template-columns: 1fr auto; gap:10px; margin-top:10px; }
-    .footer-note { margin-top:20px; color:#94a3b8; font-size:12px; text-align:center; }
-    @media (max-width:700px) {
-      .metrics,.details-grid,.search-row { grid-template-columns:1fr; }
-      .title { font-size:24px; } .symbol { font-size:22px; }
+    .stat, .search-box, .single-result, .loading, .error, .empty, .card {
+      background: rgba(12, 25, 44, .96); border: 1px solid var(--line); border-radius: 22px;
+    }
+    .stat { padding: 18px; min-height: 116px; display: flex; flex-direction: column; justify-content: space-between; }
+    .stat-label { color: var(--muted); font-size: 14px; }
+    .stat-value { font-size: 28px; font-weight: 800; }
+    .section { margin-bottom: 24px; }
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px;
+    }
+    .section-title { font-size: 34px; font-weight: 800; }
+    .section-count { color: var(--muted); font-size: 16px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .card { padding: 16px; box-shadow: 0 10px 26px rgba(0,0,0,.18); }
+    .card-top {
+      display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px;
+    }
+    .symbol { font-size: 28px; font-weight: 900; line-height: 1; }
+    .company { color: var(--muted); font-size: 13px; margin-top: 7px; line-height: 1.5; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+    .badge {
+      border-radius: 999px; padding: 8px 14px; font-size: 13px; font-weight: 800; display: inline-block; white-space: nowrap;
+    }
+    .badge-strong { background: #14532d; color: #dcfce7; }
+    .badge-cautious { background: #7c3b0d; color: #fff0c7; }
+    .badge-watch { background: #2143a8; color: #dbeafe; }
+    .badge-rank { background: var(--purple); color: #eef2ff; }
+    .badge-exec { background: #474b57; color: #f5f5f5; }
+    .badge-late { background: #6b7280; color: #fff7d6; }
+    .metrics, .details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .metrics { margin: 12px 0 14px; }
+    .metric, .detail-box, .summary, .search-box, .single-result {
+      background: #091628; border-radius: 18px; padding: 14px; border: 1px solid #182a42;
+    }
+    .metric { min-height: 102px; display: flex; flex-direction: column; justify-content: center; }
+    .metric-label, .detail-label { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .metric-value { font-size: 22px; font-weight: 800; line-height: 1.25; }
+    .detail-value { color: var(--text); font-size: 15px; line-height: 1.85; word-break: break-word; }
+    .detail-box.full { grid-column: 1 / -1; }
+    .summary { font-size: 15px; color: #d7e3f7; line-height: 1.9; margin-bottom: 10px; }
+    .main-decision {
+      border: 1px solid #1a3558; background: linear-gradient(180deg, #0b182c 0%, #0d1d33 100%);
+      padding: 15px; border-radius: 18px; margin-bottom: 12px;
+    }
+    .main-decision strong { color: #fff; }
+    .green { color: var(--green); }
+    .red { color: var(--red); }
+    .yellow { color: var(--orange); }
+    details {
+      margin-top: 10px; background: #081426; border: 1px solid #182a42; border-radius: 18px; padding: 12px;
+    }
+    details summary { cursor: pointer; font-weight: 800; color: var(--text); outline: none; font-size: 15px; }
+    .flags { margin: 8px 0 0; padding-right: 18px; color: #d7e3f7; font-size: 14px; line-height: 1.9; }
+    .loading, .error, .empty { padding: 20px; text-align: center; color: #d7e3f7; }
+    .error { color: #ffd0d0; border-color: #7f1d1d; }
+    .search-section { margin: 22px 0; }
+    .search-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 10px; }
+    .footer-note { margin-top: 22px; color: var(--muted); font-size: 13px; text-align: center; }
+    .hidden-block { display: none !important; }
+    @media (max-width: 700px) {
+      .metrics, .details-grid, .search-row { grid-template-columns: 1fr; }
+      .title { font-size: 28px; }
+      .section-title { font-size: 28px; }
+      .symbol { font-size: 25px; }
+      .metric-value { font-size: 20px; }
+      button { width: 100%; }
+      .actions { width: 100%; }
+      .actions button { flex: 1 1 100%; }
     }
   </style>
 </head>
@@ -73,7 +122,7 @@
     <div class="topbar">
       <div>
         <div class="title">Stock Radar AI</div>
-        <div class="subtitle">لوحة عرض مبسطة للفرص مع بطاقات قابلة للتوسيع</div>
+        <div class="subtitle">عرض مختصر وواضح للفرص أولًا، والتفاصيل الكاملة داخل كل بطاقة.</div>
       </div>
       <div class="actions">
         <button class="primary" onclick="loadScan()">تحديث الفرص</button>
@@ -100,7 +149,7 @@
       <div id="singleStockResult" style="margin-top:12px;"></div>
     </div>
 
-    <div class="footer-note">البطاقة تعرض أهم المعلومات أولًا، والتفاصيل الكاملة تظهر عند الضغط على "عرض التفاصيل".</div>
+    <div class="footer-note">البطاقة الرئيسية تعرض القرار والتنفيذ بسرعة، وكل ما عدا ذلك داخل "عرض التفاصيل".</div>
   </div>
 
   <script>
@@ -110,6 +159,7 @@
       if (Number.isNaN(num)) return value;
       return num.toLocaleString("en-US", { maximumFractionDigits: 2 });
     }
+
     function formatPercent(value) {
       if (value === null || value === undefined || value === "") return "-";
       const num = Number(value);
@@ -118,15 +168,43 @@
       const sign = num > 0 ? "+" : "";
       return `<span class="${cls}">${sign}${num.toFixed(2)}%</span>`;
     }
+
+    function safeText(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      return String(value);
+    }
+
+    function hasValue(value) {
+      if (value === null || value === undefined) return false;
+      const text = String(value).trim();
+      if (text === "" || text === "-") return false;
+      return true;
+    }
+
+    function metricBox(label, valueHtml) {
+      return `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${valueHtml}</div></div>`;
+    }
+
+    function detailBox(label, value, full = false) {
+      if (!hasValue(value)) return "";
+      return `<div class="detail-box ${full ? 'full' : ''}"><div class="detail-label">${label}</div><div class="detail-value">${value}</div></div>`;
+    }
+
     function badgeDecision(decision) {
       if (decision === "دخول قوي") return '<span class="badge badge-strong">دخول قوي</span>';
       if (decision === "دخول بحذر") return '<span class="badge badge-cautious">دخول بحذر</span>';
       return '<span class="badge badge-watch">مراقبة</span>';
     }
-    function safeText(value) {
-      if (value === null || value === undefined || value === "") return "-";
-      return String(value);
+
+    function badgeExecution(mode) {
+      const text = safeText(mode);
+      if (text.includes("جاهز")) return `<span class="badge badge-strong">${text}</span>`;
+      if (text.includes("بحذر")) return `<span class="badge badge-cautious">${text}</span>`;
+      if (text.includes("متأخر") || text.includes("تجنب")) return `<span class="badge badge-late">${text}</span>`;
+      if (text.includes("اختراق") || text.includes("تأكيد") || text.includes("افتتاح")) return `<span class="badge badge-exec">${text}</span>`;
+      return `<span class="badge badge-watch">${text}</span>`;
     }
+
     function renderStatusbar(data) {
       const phase = data?.market_phase || "closed";
       const phaseLabel = data?.market_phase_label || (phase === "open" ? "مفتوح" : "مغلق");
@@ -139,9 +217,9 @@
         <div class="stat"><div class="stat-label">مراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
         <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>`;
     }
+
     function createCard(stock) {
       const currentPrice = stock.current_price_live ?? stock.financials?.current_price ?? 0;
-      const openPrice = stock.open_price_live ?? 0;
       const marketPhase = stock.market_phase || "closed";
       const changeLabel = marketPhase === "open"
         ? "التغير من الافتتاح"
@@ -153,9 +231,48 @@
       const changePct = marketPhase === "open"
         ? (stock.change_from_open_pct ?? 0)
         : (stock.change_vs_prev_close_pct ?? 0);
-      const riskPct = stock.risk_pct ?? 0;
       const company = stock.company || stock.symbol;
       const flags = Array.isArray(stock.risk_flags) ? stock.risk_flags : [];
+      const stopPrice = stock.smart_stop_price ?? stock.stop_loss;
+      const entryPrice = stock.smart_entry_price ?? stock.entry_price_real ?? stock.entry;
+      const targetPrice = stock.smart_target_1 ?? stock.target_1;
+      const breakout = stock.breakout_price;
+      const confirm = stock.confirmation_price;
+      const compactSummary = stock.owner_action || stock.execution_note || stock.ai_summary || "-";
+
+      const detailGrid = [
+        detailBox("سعر الافتتاح", formatNumber(stock.open_price_live)),
+        detailBox("الإغلاق السابق", formatNumber(stock.previous_close_live)),
+        detailBox("نوع المرحلة", safeText(stock.market_phase_label || stock.market_phase)),
+        detailBox("سعر الاختراق", formatNumber(breakout)),
+        detailBox("سعر التأكيد", formatNumber(confirm)),
+        detailBox("الدخول الفعلي", formatNumber(stock.entry_price_real ?? stock.entry)),
+        detailBox("آخر دخول مناسب", formatNumber(stock.late_entry_price)),
+        detailBox("دخول ذكي", formatNumber(stock.smart_entry_price)),
+        detailBox("وقف ذكي", formatNumber(stock.smart_stop_price)),
+        detailBox("هدف ذكي", formatNumber(stock.smart_target_1)),
+        detailBox("VWAP اللحظي", safeText(stock.vwap_status)),
+        detailBox("حالة السيولة", safeText(stock.volume_status)),
+        detailBox("السيولة اليومية", formatNumber(stock.volume_ratio)),
+        detailBox("السيولة الفعلية", formatNumber(stock.effective_volume_ratio)),
+        detailBox("العائد/المخاطرة للهدف 1", formatNumber(stock.rr_1)),
+        detailBox("المسافة إلى الدخول", formatPercent(stock.distance_to_entry_pct ?? 0)),
+        detailBox("الترند", safeText(stock.trend)),
+        detailBox("نوع الفرصة", safeText(stock.type)),
+        detailBox("الهدف الأول", formatNumber(stock.target_1)),
+        detailBox("الهدف الثاني", formatNumber(stock.target_2)),
+        detailBox("حالة الاختراق", safeText(stock.breakout_status)),
+        detailBox("صالح لمدة", safeText(stock.valid_for)),
+        detailBox("جودة البيانات", safeText(stock.data_quality)),
+        detailBox("الإجراء المقترح", safeText(stock.owner_action), true),
+        detailBox("الخبر / المحفز", safeText(stock.news_note), true),
+        detailBox("نوع حداثة الخبر", safeText(stock.news_freshness_label)),
+        detailBox("جلسات منذ الخبر", safeText(stock.news_sessions_since)),
+        detailBox("الشركة", safeText(stock.company)),
+        detailBox("القطاع / الصناعة", `${safeText(stock.sector)} / ${safeText(stock.industry)}`),
+        flags.length ? detailBox("الإشارات التحذيرية", `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>`, true) : ""
+      ].join("");
+
       return `
         <div class="card">
           <div class="card-top">
@@ -166,63 +283,39 @@
             <div class="badges">
               ${badgeDecision(stock.decision)}
               <span class="badge badge-rank">${safeText(stock.rank_label)}</span>
-              <span class="badge badge-exec">${safeText(stock.execution_mode || stock.execution_status_ar || stock.execution_status)}</span>
-              ${stock.execution_mode === "متأخر ⚠️" ? `<span class="badge badge-cautious">متأخر</span>` : ""}
-              ${stock.execution_mode === "جاهز 🔥" ? `<span class="badge badge-strong">جاهز</span>` : ""}
+              ${badgeExecution(stock.execution_mode || stock.execution_status_ar || stock.execution_status)}
             </div>
           </div>
 
           <div class="metrics">
-            <div class="metric"><div class="metric-label">السعر الحالي</div><div class="metric-value">${formatNumber(currentPrice)}</div></div>
-            <div class="metric"><div class="metric-label">${safeText(changeLabel)}</div><div class="metric-value">${formatPercent(changePct)}</div></div>
-            <div class="metric"><div class="metric-label">الدخول الفعلي</div><div class="metric-value">${formatNumber(stock.entry_price_real ?? stock.entry)}</div></div>
-            <div class="metric"><div class="metric-label">وقف الخسارة</div><div class="metric-value">${formatNumber(stock.stop_loss)}</div></div>
-            <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
-            <div class="metric"><div class="metric-label">المخاطرة</div><div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div></div>
+            ${metricBox("السعر الحالي", formatNumber(currentPrice))}
+            ${metricBox(changeLabel, formatPercent(changePct))}
+            ${metricBox("سعر الاختراق", formatNumber(breakout))}
+            ${metricBox("سعر التأكيد", formatNumber(confirm))}
+            ${metricBox("الدخول", formatNumber(entryPrice))}
+            ${metricBox("وقف الخسارة", formatNumber(stopPrice))}
+            ${metricBox("الهدف الأول", formatNumber(targetPrice))}
+            ${metricBox("الجودة", formatNumber(stock.quality_score))}
           </div>
 
-          <div class="summary">${safeText(stock.ai_summary)}</div>
-          <div class="summary"><strong>وضع التنفيذ:</strong> ${safeText(stock.execution_note || stock.owner_action)}</div><div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "-")} | <strong>إشارة التوقيت:</strong> ${safeText(stock.timing_signal || stock.execution_mode || "-")}</div>
-          <div class="summary"><strong>حالة الاختراق:</strong> ${safeText(stock.breakout_status || "-")}</div>
+          <div class="main-decision"><strong>القرار الآن:</strong> ${safeText(compactSummary)}</div>
+          <div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "-")} | <strong>إشارة التوقيت:</strong> ${safeText(stock.timing_signal || stock.execution_mode || "-")}</div>
+          <div class="summary"><strong>ملخص:</strong> ${safeText(stock.ai_summary)}</div>
 
           <details>
             <summary>عرض التفاصيل</summary>
-            <div class="details-grid">
-              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div><div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live)}</div></div><div class="detail-box"><div class="detail-label">نوع المرحلة</div><div class="detail-value">${safeText(stock.market_phase_label)}</div></div>
-              <div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live ?? 0)}</div></div>
-              <div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div>
-              <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
-              <div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real ?? stock.entry)}</div></div>
-              <div class="detail-box"><div class="detail-label">آخر دخول مناسب</div><div class="detail-value">${formatNumber(stock.late_entry_price)}</div></div>
-              <div class="detail-box"><div class="detail-label">السيولة اليومية</div><div class="detail-value">${formatNumber(stock.volume_ratio)}</div></div>
-              <div class="detail-box"><div class="detail-label">السيولة الفعلية</div><div class="detail-value">${formatNumber(stock.effective_volume_ratio)}</div></div>
-              <div class="detail-box"><div class="detail-label">البعد عن نقطة الدخول</div><div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div></div>
-              <div class="detail-box"><div class="detail-label">المسافة إلى الدخول</div><div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div></div>
-              <div class="detail-box"><div class="detail-label">الترند</div><div class="detail-value">${safeText(stock.trend)}</div></div>
-              <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
-              <div class="detail-box"><div class="detail-label">حالة السوق</div><div class="detail-value">${safeText(stock.market_phase_label || stock.market_phase || "-")}</div></div>
-              <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
-              <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div><div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div><div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div><div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real)}</div></div><div class="detail-box"><div class="detail-label">آخر دخول مناسب</div><div class="detail-value">${formatNumber(stock.late_entry_price)}</div></div><div class="detail-box"><div class="detail-label">حالة الاختراق</div><div class="detail-value">${safeText(stock.breakout_status)}</div></div><div class="detail-box"><div class="detail-label">VWAP اللحظي</div><div class="detail-value">${safeText(stock.vwap_status)}</div></div><div class="detail-box"><div class="detail-label">حالة السيولة</div><div class="detail-value">${safeText(stock.volume_status)}</div></div><div class="detail-box"><div class="detail-label">دخول ذكي</div><div class="detail-value">${formatNumber(stock.smart_entry_price)}</div></div><div class="detail-box"><div class="detail-label">وقف ذكي</div><div class="detail-value">${formatNumber(stock.smart_stop_price)}</div></div><div class="detail-box"><div class="detail-label">هدف ذكي</div><div class="detail-value">${formatNumber(stock.smart_target_1)}</div></div>
-              <div class="detail-box"><div class="detail-label">العائد/المخاطرة للهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
-              <div class="detail-box"><div class="detail-label">صالح لمدة</div><div class="detail-value">${safeText(stock.valid_for)}</div></div>
-              <div class="detail-box"><div class="detail-label">جودة البيانات</div><div class="detail-value">${safeText(stock.data_quality)}</div></div>
-              <div class="detail-box full"><div class="detail-label">الإجراء المقترح</div><div class="detail-value">${safeText(stock.owner_action)}</div></div>
-              <div class="detail-box full"><div class="detail-label">الخبر / المحفز</div><div class="detail-value">${safeText(stock.news_note)}</div></div>
-              <div class="detail-box"><div class="detail-label">نوع حداثة الخبر</div><div class="detail-value">${safeText(stock.news_freshness_label)}</div></div>
-              <div class="detail-box"><div class="detail-label">جلسات منذ الخبر</div><div class="detail-value">${safeText(stock.news_sessions_since)}</div></div>
-              <div class="detail-box"><div class="detail-label">الشركة</div><div class="detail-value">${safeText(stock.company)}</div></div>
-              <div class="detail-box"><div class="detail-label">القطاع / الصناعة</div><div class="detail-value">${safeText(stock.sector)} / ${safeText(stock.industry)}</div></div>
-              <div class="detail-box full"><div class="detail-label">الإشارات التحذيرية</div><div class="detail-value">${flags.length ? `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>` : "لا يوجد"}</div></div>
-            </div>
+            <div class="details-grid">${detailGrid}</div>
           </details>
         </div>`;
     }
+
     function renderSection(id, title, items) {
       if (!items || !items.length) {
         return `<div class="section" id="${id}"><div class="section-header"><div class="section-title">${title}</div><div class="section-count">0</div></div><div class="empty">لا توجد أسهم في هذا القسم</div></div>`;
       }
       return `<div class="section" id="${id}"><div class="section-header"><div class="section-title">${title}</div><div class="section-count">${items.length}</div></div><div class="cards">${items.map(createCard).join("")}</div></div>`;
     }
+
     function renderContent(data) {
       const html = [
         renderSection("top-ranked-section", "الأعلى ترتيبًا", data.top_ranked || []),
@@ -231,13 +324,15 @@
       ].join("");
       document.getElementById("content").innerHTML = html;
     }
+
     function toggleSection(id) {
       const el = document.getElementById(id);
       if (!el) return;
       const cards = el.querySelector(".cards") || el.querySelector(".empty");
       if (!cards) return;
-      cards.style.display = cards.style.display === "none" ? "" : "none";
+      cards.classList.toggle("hidden-block");
     }
+
     async function loadScan() {
       document.getElementById("content").innerHTML = '<div class="loading">جاري تحديث الفرص...</div>';
       try {
@@ -253,6 +348,7 @@
         document.getElementById("content").innerHTML = `<div class="error">تعذر تحميل البيانات: ${safeText(err.message)}</div>`;
       }
     }
+
     async function scanSingleStock() {
       const symbol = (document.getElementById("singleSymbol").value || "").trim().toUpperCase();
       const result = document.getElementById("singleStockResult");
@@ -271,14 +367,15 @@
         if (data.trade_plan) {
           result.innerHTML = `<div class="single-result">${createCard(data.trade_plan)}</div>`;
         } else if (data.overview && data.overview.available) {
-          result.innerHTML = `<div class="single-result"><div class="summary"><strong>${safeText(data.overview.symbol)}</strong> - ${safeText(data.overview.company)}</div><div class="summary">لا توجد فرصة تداول حالية واضحة لهذا السهم، لكن يمكنك مراقبته.</div></div>`;
+          result.innerHTML = `<div class="single-result"><div class="summary"><strong>${safeText(data.overview.symbol)}</strong> - ${safeText(data.overview.company)}</div><div class="summary">لا توجد فرصة تداول واضحة الآن، لكن السهم ما زال قابلًا للمراقبة.</div></div>`;
         } else {
-          result.innerHTML = `<div class="error">لم أتمكن من جلب بيانات هذا السهم</div>`;
+          result.innerHTML = '<div class="error">لم أتمكن من جلب بيانات هذا السهم</div>';
         }
       } catch (err) {
         result.innerHTML = `<div class="error">تعذر فحص السهم: ${safeText(err.message)}</div>`;
       }
     }
+
     loadScan();
   </script>
 </body>
