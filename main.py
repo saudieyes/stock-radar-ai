@@ -5,10 +5,19 @@ import os
 import csv
 import re
 from datetime import datetime, timedelta
+import time
 from zoneinfo import ZoneInfo
 from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels
 
 app = FastAPI()
+
+@app.middleware("http")
+async def disable_http_cache(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
@@ -19,6 +28,13 @@ INCOME_DATA = {}
 HISTORY_CACHE = {}
 REF_INFO_CACHE = {}
 INTRADAY_CACHE = {}
+SNAPSHOT_CACHE = {}
+
+INTRADAY_CACHE_TTL_OPEN = 12
+INTRADAY_CACHE_TTL_CLOSED = 60
+SNAPSHOT_CACHE_TTL_OPEN = 8
+SNAPSHOT_CACHE_TTL_EXTENDED = 15
+SNAPSHOT_CACHE_TTL_CLOSED = 120
 
 HARAM_SECTORS = {"financial services", "banks", "insurance"}
 
@@ -66,6 +82,30 @@ def safe_round(x, digits=2):
         return round(float(x), digits)
     except:
         return x
+
+
+def _cache_get(cache_obj, key):
+    item = cache_obj.get(key)
+    if not item:
+        return None
+    expires_at = float(item.get("expires_at", 0) or 0)
+    if expires_at <= time.time():
+        cache_obj.pop(key, None)
+        return None
+    return item.get("value")
+
+
+def _cache_set(cache_obj, key, value, ttl_seconds):
+    cache_obj[key] = {
+        "value": value,
+        "expires_at": time.time() + max(float(ttl_seconds or 0), 0.0)
+    }
+    return value
+
+
+def latest_market_date_str():
+    ny = ZoneInfo("America/New_York")
+    return datetime.now(ny).date().isoformat()
 
 
 def latest_key(row):
@@ -371,8 +411,58 @@ def get_prev(symbol):
 
 
 
+
+def get_latest_minute_price(symbol):
+    try:
+        today_ny = latest_market_date_str()
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/"
+            f"{today_ny}/{today_ny}?adjusted=true&sort=desc&limit=5&apiKey={POLYGON_API_KEY}"
+        )
+        r = requests.get(url, timeout=12).json()
+        bars = r.get("results", []) or []
+        if not bars:
+            return {
+                "available": False,
+                "current_price": 0.0,
+                "open": 0.0,
+                "high": 0.0,
+                "low": 0.0,
+                "volume": 0.0,
+                "updated": 0,
+            }
+
+        bar = bars[0]
+        return {
+            "available": True,
+            "current_price": to_float(bar.get("c")),
+            "open": to_float(bar.get("o")),
+            "high": to_float(bar.get("h")),
+            "low": to_float(bar.get("l")),
+            "volume": to_float(bar.get("v")),
+            "updated": int(to_float(bar.get("t"))),
+        }
+    except:
+        return {
+            "available": False,
+            "current_price": 0.0,
+            "open": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "volume": 0.0,
+            "updated": 0,
+        }
+
+
 def get_snapshot_quote(symbol):
     try:
+        symbol = str(symbol).upper().strip()
+        phase = get_market_phase()
+        cache_key = f"{symbol}:{phase}"
+        cached = _cache_get(SNAPSHOT_CACHE, cache_key)
+        if cached:
+            return cached
+
         url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
         r = requests.get(url, timeout=12).json()
         t = (r.get("ticker") or {})
@@ -381,12 +471,34 @@ def get_snapshot_quote(symbol):
         last_trade = (t.get("lastTrade") or {})
         min_data = (t.get("min") or {})
 
-        current_price = to_float(last_trade.get("p")) or to_float(day.get("c")) or to_float(min_data.get("c")) or 0.0
+        last_price = to_float(last_trade.get("p"))
         prev_close = to_float(prev_day.get("c")) or 0.0
         day_open = to_float(day.get("o")) or 0.0
         day_high = to_float(day.get("h")) or 0.0
         day_low = to_float(day.get("l")) or 0.0
         day_volume = to_float(day.get("v")) or 0.0
+
+        minute = get_latest_minute_price(symbol)
+
+        current_price = last_price or to_float(min_data.get("c")) or to_float(day.get("c")) or 0.0
+        if minute.get("available") and minute.get("current_price", 0) > 0:
+            minute_price = to_float(minute.get("current_price", 0))
+            if phase in {"open", "after_hours", "pre_market"}:
+                current_price = minute_price or current_price
+                if minute.get("high", 0) > 0:
+                    day_high = max(day_high, to_float(minute.get("high", 0)))
+                if minute.get("low", 0) > 0:
+                    minute_low = to_float(minute.get("low", 0))
+                    day_low = min(day_low, minute_low) if day_low > 0 else minute_low
+                if minute.get("volume", 0) > 0:
+                    day_volume = max(day_volume, to_float(minute.get("volume", 0)))
+
+        if phase == "open":
+            ttl = SNAPSHOT_CACHE_TTL_OPEN
+        elif phase in {"after_hours", "pre_market"}:
+            ttl = SNAPSHOT_CACHE_TTL_EXTENDED
+        else:
+            ttl = SNAPSHOT_CACHE_TTL_CLOSED
 
         change_vs_prev_close_pct = 0.0
         if current_price > 0 and prev_close > 0:
@@ -396,7 +508,7 @@ def get_snapshot_quote(symbol):
         if current_price > 0 and day_open > 0:
             change_from_open_pct = ((current_price - day_open) / day_open) * 100
 
-        return {
+        out = {
             "available": current_price > 0,
             "current_price": current_price,
             "previous_close": prev_close,
@@ -406,7 +518,10 @@ def get_snapshot_quote(symbol):
             "volume": day_volume,
             "change_vs_prev_close_pct": change_vs_prev_close_pct,
             "change_from_open_pct": change_from_open_pct,
+            "updated": int(time.time() * 1000),
+            "source": "minute+snapshot" if minute.get("available") else "snapshot",
         }
+        return _cache_set(SNAPSHOT_CACHE, cache_key, out, ttl)
     except:
         return {
             "available": False,
@@ -418,7 +533,10 @@ def get_snapshot_quote(symbol):
             "volume": 0.0,
             "change_vs_prev_close_pct": 0.0,
             "change_from_open_pct": 0.0,
+            "updated": 0,
+            "source": "error",
         }
+
 
 def get_reference_info(symbol):
     symbol = str(symbol).upper().strip()
@@ -583,12 +701,16 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
+
 def get_intraday_snapshot(symbol):
     symbol = str(symbol).upper().strip()
     market_open = is_market_open_now()
     cache_key = f"{symbol}:{'open' if market_open else 'closed'}"
-    if cache_key in INTRADAY_CACHE:
-        return INTRADAY_CACHE[cache_key]
+    ttl = INTRADAY_CACHE_TTL_OPEN if market_open else INTRADAY_CACHE_TTL_CLOSED
+
+    cached = _cache_get(INTRADAY_CACHE, cache_key)
+    if cached:
+        return cached
 
     out = {
         "available": False,
@@ -608,8 +730,7 @@ def get_intraday_snapshot(symbol):
     }
 
     if not market_open:
-        INTRADAY_CACHE[cache_key] = out
-        return out
+        return _cache_set(INTRADAY_CACHE, cache_key, out, ttl)
 
     try:
         ny = ZoneInfo("America/New_York")
@@ -621,14 +742,12 @@ def get_intraday_snapshot(symbol):
         r = requests.get(url, timeout=15).json()
         bars = r.get("results", [])
         if not bars:
-            INTRADAY_CACHE[cache_key] = out
-            return out
+            return _cache_set(INTRADAY_CACHE, cache_key, out, ttl)
 
         volumes = [to_float(x.get("v")) for x in bars if to_float(x.get("v")) > 0]
         closes = [to_float(x.get("c")) for x in bars if to_float(x.get("c")) > 0]
         if not volumes or not closes:
-            INTRADAY_CACHE[cache_key] = out
-            return out
+            return _cache_set(INTRADAY_CACHE, cache_key, out, ttl)
 
         session_open = to_float(bars[0].get("o"))
         session_high = max(to_float(x.get("h")) for x in bars)
@@ -677,8 +796,7 @@ def get_intraday_snapshot(symbol):
     except:
         pass
 
-    INTRADAY_CACHE[cache_key] = out
-    return out
+    return _cache_set(INTRADAY_CACHE, cache_key, out, ttl)
 
 
 def build_live_price_block(symbol, prev_data, intraday_data):
@@ -729,6 +847,9 @@ def build_live_price_block(symbol, prev_data, intraday_data):
         "high_live": safe_round(to_float(snap.get("high", prev_high)) or prev_high),
         "low_live": safe_round(to_float(snap.get("low", prev_low)) or prev_low),
         "volume_live": safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume),
+        "price_source": snap.get("source", "snapshot"),
+        "last_price_update_ms": int(to_float(snap.get("updated", 0))),
+        "last_price_update_label": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
     }
 
 
@@ -828,98 +949,6 @@ def classify_news_impact(title_lower: str, sessions_since: int):
         return 0, "خبر سلبي قديم", "NEGATIVE_OLD"
 
     return 0, "لا يوجد محفز حديث", "NONE"
-
-
-
-def compute_timing_layer(current_price: float, intraday: dict, effective_volume_ratio: float, levels: dict, market_phase: str):
-    breakout_price = float(levels.get("breakout_price", 0) or 0)
-    confirmation_price = float(levels.get("confirmation_price", 0) or 0)
-    entry_price_real = float(levels.get("entry_price_real", 0) or 0)
-    late_entry_price = float(levels.get("late_entry_price", 0) or 0)
-
-    intraday_ratio = float((intraday or {}).get("intraday_volume_ratio", 0) or 0)
-    vwap_proxy = float((intraday or {}).get("vwap_proxy", 0) or 0)
-    above_vwap = bool((intraday or {}).get("above_vwap_proxy", False))
-    opening_drive = str((intraday or {}).get("opening_drive", "unknown") or "unknown")
-    market_open = bool((intraday or {}).get("market_open", False))
-
-    strong_volume = effective_volume_ratio >= 1.1 or intraday_ratio >= 1.2
-    excellent_volume = effective_volume_ratio >= 1.25 or intraday_ratio >= 1.5
-
-    if market_phase == "open":
-        if market_open and vwap_proxy > 0:
-            vwap_status = "فوق VWAP ✅" if above_vwap else "تحت VWAP ❌"
-        else:
-            vwap_status = "VWAP غير متاح"
-    else:
-        vwap_status = "VWAP يكتمل أثناء السوق"
-
-    if excellent_volume:
-        volume_status = "سيولة قوية جدًا ✅"
-    elif strong_volume:
-        volume_status = "سيولة داعمة ✅"
-    elif effective_volume_ratio >= 0.9 or intraday_ratio >= 0.95:
-        volume_status = "سيولة متوسطة ⚠️"
-    else:
-        volume_status = "سيولة ضعيفة ❌"
-
-    timing_signal = "مراقبة 👀"
-    timing_reason = "تحت المراقبة"
-    smart_entry_price = entry_price_real if entry_price_real > 0 else confirmation_price
-    smart_stop_price = 0.0
-    smart_target_1 = 0.0
-
-    if confirmation_price > 0:
-        if current_price < breakout_price:
-            timing_signal = "انتظار اختراق ⏳"
-            timing_reason = f"السعر ما زال تحت الاختراق {safe_round(breakout_price)}"
-            smart_entry_price = confirmation_price
-        elif breakout_price <= current_price < confirmation_price:
-            timing_signal = "انتظار تأكيد 📊"
-            timing_reason = f"تم الكسر الأولي ويحتاج الثبات فوق {safe_round(confirmation_price)}"
-            smart_entry_price = confirmation_price
-        elif confirmation_price <= current_price <= entry_price_real:
-            if market_phase == "open":
-                if above_vwap and strong_volume and opening_drive != "هابط":
-                    timing_signal = "جاهز 🔥"
-                    timing_reason = "السعر فوق التأكيد وفوق VWAP والسيولة داعمة"
-                elif strong_volume:
-                    timing_signal = "دخول بحذر 🟠"
-                    timing_reason = "السعر فوق التأكيد لكن يحتاج ثباتًا لحظيًا أفضل"
-                else:
-                    timing_signal = "انتظار تأكيد 📊"
-                    timing_reason = "السعر في منطقة جيدة لكن السيولة ليست كافية بعد"
-            else:
-                timing_signal = "انتظار تأكيد 📊"
-                timing_reason = "السهم في منطقة جيدة، وقرار التنفيذ الأفضل يكون مع افتتاح السوق"
-            smart_entry_price = entry_price_real
-        elif entry_price_real < current_price <= late_entry_price:
-            if market_phase == "open" and above_vwap and excellent_volume:
-                timing_signal = "دخول بحذر 🟠"
-                timing_reason = "السعر تجاوز الدخول المثالي لكن ما زال ضمن آخر دخول مناسب"
-            else:
-                timing_signal = "متأخر ⚠️"
-                timing_reason = "السعر تجاوز الدخول المثالي وأصبح أقل جاذبية"
-            smart_entry_price = late_entry_price
-        elif late_entry_price > 0 and current_price > late_entry_price:
-            timing_signal = "متأخر ⚠️"
-            timing_reason = "السعر تجاوز آخر دخول مناسب - لا تطارد"
-            smart_entry_price = late_entry_price
-
-    if entry_price_real > 0:
-        smart_stop_price = max(0.0, entry_price_real * 0.97)
-        smart_target_1 = entry_price_real * 1.04
-
-    return {
-        "timing_signal": timing_signal,
-        "timing_reason": timing_reason,
-        "vwap_status": vwap_status,
-        "volume_status": volume_status,
-        "smart_entry_price": safe_round(smart_entry_price),
-        "smart_stop_price": safe_round(smart_stop_price),
-        "smart_target_1": safe_round(smart_target_1),
-    }
-
 
 def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str):
     breakout_price = float(high_price or current_price or 0)
@@ -1525,7 +1554,6 @@ def trade_plan_pro(symbol):
 
     live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
-    timing = compute_timing_layer(live_block["current_price_live"], intraday, effective_volume_ratio, levels, live_block.get("market_phase", "closed"))
 
     return {
         "symbol": symbol,
@@ -1554,7 +1582,6 @@ def trade_plan_pro(symbol):
         "owner_action": owner_decision(decision, trend, breakout_quality, effective_volume_ratio, news["catalyst_score"]),
         "intraday": intraday,
         **levels,
-        **timing,
         **live_block
     }
 
@@ -1572,7 +1599,6 @@ def build_fallback_trade(symbol: str):
     effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
     live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], a.get("high", 0), a.get("low", 0), intraday, "Breakout")
-    timing = compute_timing_layer(live_block["current_price_live"], intraday, effective_volume_ratio, levels, live_block.get("market_phase", "closed"))
     current = float(live_block.get("current_price_live", 0) or 0)
     breakout = float(levels.get("breakout_price", 0) or 0)
     confirm = float(levels.get("confirmation_price", 0) or 0)
@@ -1642,7 +1668,6 @@ def build_fallback_trade(symbol: str):
         "industry": info.get("industry", ""),
         "financials": h.get("financials", {}),
         **levels,
-        **timing,
         **live_block,
     }
     out = normalize_execution_labels(assign_execution_mode(apply_late_move_filter(out)))
@@ -1894,4 +1919,3 @@ def debug_symbol(symbol: str):
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase())
     }
-
