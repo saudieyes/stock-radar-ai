@@ -369,6 +369,57 @@ def get_prev(symbol):
         return None
 
 
+
+
+def get_snapshot_quote(symbol):
+    try:
+        url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
+        r = requests.get(url, timeout=12).json()
+        t = (r.get("ticker") or {})
+        day = (t.get("day") or {})
+        prev_day = (t.get("prevDay") or {})
+        last_trade = (t.get("lastTrade") or {})
+        min_data = (t.get("min") or {})
+
+        current_price = to_float(last_trade.get("p")) or to_float(day.get("c")) or to_float(min_data.get("c")) or 0.0
+        prev_close = to_float(prev_day.get("c")) or 0.0
+        day_open = to_float(day.get("o")) or 0.0
+        day_high = to_float(day.get("h")) or 0.0
+        day_low = to_float(day.get("l")) or 0.0
+        day_volume = to_float(day.get("v")) or 0.0
+
+        change_vs_prev_close_pct = 0.0
+        if current_price > 0 and prev_close > 0:
+            change_vs_prev_close_pct = ((current_price - prev_close) / prev_close) * 100
+
+        change_from_open_pct = 0.0
+        if current_price > 0 and day_open > 0:
+            change_from_open_pct = ((current_price - day_open) / day_open) * 100
+
+        return {
+            "available": current_price > 0,
+            "current_price": current_price,
+            "previous_close": prev_close,
+            "open": day_open,
+            "high": day_high,
+            "low": day_low,
+            "volume": day_volume,
+            "change_vs_prev_close_pct": change_vs_prev_close_pct,
+            "change_from_open_pct": change_from_open_pct,
+        }
+    except:
+        return {
+            "available": False,
+            "current_price": 0.0,
+            "previous_close": 0.0,
+            "open": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "volume": 0.0,
+            "change_vs_prev_close_pct": 0.0,
+            "change_from_open_pct": 0.0,
+        }
+
 def get_reference_info(symbol):
     symbol = str(symbol).upper().strip()
     if not symbol:
@@ -630,25 +681,54 @@ def get_intraday_snapshot(symbol):
     return out
 
 
-def build_live_price_block(prev_data, intraday_data):
+def build_live_price_block(symbol, prev_data, intraday_data):
+    phase = get_market_phase()
     prev_price = to_float(prev_data.get("price", 0)) if prev_data else 0.0
     prev_open = to_float(prev_data.get("open", 0)) if prev_data else 0.0
+    prev_high = to_float(prev_data.get("high", 0)) if prev_data else 0.0
+    prev_low = to_float(prev_data.get("low", 0)) if prev_data else 0.0
+    prev_volume = to_float(prev_data.get("volume", 0)) if prev_data else 0.0
 
-    if intraday_data.get("available"):
-        current_price = to_float(intraday_data.get("current_price", 0))
-        open_price = to_float(intraday_data.get("session_open", 0))
+    snap = get_snapshot_quote(symbol)
+
+    current_price = prev_price
+    open_price = prev_open
+    previous_close = prev_price
+    change_vs_prev_close_pct = 0.0
+    change_from_open_pct = 0.0
+
+    if phase == "open" and intraday_data.get("available"):
+        current_price = to_float(intraday_data.get("current_price", 0)) or prev_price
+        open_price = to_float(intraday_data.get("session_open", 0)) or prev_open
+        previous_close = prev_price
+        if open_price > 0 and current_price > 0:
+            change_from_open_pct = ((current_price - open_price) / open_price) * 100
+        if previous_close > 0 and current_price > 0:
+            change_vs_prev_close_pct = ((current_price - previous_close) / previous_close) * 100
+    elif snap.get("available"):
+        current_price = to_float(snap.get("current_price", prev_price)) or prev_price
+        open_price = to_float(snap.get("open", prev_open)) or prev_open
+        previous_close = to_float(snap.get("previous_close", prev_price)) or prev_price
+        change_from_open_pct = to_float(snap.get("change_from_open_pct", 0))
+        change_vs_prev_close_pct = to_float(snap.get("change_vs_prev_close_pct", 0))
     else:
         current_price = prev_price
         open_price = prev_open
-
-    change_pct = 0.0
-    if open_price > 0:
-        change_pct = ((current_price - open_price) / open_price) * 100
+        previous_close = prev_price
+        if open_price > 0 and current_price > 0:
+            change_from_open_pct = ((current_price - open_price) / open_price) * 100
 
     return {
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
         "current_price_live": safe_round(current_price),
         "open_price_live": safe_round(open_price),
-        "change_from_open_pct": safe_round(change_pct)
+        "previous_close_live": safe_round(previous_close),
+        "change_from_open_pct": safe_round(change_from_open_pct),
+        "change_vs_prev_close_pct": safe_round(change_vs_prev_close_pct),
+        "high_live": safe_round(to_float(snap.get("high", prev_high)) or prev_high),
+        "low_live": safe_round(to_float(snap.get("low", prev_low)) or prev_low),
+        "volume_live": safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume),
     }
 
 
@@ -1385,6 +1465,93 @@ def trade_plan_pro(symbol):
     }
 
 
+
+
+def build_fallback_trade(symbol: str):
+    a = base_analysis(symbol)
+    if not a:
+        return None
+    info = get_info(symbol)
+    h = halal(symbol)
+    intraday = get_intraday_snapshot(symbol)
+    volume_ratio = get_volume_ratio(symbol)
+    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
+    live_block = build_live_price_block(symbol, a, intraday)
+    levels = compute_breakout_levels(live_block["current_price_live"], a.get("high", 0), a.get("low", 0), intraday, "Breakout")
+    current = float(live_block.get("current_price_live", 0) or 0)
+    breakout = float(levels.get("breakout_price", 0) or 0)
+    confirm = float(levels.get("confirmation_price", 0) or 0)
+    entry_real = float(levels.get("entry_price_real", 0) or 0)
+
+    if current < breakout:
+        execution_status = "WAIT_BREAKOUT"
+        execution_note = f"راقب كسر {round(breakout,2)}"
+    elif current < confirm:
+        execution_status = "WAIT_CONFIRM"
+        execution_note = f"يحتاج الثبات فوق {round(confirm,2)}"
+    elif current <= entry_real:
+        execution_status = "READY"
+        execution_note = f"منطقة دخول قريبة من {round(entry_real,2)}"
+    else:
+        execution_status = "CAUTION"
+        execution_note = "التحرك بدأ لكن ما زالت تحت المراقبة"
+
+    quality_score = 34
+    trend = get_trend(symbol).get("trend", "متذبذب")
+    if trend == "صاعد قوي":
+        quality_score += 12
+    elif trend == "صاعد":
+        quality_score += 7
+    elif trend == "هابط":
+        quality_score -= 6
+    if effective_volume_ratio >= 1.0:
+        quality_score += 6
+    elif effective_volume_ratio < 0.8:
+        quality_score -= 4
+    quality_score = max(15, min(55, quality_score))
+
+    stop_loss = a.get("low", 0) * 0.99 if a.get("low", 0) > 0 else current * 0.95
+    target_1 = entry_real + max(entry_real - stop_loss, current * 0.03)
+    target_2 = entry_real + max((entry_real - stop_loss) * 1.5, current * 0.05)
+    risk_pct = ((entry_real - stop_loss) / entry_real * 100) if entry_real > stop_loss > 0 else 0.0
+
+    out = {
+        "symbol": symbol,
+        "type": "Breakout",
+        "decision": "مراقبة",
+        "entry": safe_round(entry_real),
+        "stop_loss": safe_round(stop_loss),
+        "target_1": safe_round(target_1),
+        "target_2": safe_round(target_2),
+        "risk_pct": safe_round(risk_pct),
+        "quality_score": int(quality_score),
+        "rank_label": make_rank_label(quality_score),
+        "valid_for": "صالح للمراقبة",
+        "trend": trend,
+        "volume_ratio": round(volume_ratio, 2),
+        "effective_volume_ratio": round(effective_volume_ratio, 2),
+        "data_quality": "medium",
+        "catalyst_score": 0,
+        "news_note": "لا يوجد محفز حديث",
+        "news_freshness_label": "NONE",
+        "news_sessions_since": None,
+        "risk_flags": ["تم توليد بطاقة احتياطية بسبب نقص/تعطل بعض البيانات"],
+        "ai_summary": "بطاقة احتياطية لضمان عدم اختفاء السهم - راقب السعر والاختراق",
+        "breakout_quality": "WEAK",
+        "execution_status": execution_status,
+        "execution_note": execution_note,
+        "owner_action": execution_note,
+        "intraday": intraday,
+        "company": info.get("company", ""),
+        "sector": info.get("sector", ""),
+        "industry": info.get("industry", ""),
+        "financials": h.get("financials", {}),
+        **levels,
+        **live_block,
+    }
+    out = normalize_execution_labels(assign_execution_mode(apply_late_move_filter(out)))
+    return out
+
 def analyze_symbol_overview(symbol):
     symbol = str(symbol).upper().strip()
     prev = get_prev(symbol)
@@ -1468,12 +1635,15 @@ def trade_scan():
                 continue
 
             t = trade_plan_pro(s)
+            if not t:
+                t = build_fallback_trade(s)
+
             if t:
                 info = get_info(s)
-                t["company"] = info["company"]
-                t["sector"] = info["sector"]
-                t["industry"] = info["industry"]
-                t["financials"] = h["financials"]
+                t["company"] = info.get("company", t.get("company", ""))
+                t["sector"] = info.get("sector", t.get("sector", ""))
+                t["industry"] = info.get("industry", t.get("industry", ""))
+                t["financials"] = h.get("financials", t.get("financials", {}))
                 t = execution_filter(t)
                 t = apply_late_move_filter(t)
                 t = assign_execution_mode(t)
@@ -1534,8 +1704,10 @@ def single_stock(symbol: str):
 
         try:
             trade = trade_plan_pro(symbol)
+            if not trade:
+                trade = build_fallback_trade(symbol)
         except Exception as e:
-            trade = None
+            trade = build_fallback_trade(symbol)
             trade_error = str(e)
 
         if trade:
@@ -1597,7 +1769,7 @@ def single_stock(symbol: str):
 def debug_symbol(symbol: str):
     symbol = symbol.upper()
     overview = analyze_symbol_overview(symbol)
-    trade = trade_plan_pro(symbol)
+    trade = trade_plan_pro(symbol) or build_fallback_trade(symbol)
 
     if trade:
         info = get_info(symbol)
