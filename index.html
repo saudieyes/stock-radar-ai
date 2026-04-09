@@ -140,19 +140,23 @@
         <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>`;
     }
     function createCard(stock) {
-      const currentPrice = stock.current_price_live ?? stock.financials?.current_price ?? 0;
-      const openPrice = stock.open_price_live ?? 0;
+      const liveAvailable = !!stock.live_price_available;
       const marketPhase = stock.market_phase || "closed";
-      const changeLabel = marketPhase === "open"
-        ? "التغير من الافتتاح"
-        : marketPhase === "after_hours"
-          ? "التغير بعد الإغلاق"
-          : marketPhase === "pre_market"
-            ? "التغير قبل الافتتاح"
-            : "التغير عن الإغلاق";
-      const changePct = marketPhase === "open"
-        ? (stock.change_from_open_pct ?? 0)
-        : (stock.change_vs_prev_close_pct ?? 0);
+      const currentPrice = (stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0);
+      const currentPriceLabel = stock.display_price_label || "السعر الحالي";
+      const openPrice = stock.open_price_live ?? 0;
+      const changeLabel = !liveAvailable && marketPhase !== "closed"
+        ? "التغير اللحظي"
+        : marketPhase === "open"
+          ? "التغير من الافتتاح"
+          : marketPhase === "after_hours"
+            ? "التغير بعد الإغلاق"
+            : marketPhase === "pre_market"
+              ? "التغير قبل الافتتاح"
+              : "التغير عن الإغلاق";
+      const changePct = (stock.display_change_available === false || stock.display_change_pct === null || stock.display_change_pct === undefined)
+        ? null
+        : (stock.display_change_pct ?? (marketPhase === "open" ? (stock.change_from_open_pct ?? 0) : (stock.change_vs_prev_close_pct ?? 0)));
       const riskPct = stock.risk_pct ?? 0;
       const company = stock.company || stock.symbol;
       const flags = Array.isArray(stock.risk_flags) ? stock.risk_flags : [];
@@ -180,8 +184,8 @@
           </div>
 
           <div class="metrics">
-            <div class="metric"><div class="metric-label">السعر الحالي</div><div class="metric-value">${formatNumber(currentPrice)}</div></div>
-            <div class="metric"><div class="metric-label">${safeText(changeLabel)}</div><div class="metric-value">${formatPercent(changePct)}</div></div>
+            <div class="metric"><div class="metric-label">${safeText(currentPriceLabel)}</div><div class="metric-value">${currentPrice > 0 ? formatNumber(currentPrice) : "غير متاح"}</div></div>
+            <div class="metric"><div class="metric-label">${safeText(changeLabel)}</div><div class="metric-value">${changePct === null ? "غير متاح" : formatPercent(changePct)}</div></div>
             <div class="metric"><div class="metric-label">${entryLabel}</div><div class="metric-value">${formatNumber(entryValue)}</div></div>
             <div class="metric"><div class="metric-label">وقف الخسارة</div><div class="metric-value">${formatNumber(stock.stop_loss)}</div></div>
             <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
@@ -190,12 +194,13 @@
 
           <div class="summary">${safeText(stock.ai_summary)}</div>
           <div class="summary"><strong>وضع التنفيذ:</strong> ${mainAction}</div><div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "-")} | <strong>إشارة التوقيت:</strong> ${safeText(stock.timing_signal || stock.execution_mode || "-")}</div>
+          <div class="summary"><strong>مصدر السعر:</strong> ${safeText(stock.price_source_label || "-")}${stock.live_price_available === false && stock.market_phase !== "closed" ? " | السعر اللحظي غير متاح الآن" : ""}</div>
           <div class="summary"><strong>حالة الاختراق:</strong> ${safeText(stock.breakout_status || "-")}</div>
 
           <details>
             <summary>عرض التفاصيل</summary>
             <div class="details-grid">
-              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div><div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live)}</div></div><div class="detail-box"><div class="detail-label">نوع المرحلة</div><div class="detail-value">${safeText(stock.market_phase_label)}</div></div>
+              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div><div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live)}</div></div><div class="detail-box"><div class="detail-label">نوع المرحلة</div><div class="detail-value">${safeText(stock.market_phase_label)}</div></div><div class="detail-box"><div class="detail-label">مصدر السعر</div><div class="detail-value">${safeText(stock.price_source_label || "-")}</div></div>
               <div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live ?? 0)}</div></div>
               <div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div>
               <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
