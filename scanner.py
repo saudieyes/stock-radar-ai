@@ -568,6 +568,8 @@ def assign_execution_mode(stock: dict) -> dict:
     try:
         trade_type = str(stock.get("type", "") or "")
         current_price = float(stock.get("current_price_live", 0) or 0)
+        price_reliable = bool(stock.get("price_reliable_for_execution", False))
+        market_phase = str(stock.get("market_phase", "") or "")
         stop_loss = float(stock.get("stop_loss", 0) or 0)
         target_1 = float(stock.get("target_1", 0) or 0)
         risk_pct = float(stock.get("risk_pct", 0) or 0)
@@ -585,7 +587,6 @@ def assign_execution_mode(stock: dict) -> dict:
         market_open = bool(intraday.get("market_open", False))
         timing_signal = str(stock.get("timing_signal", "") or "")
         timing_reason = str(stock.get("timing_reason", "") or "")
-        market_phase = str(stock.get("market_phase", "") or "")
 
         rr = 0.0
         if entry_price_real > 0 and stop_loss > 0 and target_1 > 0 and entry_price_real > stop_loss:
@@ -607,13 +608,25 @@ def assign_execution_mode(stock: dict) -> dict:
             execution_mode = timing_signal
             execution_note = timing_reason or execution_note
 
+        # إذا لا يوجد سعر لحظي موثوق أثناء الفترات اللحظية نحولها إلى مراقبة فقط
+        if market_phase in {"open", "after_hours", "pre_market"} and (not price_reliable or current_price <= 0):
+            stock["decision"] = "مراقبة"
+            execution_mode = "مراقبة 👀"
+            execution_note = f"مصدر السعر الحالي: {stock.get('price_source_label', 'بيانات غير متاحة')}"
+            stock["owner_action"] = "👀 راقب السهم فقط حتى تتوفر بيانات سعر لحظية موثوقة"
+            stock["execution_mode"] = execution_mode
+            stock["execution_note"] = execution_note
+            return stock
+
         # منع أحكام خاطئة
         if risk_pct > 25:
             execution_mode = "تجنب ❌"
             execution_note = "المخاطرة مرتفعة جدًا"
         elif late_move_flag in {"CONFIRMED_LATE"} or execution_status in {"SKIP_FAR_FROM_ENTRY"}:
-            execution_mode = "متأخر ⚠️"
-            execution_note = "السهم تجاوز آخر دخول مناسب - لا تطارد السعر"
+            stock["decision"] = "مراقبة"
+            stock = recalc_reentry_plan(stock)
+            execution_mode = "مراقبة إعادة دخول 👀"
+            execution_note = stock.get("reentry_note") or "السهم تجاوز آخر دخول مناسب - راقب إعادة دخول"
         elif trade_type == "Breakout":
             has_good_volume = effective_volume_ratio >= 1.0 or intraday_ratio >= 1.1
             intraday_ok = (not market_open) or (above_vwap and opening_drive != "هابط")
@@ -666,6 +679,8 @@ def assign_execution_mode(stock: dict) -> dict:
             stock["owner_action"] = f"⏳ انتظر اختراق {round(breakout_price,2)} ثم تأكيد {round(confirmation_price,2)}"
         elif execution_mode == "انتظار تأكيد 📊":
             stock["owner_action"] = execution_note
+        elif execution_mode == "مراقبة إعادة دخول 👀":
+            stock["owner_action"] = stock.get("reentry_note") or "👀 راقب إعادة الدخول فقط"
         elif execution_mode in {"متأخر ⚠️", "تجنب ❌"}:
             stock["owner_action"] = "🚫 لا تطارد السعر الآن"
         else:
