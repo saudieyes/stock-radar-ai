@@ -1787,14 +1787,12 @@ def get_manual_watchlist():
     out = []
     for item in items:
         symbol = str(item.get("symbol", "")).upper().strip()
-        snap = get_snapshot_quote(symbol)
         prev = get_prev(symbol) or {}
-        current = to_float(snap.get("current_price", 0))
-        if current <= 0:
-            current = to_float(prev.get("price", 0))
+        intraday = get_intraday_snapshot(symbol)
+        live_block = build_live_price_block(symbol, prev, intraday)
+        current = to_float(live_block.get("display_price", 0))
         added_price = to_float(item.get("added_price", 0))
         change_pct = ((current - added_price) / added_price) * 100 if added_price > 0 and current > 0 else 0.0
-        phase = get_market_phase()
         out.append({
             "symbol": symbol,
             "added_price": safe_round(added_price),
@@ -1803,7 +1801,9 @@ def get_manual_watchlist():
             "recommendation": item.get("recommendation", ""),
             "note": item.get("note", ""),
             "added_at": item.get("added_at", ""),
-            "price_source_label": "بعد الإغلاق" if phase == "after_hours" else "قبل الافتتاح" if phase == "pre_market" else "مباشر" if phase == "open" else "آخر إغلاق"
+            "price_source_label": live_block.get("price_source_label", ""),
+            "live_price_available": live_block.get("live_price_available", False),
+            "display_price_label": live_block.get("display_price_label", "آخر إغلاق")
         })
     return {"count": len(out), "items": out}
 
