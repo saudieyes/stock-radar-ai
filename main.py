@@ -912,6 +912,12 @@ def build_live_price_block(symbol, prev_data, intraday_data):
     low_live = to_float(snap.get("low", prev_low)) or prev_low
     volume_live = to_float(snap.get("volume", prev_volume)) or prev_volume
 
+    live_price_available = current_price > 0 and reliable
+    display_price = current_price if current_price > 0 else previous_close
+    display_price_label = "السعر الحالي" if live_price_available or phase == "closed" else "آخر إغلاق"
+    display_change_pct = change_from_open_pct if phase == "open" else change_vs_prev_close_pct
+    display_change_available = live_price_available or phase == "closed"
+
     return {
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
@@ -926,6 +932,11 @@ def build_live_price_block(symbol, prev_data, intraday_data):
         "price_source": source,
         "price_source_label": price_source_label(source),
         "price_reliable_for_execution": reliable,
+        "live_price_available": live_price_available,
+        "display_price": safe_round(display_price),
+        "display_price_label": display_price_label,
+        "display_change_pct": safe_round(display_change_pct) if display_change_available else None,
+        "display_change_available": display_change_available,
         "last_price_update_ms": int(to_float(snap.get("updated", 0))),
         "last_price_update_label": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
     }
@@ -2007,3 +2018,4 @@ def debug_symbol(symbol: str):
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase())
     }
+
