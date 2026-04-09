@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 from fastapi.responses import FileResponse
 import requests
 import os
@@ -6,6 +6,7 @@ import csv
 import re
 from datetime import datetime, timedelta
 import time
+import json
 from zoneinfo import ZoneInfo
 from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels
 
@@ -29,6 +30,24 @@ HISTORY_CACHE = {}
 REF_INFO_CACHE = {}
 INTRADAY_CACHE = {}
 SNAPSHOT_CACHE = {}
+
+MANUAL_WATCHLIST_FILE = "manual_watchlist.json"
+
+def load_manual_watchlist():
+    try:
+        with open(MANUAL_WATCHLIST_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except:
+        return []
+
+def save_manual_watchlist(items):
+    try:
+        with open(MANUAL_WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
 
 INTRADAY_CACHE_TTL_OPEN = 12
 INTRADAY_CACHE_TTL_CLOSED = 60
@@ -211,32 +230,6 @@ def market_phase_label(phase: str) -> str:
         "closed": "مغلق",
     }
     return mapping.get(str(phase or "closed"), "مغلق")
-
-
-def is_realtime_phase(phase: str) -> bool:
-    return str(phase or "") in {"open", "after_hours", "pre_market"}
-
-
-def price_source_label(source: str) -> str:
-    mapping = {
-        "intraday_live": "مباشر أثناء السوق",
-        "snapshot_minute": "آخر دقيقة",
-        "snapshot_last_trade": "آخر صفقة",
-        "snapshot_day_close": "إغلاق/ملخص الجلسة",
-        "previous_close": "الإغلاق السابق",
-        "unavailable_realtime": "بيانات لحظية غير متاحة",
-        "error": "خطأ في جلب السعر",
-        "unknown": "غير معروف",
-    }
-    return mapping.get(str(source or "unknown"), str(source or "غير معروف"))
-
-
-def price_source_is_reliable(source: str, phase: str) -> bool:
-    source = str(source or "")
-    phase = str(phase or "")
-    if phase == "closed":
-        return source in {"previous_close", "snapshot_day_close", "snapshot_last_trade", "snapshot_minute"}
-    return source in {"intraday_live", "snapshot_minute", "snapshot_last_trade"}
 
 
 def get_snapshot_data(symbol):
@@ -502,48 +495,22 @@ def get_snapshot_quote(symbol):
         day_open = to_float(day.get("o")) or 0.0
         day_high = to_float(day.get("h")) or 0.0
         day_low = to_float(day.get("l")) or 0.0
-        day_close = to_float(day.get("c")) or 0.0
         day_volume = to_float(day.get("v")) or 0.0
 
         minute = get_latest_minute_price(symbol)
 
-        current_price = 0.0
-        source = "unknown"
-
-        if phase in {"open", "after_hours", "pre_market"}:
-            if minute.get("available") and to_float(minute.get("current_price", 0)) > 0:
-                current_price = to_float(minute.get("current_price", 0))
-                source = "snapshot_minute"
-            elif last_price > 0:
-                current_price = last_price
-                source = "snapshot_last_trade"
-            else:
-                current_price = 0.0
-                source = "unavailable_realtime"
-        else:
-            if day_close > 0:
-                current_price = day_close
-                source = "snapshot_day_close"
-            elif last_price > 0:
-                current_price = last_price
-                source = "snapshot_last_trade"
-            elif prev_close > 0:
-                current_price = prev_close
-                source = "previous_close"
-            else:
-                current_price = 0.0
-                source = "unknown"
-
-        if minute.get("available") and to_float(minute.get("current_price", 0)) > 0:
-            if minute.get("high", 0) > 0:
-                day_high = max(day_high, to_float(minute.get("high", 0)))
-            if minute.get("low", 0) > 0:
-                minute_low = to_float(minute.get("low", 0))
-                day_low = min(day_low, minute_low) if day_low > 0 else minute_low
-            if minute.get("volume", 0) > 0:
-                day_volume = max(day_volume, to_float(minute.get("volume", 0)))
-            if day_open <= 0 and to_float(minute.get("open", 0)) > 0:
-                day_open = to_float(minute.get("open", 0))
+        current_price = last_price or to_float(min_data.get("c")) or to_float(day.get("c")) or 0.0
+        if minute.get("available") and minute.get("current_price", 0) > 0:
+            minute_price = to_float(minute.get("current_price", 0))
+            if phase in {"open", "after_hours", "pre_market"}:
+                current_price = minute_price or current_price
+                if minute.get("high", 0) > 0:
+                    day_high = max(day_high, to_float(minute.get("high", 0)))
+                if minute.get("low", 0) > 0:
+                    minute_low = to_float(minute.get("low", 0))
+                    day_low = min(day_low, minute_low) if day_low > 0 else minute_low
+                if minute.get("volume", 0) > 0:
+                    day_volume = max(day_volume, to_float(minute.get("volume", 0)))
 
         if phase == "open":
             ttl = SNAPSHOT_CACHE_TTL_OPEN
@@ -571,9 +538,7 @@ def get_snapshot_quote(symbol):
             "change_vs_prev_close_pct": change_vs_prev_close_pct,
             "change_from_open_pct": change_from_open_pct,
             "updated": int(time.time() * 1000),
-            "source": source,
-            "source_label": price_source_label(source),
-            "reliable_for_execution": price_source_is_reliable(source, phase),
+            "source": "minute+snapshot" if minute.get("available") else "snapshot",
         }
         return _cache_set(SNAPSHOT_CACHE, cache_key, out, ttl)
     except:
@@ -589,8 +554,6 @@ def get_snapshot_quote(symbol):
             "change_from_open_pct": 0.0,
             "updated": 0,
             "source": "error",
-            "source_label": price_source_label("error"),
-            "reliable_for_execution": False,
         }
 
 
@@ -870,53 +833,46 @@ def build_live_price_block(symbol, prev_data, intraday_data):
     previous_close = prev_price
     change_vs_prev_close_pct = 0.0
     change_from_open_pct = 0.0
-    source = "unknown"
+    price_source = "unavailable"
+    price_source_label = "السعر اللحظي غير متاح"
+    live_price_available = False
+    price_reliable_for_execution = False
 
     if phase == "open" and intraday_data.get("available") and to_float(intraday_data.get("current_price", 0)) > 0:
         current_price = to_float(intraday_data.get("current_price", 0))
         open_price = to_float(intraday_data.get("session_open", 0)) or prev_open
         previous_close = prev_price
-        source = "intraday_live"
-        if open_price > 0 and current_price > 0:
+        live_price_available = True
+        price_reliable_for_execution = True
+        price_source = "live_intraday"
+        price_source_label = "مباشر أثناء السوق"
+        if open_price > 0:
             change_from_open_pct = ((current_price - open_price) / open_price) * 100
-        if previous_close > 0 and current_price > 0:
+        if previous_close > 0:
             change_vs_prev_close_pct = ((current_price - previous_close) / previous_close) * 100
-    elif snap.get("available") and to_float(snap.get("current_price", 0)) > 0:
+    elif phase in {"after_hours", "pre_market"} and snap.get("available") and to_float(snap.get("current_price", 0)) > 0:
         current_price = to_float(snap.get("current_price", 0))
         open_price = to_float(snap.get("open", prev_open)) or prev_open
         previous_close = to_float(snap.get("previous_close", prev_price)) or prev_price
         change_from_open_pct = to_float(snap.get("change_from_open_pct", 0))
         change_vs_prev_close_pct = to_float(snap.get("change_vs_prev_close_pct", 0))
-        source = str(snap.get("source", "unknown") or "unknown")
-    else:
-        if phase == "closed":
-            current_price = prev_price
-            open_price = prev_open
-            previous_close = prev_price
-            source = "previous_close" if prev_price > 0 else "unknown"
-            if open_price > 0 and current_price > 0:
-                change_from_open_pct = ((current_price - open_price) / open_price) * 100
-        else:
-            current_price = 0.0
-            open_price = to_float(snap.get("open", prev_open)) or prev_open
-            previous_close = to_float(snap.get("previous_close", prev_price)) or prev_price
-            source = "unavailable_realtime"
-
-    reliable = price_source_is_reliable(source, phase)
-    if is_realtime_phase(phase) and not reliable:
+        live_price_available = True
+        price_reliable_for_execution = True
+        price_source = phase
+        price_source_label = "بعد الإغلاق" if phase == "after_hours" else "قبل الافتتاح"
+    elif phase == "closed":
         current_price = 0.0
-        change_vs_prev_close_pct = 0.0
-        change_from_open_pct = 0.0
+        open_price = prev_open
+        previous_close = prev_price
+        price_source = "previous_close"
+        price_source_label = "آخر إغلاق"
+        live_price_available = False
+        price_reliable_for_execution = False
 
-    high_live = to_float(snap.get("high", prev_high)) or prev_high
-    low_live = to_float(snap.get("low", prev_low)) or prev_low
-    volume_live = to_float(snap.get("volume", prev_volume)) or prev_volume
-
-    live_price_available = current_price > 0 and reliable
-    display_price = current_price if current_price > 0 else previous_close
-    display_price_label = "السعر الحالي" if live_price_available or phase == "closed" else "آخر إغلاق"
+    display_price = current_price if current_price > 0 else prev_price
+    display_price_label = "السعر الحالي" if live_price_available else "آخر إغلاق"
     display_change_pct = change_from_open_pct if phase == "open" else change_vs_prev_close_pct
-    display_change_available = live_price_available or phase == "closed"
+    display_change_available = True if (live_price_available or prev_price > 0) else False
 
     return {
         "market_phase": phase,
@@ -926,16 +882,16 @@ def build_live_price_block(symbol, prev_data, intraday_data):
         "previous_close_live": safe_round(previous_close),
         "change_from_open_pct": safe_round(change_from_open_pct),
         "change_vs_prev_close_pct": safe_round(change_vs_prev_close_pct),
-        "high_live": safe_round(high_live),
-        "low_live": safe_round(low_live),
-        "volume_live": safe_round(volume_live),
-        "price_source": source,
-        "price_source_label": price_source_label(source),
-        "price_reliable_for_execution": reliable,
+        "high_live": safe_round(to_float(snap.get("high", prev_high)) or prev_high),
+        "low_live": safe_round(to_float(snap.get("low", prev_low)) or prev_low),
+        "volume_live": safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume),
+        "price_source": price_source,
+        "price_source_label": price_source_label,
         "live_price_available": live_price_available,
+        "price_reliable_for_execution": price_reliable_for_execution,
         "display_price": safe_round(display_price),
         "display_price_label": display_price_label,
-        "display_change_pct": safe_round(display_change_pct) if display_change_available else None,
+        "display_change_pct": safe_round(display_change_pct),
         "display_change_available": display_change_available,
         "last_price_update_ms": int(to_float(snap.get("updated", 0))),
         "last_price_update_label": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
@@ -1643,12 +1599,6 @@ def trade_plan_pro(symbol):
     live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
 
-    if not live_block.get("price_reliable_for_execution", False) and live_block.get("market_phase") in {"open", "after_hours", "pre_market"}:
-        if decision in {"دخول قوي", "دخول بحذر"}:
-            decision = "مراقبة"
-        risk_flags.append(f"مصدر السعر غير موثوق للتنفيذ: {live_block.get('price_source_label', '-')}")
-        reasons.append(f"مصدر السعر الحالي: {live_block.get('price_source_label', '-')}")
-
     return {
         "symbol": symbol,
         "type": trade_type,
@@ -1730,11 +1680,6 @@ def build_fallback_trade(symbol: str):
     target_2 = entry_real + max((entry_real - stop_loss) * 1.5, current * 0.05)
     risk_pct = ((entry_real - stop_loss) / entry_real * 100) if entry_real > stop_loss > 0 else 0.0
 
-    if not live_block.get("price_reliable_for_execution", False) and live_block.get("market_phase") in {"open", "after_hours", "pre_market"}:
-        risk_flags.append(f"مصدر السعر غير موثوق للتنفيذ: {live_block.get('price_source_label', '-')}")
-        execution_status = "WAIT_PRICE_SOURCE"
-        execution_note = "البيانات اللحظية الحالية غير موثوقة - راقب فقط"
-
     out = {
         "symbol": symbol,
         "type": "Breakout",
@@ -1812,6 +1757,63 @@ def analyze_symbol_overview(symbol):
         **live_block
     }
 
+
+
+@app.post("/watchlist/add")
+def add_to_manual_watchlist(payload: dict = Body(...)):
+    symbol = str((payload or {}).get("symbol", "")).upper().strip()
+    price = to_float((payload or {}).get("price", 0))
+    recommendation = str((payload or {}).get("recommendation", "")).strip()
+    note = str((payload or {}).get("note", "")).strip()
+    if not symbol:
+        return {"ok": False, "error": "رمز السهم مطلوب"}
+    items = load_manual_watchlist()
+    for item in items:
+        if str(item.get("symbol", "")).upper() == symbol:
+            return {"ok": True, "status": "exists"}
+    items.append({
+        "symbol": symbol,
+        "added_price": safe_round(price),
+        "recommendation": recommendation,
+        "note": note,
+        "added_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    })
+    save_manual_watchlist(items)
+    return {"ok": True, "status": "added"}
+
+@app.get("/watchlist/manual")
+def get_manual_watchlist():
+    items = load_manual_watchlist()
+    out = []
+    for item in items:
+        symbol = str(item.get("symbol", "")).upper().strip()
+        snap = get_snapshot_quote(symbol)
+        prev = get_prev(symbol) or {}
+        current = to_float(snap.get("current_price", 0))
+        if current <= 0:
+            current = to_float(prev.get("price", 0))
+        added_price = to_float(item.get("added_price", 0))
+        change_pct = ((current - added_price) / added_price) * 100 if added_price > 0 and current > 0 else 0.0
+        phase = get_market_phase()
+        out.append({
+            "symbol": symbol,
+            "added_price": safe_round(added_price),
+            "current_price": safe_round(current),
+            "change_pct": safe_round(change_pct),
+            "recommendation": item.get("recommendation", ""),
+            "note": item.get("note", ""),
+            "added_at": item.get("added_at", ""),
+            "price_source_label": "بعد الإغلاق" if phase == "after_hours" else "قبل الافتتاح" if phase == "pre_market" else "مباشر" if phase == "open" else "آخر إغلاق"
+        })
+    return {"count": len(out), "items": out}
+
+@app.post("/watchlist/remove")
+def remove_from_manual_watchlist(payload: dict = Body(...)):
+    symbol = str((payload or {}).get("symbol", "")).upper().strip()
+    items = load_manual_watchlist()
+    new_items = [x for x in items if str(x.get("symbol", "")).upper() != symbol]
+    save_manual_watchlist(new_items)
+    return {"ok": True, "removed": symbol}
 
 @app.get("/")
 def home():
@@ -2018,3 +2020,4 @@ def debug_symbol(symbol: str):
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase())
     }
+
