@@ -619,7 +619,12 @@ def assign_execution_mode(stock: dict) -> dict:
             return stock
 
         # منع أحكام خاطئة
-        if risk_pct > 25:
+        if not price_reliable and market_phase in {"open", "after_hours", "pre_market"}:
+            stock["decision"] = "مراقبة"
+            stock = recalc_reentry_plan(stock)
+            execution_mode = "مراقبة 👀"
+            execution_note = "السعر اللحظي غير متاح بشكل موثوق - راقب فقط ولا تبنِ قرار دخول"
+        elif risk_pct > 25:
             execution_mode = "تجنب ❌"
             execution_note = "المخاطرة مرتفعة جدًا"
         elif late_move_flag in {"CONFIRMED_LATE"} or execution_status in {"SKIP_FAR_FROM_ENTRY"}:
@@ -681,6 +686,10 @@ def assign_execution_mode(stock: dict) -> dict:
             stock["owner_action"] = execution_note
         elif execution_mode == "مراقبة إعادة دخول 👀":
             stock["owner_action"] = stock.get("reentry_note") or "👀 راقب إعادة الدخول فقط"
+        elif execution_mode == "مراقبة إعادة دخول 👀":
+            stock["owner_action"] = stock.get("reentry_note") or "👀 راقب إعادة دخول جديدة"
+        elif execution_mode == "مراقبة 👀":
+            stock["owner_action"] = execution_note or "👀 تحت المراقبة فقط"
         elif execution_mode in {"متأخر ⚠️", "تجنب ❌"}:
             stock["owner_action"] = "🚫 لا تطارد السعر الآن"
         else:
