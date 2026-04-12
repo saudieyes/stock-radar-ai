@@ -1326,17 +1326,31 @@ def trade_plan_pro(symbol):
     stop = low * 0.99 if low > 0 else price * 0.95
     early_momentum = False
 
+    setup_tight = (
+        near_high
+        and trend in {"صاعد", "صاعد قوي"}
+        and 0.012 <= range_pct <= 0.08
+        and close_strength >= 0.55
+        and location == "قرب مقاومة"
+    )
+
     if near_high and momentum == "صاعد":
         trade_type = "Breakout"
         entry = high * 1.002
         stop = low * 0.995
+    elif setup_tight and volume_ratio >= 0.9:
+        trade_type = "Breakout"
+        entry = high * 1.001
+        stop = low * 0.995
+        early_momentum = True
+        risk_flags.append("إشارة مبكرة قبل الاختراق")
     elif near_high and trend in {"صاعد", "صاعد قوي"} and volume_ratio >= 1.1:
         trade_type = "Breakout"
         entry = high * 1.001
         stop = low * 0.995
         early_momentum = True
         risk_flags.append("اقتراب مبكر من الاختراق")
-    elif near_low:
+    elif near_low or (trend in {"صاعد", "صاعد قوي"} and location == "قرب دعم" and close_strength >= 0.45):
         trade_type = "Pullback"
         entry = price
         stop = low * 0.99
@@ -1540,6 +1554,31 @@ def trade_plan_pro(symbol):
         if decision in {"دخول قوي", "دخول بحذر"}:
             decision = "مراقبة"
 
+    # فلتر تضارب التوصيات
+    if trade_type == "Breakout":
+        weak_intraday = intraday["available"] and intraday.get("intraday_volume_ratio", 0) < 1.0 and not intraday.get("above_vwap_proxy", False)
+        weak_candle = close_strength < 0.5 and body_strength < 0.28
+        if (trend == "هابط" or weak_candle or weak_intraday) and decision in {"دخول قوي", "دخول بحذر"} and not early_momentum:
+            decision = "مراقبة"
+            risk_flags.append("تضارب بين التوصية والمؤشرات")
+
+    # فلتر الاختراق الوهمي
+    if trade_type == "Breakout":
+        false_breakout_signal = (
+            breakout_quality == "FAILED"
+            or (close_strength < 0.5 and body_strength < 0.25 and effective_volume_ratio < 1.0)
+        )
+        if false_breakout_signal:
+            decision = "مراقبة"
+            risk_flags.append("احتمال اختراق وهمي")
+
+    # تحسين الارتداد من الدعم
+    if trade_type == "Pullback":
+        if trend in {"صاعد", "صاعد قوي"} and risk_pct <= 0.07 and close_strength >= 0.45 and effective_volume_ratio >= 0.9:
+            if quality_score >= 64:
+                decision = "دخول بحذر"
+                risk_flags.append("ارتداد جيد من دعم")
+
     if trend == "هابط" and decision in {"دخول قوي", "دخول بحذر"}:
         decision = "مراقبة"
 
@@ -1585,6 +1624,8 @@ def trade_plan_pro(symbol):
 
     if early_momentum:
         reasons.append("بداية زخم مبكرة")
+    if trade_type == "Breakout" and close_strength >= 0.7 and body_strength >= 0.45:
+        reasons.append("الشمعة نظيفة نسبيًا")
 
     if breakout_quality == "STRONG":
         reasons.append("شمعة الاختراق قوية")
@@ -1787,12 +1828,14 @@ def get_manual_watchlist():
     out = []
     for item in items:
         symbol = str(item.get("symbol", "")).upper().strip()
+        snap = get_snapshot_quote(symbol)
         prev = get_prev(symbol) or {}
-        intraday = get_intraday_snapshot(symbol)
-        live_block = build_live_price_block(symbol, prev, intraday)
-        current = to_float(live_block.get("display_price", 0))
+        current = to_float(snap.get("current_price", 0))
+        if current <= 0:
+            current = to_float(prev.get("price", 0))
         added_price = to_float(item.get("added_price", 0))
         change_pct = ((current - added_price) / added_price) * 100 if added_price > 0 and current > 0 else 0.0
+        phase = get_market_phase()
         out.append({
             "symbol": symbol,
             "added_price": safe_round(added_price),
@@ -1801,9 +1844,7 @@ def get_manual_watchlist():
             "recommendation": item.get("recommendation", ""),
             "note": item.get("note", ""),
             "added_at": item.get("added_at", ""),
-            "price_source_label": live_block.get("price_source_label", ""),
-            "live_price_available": live_block.get("live_price_available", False),
-            "display_price_label": live_block.get("display_price_label", "آخر إغلاق")
+            "price_source_label": "بعد الإغلاق" if phase == "after_hours" else "قبل الافتتاح" if phase == "pre_market" else "مباشر" if phase == "open" else "آخر إغلاق"
         })
     return {"count": len(out), "items": out}
 
@@ -1842,7 +1883,7 @@ def trade_scan():
     rejected = []
     errors = []
 
-    universe = get_active_universe(max_symbols=60)
+    universe = get_active_universe(max_symbols=100)
 
     for s in universe:
         try:
@@ -2020,4 +2061,3 @@ def debug_symbol(symbol: str):
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase())
     }
-
