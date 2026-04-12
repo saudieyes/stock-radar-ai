@@ -73,7 +73,7 @@
     <div class="topbar">
       <div>
         <div class="title">Stock Radar AI</div>
-        <div class="subtitle">لوحة عرض مبسطة للفرص مع بطاقات قابلة للتوسيع</div>
+        <div class="subtitle">لوحة عرض ذكية للفرص مع كشف مبكر وتفاصيل قابلة للتوسيع</div>
       </div>
       <div class="actions">
         <button class="primary" onclick="loadScan()">تحديث الفرص</button>
@@ -100,26 +100,18 @@
       <div id="singleStockResult" style="margin-top:12px;"></div>
     </div>
 
-    <div class="section" id="manual-watchlist-section">
-      <div class="section-header">
-        <div class="section-title">📌 قائمة المتابعة اليدوية</div>
-        <div class="section-count" id="manualWatchlistCount">0</div>
-      </div>
-      <div id="manualWatchlistContent" class="cards"></div>
-    </div>
-
     <div class="footer-note">البطاقة تعرض أهم المعلومات أولًا، والتفاصيل الكاملة تظهر عند الضغط على "عرض التفاصيل".</div>
   </div>
 
   <script>
     function formatNumber(value) {
-      if (value === null || value === undefined || value === "" || value === 0) return "";
+      if (value === null || value === undefined || value === "") return "";
       const num = Number(value);
       if (Number.isNaN(num)) return value;
       return num.toLocaleString("en-US", { maximumFractionDigits: 2 });
     }
     function formatPercent(value) {
-      if (value === null || value === undefined || value === "" || value === 0) return "";
+      if (value === null || value === undefined || value === "") return "";
       const num = Number(value);
       if (Number.isNaN(num)) return value;
       const cls = num > 0 ? "green" : num < 0 ? "red" : "";
@@ -135,12 +127,6 @@
       if (value === null || value === undefined || value === "") return "";
       return String(value);
     }
-
-    function detailBox(label, value, isHtml=false) {
-      if (value === null || value === undefined || value === "" || value === 0 || value === "0" || value === "-" ) return "";
-      return `<div class="detail-box"><div class="detail-label">${label}</div><div class="detail-value">${isHtml ? value : safeText(value)}</div></div>`;
-    }
-
     function renderStatusbar(data) {
       const phase = data?.market_phase || "closed";
       const phaseLabel = data?.market_phase_label || (phase === "open" ? "مفتوح" : "مغلق");
@@ -202,51 +188,44 @@
             <div class="metric"><div class="metric-label">${safeText(changeLabel)}</div><div class="metric-value">${changePct === null ? "غير متاح" : formatPercent(changePct)}</div></div>
             <div class="metric"><div class="metric-label">${entryLabel}</div><div class="metric-value">${formatNumber(entryValue)}</div></div>
             <div class="metric"><div class="metric-label">وقف الخسارة</div><div class="metric-value">${formatNumber(stock.stop_loss)}</div></div>
-            <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
+            <div class="metric"><div class="metric-label">درجة الثقة</div><div class="metric-value">${formatNumber(stock.quality_score)}%</div></div>
             <div class="metric"><div class="metric-label">المخاطرة</div><div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div></div>
           </div>
 
-          ${stock.ai_summary ? `<div class="summary">${safeText(stock.ai_summary)}</div>` : ``}
-          <div class="summary"><strong>وضع التنفيذ:</strong> ${mainAction}</div>
-          <div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "")}${(stock.timing_signal || stock.execution_mode) ? ` | <strong>إشارة التوقيت:</strong> ${safeText(stock.timing_signal || stock.execution_mode || "")}` : ``}</div>
-          <div class="summary"><strong>مصدر السعر:</strong> ${safeText(stock.price_source_label || "")}${stock.live_price_available === false && stock.market_phase !== "closed" ? " | السعر اللحظي غير متاح الآن" : ""}</div>
-          ${stock.breakout_status ? `<div class="summary"><strong>حالة الاختراق:</strong> ${safeText(stock.breakout_status || "")}</div>` : ``}
-          <div class="actions" style="margin:10px 0 4px 0">
-            <button onclick="addToManualWatchlist('${stock.symbol}', ${Number(currentPrice) || 0}, '${(stock.execution_mode || stock.decision || "").replace(/'/g, " ")}', '${(stock.owner_action || "").replace(/'/g, " ")}')">📌 إضافة للمراقبة</button>
-          </div>
+          <div class="summary">${safeText(stock.ai_summary)}</div>
+          <div class="summary"><strong>وضع التنفيذ:</strong> ${mainAction}</div><div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "-")} | <strong>إشارة التوقيت:</strong> ${safeText(stock.timing_signal || stock.execution_mode || "-")}</div>
+          <div class="summary"><strong>مصدر السعر:</strong> ${safeText(stock.price_source_label || "-")}${stock.live_price_available === false && stock.market_phase !== "closed" ? " | السعر اللحظي غير متاح الآن" : ""}</div>
+          <div class="summary"><strong>حالة الاختراق:</strong> ${safeText(stock.breakout_status || "-")}</div>
 
           <details>
             <summary>عرض التفاصيل</summary>
             <div class="details-grid">
-              ${detailBox("سعر الافتتاح", formatNumber(openPrice), true)}
-              ${detailBox("الإغلاق السابق", formatNumber(stock.previous_close_live), true)}
-              ${detailBox("نوع المرحلة", stock.market_phase_label)}
-              ${detailBox("مصدر السعر", stock.price_source_label)}
-              ${detailBox("سعر الاختراق", formatNumber(stock.breakout_price), true)}
-              ${detailBox("سعر التأكيد", formatNumber(stock.confirmation_price), true)}
-              ${detailBox("الدخول الفعلي", formatNumber(stock.entry_price_real ?? stock.entry), true)}
-              ${detailBox("آخر دخول مناسب", formatNumber(stock.late_entry_price), true)}
-              ${isReentryWatch ? detailBox("إعادة دخول مقترحة", formatNumber(stock.reentry_pullback_price ?? stock.smart_entry_price), true) : ``}
-              ${isReentryWatch ? detailBox("اختراق جديد فوق", formatNumber(stock.rebreakout_price), true) : ``}
-              ${detailBox("السيولة اليومية", formatNumber(stock.volume_ratio), true)}
-              ${detailBox("السيولة الفعلية", formatNumber(stock.effective_volume_ratio), true)}
-              ${detailBox("البعد عن نقطة الدخول", formatPercent(stock.distance_from_entry_pct ?? 0), true)}
-              ${detailBox("المسافة إلى الدخول", formatPercent(stock.distance_to_entry_pct ?? 0), true)}
-              ${detailBox("الترند", stock.trend)}
-              ${detailBox("نوع الفرصة", stock.type)}
-              ${detailBox("الهدف الأول", formatNumber(stock.target_1), true)}
-              ${detailBox("الهدف الثاني", formatNumber(stock.target_2), true)}
-              ${detailBox("VWAP اللحظي", stock.vwap_status)}
-              ${detailBox("حالة السيولة", stock.volume_status)}
-              ${detailBox("دخول ذكي", formatNumber(stock.smart_entry_price), true)}
-              ${detailBox("وقف ذكي", formatNumber(stock.smart_stop_price), true)}
-              ${detailBox("هدف ذكي", formatNumber(stock.smart_target_1), true)}
-              ${detailBox("العائد/المخاطرة للهدف 1", formatNumber(stock.rr_1), true)}
-              ${detailBox("صالح لمدة", stock.valid_for)}
-              ${detailBox("جودة البيانات", stock.data_quality)}
-              ${detailBox("الإجراء المقترح", stock.owner_action)}
-              ${detailBox("الخبر / المحفز", stock.news_note)}
-              ${flags.length ? `<div class="detail-box full"><div class="detail-label">إشارات التحذير</div><div class="detail-value"><ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul></div></div>` : ``}
+              <div class="detail-box"><div class="detail-label">سعر الافتتاح</div><div class="detail-value">${formatNumber(openPrice)}</div></div><div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live)}</div></div><div class="detail-box"><div class="detail-label">نوع المرحلة</div><div class="detail-value">${safeText(stock.market_phase_label)}</div></div><div class="detail-box"><div class="detail-label">مصدر السعر</div><div class="detail-value">${safeText(stock.price_source_label || "-")}</div></div>
+              <div class="detail-box"><div class="detail-label">الإغلاق السابق</div><div class="detail-value">${formatNumber(stock.previous_close_live ?? 0)}</div></div>
+              <div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div>
+              <div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div>
+              <div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real ?? stock.entry)}</div></div>
+              <div class="detail-box"><div class="detail-label">آخر دخول مناسب</div><div class="detail-value">${formatNumber(stock.late_entry_price)}</div></div>
+              ${isReentryWatch ? `<div class="detail-box"><div class="detail-label">إعادة دخول مقترحة</div><div class="detail-value">${formatNumber(stock.reentry_pullback_price ?? stock.smart_entry_price)}</div></div><div class="detail-box"><div class="detail-label">اختراق جديد فوق</div><div class="detail-value">${formatNumber(stock.rebreakout_price)}</div></div>` : ``}
+              <div class="detail-box"><div class="detail-label">السيولة اليومية</div><div class="detail-value">${formatNumber(stock.volume_ratio)}</div></div>
+              <div class="detail-box"><div class="detail-label">السيولة الفعلية</div><div class="detail-value">${formatNumber(stock.effective_volume_ratio)}</div></div>
+              <div class="detail-box"><div class="detail-label">البعد عن نقطة الدخول</div><div class="detail-value">${formatPercent(stock.distance_from_entry_pct ?? 0)}</div></div>
+              <div class="detail-box"><div class="detail-label">المسافة إلى الدخول</div><div class="detail-value">${formatPercent(stock.distance_to_entry_pct ?? 0)}</div></div>
+              <div class="detail-box"><div class="detail-label">الترند</div><div class="detail-value">${safeText(stock.trend)}</div></div>
+              <div class="detail-box"><div class="detail-label">نوع الفرصة</div><div class="detail-value">${safeText(stock.type)}</div></div>
+              <div class="detail-box"><div class="detail-label">حالة السوق</div><div class="detail-value">${safeText(stock.market_phase_label || stock.market_phase || "-")}</div></div>
+              <div class="detail-box"><div class="detail-label">الهدف الأول</div><div class="detail-value">${formatNumber(stock.target_1)}</div></div>
+              <div class="detail-box"><div class="detail-label">الهدف الثاني</div><div class="detail-value">${formatNumber(stock.target_2)}</div></div><div class="detail-box"><div class="detail-label">سعر الاختراق</div><div class="detail-value">${formatNumber(stock.breakout_price)}</div></div><div class="detail-box"><div class="detail-label">سعر التأكيد</div><div class="detail-value">${formatNumber(stock.confirmation_price)}</div></div><div class="detail-box"><div class="detail-label">الدخول الفعلي</div><div class="detail-value">${formatNumber(stock.entry_price_real)}</div></div><div class="detail-box"><div class="detail-label">آخر دخول مناسب</div><div class="detail-value">${formatNumber(stock.late_entry_price)}</div></div><div class="detail-box"><div class="detail-label">حالة الاختراق</div><div class="detail-value">${safeText(stock.breakout_status)}</div></div><div class="detail-box"><div class="detail-label">VWAP اللحظي</div><div class="detail-value">${safeText(stock.vwap_status)}</div></div><div class="detail-box"><div class="detail-label">حالة السيولة</div><div class="detail-value">${safeText(stock.volume_status)}</div></div><div class="detail-box"><div class="detail-label">دخول ذكي</div><div class="detail-value">${formatNumber(stock.smart_entry_price)}</div></div><div class="detail-box"><div class="detail-label">وقف ذكي</div><div class="detail-value">${formatNumber(stock.smart_stop_price)}</div></div><div class="detail-box"><div class="detail-label">هدف ذكي</div><div class="detail-value">${formatNumber(stock.smart_target_1)}</div></div>
+              <div class="detail-box"><div class="detail-label">العائد/المخاطرة للهدف 1</div><div class="detail-value">${formatNumber(stock.rr_1)}</div></div>
+              <div class="detail-box"><div class="detail-label">صالح لمدة</div><div class="detail-value">${safeText(stock.valid_for)}</div></div>
+              <div class="detail-box"><div class="detail-label">جودة البيانات</div><div class="detail-value">${safeText(stock.data_quality)}</div></div>
+              <div class="detail-box full"><div class="detail-label">الإجراء المقترح</div><div class="detail-value">${safeText(stock.owner_action)}</div></div>
+              <div class="detail-box full"><div class="detail-label">الخبر / المحفز</div><div class="detail-value">${safeText(stock.news_note)}</div></div>
+              <div class="detail-box"><div class="detail-label">نوع حداثة الخبر</div><div class="detail-value">${safeText(stock.news_freshness_label)}</div></div>
+              <div class="detail-box"><div class="detail-label">جلسات منذ الخبر</div><div class="detail-value">${safeText(stock.news_sessions_since)}</div></div>
+              <div class="detail-box"><div class="detail-label">الشركة</div><div class="detail-value">${safeText(stock.company)}</div></div>
+              <div class="detail-box"><div class="detail-label">القطاع / الصناعة</div><div class="detail-value">${safeText(stock.sector)} / ${safeText(stock.industry)}</div></div>
+              <div class="detail-box full"><div class="detail-label">الإشارات التحذيرية</div><div class="detail-value">${flags.length ? `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>` : "لا يوجد"}</div></div>
             </div>
           </details>
         </div>`;
@@ -313,72 +292,7 @@
         result.innerHTML = `<div class="error">تعذر فحص السهم: ${safeText(err.message)}</div>`;
       }
     }
-
-    function manualWatchCard(item) {
-      return `
-        <div class="card">
-          <div class="card-top">
-            <div>
-              <div class="symbol">${safeText(item.symbol)}</div>
-              <div class="company">${safeText(item.recommendation || "متابعة يدوية")}</div>
-            </div>
-            <div class="badges">
-              <span class="badge badge-watch">${safeText(item.display_price_label || "سعر مرجعي")}</span>
-              <span class="badge badge-rank">${safeText(item.price_source_label || "")}</span>
-            </div>
-          </div>
-          <div class="metrics">
-            <div class="metric"><div class="metric-label">سعر الإضافة</div><div class="metric-value">${formatNumber(item.added_price) || "—"}</div></div>
-            <div class="metric"><div class="metric-label">السعر الآن</div><div class="metric-value">${formatNumber(item.current_price) || "غير متاح"}</div></div>
-            <div class="metric"><div class="metric-label">الأداء</div><div class="metric-value">${formatPercent(item.change_pct) || "غير متاح"}</div></div>
-            <div class="metric"><div class="metric-label">وقت الإضافة</div><div class="metric-value">${safeText(item.added_at)}</div></div>
-          </div>
-          ${item.note ? `<div class="summary">${safeText(item.note)}</div>` : ``}
-          <div class="actions">
-            <button onclick="removeFromManualWatchlist('${item.symbol}')">🗑 إزالة</button>
-          </div>
-        </div>
-      `;
-    }
-
-    async function loadManualWatchlist() {
-      try {
-        const r = await fetch('/watchlist/manual');
-        const data = await r.json();
-        const items = data.items || [];
-        document.getElementById('manualWatchlistCount').innerText = items.length;
-        document.getElementById('manualWatchlistContent').innerHTML = items.length ? items.map(manualWatchCard).join('') : '<div class="empty">لا توجد أسهم محفوظة في المتابعة اليدوية</div>';
-      } catch (e) {
-        document.getElementById('manualWatchlistContent').innerHTML = '<div class="error">تعذر تحميل قائمة المتابعة اليدوية</div>';
-      }
-    }
-
-    async function addToManualWatchlist(symbol, price, recommendation, note) {
-      try {
-        await fetch('/watchlist/add', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({symbol, price, recommendation, note})
-        });
-        await loadManualWatchlist();
-      } catch (e) {}
-    }
-
-    async function removeFromManualWatchlist(symbol) {
-      try {
-        await fetch('/watchlist/remove', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({symbol})
-        });
-        await loadManualWatchlist();
-      } catch (e) {}
-    }
-
-    loadManualWatchlist();
-
     loadScan();
   </script>
 </body>
 </html>
-
