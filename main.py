@@ -9,9 +9,12 @@ import time
 import json
 from zoneinfo import ZoneInfo
 try:
-    from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile
+    from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 except Exception:
-    from scanner_resend_momentum_suite import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile
+    try:
+        from scanner_resend_momentum_suite import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
+    except Exception:
+        from scanner_resend_momentum_suite_no_conflict import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 
 app = FastAPI()
 
@@ -37,6 +40,9 @@ PERFORMANCE_FILE = "signal_performance.json"
 
 MANUAL_WATCHLIST_FILE = "manual_watchlist.json"
 
+def ny_now():
+    return datetime.now(ZoneInfo("America/New_York"))
+
 def load_manual_watchlist():
     try:
         with open(MANUAL_WATCHLIST_FILE, "r", encoding="utf-8") as f:
@@ -53,73 +59,274 @@ def save_manual_watchlist(items):
         pass
 
 
-def load_performance_items():
+def get_performance_week_window(base_dt=None):
+    dt = base_dt.astimezone(ZoneInfo("America/New_York")) if base_dt else ny_now()
+    monday = dt.date() - timedelta(days=dt.weekday())
+    friday = monday + timedelta(days=4)
+    return monday.isoformat(), friday.isoformat()
+
+
+def get_performance_week_key(base_dt=None):
+    week_start, week_end = get_performance_week_window(base_dt)
+    return f"{week_start}_{week_end}"
+
+
+def make_blank_performance_store(base_dt=None):
+    week_start, week_end = get_performance_week_window(base_dt)
+    return {
+        "active_week_key": get_performance_week_key(base_dt),
+        "active_week_start": week_start,
+        "active_week_end": week_end,
+        "active_records": [],
+        "weekly_archive": [],
+    }
+
+
+def make_performance_summary(records):
+    wins = sum(1 for r in records if r.get("outcome") == "win")
+    losses = sum(1 for r in records if r.get("outcome") == "loss")
+    pending = sum(1 for r in records if r.get("outcome") not in {"win", "loss"})
+    total = len(records)
+    win_rate = safe_round((wins / total) * 100, 2) if total > 0 else 0.0
+    return {
+        "count": total,
+        "wins": wins,
+        "losses": losses,
+        "pending": pending,
+        "win_rate_pct": win_rate,
+    }
+
+
+def build_archive_summary_for_week(week_start, week_end, records):
+    summary = make_performance_summary(records)
+    return {
+        "week_key": f"{week_start}_{week_end}",
+        "week_start": week_start,
+        "week_end": week_end,
+        "count": summary["count"],
+        "wins": summary["wins"],
+        "losses": summary["losses"],
+        "pending": summary["pending"],
+        "win_rate_pct": summary["win_rate_pct"],
+    }
+
+
+def normalize_performance_store(store):
+    if not isinstance(store, dict):
+        store = make_blank_performance_store()
+    store.setdefault("active_week_key", get_performance_week_key())
+    store.setdefault("active_week_start", get_performance_week_window()[0])
+    store.setdefault("active_week_end", get_performance_week_window()[1])
+    store.setdefault("active_records", [])
+    store.setdefault("weekly_archive", [])
+    if not isinstance(store.get("active_records"), list):
+        store["active_records"] = []
+    if not isinstance(store.get("weekly_archive"), list):
+        store["weekly_archive"] = []
+    return store
+
+
+def migrate_legacy_performance_items(items):
+    store = make_blank_performance_store()
+    week_start = store["active_week_start"]
+    week_end = store["active_week_end"]
+    records = []
+    for item in items if isinstance(items, list) else []:
+        signal_type = str(item.get("signal_type", "") or "")
+        if signal_type not in {"دخول قوي", "دخول بحذر"}:
+            continue
+        item_date = str(item.get("date", "") or "")
+        if not item_date or item_date < week_start or item_date > week_end:
+            continue
+        entry_price = float(item.get("entry_price", 0) or 0)
+        if entry_price <= 0:
+            continue
+        created_at = f"{item_date} {str(item.get('time', '') or '').strip()}".strip()
+        records.append({
+            "id": f"{store['active_week_key']}::{str(item.get('symbol', '')).upper().strip()}",
+            "symbol": str(item.get("symbol", "") or "").upper().strip(),
+            "signal_type": signal_type,
+            "entry_price": safe_round(entry_price),
+            "target_price": 0.0,
+            "stop_loss": 0.0,
+            "first_seen_at": created_at,
+            "last_seen_at": created_at,
+            "current_price": float(item.get("current_price", 0) or 0),
+            "max_price_seen": float(item.get("current_price", 0) or 0),
+            "min_price_seen": float(item.get("current_price", 0) or 0),
+            "price_source_label": str(item.get("price_source", "") or ""),
+            "strategy_label": str(item.get("strategy_label", "") or ""),
+            "status_mark": "⏳",
+            "status_label": "قيد المتابعة",
+            "outcome": "pending",
+            "closed_at": "",
+            "market_phase": str(item.get("market_phase", "") or ""),
+            "last_change_pct": float(item.get("change_pct", 0) or 0),
+        })
+    store["active_records"] = records[:200]
+    return store
+
+
+def load_performance_store():
     try:
         with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, list) else []
+            raw = json.load(f)
     except:
-        return []
+        return make_blank_performance_store()
+
+    if isinstance(raw, list):
+        return migrate_legacy_performance_items(raw)
+
+    return normalize_performance_store(raw)
 
 
-def save_performance_items(items):
+def save_performance_store(store):
     try:
         with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
+            json.dump(normalize_performance_store(store), f, ensure_ascii=False, indent=2)
     except:
         pass
+
+
+def rollover_performance_store_if_needed(store, base_dt=None):
+    store = normalize_performance_store(store)
+    current_week_key = get_performance_week_key(base_dt)
+    if store.get("active_week_key") == current_week_key:
+        return store
+
+    old_records = list(store.get("active_records", []))
+    old_week_start = str(store.get("active_week_start", "") or "")
+    old_week_end = str(store.get("active_week_end", "") or "")
+    if old_records and old_week_start and old_week_end:
+        archive_entry = build_archive_summary_for_week(old_week_start, old_week_end, old_records)
+        existing_index = next((i for i, row in enumerate(store.get("weekly_archive", [])) if row.get("week_key") == archive_entry["week_key"]), None)
+        if existing_index is None:
+            store.setdefault("weekly_archive", []).insert(0, archive_entry)
+        else:
+            store["weekly_archive"][existing_index] = archive_entry
+
+    new_store = make_blank_performance_store(base_dt)
+    new_store["weekly_archive"] = store.get("weekly_archive", [])[:26]
+    return new_store
+
+
+def evaluate_performance_record(record, current_price):
+    entry_price = float(record.get("entry_price", 0) or 0)
+    target_price = float(record.get("target_price", 0) or 0)
+    stop_loss = float(record.get("stop_loss", 0) or 0)
+    current_price = float(current_price or 0)
+
+    if current_price > 0:
+        if float(record.get("max_price_seen", 0) or 0) <= 0:
+            record["max_price_seen"] = current_price
+        else:
+            record["max_price_seen"] = max(float(record.get("max_price_seen", 0) or 0), current_price)
+
+        if float(record.get("min_price_seen", 0) or 0) <= 0:
+            record["min_price_seen"] = current_price
+        else:
+            record["min_price_seen"] = min(float(record.get("min_price_seen", current_price) or current_price), current_price)
+
+        record["current_price"] = safe_round(current_price)
+
+    change_pct = 0.0
+    if entry_price > 0 and current_price > 0:
+        change_pct = ((current_price - entry_price) / entry_price) * 100
+    record["last_change_pct"] = safe_round(change_pct)
+
+    if record.get("outcome") in {"win", "loss"}:
+        return record
+
+    max_seen = float(record.get("max_price_seen", 0) or 0)
+    min_seen = float(record.get("min_price_seen", 0) or 0)
+    now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if target_price > 0 and max_seen >= target_price:
+        record["outcome"] = "win"
+        record["status_mark"] = "✅"
+        record["status_label"] = "ناجحة"
+        record["closed_at"] = now_str
+    elif stop_loss > 0 and min_seen > 0 and min_seen <= stop_loss:
+        record["outcome"] = "loss"
+        record["status_mark"] = "❌"
+        record["status_label"] = "خاسرة"
+        record["closed_at"] = now_str
+    else:
+        record["outcome"] = "pending"
+        record["status_mark"] = "⏳"
+        record["status_label"] = "قيد المتابعة"
+
+    return record
 
 
 def upsert_performance_signal(stock: dict):
     try:
         signal_type = str(stock.get("decision", "") or "")
-        execution_mode = str(stock.get("execution_mode", "") or "")
-        stage = str(stock.get("signal_stage", "") or "")
-        if signal_type not in {"دخول قوي", "دخول بحذر", "مراقبة"} and execution_mode not in {"إشارة مبكرة ⏳", "إعادة دخول 👀"}:
+        if signal_type not in {"دخول قوي", "دخول بحذر"}:
             return
 
-        items = load_performance_items()
         symbol = str(stock.get("symbol", "") or "").upper().strip()
         if not symbol:
             return
 
-        current_price = float(stock.get("current_price_live", 0) or 0)
-        display_price = float(stock.get("display_price", 0) or 0)
-        tracked_price = current_price if current_price > 0 else display_price
-        if tracked_price <= 0:
+        entry_price = float(stock.get("display_entry_price", 0) or 0)
+        target_price = float(stock.get("display_target_price", 0) or 0)
+        stop_loss = float(stock.get("display_stop_price", 0) or 0)
+        current_price = float(stock.get("display_price", stock.get("current_price_live", 0)) or 0)
+        if entry_price <= 0:
             return
 
-        today_key = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        store = rollover_performance_store_if_needed(load_performance_store())
+        records = store.get("active_records", [])
+        record_id = f"{store['active_week_key']}::{symbol}"
+        now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+
         existing = None
-        for item in items:
-            if item.get("symbol") == symbol and item.get("date") == today_key:
+        for item in records:
+            if item.get("id") == record_id:
                 existing = item
                 break
 
-        payload = {
-            "symbol": symbol,
-            "date": today_key,
-            "time": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
-            "signal_type": signal_type or execution_mode or stage,
-            "signal_stage": stage,
-            "entry_price": round(tracked_price, 2),
-            "current_price": round(tracked_price, 2),
-            "change_pct": 0.0,
-            "status": "جديدة",
-            "market_phase": str(stock.get("market_phase", "") or ""),
-            "price_source": str(stock.get("price_source_label", stock.get("price_source", "")) or ""),
-            "strategy_label": str(stock.get("strategy_label", "") or ""),
-        }
-
-        if existing:
-            existing.update(payload)
+        if existing is None:
+            existing = {
+                "id": record_id,
+                "symbol": symbol,
+                "signal_type": signal_type,
+                "entry_price": safe_round(entry_price),
+                "target_price": safe_round(target_price),
+                "stop_loss": safe_round(stop_loss),
+                "first_seen_at": now_str,
+                "last_seen_at": now_str,
+                "current_price": safe_round(current_price),
+                "max_price_seen": safe_round(current_price if current_price > 0 else entry_price),
+                "min_price_seen": safe_round(current_price if current_price > 0 else entry_price),
+                "price_source_label": str(stock.get("price_source_label", stock.get("price_source", "")) or ""),
+                "strategy_label": str(stock.get("strategy_label", "") or ""),
+                "status_mark": "⏳",
+                "status_label": "قيد المتابعة",
+                "outcome": "pending",
+                "closed_at": "",
+                "market_phase": str(stock.get("market_phase_label", stock.get("market_phase", "")) or ""),
+                "last_change_pct": 0.0,
+            }
+            records.insert(0, existing)
         else:
-            items.insert(0, payload)
+            existing["last_seen_at"] = now_str
+            existing["price_source_label"] = str(stock.get("price_source_label", stock.get("price_source", "")) or existing.get("price_source_label", ""))
+            existing["strategy_label"] = str(stock.get("strategy_label", "") or existing.get("strategy_label", ""))
+            existing["market_phase"] = str(stock.get("market_phase_label", stock.get("market_phase", "")) or existing.get("market_phase", ""))
+            if not existing.get("signal_type"):
+                existing["signal_type"] = signal_type
+            if float(existing.get("target_price", 0) or 0) <= 0 and target_price > 0:
+                existing["target_price"] = safe_round(target_price)
+            if float(existing.get("stop_loss", 0) or 0) <= 0 and stop_loss > 0:
+                existing["stop_loss"] = safe_round(stop_loss)
 
-        save_performance_items(items[:300])
+        evaluate_performance_record(existing, current_price)
+        store["active_records"] = records[:300]
+        save_performance_store(store)
     except:
         pass
-
 
 INTRADAY_CACHE_TTL_OPEN = 12
 INTRADAY_CACHE_TTL_CLOSED = 60
@@ -1859,8 +2066,8 @@ def scan_all():
             p = apply_late_move_filter(p)
             p = assign_execution_mode(p)
             p = normalize_execution_labels(p)
-            p = recalc_reentry_plan(p)
             p = enrich_signal_stage(p)
+            p = finalize_display_contract(p)
 
             if not p.get("price_reliable_for_execution", True) and p.get("market_phase") in {"open", "pre_market", "after_hours"}:
                 p["decision"] = "مراقبة"
@@ -1884,6 +2091,10 @@ def scan_all():
 def root():
     if os.path.exists("index.html"):
         return FileResponse("index.html")
+    if os.path.exists("index_weekly_compact.html"):
+        return FileResponse("index_weekly_compact.html")
+    if os.path.exists("index_no_conflict.html"):
+        return FileResponse("index_no_conflict.html")
     return FileResponse("index-new.html")
 
 
@@ -1914,7 +2125,8 @@ def trade_scan():
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
         "watchlist_count": len(watch),
-        "top_ranked": results[:25],
+        "strong_entries": strong[:25],
+        "top_ranked": strong[:25],
         "cautious_entries": cautious[:25],
         "watchlist": watch[:50],
         "all_results": results,
@@ -1975,8 +2187,8 @@ def single_stock(symbol: str):
             trade_plan = apply_late_move_filter(trade_plan)
             trade_plan = assign_execution_mode(trade_plan)
             trade_plan = normalize_execution_labels(trade_plan)
-            trade_plan = recalc_reentry_plan(trade_plan)
             trade_plan = enrich_signal_stage(trade_plan)
+            trade_plan = finalize_display_contract(trade_plan)
             if not trade_plan.get("price_reliable_for_execution", True) and trade_plan.get("market_phase") in {"open", "pre_market", "after_hours"}:
                 trade_plan["decision"] = "مراقبة"
                 trade_plan["execution_mode"] = "مراقبة 👀"
@@ -2053,51 +2265,49 @@ def watchlist_get():
 
 @app.get("/performance")
 def performance_get():
-    items = load_performance_items()
+    store = rollover_performance_store_if_needed(load_performance_store())
+    records = list(store.get("active_records", []))
     updated = []
-    wins = 0
-    losses = 0
-    flats = 0
-    total_change = 0.0
-    counted = 0
 
-    for item in items[:200]:
+    for item in records[:300]:
         symbol = str(item.get("symbol", "") or "").upper().strip()
-        entry_price = float(item.get("entry_price", 0) or 0)
-        prev = get_prev(symbol)
-        intraday = get_intraday_snapshot(symbol)
-        live_block = build_live_price_block(symbol, prev or {}, intraday)
-        current_price = float(live_block.get("display_price", 0) or 0)
-        change_pct = 0.0
-        status = "محايد"
-        if entry_price > 0 and current_price > 0:
-            change_pct = ((current_price - entry_price) / entry_price) * 100
-            if change_pct >= 1.0:
-                status = "رابحة"
-                wins += 1
-            elif change_pct <= -1.0:
-                status = "خاسرة"
-                losses += 1
-            else:
-                flats += 1
-            total_change += change_pct
-            counted += 1
+        current_price = float(item.get("current_price", 0) or 0)
+        price_source_label = str(item.get("price_source_label", "") or "")
+        if symbol:
+            prev = get_prev(symbol)
+            intraday = get_intraday_snapshot(symbol)
+            live_block = build_live_price_block(symbol, prev or {}, intraday)
+            live_price = float(live_block.get("display_price", 0) or 0)
+            if live_price > 0:
+                current_price = live_price
+                price_source_label = live_block.get("price_source_label", price_source_label)
+        item["last_seen_at"] = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+        item["price_source_label"] = price_source_label
+        evaluate_performance_record(item, current_price)
         updated.append({
             **item,
-            "current_price": safe_round(current_price),
-            "change_pct": safe_round(change_pct),
-            "status": status,
-            "price_source_label": live_block.get("price_source_label", ""),
+            "current_price": safe_round(item.get("current_price", 0)),
+            "entry_price": safe_round(item.get("entry_price", 0)),
+            "target_price": safe_round(item.get("target_price", 0)),
+            "stop_loss": safe_round(item.get("stop_loss", 0)),
+            "max_price_seen": safe_round(item.get("max_price_seen", 0)),
+            "min_price_seen": safe_round(item.get("min_price_seen", 0)),
+            "last_change_pct": safe_round(item.get("last_change_pct", 0)),
         })
 
-    avg_change = safe_round(total_change / counted) if counted > 0 else 0.0
+    status_order = {"win": 0, "loss": 1, "pending": 2}
+    updated.sort(key=lambda r: (status_order.get(r.get("outcome", "pending"), 9), r.get("first_seen_at", "")), reverse=False)
+
+    store["active_records"] = updated
+    save_performance_store(store)
+
     return {
+        "active_week": {
+            "week_key": store.get("active_week_key"),
+            "week_start": store.get("active_week_start"),
+            "week_end": store.get("active_week_end"),
+        },
         "items": updated,
-        "summary": {
-            "count": len(updated),
-            "wins": wins,
-            "losses": losses,
-            "flats": flats,
-            "avg_change_pct": avg_change,
-        }
-        }
+        "summary": make_performance_summary(updated),
+        "weekly_archive": store.get("weekly_archive", [])[:26],
+    }
