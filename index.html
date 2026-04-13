@@ -7,9 +7,9 @@
   <style>
     * { box-sizing: border-box; }
     body { margin:0; font-family: Arial, sans-serif; background:#0b1220; color:#e5e7eb; }
-    .container { max-width:1280px; margin:0 auto; padding:16px; }
+    .container { max-width:1360px; margin:0 auto; padding:16px; }
     .topbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
-    .title { font-size:28px; font-weight:700; color:#f8fafc; }
+    .title { font-size:30px; font-weight:700; color:#f8fafc; }
     .subtitle { color:#94a3b8; font-size:14px; margin-top:4px; }
     .actions { display:flex; gap:10px; flex-wrap:wrap; }
     button {
@@ -17,13 +17,15 @@
       background:#1e293b; color:#f8fafc;
     }
     button.primary { background:#2563eb; }
+    button.watch { background:#065f46; }
+    button.delete { background:#7f1d1d; }
     button:hover { opacity:.95; }
     input[type="text"]{
       width:100%; background:#0f172a; color:#f8fafc; border:1px solid #1f2937;
       border-radius:10px; padding:12px 14px; font-size:15px;
     }
     .statusbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
-    .stat,.search-box,.single-result,.loading,.error,.empty,.card {
+    .stat,.search-box,.single-result,.loading,.error,.empty,.card,.panel {
       background:#111827; border:1px solid #1f2937; border-radius:14px;
     }
     .stat { padding:14px; }
@@ -33,10 +35,10 @@
     .section-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
     .section-title { font-size:20px; font-weight:700; }
     .section-count { color:#94a3b8; font-size:13px; }
-    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; }
     .card { padding:14px; box-shadow:0 6px 18px rgba(0,0,0,0.18); }
     .card-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:10px; }
-    .symbol { font-size:24px; font-weight:800; color:#f8fafc; line-height:1; }
+    .symbol { font-size:26px; font-weight:800; color:#f8fafc; line-height:1; }
     .company { color:#9ca3af; font-size:12px; margin-top:6px; }
     .badges { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-start; }
     .badge { border-radius:999px; padding:5px 10px; font-size:12px; font-weight:700; display:inline-block; white-space:nowrap; }
@@ -45,9 +47,12 @@
     .badge-watch { background:#1e3a8a; color:#dbeafe; }
     .badge-rank { background:#312e81; color:#e0e7ff; }
     .badge-exec { background:#3f3f46; color:#f4f4f5; }
-    .metrics,.details-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .badge-early { background:#164e63; color:#cffafe; }
+    .badge-reentry { background:#4a044e; color:#f5d0fe; }
+    .badge-runner { background:#7c2d12; color:#ffedd5; }
+    .metrics,.details-grid,.mini-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .metrics { margin:12px 0; }
-    .metric,.detail-box,.summary,.search-box,.single-result { background:#0f172a; border-radius:12px; padding:12px; border:1px solid #1e293b; }
+    .metric,.detail-box,.summary,.search-box,.single-result,.panel { background:#0f172a; border-radius:12px; padding:12px; border:1px solid #1e293b; }
     .metric-label,.detail-label { font-size:12px; color:#94a3b8; margin-bottom:6px; }
     .metric-value { font-size:17px; font-weight:700; color:#f8fafc; }
     .detail-value { color:#f8fafc; font-size:14px; line-height:1.7; word-break:break-word; }
@@ -62,20 +67,15 @@
     .search-section { margin:20px 0; }
     .search-row { display:grid; grid-template-columns: 1fr auto; gap:10px; margin-top:10px; }
     .footer-note { margin-top:20px; color:#94a3b8; font-size:12px; text-align:center; }
-
-    .mini-btn { font-size:12px; padding:8px 10px; border-radius:8px; }
-    .mini-btn.watch { background:#0f766e; }
-    .mini-btn.remove { background:#7f1d1d; }
-    .muted { color:#94a3b8; }
-    .watchlist-panel { margin:18px 0; padding:14px; background:#111827; border:1px solid #1f2937; border-radius:14px; }
-    .watchlist-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin-top:12px; }
-    .watch-item { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:12px; }
-    .watch-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
-    .inline-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-
+    .toolbar-note { color:#94a3b8; font-size:13px; }
+    .list-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .list-table th, .list-table td { border-bottom:1px solid #1f2937; padding:10px 8px; text-align:right; }
+    .list-table th { color:#94a3b8; font-weight:700; }
+    .list-table tr:hover { background:#111827; }
     @media (max-width:700px) {
-      .metrics,.details-grid,.search-row { grid-template-columns:1fr; }
+      .metrics,.details-grid,.search-row,.mini-grid { grid-template-columns:1fr; }
       .title { font-size:24px; } .symbol { font-size:22px; }
+      .list-table { display:block; overflow:auto; white-space:nowrap; }
     }
   </style>
 </head>
@@ -84,7 +84,7 @@
     <div class="topbar">
       <div>
         <div class="title">Stock Radar AI</div>
-        <div class="subtitle">لوحة عرض ذكية للفرص مع كشف مبكر وتفاصيل قابلة للتوسيع</div>
+        <div class="subtitle">لوحة ذكية للفرص مع كشف مبكر واستمرار الحركة وتتبع الأداء</div>
       </div>
       <div class="actions">
         <button class="primary" onclick="loadScan()">تحديث الفرص</button>
@@ -94,17 +94,28 @@
       </div>
     </div>
 
+    <div id="lastUpdateNote" class="toolbar-note" style="margin-bottom:12px;"></div>
     <div id="statusbar" class="statusbar"></div>
     <div id="content"><div class="loading">جاري تحميل البيانات...</div></div>
 
-
-    <div class="watchlist-panel">
+    <div class="section">
       <div class="section-header">
         <div class="section-title">📌 قائمة المتابعة اليدوية</div>
-        <div class="section-count" id="manualWatchCount">0</div>
+        <div class="section-count" id="watchlistCount"></div>
       </div>
-      <div class="subtitle">أضف أي سهم يدويًا من البطاقات وتابع أداءه لاحقًا لتقييم الأداة.</div>
-      <div id="manualWatchlist"><div class="empty">لا توجد أسهم في المتابعة اليدوية</div></div>
+      <div class="panel">
+        <div id="manualWatchlistContent" class="loading">جاري تحميل القائمة...</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">📊 تتبع أداء الإشارات</div>
+        <div class="section-count" id="performanceSummary"></div>
+      </div>
+      <div class="panel">
+        <div id="performanceContent" class="loading">جاري تحميل تتبع الأداء...</div>
+      </div>
     </div>
 
     <div class="search-section">
@@ -148,103 +159,81 @@
       if (value === null || value === undefined || value === "") return "";
       return String(value);
     }
-    
-function renderStatusbar(data) {
+    function compactRow(label, value) {
+      if (value === null || value === undefined || value === "") return '';
+      return `<div class="summary"><strong>${label}:</strong> ${value}</div>`;
+    }
+    function detailBox(label, value, full=false) {
+      if (value === null || value === undefined || value === "") return '';
+      return `<div class="detail-box ${full ? 'full' : ''}"><div class="detail-label">${label}</div><div class="detail-value">${value}</div></div>`;
+    }
+    function toggleSection(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.display = el.style.display === 'none' ? '' : 'none';
+    }
+
+    function renderStatusbar(data) {
       const phase = data?.market_phase || "closed";
       const phaseLabel = data?.market_phase_label || (phase === "open" ? "مفتوح" : "مغلق");
       const isOpen = phase === "open";
-      const updated = safeText(data.generated_at_label || "");
       document.getElementById("statusbar").innerHTML = `
         <div class="stat"><div class="stat-label">عدد الأسهم في Universe</div><div class="stat-value">${formatNumber(data.universe_count)}</div></div>
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
         <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">${formatNumber(data.strong_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">مراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
-        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>
-        <div class="stat"><div class="stat-label">آخر تحديث</div><div class="stat-value" style="font-size:16px">${updated || "—"}</div></div>`;
+        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>`;
+      document.getElementById('lastUpdateNote').innerHTML = `آخر تحديث: ${safeText(data.updated_at)}`;
     }
-    
-function hasValue(v) {
-      return !(v === null || v === undefined || v === "" || v === 0 || v === "0");
+
+    function renderBadges(stock) {
+      const arr = [];
+      arr.push(badgeDecision(stock.decision));
+      if (stock.rank_label) arr.push(`<span class="badge badge-rank">${safeText(stock.rank_label)}</span>`);
+      if (stock.execution_mode) arr.push(`<span class="badge badge-exec">${safeText(stock.execution_mode)}</span>`);
+      if (stock.signal_stage === 'early_signal') arr.push('<span class="badge badge-early">إشارة مبكرة ⏳</span>');
+      if (stock.signal_stage === 'reentry') arr.push('<span class="badge badge-reentry">إعادة دخول 👀</span>');
+      if (stock.runner_label) arr.push(`<span class="badge badge-runner">${safeText(stock.runner_label)}</span>`);
+      if (stock.strategy_label) arr.push(`<span class="badge badge-watch">${safeText(stock.strategy_label)}</span>`);
+      return arr.join('');
     }
-    function detailBox(label, value, full=false) {
-      if (!hasValue(value)) return "";
-      return `<div class="detail-box${full ? " full" : ""}"><div class="detail-label">${label}</div><div class="detail-value">${value}</div></div>`;
-    }
-    function metricBox(label, valueHtml) {
-      if (!hasValue(valueHtml)) return "";
-      return `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${valueHtml}</div></div>`;
-    }
+
     function createCard(stock) {
-      const liveAvailable = !!stock.live_price_available;
-      const marketPhase = stock.market_phase || "closed";
-      const currentPrice = (stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0);
-      const currentPriceLabel = stock.display_price_label || "السعر الحالي";
-      const openPrice = stock.open_price_live ?? 0;
-      const changeLabel = !liveAvailable && marketPhase !== "closed"
-        ? "التغير اللحظي"
-        : marketPhase === "open"
-          ? "التغير من الافتتاح"
-          : marketPhase === "after_hours"
-            ? "التغير بعد الإغلاق"
-            : marketPhase === "pre_market"
-              ? "التغير قبل الافتتاح"
-              : "التغير عن الإغلاق";
-      const changePct = (stock.display_change_available === false || stock.display_change_pct === null || stock.display_change_pct === undefined)
-        ? null
-        : (stock.display_change_pct ?? (marketPhase === "open" ? (stock.change_from_open_pct ?? 0) : (stock.change_vs_prev_close_pct ?? 0)));
-      const riskPct = stock.risk_pct ?? 0;
+      const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
+      const displayChange = stock.display_change_pct ?? stock.change_vs_prev_close_pct ?? stock.change_from_open_pct ?? 0;
       const company = stock.company || stock.symbol;
-      const flags = Array.isArray(stock.risk_flags) ? stock.risk_flags : [];
-      const isReentryWatch = !!(stock.late_as_watch || stock.reentry_plan_active || (stock.execution_mode || '').includes('إعادة دخول'));
-      const entryLabel = isReentryWatch ? 'إعادة الدخول' : 'الدخول الفعلي';
-      const entryValue = isReentryWatch ? (stock.smart_entry_price ?? stock.reentry_pullback_price ?? stock.entry_price_real ?? stock.entry) : (stock.entry_price_real ?? stock.entry);
-      const mainAction = isReentryWatch
-        ? `خطة جديدة: راقب إعادة دخول قرب ${formatNumber(stock.smart_entry_price ?? stock.reentry_pullback_price)} أو اختراق جديد فوق ${formatNumber(stock.rebreakout_price)}`
-        : safeText(stock.execution_note || stock.owner_action);
-      const stageBadge = stock.signal_stage_label
-        ? `<span class="badge ${stock.signal_stage === 'reentry' ? 'badge-watch' : 'badge-watch'}">${safeText(stock.signal_stage_label)}</span>`
-        : "";
-
-      const metrics = [
-        metricBox(safeText(currentPriceLabel), currentPrice > 0 ? formatNumber(currentPrice) : "غير متاح"),
-        metricBox(safeText(changeLabel), changePct === null ? "غير متاح" : formatPercent(changePct)),
-        metricBox(entryLabel, formatNumber(entryValue)),
-        metricBox("وقف الخسارة", formatNumber(stock.stop_loss)),
-        metricBox("درجة الثقة", hasValue(stock.quality_score) ? `${formatNumber(stock.quality_score)}%` : ""),
-        metricBox("المخاطرة", hasValue(riskPct) ? formatPercent(riskPct) : "")
-      ].filter(Boolean).join("");
-
-      const details = [
-        detailBox("سعر الافتتاح", formatNumber(openPrice)),
-        detailBox("الإغلاق السابق", formatNumber(stock.previous_close_live)),
-        detailBox("نوع المرحلة", safeText(stock.market_phase_label)),
-        detailBox("مصدر السعر", safeText(stock.price_source_label || "")),
-        detailBox("سعر الاختراق", formatNumber(stock.breakout_price)),
-        detailBox("سعر التأكيد", formatNumber(stock.confirmation_price)),
-        detailBox(entryLabel, formatNumber(entryValue)),
-        detailBox("آخر دخول مناسب", formatNumber(stock.late_entry_price)),
-        detailBox("إعادة دخول مقترحة", formatNumber(stock.reentry_pullback_price)),
-        detailBox("اختراق جديد فوق", formatNumber(stock.rebreakout_price)),
-        detailBox("السيولة اليومية", formatNumber(stock.volume_ratio)),
-        detailBox("السيولة الفعلية", formatNumber(stock.effective_volume_ratio)),
-        detailBox("الترند", safeText(stock.trend)),
-        detailBox("VWAP", safeText(stock.vwap_status || "")),
-        detailBox("حالة السيولة", safeText(stock.volume_status || "")),
-        detailBox("صالح لمدة", safeText(stock.valid_for || "")),
-        detailBox("العائد/المخاطرة للهدف 1", formatNumber(stock.rr_1)),
-        detailBox("الخبر / المحفز", safeText(stock.news_note || ""), true),
-        detailBox("الإجراء المقترح", safeText(stock.owner_action || ""), true)
-      ].filter(Boolean).join("");
-
-      const summaryParts = [
-        stock.ai_summary ? `<div class="summary">${safeText(stock.ai_summary)}</div>` : "",
-        `<div class="summary"><strong>وضع التنفيذ:</strong> ${mainAction}</div>`,
-        `<div class="summary"><strong>حالة السوق:</strong> ${safeText(stock.market_phase_label || "")}${stock.price_source_label ? ` | <strong>مصدر السعر:</strong> ${safeText(stock.price_source_label)}` : ""}${stock.live_price_available === false && stock.market_phase !== "closed" ? " | السعر اللحظي غير متاح الآن" : ""}</div>`,
-        stock.breakout_status ? `<div class="summary"><strong>حالة الاختراق:</strong> ${safeText(stock.breakout_status)}</div>` : ""
-      ].filter(Boolean).join("");
-
-      const flagsHtml = flags.length ? `<ul class="flags">${flags.map(f => `<li>${safeText(f)}</li>`).join("")}</ul>` : "";
+      const riskPct = stock.risk_pct ?? 0;
+      const details = [];
+      details.push(detailBox('سعر العرض', formatNumber(stock.display_price)));
+      details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
+      details.push(detailBox('سعر الافتتاح', formatNumber(stock.open_price_live)));
+      details.push(detailBox('الإغلاق السابق', formatNumber(stock.previous_close_live)));
+      details.push(detailBox('نوع المرحلة', safeText(stock.market_phase_label)));
+      details.push(detailBox('سعر الاختراق', formatNumber(stock.breakout_price)));
+      details.push(detailBox('سعر التأكيد', formatNumber(stock.confirmation_price)));
+      details.push(detailBox('الدخول الفعلي', formatNumber(stock.entry_price_real ?? stock.entry)));
+      details.push(detailBox('آخر دخول مناسب', formatNumber(stock.late_entry_price)));
+      details.push(detailBox('الدخول الذكي', formatNumber(stock.smart_entry_price)));
+      details.push(detailBox('الوقف الذكي', formatNumber(stock.smart_stop_price)));
+      details.push(detailBox('الهدف الذكي', formatNumber(stock.smart_target_1)));
+      details.push(detailBox('منطقة الارتداد', safeText(stock.pullback_zone_low && stock.pullback_zone_high ? `${formatNumber(stock.pullback_zone_low)} - ${formatNumber(stock.pullback_zone_high)}` : '')));
+      details.push(detailBox('Fibonacci 38.2%', formatNumber(stock.fib_38)));
+      details.push(detailBox('Fibonacci 50%', formatNumber(stock.fib_50)));
+      details.push(detailBox('Fibonacci 61.8%', formatNumber(stock.fib_62)));
+      details.push(detailBox('السيولة اليومية', formatNumber(stock.volume_ratio)));
+      details.push(detailBox('سيولة السرعة', formatNumber(stock.volume_pace_ratio)));
+      details.push(detailBox('السيولة الفعلية', formatNumber(stock.effective_volume_ratio)));
+      details.push(detailBox('VWAP اللحظي', safeText(stock.vwap_status)));
+      details.push(detailBox('حالة السيولة', safeText(stock.volume_status)));
+      details.push(detailBox('العائد/المخاطرة', formatNumber(stock.rr_1)));
+      details.push(detailBox('جودة البيانات', safeText(stock.data_quality)));
+      details.push(detailBox('الترند', safeText(stock.trend)));
+      details.push(detailBox('صالح لمدة', safeText(stock.valid_for)));
+      details.push(detailBox('الخبر / المحفز', safeText(stock.news_note), true));
+      if (Array.isArray(stock.risk_flags) && stock.risk_flags.length) {
+        details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${x}</li>`).join('')}</ul>`, true));
+      }
 
       return `
         <div class="card">
@@ -253,154 +242,185 @@ function hasValue(v) {
               <div class="symbol">${safeText(stock.symbol)}</div>
               <div class="company">${safeText(company)}</div>
             </div>
-            <div class="badges">
-              ${badgeDecision(stock.decision)}
-              ${hasValue(stock.rank_label) ? `<span class="badge badge-rank">${safeText(stock.rank_label)}</span>` : ""}
-              ${hasValue(stock.execution_mode || stock.execution_status_ar || stock.execution_status) ? `<span class="badge badge-exec">${safeText(stock.execution_mode || stock.execution_status_ar || stock.execution_status)}</span>` : ""}
-              ${stageBadge}
-              ${isReentryWatch ? `<span class="badge badge-watch">إعادة دخول</span>` : ""}
-              ${stock.execution_mode === "جاهز 🔥" ? `<span class="badge badge-strong">جاهز</span>` : ""}
-            </div>
+            <div class="badges">${renderBadges(stock)}</div>
           </div>
 
-          <div class="metrics">${metrics}</div>
-          ${summaryParts}
-          <div class="inline-actions">
-            <button class="mini-btn watch" onclick="addToManualWatchlist('${safeText(stock.symbol)}', ${Number(currentPrice || 0)}, '${safeText(stock.decision)}', '${safeText(stock.execution_mode || stock.signal_stage_label || "")}')">📌 إضافة للمراقبة</button>
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">${safeText(stock.display_price_label || 'السعر')}</div><div class="metric-value">${formatNumber(displayPrice)}</div></div>
+            <div class="metric"><div class="metric-label">التغير</div><div class="metric-value">${formatPercent(displayChange)}</div></div>
+            <div class="metric"><div class="metric-label">الدخول</div><div class="metric-value">${formatNumber(stock.smart_entry_price || stock.entry_price_real || stock.entry)}</div></div>
+            <div class="metric"><div class="metric-label">الوقف</div><div class="metric-value">${formatNumber(stock.smart_stop_price || stock.stop_loss)}</div></div>
+            <div class="metric"><div class="metric-label">الجودة</div><div class="metric-value">${formatNumber(stock.quality_score)}</div></div>
+            <div class="metric"><div class="metric-label">المخاطرة</div><div class="metric-value ${riskPct > 10 ? 'red' : riskPct > 7 ? 'yellow' : ''}">${formatPercent(riskPct)}</div></div>
+          </div>
+
+          ${compactRow('مصدر السعر', safeText(stock.price_source_label))}
+          ${compactRow('وضع التنفيذ', safeText(stock.execution_note || stock.owner_action))}
+          ${compactRow('حالة السوق', safeText(stock.market_phase_label))}
+          ${compactRow('حالة الاختراق', safeText(stock.breakout_status))}
+          ${compactRow('مرحلة الإشارة', safeText(stock.signal_stage_label))}
+          ${compactRow('استراتيجية السهم', safeText(stock.strategy_label))}
+          ${compactRow('تقييم الاستمرار', safeText(stock.runner_label))}
+          ${compactRow('ملخص', safeText(stock.ai_summary))}
+
+          <div class="actions" style="margin-top:12px;">
+            <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(stock.display_price || 0)})">📌 إضافة للمراقبة</button>
           </div>
 
           <details>
             <summary>عرض التفاصيل</summary>
-            <div class="details-grid">${details}</div>
-            ${flagsHtml}
+            <div class="details-grid">${details.join('')}</div>
           </details>
         </div>`;
     }
-    function renderSection(id, title, items) {
-      if (!items || !items.length) {
-        return `<div class="section" id="${id}"><div class="section-header"><div class="section-title">${title}</div><div class="section-count">0</div></div><div class="empty">لا توجد أسهم في هذا القسم</div></div>`;
-      }
-      return `<div class="section" id="${id}"><div class="section-header"><div class="section-title">${title}</div><div class="section-count">${items.length}</div></div><div class="cards">${items.map(createCard).join("")}</div></div>`;
+
+    function renderSections(data) {
+      const top = data.top_ranked || [];
+      const cautious = data.cautious_entries || [];
+      const watch = data.watchlist || [];
+      document.getElementById('content').innerHTML = `
+        <div id="top-ranked-section" class="section">
+          <div class="section-header"><div class="section-title">الأعلى ترتيبًا</div><div class="section-count">${top.length} سهم</div></div>
+          <div class="cards">${top.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>
+        </div>
+        <div id="cautious-section" class="section">
+          <div class="section-header"><div class="section-title">دخول بحذر</div><div class="section-count">${cautious.length} سهم</div></div>
+          <div class="cards">${cautious.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>
+        </div>
+        <div id="watch-section" class="section">
+          <div class="section-header"><div class="section-title">المراقبة</div><div class="section-count">${watch.length} سهم</div></div>
+          <div class="cards">${watch.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>
+        </div>`;
     }
-    function renderContent(data) {
-      const html = [
-        renderSection("top-ranked-section", "الأعلى ترتيبًا", data.top_ranked || []),
-        renderSection("cautious-section", "دخول بحذر", data.cautious_entries || []),
-        renderSection("watch-section", "قائمة المراقبة", data.watchlist || []),
-      ].join("");
-      document.getElementById("content").innerHTML = html;
-    }
-    function toggleSection(id) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const cards = el.querySelector(".cards") || el.querySelector(".empty");
-      if (!cards) return;
-      cards.style.display = cards.style.display === "none" ? "" : "none";
-    }
-    
-    async function addToManualWatchlist(symbol, price, recommendation="", note="") {
+
+    async function loadScan() {
+      document.getElementById('content').innerHTML = '<div class="loading">جاري تحميل البيانات...</div>';
       try {
-        await fetch("/watchlist/add", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol, price, recommendation, note })
-        });
-        loadManualWatchlist();
-      } catch (err) {
-        console.error(err);
+        const res = await fetch('/trade-scan');
+        const data = await res.json();
+        renderStatusbar(data);
+        renderSections(data);
+      } catch (e) {
+        document.getElementById('content').innerHTML = `<div class="error">تعذر تحميل الفرص</div>`;
+      }
+      loadWatchlist();
+      loadPerformance();
+    }
+
+    async function scanSingleStock() {
+      const symbol = (document.getElementById('singleSymbol').value || '').trim().toUpperCase();
+      if (!symbol) return;
+      const holder = document.getElementById('singleStockResult');
+      holder.innerHTML = '<div class="loading">جاري فحص السهم...</div>';
+      try {
+        const res = await fetch(`/single-stock?symbol=${encodeURIComponent(symbol)}`);
+        const data = await res.json();
+        if (data.trade_plan) {
+          holder.innerHTML = createCard(data.trade_plan);
+        } else {
+          holder.innerHTML = '<div class="error">تعذر استخراج خطة السهم</div>';
+        }
+      } catch (e) {
+        holder.innerHTML = '<div class="error">تعذر فحص السهم</div>';
       }
     }
 
-    async function removeFromManualWatchlist(symbol) {
+    async function addToWatchlist(symbol, price) {
       try {
-        await fetch("/watchlist/remove", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        await fetch('/watchlist/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, price })
+        });
+        loadWatchlist();
+      } catch (e) {}
+    }
+
+    async function removeFromWatchlist(symbol) {
+      try {
+        await fetch('/watchlist/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol })
         });
-        loadManualWatchlist();
-      } catch (err) {
-        console.error(err);
-      }
+        loadWatchlist();
+      } catch (e) {}
     }
 
-    async function loadManualWatchlist() {
-      const container = document.getElementById("manualWatchlist");
-      const countEl = document.getElementById("manualWatchCount");
-      if (!container || !countEl) return;
+    async function loadWatchlist() {
       try {
-        const res = await fetch("/watchlist/manual", { cache: "no-store" });
+        const res = await fetch('/watchlist');
         const data = await res.json();
         const items = data.items || [];
-        countEl.innerText = String(data.count || items.length || 0);
+        document.getElementById('watchlistCount').innerHTML = `${items.length} سهم`;
         if (!items.length) {
-          container.innerHTML = '<div class="empty">لا توجد أسهم في المتابعة اليدوية</div>';
+          document.getElementById('manualWatchlistContent').innerHTML = '<div class="empty">لا توجد أسهم مضافة للمراقبة بعد</div>';
           return;
         }
-        container.innerHTML = `<div class="watchlist-grid">${items.map(item => `
-          <div class="watch-item">
-            <div class="watch-head">
-              <div class="symbol" style="font-size:20px">${safeText(item.symbol)}</div>
-              <button class="mini-btn remove" onclick="removeFromManualWatchlist('${safeText(item.symbol)}')">حذف</button>
-            </div>
-            <div class="summary"><strong>سعر الإضافة:</strong> ${formatNumber(item.added_price)}</div>
-            <div class="summary"><strong>السعر الآن:</strong> ${formatNumber(item.current_price)}</div>
-            <div class="summary"><strong>التغير:</strong> ${formatPercent(item.change_pct)}</div>
-            ${item.recommendation ? `<div class="summary"><strong>التوصية:</strong> ${safeText(item.recommendation)}</div>` : ""}
-            ${item.note ? `<div class="summary"><strong>ملاحظة:</strong> ${safeText(item.note)}</div>` : ""}
-            <div class="summary"><strong>وقت الإضافة:</strong> ${safeText(item.added_at)}</div>
-            <div class="summary"><strong>مصدر السعر:</strong> ${safeText(item.price_source_label || "")}</div>
-          </div>
-        `).join("")}</div>`;
-      } catch (err) {
-        container.innerHTML = `<div class="error">تعذر تحميل قائمة المتابعة: ${safeText(err.message)}</div>`;
+        const rows = items.map(item => `
+          <tr>
+            <td>${safeText(item.symbol)}</td>
+            <td>${formatNumber(item.added_price)}</td>
+            <td>${formatNumber(item.current_price)}</td>
+            <td>${formatPercent(item.change_pct)}</td>
+            <td>${safeText(item.price_source_label)}</td>
+            <td>${safeText(item.market_phase_label)}</td>
+            <td>${safeText(item.added_at)}</td>
+            <td><button class="delete" onclick="removeFromWatchlist('${safeText(item.symbol)}')">حذف</button></td>
+          </tr>`).join('');
+        document.getElementById('manualWatchlistContent').innerHTML = `
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>السهم</th><th>سعر الإضافة</th><th>السعر الآن</th><th>التغير</th><th>مصدر السعر</th><th>المرحلة</th><th>وقت الإضافة</th><th></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      } catch (e) {
+        document.getElementById('manualWatchlistContent').innerHTML = '<div class="error">تعذر تحميل قائمة المراقبة</div>';
       }
     }
 
-async function loadScan() {
-      document.getElementById("content").innerHTML = '<div class="loading">جاري تحديث الفرص...</div>';
+    async function loadPerformance() {
       try {
-        const response = await fetch("/trade-scan", { cache: "no-store" });
-        const data = await response.json();
-        if (data.error) {
-          document.getElementById("content").innerHTML = `<div class="error">حدث خطأ: ${safeText(data.error)}</div>`;
-          return;
-        }
-        renderStatusbar(data);
-        renderContent(data);
-        loadManualWatchlist();
-      } catch (err) {
-        document.getElementById("content").innerHTML = `<div class="error">تعذر تحميل البيانات: ${safeText(err.message)}</div>`;
-      }
-    }
-    async function scanSingleStock() {
-      const symbol = (document.getElementById("singleSymbol").value || "").trim().toUpperCase();
-      const result = document.getElementById("singleStockResult");
-      if (!symbol) {
-        result.innerHTML = '<div class="error">اكتب رمز السهم أولاً</div>';
-        return;
-      }
-      result.innerHTML = '<div class="loading">جاري فحص السهم...</div>';
-      try {
-        const res = await fetch(`/single-stock?symbol=${encodeURIComponent(symbol)}`, { cache: "no-store" });
+        const res = await fetch('/performance');
         const data = await res.json();
-        if (data.error) {
-          result.innerHTML = `<div class="error">${safeText(data.error)}</div>`;
+        const items = data.items || [];
+        const s = data.summary || {};
+        document.getElementById('performanceSummary').innerHTML = `عدد الإشارات: ${s.count || 0} | رابحة: ${s.wins || 0} | خاسرة: ${s.losses || 0} | متوسط العائد: ${formatPercent(s.avg_change_pct || 0)}`;
+        if (!items.length) {
+          document.getElementById('performanceContent').innerHTML = '<div class="empty">لا توجد إشارات محفوظة بعد</div>';
           return;
         }
-        if (data.trade_plan) {
-          result.innerHTML = `<div class="single-result">${createCard(data.trade_plan)}</div>`;
-        } else if (data.overview && data.overview.available) {
-          result.innerHTML = `<div class="single-result"><div class="summary"><strong>${safeText(data.overview.symbol)}</strong> - ${safeText(data.overview.company)}</div><div class="summary">لا توجد فرصة تداول حالية واضحة لهذا السهم، لكن يمكنك مراقبته.</div></div>`;
-        } else {
-          result.innerHTML = `<div class="error">لم أتمكن من جلب بيانات هذا السهم</div>`;
-        }
-      } catch (err) {
-        result.innerHTML = `<div class="error">تعذر فحص السهم: ${safeText(err.message)}</div>`;
+        const rows = items.slice(0, 50).map(item => `
+          <tr>
+            <td>${safeText(item.symbol)}</td>
+            <td>${safeText(item.signal_type)}</td>
+            <td>${formatNumber(item.entry_price)}</td>
+            <td>${formatNumber(item.current_price)}</td>
+            <td>${formatPercent(item.change_pct)}</td>
+            <td>${safeText(item.status)}</td>
+            <td>${safeText(item.signal_stage)}</td>
+            <td>${safeText(item.strategy_label)}</td>
+            <td>${safeText(item.price_source)}</td>
+            <td>${safeText(item.date)} ${safeText(item.time)}</td>
+          </tr>`).join('');
+        document.getElementById('performanceContent').innerHTML = `
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>السهم</th><th>نوع الإشارة</th><th>سعر الإشارة</th><th>السعر الآن</th><th>العائد</th><th>الحالة</th><th>المرحلة</th><th>الاستراتيجية</th><th>مصدر السعر</th><th>الوقت</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      } catch (e) {
+        document.getElementById('performanceContent').innerHTML = '<div class="error">تعذر تحميل تتبع الأداء</div>';
       }
     }
+
     loadScan();
-    loadManualWatchlist();
   </script>
 </body>
 </html>
