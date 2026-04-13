@@ -1329,6 +1329,146 @@ def enrich_signal_stage(stock: dict) -> dict:
     except:
         return stock
 
+
+def finalize_display_contract(stock: dict) -> dict:
+    try:
+        current_price = _safe_float(stock.get("current_price_live", stock.get("display_price", 0)))
+        breakout_price = _safe_float(stock.get("breakout_price", 0))
+        confirmation_price = _safe_float(stock.get("confirmation_price", 0))
+        entry_price_real = _safe_float(stock.get("entry_price_real", stock.get("entry", 0)))
+        late_entry_price = _safe_float(stock.get("late_entry_price", 0))
+        stop_loss = _safe_float(stock.get("stop_loss", 0))
+        target_1 = _safe_float(stock.get("target_1", 0))
+        smart_entry_price = _safe_float(stock.get("smart_entry_price", 0))
+        smart_stop_price = _safe_float(stock.get("smart_stop_price", 0))
+        smart_target_1 = _safe_float(stock.get("smart_target_1", 0))
+        reentry_pullback_price = _safe_float(stock.get("reentry_pullback_price", 0))
+        rebreakout_price = _safe_float(stock.get("rebreakout_price", 0))
+        execution_mode = str(stock.get("execution_mode", "") or "")
+        signal_stage = str(stock.get("signal_stage", "") or "")
+        trade_type = str(stock.get("type", "") or "")
+        breakout_status = str(stock.get("breakout_status", "") or "")
+        zone_low = _safe_float(stock.get("pullback_zone_low", 0))
+        zone_high = _safe_float(stock.get("pullback_zone_high", 0))
+
+        is_reentry = bool(stock.get("reentry_plan_active", False)) or signal_stage == "reentry" or "إعادة دخول" in execution_mode
+
+        display_plan_family = "normal"
+        display_plan_family_label = "الخطة الحالية"
+        display_entry_label = "الدخول"
+        display_entry_price = 0.0
+        display_stop_label = "الوقف"
+        display_stop_price = 0.0
+        display_target_label = "الهدف الأول"
+        display_target_price = 0.0
+        alternate_entry_label = ""
+        alternate_entry_price = 0.0
+
+        if is_reentry:
+            display_plan_family = "reentry"
+            display_plan_family_label = "خطة إعادة الدخول"
+
+            if reentry_pullback_price > 0 and rebreakout_price > 0:
+                pivot_threshold = reentry_pullback_price * 1.015
+                if current_price > pivot_threshold:
+                    display_entry_label = "إعادة الدخول بعد اختراق جديد"
+                    display_entry_price = rebreakout_price
+                    alternate_entry_label = "بديل: إعادة دخول قرب الارتداد"
+                    alternate_entry_price = reentry_pullback_price
+                else:
+                    display_entry_label = "إعادة الدخول قرب الارتداد"
+                    display_entry_price = reentry_pullback_price
+                    alternate_entry_label = "بديل: اختراق جديد"
+                    alternate_entry_price = rebreakout_price
+            elif reentry_pullback_price > 0:
+                display_entry_label = "إعادة الدخول قرب الارتداد"
+                display_entry_price = reentry_pullback_price
+            elif rebreakout_price > 0:
+                display_entry_label = "إعادة الدخول بعد اختراق جديد"
+                display_entry_price = rebreakout_price
+            else:
+                display_entry_label = "إعادة الدخول"
+                display_entry_price = smart_entry_price if smart_entry_price > 0 else entry_price_real
+
+            display_stop_label = "وقف إعادة الدخول"
+            display_stop_price = smart_stop_price if smart_stop_price > 0 else stop_loss
+            display_target_label = "هدف إعادة الدخول"
+            display_target_price = smart_target_1 if smart_target_1 > 0 else target_1
+
+        elif trade_type == "Breakout":
+            display_plan_family = "breakout"
+            display_plan_family_label = "خطة اختراق"
+
+            if breakout_price > 0 and current_price > 0 and current_price < breakout_price:
+                display_entry_label = "الاختراق المطلوب"
+                display_entry_price = breakout_price
+            elif confirmation_price > 0 and current_price > 0 and current_price < confirmation_price:
+                display_entry_label = "التأكيد المطلوب"
+                display_entry_price = confirmation_price
+            elif late_entry_price > 0 and current_price > late_entry_price:
+                display_entry_label = "آخر دخول مناسب"
+                display_entry_price = late_entry_price
+            else:
+                display_entry_label = "الدخول الحالي"
+                display_entry_price = entry_price_real if entry_price_real > 0 else confirmation_price if confirmation_price > 0 else breakout_price
+
+            display_stop_label = "وقف الخطة"
+            display_stop_price = stop_loss
+            display_target_label = "الهدف الأول"
+            display_target_price = target_1
+
+        elif trade_type == "Pullback":
+            display_plan_family = "pullback"
+            display_plan_family_label = "خطة ارتداد"
+            display_entry_label = "دخول الارتداد"
+            if entry_price_real > 0:
+                display_entry_price = entry_price_real
+            elif zone_low > 0 and zone_high > 0:
+                display_entry_price = round2((zone_low + zone_high) / 2)
+            else:
+                display_entry_price = current_price
+            if zone_low > 0 and zone_high > 0:
+                alternate_entry_label = "منطقة الارتداد"
+                alternate_entry_price = round2((zone_low + zone_high) / 2)
+            display_stop_label = "وقف الارتداد"
+            display_stop_price = smart_stop_price if smart_stop_price > 0 else stop_loss
+            display_target_label = "هدف الارتداد"
+            display_target_price = smart_target_1 if smart_target_1 > 0 else target_1
+
+        else:
+            display_entry_price = entry_price_real if entry_price_real > 0 else smart_entry_price
+            display_stop_price = smart_stop_price if smart_stop_price > 0 else stop_loss
+            display_target_price = smart_target_1 if smart_target_1 > 0 else target_1
+
+        if display_entry_price <= 0:
+            display_entry_price = smart_entry_price if smart_entry_price > 0 else entry_price_real if entry_price_real > 0 else breakout_price
+        if display_stop_price <= 0:
+            display_stop_price = smart_stop_price if smart_stop_price > 0 else stop_loss
+        if display_target_price <= 0:
+            display_target_price = smart_target_1 if smart_target_1 > 0 else target_1
+
+        display_risk_pct = 0.0
+        if display_entry_price > 0 and display_stop_price > 0 and display_entry_price > display_stop_price:
+            display_risk_pct = ((display_entry_price - display_stop_price) / display_entry_price) * 100
+        else:
+            display_risk_pct = _safe_float(stock.get("risk_pct", 0))
+
+        stock["display_plan_family"] = display_plan_family
+        stock["display_plan_family_label"] = display_plan_family_label
+        stock["display_entry_label"] = display_entry_label
+        stock["display_entry_price"] = round2(display_entry_price)
+        stock["display_stop_label"] = display_stop_label
+        stock["display_stop_price"] = round2(display_stop_price)
+        stock["display_target_label"] = display_target_label
+        stock["display_target_price"] = round2(display_target_price)
+        stock["alternate_entry_label"] = alternate_entry_label
+        stock["alternate_entry_price"] = round2(alternate_entry_price) if alternate_entry_price > 0 else 0.0
+        stock["display_risk_pct"] = round2(display_risk_pct)
+
+        return stock
+    except:
+        return stock
+
 def unique_keep_order(items: list[str]) -> list[str]:
     seen = set()
     out = []
