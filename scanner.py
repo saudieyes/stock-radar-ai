@@ -24,6 +24,7 @@ BIG_CAP_LIMIT = 15
 MOMENTUM_LIMIT = 60
 EMERGING_LIMIT = 45
 SMALL_CAP_LIMIT = 30
+RUNNER_LIMIT = 40
 
 BIG_CAPS = [
     "AAPL", "NVDA", "MSFT", "AMZN", "META",
@@ -484,6 +485,467 @@ def round2(value):
         return 0.0
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value or 0)
+    except:
+        return float(default)
+
+
+def _clamp_score(value: float, low: float = 0.0, high: float = 99.0) -> float:
+    return max(low, min(float(value or 0), high))
+
+
+def score_all_day_runner(stock_or_ticker, d: dict | None = None, ref: dict | None = None) -> float:
+    try:
+        if isinstance(stock_or_ticker, dict) and d is None:
+            stock = stock_or_ticker
+            intraday = stock.get("intraday", {}) or {}
+            trend = str(stock.get("trend", "") or "")
+            effective_volume_ratio = _safe_float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)))
+            volume_pace_ratio = _safe_float(stock.get("volume_pace_ratio", effective_volume_ratio))
+            quality_score = _safe_float(stock.get("quality_score", 0))
+            breakout_quality = str(stock.get("breakout_quality", "") or "")
+            above_vwap = bool(intraday.get("above_vwap_proxy", False))
+            opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
+            intraday_ratio = _safe_float(intraday.get("intraday_volume_ratio", 0))
+            session_position = _safe_float(intraday.get("session_position_pct", 0))
+            spike_pct = _safe_float(intraday.get("spike_from_open_pct", 0))
+            continuation_score = _safe_float(stock.get("continuation_score", 0))
+
+            score = 35.0
+            if trend == "صاعد قوي":
+                score += 18
+            elif trend == "صاعد":
+                score += 10
+            else:
+                score -= 14
+
+            if effective_volume_ratio >= 1.4:
+                score += 18
+            elif effective_volume_ratio >= 1.15:
+                score += 12
+            elif effective_volume_ratio >= 0.95:
+                score += 6
+            else:
+                score -= 12
+
+            if volume_pace_ratio >= 1.2:
+                score += 10
+            elif volume_pace_ratio >= 1.0:
+                score += 4
+            else:
+                score -= 6
+
+            if above_vwap:
+                score += 8
+            else:
+                score -= 8
+
+            if opening_drive == "صاعد":
+                score += 6
+            elif opening_drive == "هابط":
+                score -= 8
+
+            if intraday_ratio >= 1.1:
+                score += 6
+            elif intraday_ratio < 0.85:
+                score -= 6
+
+            if session_position >= 70:
+                score += 8
+            elif session_position < 45:
+                score -= 6
+
+            if 3.0 <= spike_pct <= 18.0:
+                score += 6
+            elif spike_pct > 25.0:
+                score -= 4
+
+            if breakout_quality == "STRONG":
+                score += 8
+            elif breakout_quality == "FAILED":
+                score -= 20
+
+            if quality_score >= 80:
+                score += 8
+            elif quality_score >= 70:
+                score += 4
+            elif quality_score < 60:
+                score -= 8
+
+            if continuation_score >= 70:
+                score += 6
+            elif 0 < continuation_score < 55:
+                score -= 6
+
+            return _clamp_score(score)
+
+        ticker = str(stock_or_ticker).upper().strip()
+        if not d or not base_filters(d):
+            return -9999
+
+        m = calc_metrics(d)
+        score = 0.0
+        if m["day_change_pct"] > 0.12:
+            score += 16
+        elif m["day_change_pct"] > 0.07:
+            score += 20
+        elif m["day_change_pct"] > 0.04:
+            score += 16
+        elif m["day_change_pct"] > 0.02:
+            score += 10
+        else:
+            return -9999
+
+        if m["near_high"]:
+            score += 18
+        if m["close_strength"] > 0.78:
+            score += 18
+        elif m["close_strength"] > 0.62:
+            score += 12
+        elif m["close_strength"] < 0.4:
+            score -= 10
+
+        if 0.25 <= m["body_strength"] <= 0.75:
+            score += 8
+        elif m["body_strength"] > 0.9:
+            score -= 6
+
+        if m["volume"] > 15_000_000:
+            score += 14
+        elif m["volume"] > 5_000_000:
+            score += 10
+        elif m["volume"] > 1_000_000:
+            score += 6
+
+        if m["dollar_volume"] > 150_000_000:
+            score += 12
+        elif m["dollar_volume"] > 40_000_000:
+            score += 8
+        elif m["dollar_volume"] > 10_000_000:
+            score += 4
+
+        if 0.03 <= m["range_pct"] <= 0.18:
+            score += 10
+        elif m["range_pct"] > 0.28:
+            score -= 10
+
+        if m["gap_like_pct"] > 0.20:
+            score -= 6
+        elif m["gap_like_pct"] > 0.05:
+            score += 4
+
+        return score
+    except:
+        return -9999
+
+
+def early_momentum_sustainability_check(stock: dict) -> dict:
+    try:
+        intraday = stock.get("intraday", {}) or {}
+        trend = str(stock.get("trend", "") or "")
+        effective_volume_ratio = _safe_float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)))
+        volume_pace_ratio = _safe_float(stock.get("volume_pace_ratio", effective_volume_ratio))
+        breakout_quality = str(stock.get("breakout_quality", "") or "")
+        quality_score = _safe_float(stock.get("quality_score", 0))
+        above_vwap = bool(intraday.get("above_vwap_proxy", False))
+        opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
+        intraday_ratio = _safe_float(intraday.get("intraday_volume_ratio", 0))
+        session_position = _safe_float(intraday.get("session_position_pct", 0))
+
+        score = 42.0
+        if trend == "صاعد قوي":
+            score += 18
+        elif trend == "صاعد":
+            score += 10
+        else:
+            score -= 15
+
+        if effective_volume_ratio >= 1.3:
+            score += 16
+        elif effective_volume_ratio >= 1.05:
+            score += 9
+        else:
+            score -= 10
+
+        if volume_pace_ratio >= 1.2:
+            score += 10
+        elif volume_pace_ratio >= 1.0:
+            score += 4
+        else:
+            score -= 5
+
+        if above_vwap:
+            score += 12
+        else:
+            score -= 10
+
+        if opening_drive == "صاعد":
+            score += 8
+        elif opening_drive == "هابط":
+            score -= 8
+
+        if intraday_ratio >= 1.1:
+            score += 6
+        elif intraday_ratio < 0.85:
+            score -= 6
+
+        if session_position >= 70:
+            score += 8
+        elif session_position < 45:
+            score -= 6
+
+        if breakout_quality == "STRONG":
+            score += 8
+        elif breakout_quality == "FAILED":
+            score -= 18
+
+        if quality_score >= 80:
+            score += 6
+        elif quality_score < 60:
+            score -= 8
+
+        score = _clamp_score(score)
+        if score >= 80:
+            label = "استدامة مبكرة قوية 🔥"
+        elif score >= 66:
+            label = "استدامة جيدة ✅"
+        elif score >= 56:
+            label = "استدامة محتملة بحذر 🟠"
+        else:
+            label = "استدامة ضعيفة ⚠️"
+
+        stock["sustainability_score"] = round2(score)
+        stock["sustainability_label"] = label
+        return stock
+    except:
+        return stock
+
+
+def detect_continuation_potential(stock: dict) -> dict:
+    try:
+        current_price = _safe_float(stock.get("current_price_live", stock.get("display_price", 0)))
+        breakout_price = _safe_float(stock.get("breakout_price", 0))
+        confirmation_price = _safe_float(stock.get("confirmation_price", 0))
+        late_entry_price = _safe_float(stock.get("late_entry_price", 0))
+        quality_score = _safe_float(stock.get("quality_score", 0))
+        sustainability_score = _safe_float(stock.get("sustainability_score", 0))
+        effective_volume_ratio = _safe_float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)))
+
+        score = 40.0
+        if current_price > 0 and breakout_price > 0 and current_price >= breakout_price:
+            score += 10
+        if current_price > 0 and confirmation_price > 0 and current_price >= confirmation_price:
+            score += 8
+        if current_price > 0 and late_entry_price > 0 and current_price > late_entry_price:
+            score -= 4
+        if quality_score >= 80:
+            score += 10
+        elif quality_score >= 68:
+            score += 5
+        if sustainability_score >= 70:
+            score += 10
+        elif sustainability_score < 55:
+            score -= 8
+        if effective_volume_ratio >= 1.2:
+            score += 8
+        elif effective_volume_ratio < 0.9:
+            score -= 8
+
+        score = _clamp_score(score)
+        if score >= 80:
+            label = "استمرار قوي 4-6 ساعات 🔥"
+        elif score >= 66:
+            label = "استمرار جيد لباقي الجلسة ✅"
+        elif score >= 56:
+            label = "استمرار محتمل بحذر 🟠"
+        else:
+            label = "احتمال استمرار ضعيف ⚠️"
+
+        stock["continuation_bias_score"] = round2(score)
+        stock["continuation_bias_label"] = label
+        return stock
+    except:
+        return stock
+
+
+def pullback_after_spike_detector(stock: dict) -> dict:
+    try:
+        intraday = stock.get("intraday", {}) or {}
+        current_price = _safe_float(stock.get("current_price_live", stock.get("display_price", 0)))
+        fib_38 = _safe_float(stock.get("fib_38", 0))
+        fib_50 = _safe_float(stock.get("fib_50", 0))
+        fib_62 = _safe_float(stock.get("fib_62", 0))
+        trend = str(stock.get("trend", "") or "")
+        spike_pct = _safe_float(intraday.get("spike_from_open_pct", 0))
+        volume_dry = bool(intraday.get("pullback_volume_dry", False))
+        recent_red_bars = int(intraday.get("recent_red_bars", 0) or 0)
+        above_vwap = bool(intraday.get("above_vwap_proxy", False))
+
+        zone_low = min(x for x in [fib_38, fib_62] if x > 0) if any(x > 0 for x in [fib_38, fib_62]) else 0.0
+        zone_high = max(fib_38, fib_62) if max(fib_38, fib_62) > 0 else 0.0
+        in_zone = zone_low > 0 and zone_high > 0 and zone_low <= current_price <= zone_high
+
+        score = 0.0
+        if spike_pct >= 3.0:
+            score += 28
+        elif str(stock.get("type", "") or "") == "Pullback":
+            score += 18
+        if in_zone:
+            score += 24
+        elif fib_50 > 0 and abs(current_price - fib_50) / max(fib_50, 0.01) <= 0.01:
+            score += 14
+        if volume_dry:
+            score += 18
+        if 2 <= recent_red_bars <= 4:
+            score += 12
+        elif recent_red_bars > 4:
+            score -= 6
+        if above_vwap:
+            score += 10
+        if trend in {"صاعد", "صاعد قوي"}:
+            score += 8
+        if fib_62 > 0 and current_price < fib_62 * 0.995:
+            score -= 18
+
+        score = _clamp_score(score)
+        detected = score >= 58
+        if detected and volume_dry:
+            label = "ارتداد بعد قفزة مع جفاف سيولة ✅"
+        elif detected:
+            label = "ارتداد بعد قفزة يحتاج تأكيدًا 📊"
+        else:
+            label = "لا يوجد ارتداد مثالي بعد قفزة"
+
+        stock["pullback_after_spike"] = detected
+        stock["pullback_score"] = round2(max(_safe_float(stock.get("pullback_score", 0)), score))
+        stock["pullback_pattern_label"] = str(stock.get("pullback_pattern_label", "") or label or "")
+        stock["pullback_volume_confirmed"] = volume_dry
+        stock["pullback_volume_label"] = "جفاف سيولة على الارتداد ✅" if volume_dry else "سيولة الارتداد ما زالت مرتفعة ⚠️"
+        return stock
+    except:
+        return stock
+
+
+def delayed_entry_optimizer(stock: dict) -> dict:
+    try:
+        current_price = _safe_float(stock.get("current_price_live", stock.get("display_price", 0)))
+        late_entry_price = _safe_float(stock.get("late_entry_price", 0))
+        breakout_price = _safe_float(stock.get("breakout_price", 0))
+        fib_50 = _safe_float(stock.get("fib_50", 0))
+        zone_low = _safe_float(stock.get("pullback_zone_low", 0))
+        zone_high = _safe_float(stock.get("pullback_zone_high", 0))
+        smart_entry = _safe_float(stock.get("smart_entry_price", stock.get("entry_price_real", stock.get("entry", 0))))
+        reentry_pullback_price = _safe_float(stock.get("reentry_pullback_price", 0))
+        rebreakout_price = _safe_float(stock.get("rebreakout_price", 0))
+        pullback_after_spike = bool(stock.get("pullback_after_spike", False))
+
+        delayed_active = bool(stock.get("late_as_watch", False) or stock.get("reentry_plan_active", False))
+        if current_price > 0 and late_entry_price > 0 and current_price > late_entry_price:
+            delayed_active = True
+
+        optimized_pullback = reentry_pullback_price or fib_50 or zone_low or smart_entry
+        optimized_breakout = rebreakout_price or (breakout_price * 1.003 if breakout_price > 0 else 0.0)
+
+        label = ""
+        if delayed_active and optimized_pullback > 0 and optimized_breakout > 0:
+            label = f"تعويض التأخير: راقب ارتداد {round2(optimized_pullback)} أو اختراق جديد {round2(optimized_breakout)}"
+        elif pullback_after_spike and zone_low > 0 and zone_high > 0:
+            label = f"دخول مؤجل ذكي داخل منطقة {round2(zone_low)} - {round2(zone_high)}"
+
+        stock["delayed_entry_active"] = delayed_active or pullback_after_spike
+        stock["optimized_pullback_entry"] = round2(optimized_pullback)
+        stock["optimized_breakout_reentry"] = round2(optimized_breakout)
+        stock["delayed_compensation_label"] = label
+        if label and not str(stock.get("strategy_label", "") or ""):
+            stock["strategy_label"] = "تأخير 15د - ارتداد" if pullback_after_spike else "تأخير 15د - استمرار"
+        return stock
+    except:
+        return stock
+
+
+def continuation_predictor(stock: dict) -> dict:
+    try:
+        sustainability_score = _safe_float(stock.get("sustainability_score", 0))
+        continuation_bias_score = _safe_float(stock.get("continuation_bias_score", 0))
+        pullback_score = _safe_float(stock.get("pullback_score", 0))
+        effective_volume_ratio = _safe_float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)))
+        quality_score = _safe_float(stock.get("quality_score", 0))
+
+        score = (sustainability_score * 0.35) + (continuation_bias_score * 0.35) + (pullback_score * 0.15) + (quality_score * 0.15)
+        if effective_volume_ratio >= 1.2:
+            score += 4
+        elif effective_volume_ratio < 0.9:
+            score -= 6
+        score = _clamp_score(score)
+
+        if score >= 80:
+            label = "استمرار مرجح بقوة 🔥"
+        elif score >= 66:
+            label = "استمرار مرجح ✅"
+        elif score >= 56:
+            label = "استمرار محتمل بحذر 🟠"
+        else:
+            label = "استمرار غير مؤكد ⚠️"
+
+        stock["continuation_score"] = round2(score)
+        stock["continuation_label"] = label
+        return stock
+    except:
+        return stock
+
+
+def early_warning_system(stock: dict) -> dict:
+    try:
+        current_price = _safe_float(stock.get("current_price_live", stock.get("display_price", 0)))
+        breakout_price = _safe_float(stock.get("breakout_price", 0))
+        confirmation_price = _safe_float(stock.get("confirmation_price", 0))
+        pullback_after_spike = bool(stock.get("pullback_after_spike", False))
+        quality_score = _safe_float(stock.get("quality_score", 0))
+        effective_volume_ratio = _safe_float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)))
+        zone_low = _safe_float(stock.get("pullback_zone_low", 0))
+        zone_high = _safe_float(stock.get("pullback_zone_high", 0))
+
+        label = ""
+        if current_price > 0 and breakout_price > 0 and current_price < breakout_price and quality_score >= 66 and effective_volume_ratio >= 0.95:
+            label = f"إنذار مبكر: راقب كسر {round2(breakout_price)} ثم تأكيد {round2(confirmation_price)}"
+        elif pullback_after_spike and zone_low > 0 and zone_high > 0:
+            label = f"إنذار مبكر: راقب ارتدادًا من {round2(zone_low)} - {round2(zone_high)}"
+
+        stock["early_warning_label"] = label
+        return stock
+    except:
+        return stock
+
+
+def enrich_strategy_profile(stock: dict) -> dict:
+    try:
+        stock = early_momentum_sustainability_check(stock)
+        stock = detect_continuation_potential(stock)
+        stock = pullback_after_spike_detector(stock)
+        stock = delayed_entry_optimizer(stock)
+        stock = continuation_predictor(stock)
+        stock = early_warning_system(stock)
+        stock["runner_score"] = round2(score_all_day_runner(stock))
+        if not str(stock.get("runner_label", "") or ""):
+            runner_score = _safe_float(stock.get("runner_score", 0))
+            if runner_score >= 80:
+                stock["runner_label"] = "Runner محتمل 4-6 ساعات 🔥"
+            elif runner_score >= 66:
+                stock["runner_label"] = "مرشح استمرار اليوم ✅"
+            elif runner_score >= 56:
+                stock["runner_label"] = "استمرار محتمل بحذر 🟠"
+        if not str(stock.get("strategy_label", "") or ""):
+            if bool(stock.get("pullback_after_spike", False)) or str(stock.get("type", "") or "") == "Pullback":
+                stock["strategy_label"] = "دخول ارتداد محسّن"
+            else:
+                stock["strategy_label"] = "دخول استمرار"
+        return stock
+    except:
+        return stock
+
+
 def classify_runner_stage(stock: dict) -> dict:
     try:
         runner_score = float(stock.get("runner_score", 0) or 0)
@@ -524,21 +986,30 @@ def recalc_reentry_plan(stock: dict) -> dict:
         stop_loss = float(stock.get("stop_loss", 0) or 0)
         target_1 = float(stock.get("target_1", 0) or 0)
         high_live = float(stock.get("high_live", 0) or current_price)
+        fib_50 = float(stock.get("fib_50", 0) or 0)
+        fib_62 = float(stock.get("fib_62", 0) or 0)
+        zone_low = float(stock.get("pullback_zone_low", 0) or 0)
 
         if current_price <= 0:
             return stock
 
-        # خطة إعادة تمركز تعتمد على السعر الحالي بعد فوات الدخول الأول
         move_from_breakout = max(current_price - breakout_price, 0)
         pullback_entry = confirmation_price if confirmation_price > 0 else current_price
-        if move_from_breakout > 0:
+        if fib_50 > 0:
+            pullback_entry = fib_50
+        elif zone_low > 0:
+            pullback_entry = zone_low
+        elif move_from_breakout > 0:
             pullback_entry = max(confirmation_price, current_price - (move_from_breakout * 0.35))
         if late_entry_price > 0:
             pullback_entry = min(pullback_entry, late_entry_price)
 
-        rebreakout_entry = max(high_live, current_price) * 1.003
+        rebreakout_entry = max(high_live, breakout_price, current_price) * 1.003
         smart_entry = round2(pullback_entry)
+        fib_stop = round2(fib_62 * 0.985) if fib_62 > 0 else 0.0
         smart_stop = round2(max(stop_loss, smart_entry * 0.965)) if smart_entry > 0 else round2(stop_loss)
+        if fib_stop > 0:
+            smart_stop = round2(max(smart_stop, fib_stop))
         if smart_stop >= smart_entry and smart_entry > 0:
             smart_stop = round2(smart_entry * 0.97)
         risk_unit = max(smart_entry - smart_stop, 0)
@@ -618,6 +1089,8 @@ def assign_execution_mode(stock: dict) -> dict:
         entry_price_real = float(stock.get("entry_price_real", stock.get("entry", 0)) or 0)
         late_entry_price = float(stock.get("late_entry_price", 0) or 0)
         effective_volume_ratio = float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)) or 0)
+        continuation_score = float(stock.get("continuation_score", 0) or 0)
+        pullback_score = float(stock.get("pullback_score", 0) or 0)
         intraday = stock.get("intraday", {}) or {}
         intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
         above_vwap = bool(intraday.get("above_vwap_proxy", False))
@@ -670,7 +1143,7 @@ def assign_execution_mode(stock: dict) -> dict:
         elif trade_type == "Breakout":
             has_good_volume = effective_volume_ratio >= 1.0 or intraday_ratio >= 1.1
             strong_volume = effective_volume_ratio >= 1.15 or intraday_ratio >= 1.25
-            runner_ready = runner_score >= 66
+            runner_ready = runner_score >= 66 or continuation_score >= 66
             intraday_ok = (not market_open) or (above_vwap and opening_drive != "هابط")
 
             if breakout_quality == "FAILED":
@@ -725,9 +1198,17 @@ def assign_execution_mode(stock: dict) -> dict:
                 execution_mode = "انتظار تأكيد 📊"
                 execution_note = "السعر مناسب لكن يحتاج سيولة أقوى"
         elif trade_type == "Pullback":
-            if trend in {"صاعد", "صاعد قوي"} and risk_pct <= 8 and effective_volume_ratio >= 0.9:
+            pullback_confirmed = bool(stock.get("pullback_volume_confirmed", False))
+            zone_low = float(stock.get("pullback_zone_low", 0) or 0)
+            zone_high = float(stock.get("pullback_zone_high", 0) or 0)
+            if trend in {"صاعد", "صاعد قوي"} and risk_pct <= 8 and (effective_volume_ratio >= 0.9 or continuation_score >= 64):
                 execution_mode = "دخول بحذر 🟠"
-                execution_note = "🟠 ارتداد جيد من دعم - دخول بحذر"
+                if pullback_confirmed and zone_low > 0 and zone_high > 0:
+                    execution_note = f"🟠 ارتداد محسّن من {round(zone_low,2)} - {round(zone_high,2)} مع تأكيد سيولة"
+                elif pullback_score >= 58:
+                    execution_note = "🟠 ارتداد جيد بعد قفزة - دخول بحذر"
+                else:
+                    execution_note = "🟠 ارتداد جيد من دعم - دخول بحذر"
             else:
                 execution_mode = "انتظار تأكيد 📊"
                 execution_note = "فرصة ارتداد تحتاج تأكيدًا"
@@ -884,6 +1365,7 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
     big_caps_scored = []
     momentum_scored = []
     emerging_scored = []
+    runner_scored = []
     fast_pool = []
 
     for ticker in reference_tickers:
@@ -907,12 +1389,17 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         if s_emg != -9999:
             emerging_scored.append((ticker, s_emg))
 
+        s_runner = score_all_day_runner(ticker, daily)
+        if s_runner != -9999:
+            runner_scored.append((ticker, s_runner))
+
     big_caps_scored.sort(key=lambda x: x[1], reverse=True)
     momentum_scored.sort(key=lambda x: x[1], reverse=True)
     emerging_scored.sort(key=lambda x: x[1], reverse=True)
+    runner_scored.sort(key=lambda x: x[1], reverse=True)
     fast_pool.sort(key=lambda x: x[1], reverse=True)
 
-    small_cap_candidates = [t for t, _ in fast_pool[:160]]
+    small_cap_candidates = [t for t, _ in fast_pool[:180]]
     small_cap_scored = []
 
     for ticker in small_cap_candidates:
@@ -929,10 +1416,11 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
     big_caps_final = [t for t, _ in big_caps_scored[:BIG_CAP_LIMIT]]
     momentum_final = [t for t, _ in momentum_scored[:MOMENTUM_LIMIT]]
     emerging_final = [t for t, _ in emerging_scored[:EMERGING_LIMIT]]
+    runner_final = [t for t, _ in runner_scored[:RUNNER_LIMIT]]
     small_cap_final = [t for t, _ in small_cap_scored[:SMALL_CAP_LIMIT]]
 
     final_universe = unique_keep_order(
-        big_caps_final + momentum_final + emerging_final + small_cap_final
+        big_caps_final + momentum_final + runner_final + emerging_final + small_cap_final
     )
 
     if not final_universe:
