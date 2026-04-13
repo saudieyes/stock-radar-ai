@@ -19,11 +19,11 @@ MIN_DOLLAR_VOLUME = 2_000_000
 MAX_RANGE_PCT = 0.45
 MIN_RANGE_PCT = 0.015
 
-TOTAL_UNIVERSE = 100
-BIG_CAP_LIMIT = 10
-MOMENTUM_LIMIT = 40
-EMERGING_LIMIT = 30
-SMALL_CAP_LIMIT = 20
+TOTAL_UNIVERSE = 150
+BIG_CAP_LIMIT = 15
+MOMENTUM_LIMIT = 60
+EMERGING_LIMIT = 45
+SMALL_CAP_LIMIT = 30
 
 BIG_CAPS = [
     "AAPL", "NVDA", "MSFT", "AMZN", "META",
@@ -484,6 +484,37 @@ def round2(value):
         return 0.0
 
 
+def classify_runner_stage(stock: dict) -> dict:
+    try:
+        runner_score = float(stock.get("runner_score", 0) or 0)
+        runner_label = str(stock.get("runner_label", "") or "")
+        strategy_label = str(stock.get("strategy_label", "") or "")
+        delayed_label = str(stock.get("delayed_compensation_label", "") or "")
+        if runner_score >= 80:
+            stock["runner_stage"] = "strong"
+            stock["runner_stage_label"] = runner_label or "Runner محتمل 4-6 ساعات 🔥"
+        elif runner_score >= 66:
+            stock["runner_stage"] = "good"
+            stock["runner_stage_label"] = runner_label or "مرشح استمرار اليوم ✅"
+        elif runner_score >= 56:
+            stock["runner_stage"] = "cautious"
+            stock["runner_stage_label"] = runner_label or "استمرار محتمل بحذر 🟠"
+        else:
+            stock["runner_stage"] = ""
+            stock["runner_stage_label"] = ""
+
+        if not strategy_label and str(stock.get("type", "")) == "Pullback":
+            stock["strategy_label"] = "دخول ارتداد"
+        elif not strategy_label:
+            stock["strategy_label"] = "دخول استمرار"
+
+        if delayed_label and "ملاحظة" not in str(stock.get("owner_action", "")):
+            stock["delayed_compensation_label"] = delayed_label
+        return stock
+    except:
+        return stock
+
+
 def recalc_reentry_plan(stock: dict) -> dict:
     try:
         current_price = float(stock.get("current_price_live", 0) or 0)
@@ -597,6 +628,9 @@ def assign_execution_mode(stock: dict) -> dict:
         trend = str(stock.get("trend", "") or "")
         breakout_quality = str(stock.get("breakout_quality", "") or "")
         quality_score = float(stock.get("quality_score", 0) or 0)
+        runner_score = float(stock.get("runner_score", 0) or 0)
+        strategy_label = str(stock.get("strategy_label", "") or "")
+        delayed_comp_label = str(stock.get("delayed_compensation_label", "") or "")
         close_strength_hint = "قوية" if quality_score >= 78 else "متوسطة" if quality_score >= 66 else "ضعيفة"
 
         rr = 0.0
@@ -619,7 +653,7 @@ def assign_execution_mode(stock: dict) -> dict:
             stock["execution_mode"] = "مراقبة 👀"
             stock["execution_note"] = "السعر اللحظي غير موثوق الآن - راقب فقط"
             stock["owner_action"] = "👀 راقب حتى تتوفر بيانات لحظية موثوقة"
-            return stock
+            return classify_runner_stage(stock)
 
         if timing_signal:
             execution_mode = timing_signal
@@ -636,6 +670,7 @@ def assign_execution_mode(stock: dict) -> dict:
         elif trade_type == "Breakout":
             has_good_volume = effective_volume_ratio >= 1.0 or intraday_ratio >= 1.1
             strong_volume = effective_volume_ratio >= 1.15 or intraday_ratio >= 1.25
+            runner_ready = runner_score >= 66
             intraday_ok = (not market_open) or (above_vwap and opening_drive != "هابط")
 
             if breakout_quality == "FAILED":
@@ -654,12 +689,12 @@ def assign_execution_mode(stock: dict) -> dict:
                 execution_note = f"📊 يحتاج الثبات فوق {round(confirmation_price,2)}"
             elif confirmation_price <= current_price <= entry_price_real:
                 if market_phase == "open":
-                    if strong_volume and intraday_ok:
+                    if strong_volume and intraday_ok and runner_ready:
                         execution_mode = "جاهز 🔥"
-                        execution_note = f"✅ دخول ممكن الآن قرب {round(entry_price_real,2)}"
+                        execution_note = f"✅ {strategy_label or 'دخول'} ممكن الآن قرب {round(entry_price_real,2)}"
                     elif has_good_volume:
                         execution_mode = "دخول بحذر 🟠"
-                        execution_note = f"🟠 دخول بحذر قرب {round(entry_price_real,2)} - الجودة {close_strength_hint}"
+                        execution_note = f"🟠 {strategy_label or 'دخول'} بحذر قرب {round(entry_price_real,2)} - الجودة {close_strength_hint}"
                     else:
                         execution_mode = "انتظار تأكيد 📊"
                         execution_note = "السعر في منطقة جيدة لكن يحتاج سيولة/VWAP أفضل"
@@ -718,7 +753,10 @@ def assign_execution_mode(stock: dict) -> dict:
         else:
             stock["owner_action"] = "👀 تحت المراقبة فقط"
 
-        return stock
+        if delayed_comp_label and execution_mode in {"مراقبة 👀", "مراقبة إعادة دخول 👀", "دخول بحذر 🟠"}:
+            stock["owner_action"] = f"{stock['owner_action']} | {delayed_comp_label}"
+
+        return classify_runner_stage(stock)
     except:
         return stock
 
@@ -776,11 +814,16 @@ def enrich_signal_stage(stock: dict) -> dict:
         stage = "normal"
         stage_label = ""
         stage_color = ""
+        runner_stage = str(stock.get("runner_stage", "") or "")
 
         if late_watch or "إعادة دخول" in mode:
             stage = "reentry"
             stage_label = "إعادة دخول"
             stage_color = "watch"
+        elif runner_stage in {"strong", "good"} and ("جاهز" in mode or "دخول بحذر" in mode):
+            stage = "actionable"
+            stage_label = "استمرار اليوم"
+            stage_color = "strong" if runner_stage == "strong" else "cautious"
         elif "جاهز" in mode or "دخول بحذر" in mode:
             stage = "actionable"
             stage_label = "قابل للتنفيذ"
