@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import time
 import json
 from zoneinfo import ZoneInfo
-from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage
+from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage
 
 app = FastAPI()
 
@@ -30,6 +30,7 @@ HISTORY_CACHE = {}
 REF_INFO_CACHE = {}
 INTRADAY_CACHE = {}
 SNAPSHOT_CACHE = {}
+PERFORMANCE_FILE = "signal_performance.json"
 
 MANUAL_WATCHLIST_FILE = "manual_watchlist.json"
 
@@ -45,6 +46,74 @@ def save_manual_watchlist(items):
     try:
         with open(MANUAL_WATCHLIST_FILE, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+
+def load_performance_items():
+    try:
+        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except:
+        return []
+
+
+def save_performance_items(items):
+    try:
+        with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+
+def upsert_performance_signal(stock: dict):
+    try:
+        signal_type = str(stock.get("decision", "") or "")
+        execution_mode = str(stock.get("execution_mode", "") or "")
+        stage = str(stock.get("signal_stage", "") or "")
+        if signal_type not in {"دخول قوي", "دخول بحذر", "مراقبة"} and execution_mode not in {"إشارة مبكرة ⏳", "إعادة دخول 👀"}:
+            return
+
+        items = load_performance_items()
+        symbol = str(stock.get("symbol", "") or "").upper().strip()
+        if not symbol:
+            return
+
+        current_price = float(stock.get("current_price_live", 0) or 0)
+        display_price = float(stock.get("display_price", 0) or 0)
+        tracked_price = current_price if current_price > 0 else display_price
+        if tracked_price <= 0:
+            return
+
+        today_key = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        existing = None
+        for item in items:
+            if item.get("symbol") == symbol and item.get("date") == today_key:
+                existing = item
+                break
+
+        payload = {
+            "symbol": symbol,
+            "date": today_key,
+            "time": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
+            "signal_type": signal_type or execution_mode or stage,
+            "signal_stage": stage,
+            "entry_price": round(tracked_price, 2),
+            "current_price": round(tracked_price, 2),
+            "change_pct": 0.0,
+            "status": "جديدة",
+            "market_phase": str(stock.get("market_phase", "") or ""),
+            "price_source": str(stock.get("price_source_label", stock.get("price_source", "")) or ""),
+            "strategy_label": str(stock.get("strategy_label", "") or ""),
+        }
+
+        if existing:
+            existing.update(payload)
+        else:
+            items.insert(0, payload)
+
+        save_performance_items(items[:300])
     except:
         pass
 
@@ -428,9 +497,6 @@ def get_prev(symbol):
         return None
 
 
-
-
-
 def get_latest_minute_price(symbol):
     try:
         today_ny = latest_market_date_str()
@@ -720,7 +786,6 @@ def get_volume_ratio(symbol):
         return 1.0
 
 
-
 def get_intraday_snapshot(symbol):
     symbol = str(symbol).upper().strip()
     market_open = is_market_open_now()
@@ -828,51 +893,70 @@ def build_live_price_block(symbol, prev_data, intraday_data):
 
     snap = get_snapshot_quote(symbol)
 
-    current_price = 0.0
+    current_price = prev_price
     open_price = prev_open
     previous_close = prev_price
     change_vs_prev_close_pct = 0.0
     change_from_open_pct = 0.0
-    price_source = "unavailable"
-    price_source_label = "السعر اللحظي غير متاح"
-    live_price_available = False
+    price_source = "previous_close"
     price_reliable_for_execution = False
 
     if phase == "open" and intraday_data.get("available") and to_float(intraday_data.get("current_price", 0)) > 0:
-        current_price = to_float(intraday_data.get("current_price", 0))
+        current_price = to_float(intraday_data.get("current_price", 0)) or prev_price
         open_price = to_float(intraday_data.get("session_open", 0)) or prev_open
         previous_close = prev_price
-        live_price_available = True
-        price_reliable_for_execution = True
-        price_source = "live_intraday"
-        price_source_label = "مباشر أثناء السوق"
-        if open_price > 0:
+        if open_price > 0 and current_price > 0:
             change_from_open_pct = ((current_price - open_price) / open_price) * 100
-        if previous_close > 0:
+        if previous_close > 0 and current_price > 0:
             change_vs_prev_close_pct = ((current_price - previous_close) / previous_close) * 100
+        price_source = "live_intraday"
+        price_reliable_for_execution = True
     elif phase in {"after_hours", "pre_market"} and snap.get("available") and to_float(snap.get("current_price", 0)) > 0:
-        current_price = to_float(snap.get("current_price", 0))
+        current_price = to_float(snap.get("current_price", prev_price)) or prev_price
         open_price = to_float(snap.get("open", prev_open)) or prev_open
         previous_close = to_float(snap.get("previous_close", prev_price)) or prev_price
         change_from_open_pct = to_float(snap.get("change_from_open_pct", 0))
         change_vs_prev_close_pct = to_float(snap.get("change_vs_prev_close_pct", 0))
-        live_price_available = True
-        price_reliable_for_execution = True
         price_source = phase
-        price_source_label = "بعد الإغلاق" if phase == "after_hours" else "قبل الافتتاح"
+        price_reliable_for_execution = True
     elif phase == "closed":
-        current_price = 0.0
+        current_price = prev_price
         open_price = prev_open
         previous_close = prev_price
+        if open_price > 0 and current_price > 0:
+            change_from_open_pct = ((current_price - open_price) / open_price) * 100
         price_source = "previous_close"
-        price_source_label = "آخر إغلاق"
-        live_price_available = False
+        price_reliable_for_execution = False
+    elif snap.get("available") and to_float(snap.get("current_price", 0)) > 0:
+        current_price = to_float(snap.get("current_price", prev_price)) or prev_price
+        open_price = to_float(snap.get("open", prev_open)) or prev_open
+        previous_close = to_float(snap.get("previous_close", prev_price)) or prev_price
+        change_from_open_pct = to_float(snap.get("change_from_open_pct", 0))
+        change_vs_prev_close_pct = to_float(snap.get("change_vs_prev_close_pct", 0))
+        price_source = str(snap.get("source", "snapshot") or "snapshot")
+        price_reliable_for_execution = False
+    else:
+        current_price = 0.0 if phase in {"open", "after_hours", "pre_market"} else prev_price
+        open_price = prev_open
+        previous_close = prev_price
+        price_source = "unavailable_realtime"
         price_reliable_for_execution = False
 
-    display_price = current_price if current_price > 0 else prev_price
-    display_price_label = "السعر الحالي" if live_price_available else "آخر إغلاق"
-    display_change_pct = change_from_open_pct if phase == "open" else change_vs_prev_close_pct
-    display_change_available = True if (live_price_available or prev_price > 0) else False
+    price_source_label_map = {
+        "live_intraday": "مباشر أثناء التداول",
+        "after_hours": "بعد الإغلاق",
+        "pre_market": "قبل الافتتاح",
+        "previous_close": "آخر إغلاق",
+        "unavailable_realtime": "بيانات لحظية غير متاحة",
+        "snapshot": "لقطة سوق",
+        "minute+snapshot": "دقيقة + لقطة",
+    }
+
+    display_price = current_price if current_price > 0 else previous_close
+    display_price_label = "السعر الحالي" if current_price > 0 else "آخر إغلاق"
+    live_price_available = current_price > 0
+    display_change_pct = change_vs_prev_close_pct if previous_close > 0 else change_from_open_pct
+    display_change_available = abs(display_change_pct) > 0 or live_price_available
 
     return {
         "market_phase": phase,
@@ -882,20 +966,41 @@ def build_live_price_block(symbol, prev_data, intraday_data):
         "previous_close_live": safe_round(previous_close),
         "change_from_open_pct": safe_round(change_from_open_pct),
         "change_vs_prev_close_pct": safe_round(change_vs_prev_close_pct),
-        "high_live": safe_round(to_float(snap.get("high", prev_high)) or prev_high),
-        "low_live": safe_round(to_float(snap.get("low", prev_low)) or prev_low),
-        "volume_live": safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume),
-        "price_source": price_source,
-        "price_source_label": price_source_label,
-        "live_price_available": live_price_available,
-        "price_reliable_for_execution": price_reliable_for_execution,
         "display_price": safe_round(display_price),
         "display_price_label": display_price_label,
         "display_change_pct": safe_round(display_change_pct),
         "display_change_available": display_change_available,
+        "live_price_available": live_price_available,
+        "high_live": safe_round(to_float(snap.get("high", prev_high)) or prev_high),
+        "low_live": safe_round(to_float(snap.get("low", prev_low)) or prev_low),
+        "volume_live": safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume),
+        "price_source": price_source,
+        "price_source_label": price_source_label_map.get(price_source, price_source),
+        "price_reliable_for_execution": price_reliable_for_execution,
         "last_price_update_ms": int(to_float(snap.get("updated", 0))),
         "last_price_update_label": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
     }
+
+
+def compute_volume_pace_ratio(intraday: dict, daily_volume_ratio: float) -> float:
+    try:
+        if not intraday or not intraday.get("available"):
+            return float(daily_volume_ratio or 0)
+        bars_count = int(intraday.get("bars_count", 0) or 0)
+        if bars_count <= 0:
+            return float(daily_volume_ratio or 0)
+        session_volume = float(intraday.get("session_volume", 0) or 0)
+        latest_5m = float(intraday.get("latest_5m_volume", 0) or 0)
+        avg_5m = float(intraday.get("avg_5m_volume", 0) or 0)
+        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
+        if avg_5m <= 0:
+            return max(float(daily_volume_ratio or 0), intraday_ratio)
+        projected_factor = 78 / max(bars_count, 1)
+        projected_session_ratio = (session_volume * projected_factor) / max(session_volume, 1)
+        pace = max(intraday_ratio, latest_5m / avg_5m if avg_5m > 0 else 0)
+        return max(float(daily_volume_ratio or 0), pace)
+    except:
+        return float(daily_volume_ratio or 0)
 
 
 def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
@@ -963,204 +1068,143 @@ def trading_sessions_since_news(published_utc: str) -> int:
 
 def classify_news_impact(title_lower: str, sessions_since: int):
     positive_keywords = [
-        "earnings", "beats", "guidance", "raises outlook", "upgrade", "initiated", "outperform",
-        "partnership", "deal", "contract", "acquisition", "merger", "approval", "fda", "launch",
-        "record revenue", "strong growth", "buyback", "dividend increase", "wins", "winning"
+        "beat", "beats", "strong guidance", "raises guidance", "buyback", "surge",
+        "jumps", "soars", "wins", "upgrade", "partnership", "contract", "record revenue",
+        "secures", "launch", "breakthrough", "approval", "expands", "growth"
     ]
     negative_keywords = [
-        "downgrade", "miss", "cuts forecast", "lawsuit", "fraud", "investigation", "delay", "recall",
-        "decline", "warning", "investor alert", "substantial losses", "law firm", "slumps", "falls"
+        "miss", "misses", "cuts guidance", "downgrade", "offering", "dilution", "lawsuit",
+        "probe", "investigation", "warning", "declines", "falls", "plunges", "recall", "delay",
+        "bankruptcy", "default"
     ]
 
     is_positive = any(k in title_lower for k in positive_keywords)
     is_negative = any(k in title_lower for k in negative_keywords)
 
-    if not is_positive and not is_negative:
-        return 0, "لا يوجد محفز حديث", "NONE"
+    pos_score = 0
+    neg_score = 0
 
     if is_positive:
-        if sessions_since <= 1:
-            return 12, "محفز إيجابي حديث", "POSITIVE_FRESH"
-        if sessions_since == 2:
-            return 5, "محفز إيجابي ضعيف", "POSITIVE_WEAK"
-        return 0, "خبر إيجابي قديم - لا يعتمد عليه", "POSITIVE_OLD"
+        if sessions_since == 0:
+            pos_score = 10
+        elif sessions_since == 1:
+            pos_score = 7
+        elif sessions_since == 2:
+            pos_score = 4
+        else:
+            pos_score = 0
 
     if is_negative:
-        if sessions_since <= 2:
-            return -12, "خبر سلبي حديث", "NEGATIVE_FRESH"
-        if sessions_since <= 5:
-            return -6, "خبر سلبي ما زال مؤثرًا", "NEGATIVE_MEDIUM"
-        return 0, "خبر سلبي قديم", "NEGATIVE_OLD"
-
-    return 0, "لا يوجد محفز حديث", "NONE"
-
-def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str):
-    breakout_price = float(high_price or current_price or 0)
-    if trade_type == "Breakout":
-        if breakout_price <= 0:
-            breakout_price = float(current_price or 0)
-
-        if breakout_price < 5:
-            confirmation_price = breakout_price * 1.008
-            entry_price_real = confirmation_price * 1.006
-            late_entry_price = entry_price_real * 1.018
-        elif breakout_price < 20:
-            confirmation_price = breakout_price * 1.0045
-            entry_price_real = confirmation_price * 1.0035
-            late_entry_price = entry_price_real * 1.015
+        if sessions_since == 0:
+            neg_score = -10
+        elif sessions_since == 1:
+            neg_score = -8
+        elif sessions_since == 2:
+            neg_score = -6
+        elif sessions_since <= 5:
+            neg_score = -3
         else:
-            confirmation_price = breakout_price * 1.0025
-            entry_price_real = confirmation_price * 1.0025
-            late_entry_price = entry_price_real * 1.01
-    else:
-        confirmation_price = breakout_price
-        entry_price_real = current_price
-        late_entry_price = current_price * 1.02 if current_price > 0 else 0
+            neg_score = 0
 
-    breakout_status = "لا ينطبق"
-    if trade_type == "Breakout":
-        if current_price < breakout_price:
-            breakout_status = "قبل الاختراق"
-        elif current_price < confirmation_price:
-            breakout_status = "بعد الكسر وقبل التأكيد"
-        elif current_price <= entry_price_real:
-            breakout_status = "تأكيد الاختراق"
-        elif current_price <= late_entry_price:
-            breakout_status = "اختراق مؤكد - دخول بحذر"
-        else:
-            breakout_status = "اختراق متأخر"
+    note = ""
+    if is_positive and pos_score > 0:
+        note = "محفز إيجابي حديث"
+    elif is_negative and neg_score < 0:
+        note = "محفز سلبي حديث"
 
-    return {
-        "breakout_price": safe_round(breakout_price),
-        "confirmation_price": safe_round(confirmation_price),
-        "entry_price_real": safe_round(entry_price_real),
-        "late_entry_price": safe_round(late_entry_price),
-        "breakout_status": breakout_status
-    }
+    return pos_score + neg_score, note
 
-def get_news_catalyst(symbol):
+
+def get_news(symbol, company_name=""):
+    news_note = "لا يوجد خبر بارز"
+    catalyst_score = 0
     try:
-        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد أخبار"} if not POLYGON_API_KEY else _news_impl(symbol)
-    except Exception as e:
-        return {"has_news": False, "catalyst_score": 0, "note": f"خطأ في الأخبار: {str(e)}"}
+        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&order=desc&sort=published_utc&apiKey={POLYGON_API_KEY}"
+        r = requests.get(url, timeout=12).json()
+        results = r.get("results", [])
+        if not results:
+            return news_note, catalyst_score
+
+        variants = get_company_name_variants(company_name)
+        best = None
+        best_score = -999
+        best_note = ""
+
+        for item in results:
+            title = str(item.get("title", "") or "").strip()
+            title_lower = normalize_text(title)
+            if not title:
+                continue
+
+            related = [str(x).upper().strip() for x in item.get("tickers", []) if str(x).strip()]
+            published_utc = str(item.get("published_utc", "") or "")
+            sessions_since = trading_sessions_since_news(published_utc)
+
+            relevance = 0
+            if symbol in related:
+                relevance += 3
+            if any(v and v in title_lower for v in variants):
+                relevance += 2
+            if symbol.lower() in title_lower:
+                relevance += 1
+
+            impact, note = classify_news_impact(title_lower, sessions_since)
+            total = relevance + impact
+
+            if total > best_score:
+                best_score = total
+                best = title
+                best_note = note
+                catalyst_score = impact
+
+        if best:
+            news_note = best + (f" | {best_note}" if best_note else "")
+    except:
+        pass
+
+    return news_note, catalyst_score
 
 
+def is_halal(sector, industry, total_assets, cash, total_debt):
+    sector_l = str(sector).lower().strip()
+    industry_l = str(industry).lower().strip()
 
-def _news_impl(symbol):
-    info = get_info(symbol)
-    company_name = info["company"]
-    url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&apiKey={POLYGON_API_KEY}"
-    r = requests.get(url, timeout=12).json()
-    news = r.get("results", [])
-    if not news:
-        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد محفز حديث", "freshness_label": "NONE", "sessions_since": None}
+    if sector_l in HARAM_SECTORS:
+        return False, f"مرفوض شرعيًا: القطاع ({sector}) غير مقبول"
 
-    symbol_lower = symbol.lower()
-    company_variants = get_company_name_variants(company_name)
-    weak_patterns = [
-        "top stocks", "market update", "stock market", "s&p 500", "nasdaq", "dow jones", "why investors",
-        "what to know", "best stocks", "should you buy", "index fund", "etf", "top-ranked stocks",
-        "stocks to buy now", "long term", "consumer tech news", "weekly recap", "roundup", "news recap",
-        "worth buying", "worth holding", "bullish on", "best way to buy", "compare", "comparison", "vs.",
-        "versus", "top picks", "3 stocks", "5 stocks", "10 stocks"
-    ]
+    for kw in HARAM_INDUSTRY_KEYWORDS:
+        if kw in industry_l:
+            return False, f"مرفوض شرعيًا: الصناعة تحتوي ({kw})"
 
-    best = {"score": 0, "note": "لا يوجد محفز حديث", "freshness_label": "NONE", "sessions_since": None, "freshness_note": "لا يوجد محفز حديث", "has_news": False}
+    if total_assets <= 0:
+        return True, "مقبول مبدئيًا"
 
-    for item in news[:10]:
-        title = str(item.get("title", "")).strip()
-        published = str(item.get("published_utc", "")).strip()
-        if not title:
-            continue
+    debt_ratio = total_debt / total_assets if total_assets > 0 else 0
+    cash_ratio = cash / total_assets if total_assets > 0 else 0
 
-        title_lower = normalize_text(title)
-        if any(w in title_lower for w in weak_patterns):
-            continue
+    if debt_ratio > 0.33:
+        return False, f"مرفوض شرعيًا: الديون {safe_round(debt_ratio*100)}% من الأصول"
+    if cash_ratio > 0.33:
+        return False, f"مرفوض شرعيًا: النقد {safe_round(cash_ratio*100)}% من الأصول"
 
-        symbol_match = re.search(rf"\b{re.escape(symbol_lower)}\b", title_lower) is not None
-        company_match = any(v in title_lower for v in company_variants if len(v) >= 4)
-        if not symbol_match and not company_match:
-            continue
-
-        sessions_since = trading_sessions_since_news(published)
-        score, freshness_note, freshness_label = classify_news_impact(title_lower, sessions_since)
-        if score == 0:
-            continue
-
-        if abs(score) > abs(best["score"]):
-            best = {
-                "score": score,
-                "note": title[:120],
-                "freshness_label": freshness_label,
-                "sessions_since": sessions_since,
-                "freshness_note": freshness_note,
-                "has_news": True
-            }
-
-    if not best["has_news"]:
-        return {"has_news": False, "catalyst_score": 0, "note": "لا يوجد محفز حديث", "freshness_label": "NONE", "sessions_since": None}
-
-    return {
-        "has_news": True,
-        "catalyst_score": best["score"],
-        "note": f'{best["note"]} | {best["freshness_note"]}',
-        "freshness_label": best["freshness_label"],
-        "sessions_since": best["sessions_since"],
-        "freshness_note": best["freshness_note"]
-    }
+    return True, "مطابق للضوابط الشرعية المبدئية"
 
 
-def data_quality_check(symbol, info, financials):
-    flags = []
-    quality = "high"
-    if not info["company"]:
-        quality = "low"
-        flags.append("اسم الشركة غير متوفر")
-    if not info["sector"] or not info["industry"]:
-        quality = "low"
-        flags.append("بيانات القطاع/الصناعة ناقصة")
-    if financials.get("total_assets", 0) == 0:
-        quality = "low"
-        flags.append("إجمالي الأصول غير متوفر")
-    if financials.get("shares", 0) == 0:
-        quality = "low"
-        flags.append("عدد الأسهم غير متوفر")
-    if financials.get("approx_market_cap", 0) == 0:
-        quality = "low"
-        flags.append("القيمة السوقية التقريبية غير متوفرة")
-    return quality, flags
+def get_financials(symbol):
+    b = BALANCE_DATA.get(symbol, {})
+    i = INCOME_DATA.get(symbol, {})
 
-
-def halal(symbol):
-    info = get_info(symbol)
-    text = f"{info['sector']} {info['industry']}".lower()
-
-    if info["sector"].lower() in HARAM_SECTORS:
-        return {"allowed": False, "reason": f"قطاع محرم: {info['sector']}", "financials": {}}
-
-    for word in HARAM_INDUSTRY_KEYWORDS:
-        if word in text:
-            return {"allowed": False, "reason": f"نشاط محرم: {word}", "financials": {}}
-
-    balance = BALANCE_DATA.get(symbol, {})
-    income = INCOME_DATA.get(symbol, {})
-
-    total_debt = to_float(balance.get("Short Term Debt")) + to_float(balance.get("Long Term Debt"))
-    total_assets = to_float(balance.get("Total Assets"))
-    cash = to_float(balance.get("Cash, Cash Equivalents & Short Term Investments"))
-
-    shares = to_float(income.get("Shares (Diluted)"))
-    if shares <= 0:
-        shares = to_float(income.get("Shares (Basic)"))
-
+    total_assets = to_float(b.get("Total Assets", 0))
+    cash = to_float(b.get("Cash And Cash Equivalents", 0))
+    total_debt = to_float(b.get("Total Debt", 0))
+    shares = to_float(i.get("Shares (Diluted)", 0)) or to_float(i.get("Shares (Basic)", 0))
     prev = get_prev(symbol)
     current_price = prev["price"] if prev else 0.0
-    approx_market_cap = current_price * shares if shares > 0 else 0.0
-
+    approx_market_cap = current_price * shares if shares > 0 and current_price > 0 else 0.0
     debt_to_market_cap = (total_debt / approx_market_cap) if approx_market_cap > 0 else None
     cash_to_assets = (cash / total_assets) if total_assets > 0 else None
 
-    financials = {
+    return {
         "total_assets": total_assets,
         "cash": cash,
         "total_debt": total_debt,
@@ -1171,474 +1215,326 @@ def halal(symbol):
         "cash_to_assets": cash_to_assets,
     }
 
-    if debt_to_market_cap is not None and debt_to_market_cap > 0.33:
-        return {"allowed": False, "reason": f"نسبة الدين إلى القيمة السوقية مرتفعة: {debt_to_market_cap:.2%}", "financials": financials}
-    if cash_to_assets is not None and cash_to_assets > 0.50:
-        return {"allowed": False, "reason": f"نسبة النقد إلى الأصول مرتفعة: {cash_to_assets:.2%}", "financials": financials}
 
-    return {"allowed": True, "reason": "مقبول مبدئيًا", "financials": financials}
+def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, str]:
+    if current_price <= 0:
+        return 0, ""
+    if current_price < LOW_PRICE_HARD_BLOCK:
+        return -30, "سهم منخفض السعر جدًا (أقل من 2$)"
+    if trade_type == "Breakout" and current_price < LOW_PRICE_WARNING:
+        return -15, "سهم اختراق منخفض السعر (أقل من 3$)"
+    return 0, ""
 
 
+def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str):
+    breakout_price = 0.0
+    confirmation_price = 0.0
+    entry_price_real = 0.0
+    late_entry_price = 0.0
+    breakout_status = ""
 
-def base_analysis(symbol):
+    if trade_type == "Breakout" and high_price > 0:
+        breakout_price = high_price
+        confirmation_price = high_price * 1.0025
+        entry_price_real = high_price * 1.005
+        late_entry_price = high_price * 1.015
+
+        if current_price < breakout_price:
+            breakout_status = "قبل الاختراق"
+        elif breakout_price <= current_price < confirmation_price:
+            breakout_status = "اختراق أولي"
+        elif confirmation_price <= current_price <= entry_price_real:
+            breakout_status = "تأكيد الاختراق"
+        elif entry_price_real < current_price <= late_entry_price:
+            breakout_status = "اختراق مؤكد - دخول بحذر"
+        else:
+            breakout_status = "اختراق متأخر"
+    elif trade_type == "Pullback" and low_price > 0:
+        breakout_price = low_price * 1.03
+        confirmation_price = low_price * 1.02
+        entry_price_real = low_price * 1.01
+        late_entry_price = low_price * 1.025
+        breakout_status = "ارتداد من دعم"
+
+    return {
+        "breakout_price": safe_round(breakout_price),
+        "confirmation_price": safe_round(confirmation_price),
+        "entry_price_real": safe_round(entry_price_real),
+        "late_entry_price": safe_round(late_entry_price),
+        "breakout_status": breakout_status,
+    }
+
+
+def compute_timing_layer(current_price: float, intraday: dict, effective_volume_ratio: float, levels: dict, market_phase: str):
+    breakout_price = float(levels.get("breakout_price", 0) or 0)
+    confirmation_price = float(levels.get("confirmation_price", 0) or 0)
+    entry_price_real = float(levels.get("entry_price_real", 0) or 0)
+    late_entry_price = float(levels.get("late_entry_price", 0) or 0)
+
+    intraday_ratio = float((intraday or {}).get("intraday_volume_ratio", 0) or 0)
+    vwap_proxy = float((intraday or {}).get("vwap_proxy", 0) or 0)
+    above_vwap = bool((intraday or {}).get("above_vwap_proxy", False))
+    opening_drive = str((intraday or {}).get("opening_drive", "unknown") or "unknown")
+    market_open = bool((intraday or {}).get("market_open", False))
+
+    strong_volume = effective_volume_ratio >= 1.1 or intraday_ratio >= 1.2
+    excellent_volume = effective_volume_ratio >= 1.25 or intraday_ratio >= 1.5
+
+    if market_phase == "open":
+        if market_open and vwap_proxy > 0:
+            vwap_status = "فوق VWAP ✅" if above_vwap else "تحت VWAP ❌"
+        else:
+            vwap_status = "VWAP غير متاح"
+    else:
+        vwap_status = "VWAP يكتمل أثناء السوق"
+
+    if excellent_volume:
+        volume_status = "سيولة قوية جدًا ✅"
+    elif strong_volume:
+        volume_status = "سيولة داعمة ✅"
+    elif effective_volume_ratio >= 0.9 or intraday_ratio >= 0.95:
+        volume_status = "سيولة متوسطة ⚠️"
+    else:
+        volume_status = "سيولة ضعيفة ❌"
+
+    timing_signal = "مراقبة 👀"
+    timing_reason = "تحت المراقبة"
+    smart_entry_price = entry_price_real if entry_price_real > 0 else confirmation_price
+    smart_stop_price = 0.0
+    smart_target_1 = 0.0
+
+    if confirmation_price > 0:
+        if current_price < breakout_price:
+            timing_signal = "انتظار اختراق ⏳"
+            timing_reason = f"السعر ما زال تحت الاختراق {safe_round(breakout_price)}"
+            smart_entry_price = confirmation_price
+        elif breakout_price <= current_price < confirmation_price:
+            timing_signal = "انتظار تأكيد 📊"
+            timing_reason = f"تم الكسر الأولي ويحتاج الثبات فوق {safe_round(confirmation_price)}"
+            smart_entry_price = confirmation_price
+        elif confirmation_price <= current_price <= entry_price_real:
+            if market_phase == "open":
+                if above_vwap and strong_volume and opening_drive != "هابط":
+                    timing_signal = "جاهز 🔥"
+                    timing_reason = "السعر فوق التأكيد وفوق VWAP والسيولة داعمة"
+                elif strong_volume:
+                    timing_signal = "دخول بحذر 🟠"
+                    timing_reason = "السعر فوق التأكيد لكن يحتاج ثباتًا لحظيًا أفضل"
+                else:
+                    timing_signal = "انتظار تأكيد 📊"
+                    timing_reason = "السعر في منطقة جيدة لكن السيولة ليست كافية بعد"
+            else:
+                timing_signal = "انتظار تأكيد 📊"
+                timing_reason = "السهم في منطقة جيدة، وقرار التنفيذ الأفضل يكون مع افتتاح السوق"
+            smart_entry_price = entry_price_real
+        elif entry_price_real < current_price <= late_entry_price:
+            if market_phase == "open" and above_vwap and excellent_volume:
+                timing_signal = "دخول بحذر 🟠"
+                timing_reason = "السعر تجاوز الدخول المثالي لكن ما زال ضمن آخر دخول مناسب"
+            else:
+                timing_signal = "متأخر ⚠️"
+                timing_reason = "السعر تجاوز الدخول المثالي وأصبح أقل جاذبية"
+            smart_entry_price = late_entry_price
+        elif late_entry_price > 0 and current_price > late_entry_price:
+            timing_signal = "متأخر ⚠️"
+            timing_reason = "السعر تجاوز آخر دخول مناسب - لا تطارد"
+            smart_entry_price = late_entry_price
+
+    if entry_price_real > 0:
+        smart_stop_price = max(0.0, entry_price_real * 0.97)
+        smart_target_1 = entry_price_real * 1.04
+
+    return {
+        "timing_signal": timing_signal,
+        "timing_reason": timing_reason,
+        "vwap_status": vwap_status,
+        "volume_status": volume_status,
+        "smart_entry_price": safe_round(smart_entry_price),
+        "smart_stop_price": safe_round(smart_stop_price),
+        "smart_target_1": safe_round(smart_target_1),
+    }
+
+
+def trade_plan_pro(symbol):
     prev = get_prev(symbol)
     if not prev:
         return None
 
-    intraday = get_intraday_snapshot(symbol)
-
-    if intraday.get("available"):
-        price = intraday.get("current_price", prev["price"])
-        high = max(prev["high"], intraday.get("session_high", 0))
-        low = min(prev["low"], intraday.get("session_low", prev["low"])) if intraday.get("session_low", 0) > 0 else prev["low"]
-        volume = max(prev["volume"], intraday.get("session_volume", 0))
-        open_price = intraday.get("session_open", prev["open"])
-    else:
-        price = prev["price"]
-        high = prev["high"]
-        low = prev["low"]
-        volume = prev["volume"]
-        open_price = prev["open"]
-
-    day_range = max(high - low, 0.01)
-    range_pct = day_range / price if price > 0 else 0.0
-
-    momentum = "محايد"
-    if price > open_price:
-        momentum = "صاعد"
-    elif price < open_price:
-        momentum = "هابط"
-
-    body_strength = abs(price - open_price) / day_range if day_range > 0 else 0.0
-    close_strength = (price - low) / day_range if day_range > 0 else 0.0
-
-    near_high = high > 0 and price >= high * 0.985
-    near_low = low > 0 and price <= low * 1.02
-
-    location = "وسط"
-    if near_high:
-        location = "قرب مقاومة"
-    elif near_low:
-        location = "قرب دعم"
-
-    return {
-        "symbol": symbol,
-        "price": price,
-        "high": high,
-        "low": low,
-        "open": open_price,
-        "volume": volume,
-        "day_range": day_range,
-        "range_pct": range_pct,
-        "momentum": momentum,
-        "body_strength": body_strength,
-        "close_strength": close_strength,
-        "location": location,
-        "near_high": near_high,
-        "near_low": near_low
-    }
-
-
-def execution_filter(stock: dict) -> dict:
-    entry = to_float(stock.get("entry", 0))
-    current = to_float(stock.get("financials", {}).get("current_price", 0))
-    volume_ratio = to_float(stock.get("volume_ratio", 0))
-    breakout_quality = str(stock.get("breakout_quality", "")).upper()
-    trade_type = str(stock.get("type", ""))
-    decision = str(stock.get("decision", ""))
-    existing_status = str(stock.get("execution_status", ""))
-    intraday = stock.get("intraday", {}) or {}
-
-    if existing_status == "AVOID":
-        return stock
-
-    if intraday.get("available"):
-        current = to_float(intraday.get("current_price", current))
-
-    is_above_entry = current > entry * 1.003 if entry > 0 and current > 0 else False
-    daily_volume_ok = volume_ratio >= 1.0
-    intraday_volume_ok = to_float(intraday.get("intraday_volume_ratio", 0)) >= 1.2 if intraday else False
-    has_volume = daily_volume_ok or intraday_volume_ok
-    acceptable_breakout = breakout_quality in {"STRONG", "WEAK"}
-    above_vwap = bool(intraday.get("above_vwap_proxy", False)) if intraday else False
-    opening_drive = str(intraday.get("opening_drive", "unknown"))
-
-    if trade_type == "Breakout":
-        if is_above_entry and has_volume and acceptable_breakout and decision in {"دخول قوي", "دخول بحذر"} and (above_vwap or not intraday.get("available")):
-            stock["execution_status"] = "EXECUTE"
-            stock["owner_action"] = "🔥 دخول فوري - تحقق تأكيد بعد الافتتاح"
-        elif is_above_entry and not has_volume:
-            stock["execution_status"] = "WAIT_VOLUME"
-            stock["owner_action"] = "انتظر دخول سيولة أوضح"
-        elif intraday.get("available") and not above_vwap:
-            stock["execution_status"] = "WAIT_VWAP"
-            stock["owner_action"] = "انتظر الثبات فوق متوسط اليوم"
-        elif intraday.get("available") and opening_drive == "هابط":
-            stock["execution_status"] = "WAIT_OPENING"
-            stock["owner_action"] = "انتظر تحسن افتتاح السهم أولاً"
-        elif not is_above_entry:
-            stock["execution_status"] = "WAIT_BREAKOUT"
-            stock["owner_action"] = "لم يتم تأكيد الاختراق فعليًا بعد"
-        else:
-            stock["execution_status"] = "WAIT"
-
-    return stock
-
-
-def trade_plan_pro(symbol):
-    a = base_analysis(symbol)
-    if not a:
-        return None
-
-    price = a["price"]
-    high = a["high"]
-    low = a["low"]
-    volume = a["volume"]
-    range_pct = a["range_pct"]
-    near_high = a["near_high"]
-    near_low = a["near_low"]
-    momentum = a["momentum"]
-    location = a["location"]
-    body_strength = a["body_strength"]
-    close_strength = a["close_strength"]
-
-    if price < LOW_PRICE_HARD_BLOCK:
-        return None
-
-    risk_flags = []
-    hard_block = False
-
-    if price < LOW_PRICE_WARNING:
-        risk_flags.append("سهم منخفض السعر - مخاطرة عالية")
-
+    info = get_info(symbol)
+    financials = get_financials(symbol)
+    hist = get_history_levels(symbol)
     trend_data = get_trend(symbol)
-    volume_ratio = get_volume_ratio(symbol)
-    trend = trend_data["trend"]
-    history = get_history_levels(symbol)
-    near_ath = history["near_ath"]
-    ath_breakout_zone = history["ath_breakout_zone"]
-    news = get_news_catalyst(symbol)
     intraday = get_intraday_snapshot(symbol)
-    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
+    volume_ratio = get_volume_ratio(symbol)
+    news_note, catalyst_score = get_news(symbol, info["company"])
 
-    trade_type = "Watch"
-    entry = price
-    stop = low * 0.99 if low > 0 else price * 0.95
-    early_momentum = False
-
-    setup_tight = (
-        near_high
-        and trend in {"صاعد", "صاعد قوي"}
-        and 0.012 <= range_pct <= 0.08
-        and close_strength >= 0.55
-        and location == "قرب مقاومة"
+    halal_ok, halal_reason = is_halal(
+        info["sector"], info["industry"],
+        financials["total_assets"], financials["cash"], financials["total_debt"]
     )
 
-    if near_high and momentum == "صاعد":
-        trade_type = "Breakout"
-        entry = high * 1.002
-        stop = low * 0.995
-    elif setup_tight and volume_ratio >= 0.9:
-        trade_type = "Breakout"
-        entry = high * 1.001
-        stop = low * 0.995
-        early_momentum = True
-        risk_flags.append("إشارة مبكرة قبل الاختراق")
-    elif near_high and trend in {"صاعد", "صاعد قوي"} and volume_ratio >= 1.1:
-        trade_type = "Breakout"
-        entry = high * 1.001
-        stop = low * 0.995
-        early_momentum = True
-        risk_flags.append("اقتراب مبكر من الاختراق")
-    elif near_low or (trend in {"صاعد", "صاعد قوي"} and location == "قرب دعم" and close_strength >= 0.45):
-        trade_type = "Pullback"
-        entry = price
-        stop = low * 0.99
+    if not halal_ok:
+        return {
+            "symbol": symbol,
+            "type": "Excluded",
+            "decision": "مرفوض شرعياً",
+            "entry": 0,
+            "stop_loss": 0,
+            "target_1": 0,
+            "target_2": 0,
+            "risk_pct": 0,
+            "quality_score": 0,
+            "rank_label": "-",
+            "valid_for": "-",
+            "trend": trend_data["trend"],
+            "volume_ratio": volume_ratio,
+            "data_quality": "high",
+            "catalyst_score": catalyst_score,
+            "news_note": news_note,
+            "risk_flags": [halal_reason],
+            "ai_summary": halal_reason,
+            "breakout_quality": "N/A",
+            "execution_status": "AVOID",
+            "owner_action": "تجنب السهم",
+            "company": info["company"],
+            "sector": info["sector"],
+            "industry": info["industry"],
+            "financials": financials,
+        }
 
-    risk = entry - stop
-    if risk <= 0:
-        stop = price * 0.95
-        risk = entry - stop
+    live_block = build_live_price_block(symbol, prev, intraday)
+    current_price = live_block["current_price_live"] if live_block["current_price_live"] > 0 else prev["price"]
+    high = max(prev["high"], live_block["high_live"] if live_block["high_live"] > 0 else prev["high"])
+    low = min(prev["low"], live_block["low_live"] if live_block["low_live"] > 0 else prev["low"])
 
-    risk_pct = risk / entry if entry > 0 else 0.0
-    target_1 = entry + risk * 1.5
-    target_2 = entry + risk * 2.0
+    price_penalty, price_flag = dynamic_price_penalty(current_price, "Breakout")
+    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
+    volume_pace_ratio = compute_volume_pace_ratio(intraday, volume_ratio)
 
-    breakout_quality = breakout_quality_label(trade_type, momentum, body_strength, close_strength, effective_volume_ratio)
-    quality_score = 32
-
-    if volume > 100_000_000:
-        quality_score += 14
-    elif volume > 50_000_000:
-        quality_score += 11
-    elif volume > 10_000_000:
-        quality_score += 7
-    elif volume > 2_000_000:
-        quality_score += 3
-    else:
-        quality_score -= 9
-        risk_flags.append("سيولة يومية ضعيفة")
-
-    if momentum == "صاعد":
-        quality_score += 9
-    elif momentum == "هابط":
-        quality_score -= 6
-
-    if trend == "صاعد قوي":
-        quality_score += 13
-    elif trend == "صاعد":
-        quality_score += 7
-    elif trend == "هابط":
-        quality_score -= 13
+    trade_type = "Pullback" if (trend_data["trend"] in ["صاعد", "صاعد قوي"] and current_price <= low * 1.05) else "Breakout"
 
     if trade_type == "Breakout":
-        quality_score += 8
-    elif trade_type == "Pullback":
-        quality_score += 5
+        entry = high * 1.01
+        stop = high * 0.95
+        target1 = high * 1.07
+        target2 = high * 1.10
     else:
-        quality_score -= 3
+        entry = current_price
+        stop = low * 0.97
+        target1 = current_price * 1.08
+        target2 = current_price * 1.12
 
-    if early_momentum:
-        quality_score += 6
+    risk_pct = ((entry - stop) / entry) * 100 if entry > 0 else 0
 
-    if intraday["available"]:
-        if intraday["intraday_volume_ratio"] >= 1.5:
-            quality_score += 8
-            risk_flags.append("سيولة لحظية قوية")
-        elif intraday["intraday_volume_ratio"] >= 1.2:
-            quality_score += 4
-        if intraday["above_vwap_proxy"]:
-            quality_score += 4
-        else:
-            quality_score -= 3
-        if intraday["opening_drive"] == "صاعد":
-            quality_score += 4
-        elif intraday["opening_drive"] == "هابط":
-            quality_score -= 4
-        if entry > 0 and intraday["current_price"] >= entry * 0.985:
-            quality_score += 4
-            risk_flags.append("قريب جدًا من الاختراق")
-
-    if trade_type == "Breakout" and trend == "هابط":
-        quality_score -= 16
-        risk_flags.append("اختراق عكس الاتجاه")
-        hard_block = True
-
-    if trade_type == "Breakout":
-        if effective_volume_ratio >= 1.5:
-            quality_score += 9
-        elif effective_volume_ratio >= 1.2:
-            quality_score += 5
-        elif effective_volume_ratio >= 1.0:
-            quality_score += 1
-            risk_flags.append("اختراق يحتاج تأكيد")
-        elif effective_volume_ratio >= 0.85:
-            quality_score -= 2
-            risk_flags.append("اختراق ضعيف بدون سيولة")
-        else:
-            quality_score -= 6
-            risk_flags.append("اختراق فاشل (سيولة ضعيفة جدًا)")
-            if not (intraday.get("available") and float(intraday.get("intraday_volume_ratio", 0) or 0) >= 1.2):
-                hard_block = True
-    elif trade_type == "Pullback":
-        if effective_volume_ratio >= 1.3:
-            quality_score += 4
-        elif effective_volume_ratio >= 1.0:
-            quality_score += 1
-        elif effective_volume_ratio < 0.8:
-            quality_score -= 5
+    quality = 50
+    if trend_data["trend"] == "صاعد قوي":
+        quality += 18
+    elif trend_data["trend"] == "صاعد":
+        quality += 10
+    elif trend_data["trend"] == "متذبذب":
+        quality -= 5
     else:
-        if effective_volume_ratio >= 1.3:
-            quality_score += 2
-        elif effective_volume_ratio < 0.8:
-            quality_score -= 5
+        quality -= 18
 
-    if breakout_quality == "STRONG":
-        quality_score += 9
-        risk_flags.append("اختراق قوي")
+    if effective_volume_ratio >= 1.5:
+        quality += 12
+    elif effective_volume_ratio >= 1.2:
+        quality += 8
+    elif effective_volume_ratio >= 1.0:
+        quality += 4
+    else:
+        quality -= 6
+
+    if catalyst_score > 0:
+        quality += catalyst_score
+
+    if hist["ath_breakout_zone"]:
+        quality -= 6
+    elif hist["near_52w_high"]:
+        quality -= 2
+
+    breakout_quality = breakout_quality_label(trade_type, "صاعد" if trend_data["trend"] in ["صاعد", "صاعد قوي"] else trend_data["trend"], 0.7, 0.75, effective_volume_ratio)
+    if breakout_quality == "FAILED":
+        quality -= 25
     elif breakout_quality == "WEAK":
-        quality_score -= 4
-        if trade_type == "Breakout":
-            risk_flags.append("شمعة اختراق ضعيفة")
-    elif breakout_quality == "FAILED":
-        quality_score -= 13
-        risk_flags.append("سلوك اختراق فاشل")
-        if trade_type == "Breakout":
-            hard_block = True
+        quality -= 8
+    elif breakout_quality == "STRONG":
+        quality += 6
 
-    if trade_type == "Breakout" and location == "قرب مقاومة":
-        quality_score += 5
-    elif trade_type == "Pullback" and location == "قرب دعم":
-        quality_score += 6
+    quality += price_penalty
 
-    if ath_breakout_zone and momentum == "صاعد":
-        quality_score += 6
-        risk_flags.append("قرب اختراق ATH")
-    elif near_ath and trade_type == "Breakout" and breakout_quality != "STRONG":
-        quality_score -= 3
-        risk_flags.append("قرب ATH بدون تأكيد")
+    if risk_pct > 12:
+        quality -= 18
+    elif risk_pct > 8:
+        quality -= 10
+    elif risk_pct > 5:
+        quality -= 4
 
-    if risk_pct <= 0.02:
-        quality_score += 8
-    elif risk_pct <= 0.04:
-        quality_score += 4
-    elif risk_pct <= 0.07:
-        quality_score -= 2
-    else:
-        quality_score -= 8
-        risk_flags.append("مخاطرة مرتفعة")
-        hard_block = True
+    quality = max(1, min(99, int(round(quality))))
+    rank_label = make_rank_label(quality)
 
-    if 0.02 <= range_pct <= 0.08:
-        quality_score += 5
-    elif range_pct > 0.15:
-        quality_score -= 7
-        risk_flags.append("ذبذبة يومية عالية")
+    decision = "مراقبة"
+    if quality >= 85 and risk_pct <= 8:
+        decision = "دخول قوي"
+    elif quality >= 65 and risk_pct <= 12:
+        decision = "دخول بحذر"
 
-    if abs(news["catalyst_score"]) >= 6:
-        quality_score += news["catalyst_score"]
-    elif abs(news["catalyst_score"]) >= 3:
-        quality_score += news["catalyst_score"] * 0.5
+    execution_status = compute_execution_status(
+        trade_type, decision, trend_data["trend"], effective_volume_ratio, catalyst_score, breakout_quality
+    )
+    owner_action_text = owner_decision(decision, trend_data["trend"], breakout_quality, effective_volume_ratio, catalyst_score)
+    valid_for = estimate_validity(trade_type, trend_data["trend"], effective_volume_ratio, catalyst_score)
 
-    if news["catalyst_score"] >= 6:
+    risk_flags = []
+    if price_flag:
+        risk_flags.append(price_flag)
+    if hist["near_ath"]:
+        risk_flags.append("قريب من القمة التاريخية")
+    if hist["ath_breakout_zone"]:
+        risk_flags.append("منطقة اختراق قمة تاريخية")
+    if catalyst_score > 0:
         risk_flags.append("خبر إيجابي محفز")
-    elif news["catalyst_score"] <= -6:
-        risk_flags.append("خبر سلبي ⚠️")
+    if info["sector"] == "":
+        risk_flags.append("بيانات القطاع/الصناعة ناقصة")
+    if financials["total_assets"] <= 0:
+        risk_flags.append("إجمالي الأصول غير متوفر")
+    if financials["shares"] <= 0:
+        risk_flags.append("عدد الأسهم غير متوفر")
+    if financials["approx_market_cap"] <= 0:
+        risk_flags.append("القيمة السوقية التقريبية غير متوفرة")
+    if intraday.get("market_open") and intraday.get("intraday_volume_ratio", 0) >= 1.5:
+        risk_flags.append("سيولة لحظية قوية")
+    if breakout_quality == "FAILED":
+        risk_flags.append("سلوك اختراق فاشل")
 
-    info = get_info(symbol)
-    h = halal(symbol)
-    data_quality, dq_flags = data_quality_check(symbol, info, h["financials"])
-    risk_flags.extend(dq_flags)
+    ai_summary_parts = [
+        f"الاتجاه {trend_data['trend']}",
+        f"السيولة {'مرتفعة' if effective_volume_ratio >= 1.2 else 'ضعيفة' if effective_volume_ratio < 0.9 else 'متوسطة'}",
+    ]
+    if intraday.get("market_open"):
+        ai_summary_parts.append(f"افتتاح اليوم: {intraday.get('opening_drive', 'unknown')}")
+        if intraday.get("above_vwap_proxy"):
+            ai_summary_parts.append("فوق VWAP اللحظي")
+        if intraday.get("intraday_volume_ratio", 0) >= 1.2:
+            ai_summary_parts.append("السيولة اللحظية داعمة")
+    if catalyst_score > 0:
+        ai_summary_parts.append("يوجد محفز إيجابي")
+    if hist["ath_breakout_zone"]:
+        ai_summary_parts.append("في منطقة قمة تاريخية")
+    if breakout_quality == "FAILED":
+        ai_summary_parts.append("شمعة الاختراق فشلت")
+    elif breakout_quality == "STRONG":
+        ai_summary_parts.append("اختراق قوي")
 
-    if data_quality == "low":
-        if effective_volume_ratio >= 1.0 and trend in {"صاعد", "صاعد قوي"}:
-            quality_score -= 5
-        else:
-            quality_score -= 9
+    if info["sector"] == "" or financials["total_assets"] <= 0 or financials["shares"] <= 0:
+        ai_summary_parts.append("جودة البيانات ضعيفة")
+    elif financials["approx_market_cap"] <= 0:
+        ai_summary_parts.append("جودة البيانات متوسطة")
 
-    quality_score = max(1, min(100, quality_score))
+    data_quality = "low" if (info["sector"] == "" or financials["total_assets"] <= 0 or financials["shares"] <= 0) else ("medium" if financials["approx_market_cap"] <= 0 else "high")
 
-    if risk_pct > 0.10:
-        decision = "مراقبة"
-    elif risk_pct > 0.08:
-        if quality_score >= 68:
-            decision = "دخول بحذر"
-        elif quality_score >= 56:
-            decision = "مراقبة"
-        else:
-            decision = "مراقبة"
-    else:
-        if hard_block and quality_score < 68:
-            decision = "مراقبة"
-        elif quality_score >= 78:
-            decision = "دخول قوي"
-        elif quality_score >= 68:
-            decision = "دخول بحذر"
-        elif quality_score >= 56:
-            decision = "مراقبة"
-        else:
-            decision = "مراقبة"
-
-    if (
-        decision == "مراقبة"
-        and risk_pct <= 0.065
-        and trend in {"صاعد", "صاعد قوي"}
-        and volume_ratio >= 1.0
-        and breakout_quality == "WEAK"
-        and trade_type == "Breakout"
-        and not hard_block
-    ):
-        decision = "دخول بحذر"
-
-    if trade_type == "Breakout" and volume_ratio < 0.8:
-        if decision in {"دخول قوي", "دخول بحذر"}:
-            decision = "مراقبة"
-
-    # فلتر تضارب التوصيات
-    if trade_type == "Breakout":
-        weak_intraday = intraday["available"] and intraday.get("intraday_volume_ratio", 0) < 1.0 and not intraday.get("above_vwap_proxy", False)
-        weak_candle = close_strength < 0.5 and body_strength < 0.28
-        if (trend == "هابط" or weak_candle or weak_intraday) and decision in {"دخول قوي", "دخول بحذر"} and not early_momentum:
-            decision = "مراقبة"
-            risk_flags.append("تضارب بين التوصية والمؤشرات")
-
-    # فلتر الاختراق الوهمي
-    if trade_type == "Breakout":
-        false_breakout_signal = (
-            breakout_quality == "FAILED"
-            or (close_strength < 0.5 and body_strength < 0.25 and effective_volume_ratio < 1.0)
-        )
-        if false_breakout_signal:
-            decision = "مراقبة"
-            risk_flags.append("احتمال اختراق وهمي")
-
-    # تحسين الارتداد من الدعم
-    if trade_type == "Pullback":
-        if trend in {"صاعد", "صاعد قوي"} and risk_pct <= 0.07 and close_strength >= 0.45 and effective_volume_ratio >= 0.9:
-            if quality_score >= 64:
-                decision = "دخول بحذر"
-                risk_flags.append("ارتداد جيد من دعم")
-
-    if trend == "هابط" and decision in {"دخول قوي", "دخول بحذر"}:
-        decision = "مراقبة"
-
-    if data_quality == "low" and decision == "دخول قوي":
-        decision = "دخول بحذر"
-
-
-    reasons = []
-    if trend == "صاعد قوي":
-        reasons.append("الاتجاه صاعد قوي")
-    elif trend == "صاعد":
-        reasons.append("الاتجاه إيجابي")
-    elif trend == "هابط":
-        reasons.append("الاتجاه سلبي")
-    else:
-        reasons.append("الاتجاه متذبذب")
-
-    if volume_ratio < 1:
-        reasons.append("السيولة ضعيفة")
-    elif volume_ratio >= 1.5:
-        reasons.append("السيولة قوية")
-    elif volume_ratio >= 1.0:
-        reasons.append("السيولة مقبولة")
-
-    if intraday["available"]:
-        reasons.append(f"افتتاح اليوم: {intraday['opening_drive']}")
-        if intraday["intraday_volume_ratio"] >= 1.2:
-            reasons.append("السيولة اللحظية داعمة")
-
-    if news["catalyst_score"] > 0:
-        reasons.append(news.get("freshness_note", "محفز إيجابي حديث"))
-    elif news["catalyst_score"] < 0:
-        reasons.append(news.get("freshness_note", "خبر سلبي حديث"))
-    else:
-        reasons.append("لا يوجد محفز حديث")
-
-    if trade_type == "Breakout":
-        reasons.append("محاولة اختراق")
-    elif trade_type == "Pullback":
-        reasons.append("ارتداد من دعم")
-    else:
-        reasons.append("فرصة واعدة مشروطة")
-
-    if early_momentum:
-        reasons.append("بداية زخم مبكرة")
-    if trade_type == "Breakout" and close_strength >= 0.7 and body_strength >= 0.45:
-        reasons.append("الشمعة نظيفة نسبيًا")
-
-    if breakout_quality == "STRONG":
-        reasons.append("شمعة الاختراق قوية")
-    elif breakout_quality == "WEAK":
-        reasons.append("شمعة الاختراق ضعيفة")
-    elif breakout_quality == "FAILED":
-        reasons.append("شمعة الاختراق فشلت")
-
-    if data_quality == "low":
-        reasons.append("جودة البيانات ضعيفة")
-
-    live_block = build_live_price_block(symbol, a, intraday)
     levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
+    timing = compute_timing_layer(live_block["current_price_live"], intraday, effective_volume_ratio, levels, live_block.get("market_phase", "closed"))
 
     return {
         "symbol": symbol,
@@ -1646,425 +1542,280 @@ def trade_plan_pro(symbol):
         "decision": decision,
         "entry": safe_round(entry),
         "stop_loss": safe_round(stop),
-        "target_1": safe_round(target_1),
-        "target_2": safe_round(target_2),
-        "risk_pct": safe_round(risk_pct * 100),
-        "quality_score": quality_score,
-        "rank_label": make_rank_label(quality_score),
-        "valid_for": estimate_validity(trade_type, trend, effective_volume_ratio, news["catalyst_score"]),
-        "trend": trend,
-        "volume_ratio": round(volume_ratio, 2),
-        "effective_volume_ratio": round(effective_volume_ratio, 2),
-        "data_quality": data_quality,
-        "catalyst_score": news["catalyst_score"],
-        "news_note": news["note"],
-        "news_freshness_label": news.get("freshness_label", "NONE"),
-        "news_sessions_since": news.get("sessions_since", None),
-        "risk_flags": risk_flags,
-        "ai_summary": " - ".join(reasons) if reasons else "لا يوجد وضوح كافي",
-        "breakout_quality": breakout_quality,
-        "execution_status": compute_execution_status(trade_type, decision, trend, effective_volume_ratio, news["catalyst_score"], breakout_quality),
-        "owner_action": owner_decision(decision, trend, breakout_quality, effective_volume_ratio, news["catalyst_score"]),
-        "intraday": intraday,
-        **levels,
-        **live_block
-    }
-
-
-
-
-def build_fallback_trade(symbol: str):
-    a = base_analysis(symbol)
-    if not a:
-        return None
-    info = get_info(symbol)
-    h = halal(symbol)
-    intraday = get_intraday_snapshot(symbol)
-    volume_ratio = get_volume_ratio(symbol)
-    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
-    live_block = build_live_price_block(symbol, a, intraday)
-    levels = compute_breakout_levels(live_block["current_price_live"], a.get("high", 0), a.get("low", 0), intraday, "Breakout")
-    current = float(live_block.get("current_price_live", 0) or 0)
-    breakout = float(levels.get("breakout_price", 0) or 0)
-    confirm = float(levels.get("confirmation_price", 0) or 0)
-    entry_real = float(levels.get("entry_price_real", 0) or 0)
-
-    if current < breakout:
-        execution_status = "WAIT_BREAKOUT"
-        execution_note = f"راقب كسر {round(breakout,2)}"
-    elif current < confirm:
-        execution_status = "WAIT_CONFIRM"
-        execution_note = f"يحتاج الثبات فوق {round(confirm,2)}"
-    elif current <= entry_real:
-        execution_status = "READY"
-        execution_note = f"منطقة دخول قريبة من {round(entry_real,2)}"
-    else:
-        execution_status = "CAUTION"
-        execution_note = "التحرك بدأ لكن ما زالت تحت المراقبة"
-
-    quality_score = 34
-    trend = get_trend(symbol).get("trend", "متذبذب")
-    if trend == "صاعد قوي":
-        quality_score += 12
-    elif trend == "صاعد":
-        quality_score += 7
-    elif trend == "هابط":
-        quality_score -= 6
-    if effective_volume_ratio >= 1.0:
-        quality_score += 6
-    elif effective_volume_ratio < 0.8:
-        quality_score -= 4
-    quality_score = max(15, min(55, quality_score))
-
-    stop_loss = a.get("low", 0) * 0.99 if a.get("low", 0) > 0 else current * 0.95
-    target_1 = entry_real + max(entry_real - stop_loss, current * 0.03)
-    target_2 = entry_real + max((entry_real - stop_loss) * 1.5, current * 0.05)
-    risk_pct = ((entry_real - stop_loss) / entry_real * 100) if entry_real > stop_loss > 0 else 0.0
-
-    out = {
-        "symbol": symbol,
-        "type": "Breakout",
-        "decision": "مراقبة",
-        "entry": safe_round(entry_real),
-        "stop_loss": safe_round(stop_loss),
-        "target_1": safe_round(target_1),
-        "target_2": safe_round(target_2),
+        "target_1": safe_round(target1),
+        "target_2": safe_round(target2),
         "risk_pct": safe_round(risk_pct),
-        "quality_score": int(quality_score),
-        "rank_label": make_rank_label(quality_score),
-        "valid_for": "صالح للمراقبة",
-        "trend": trend,
-        "volume_ratio": round(volume_ratio, 2),
-        "effective_volume_ratio": round(effective_volume_ratio, 2),
-        "data_quality": "medium",
-        "catalyst_score": 0,
-        "news_note": "لا يوجد محفز حديث",
-        "news_freshness_label": "NONE",
-        "news_sessions_since": None,
-        "risk_flags": ["تم توليد بطاقة احتياطية بسبب نقص/تعطل بعض البيانات"],
-        "ai_summary": "بطاقة احتياطية لضمان عدم اختفاء السهم - راقب السعر والاختراق",
-        "breakout_quality": "WEAK",
-        "execution_status": execution_status,
-        "execution_note": execution_note,
-        "owner_action": execution_note,
-        "intraday": intraday,
-        "company": info.get("company", ""),
-        "sector": info.get("sector", ""),
-        "industry": info.get("industry", ""),
-        "financials": h.get("financials", {}),
-        **levels,
-        **live_block,
-    }
-    out = normalize_execution_labels(assign_execution_mode(apply_late_move_filter(out)))
-    return out
-
-def analyze_symbol_overview(symbol):
-    symbol = str(symbol).upper().strip()
-    prev = get_prev(symbol)
-    if not prev:
-        return {"symbol": symbol, "available": False}
-
-    info = get_info(symbol)
-    trend_data = get_trend(symbol)
-    volume_ratio = get_volume_ratio(symbol)
-    news = get_news_catalyst(symbol)
-    history = get_history_levels(symbol)
-    intraday = get_intraday_snapshot(symbol)
-    halal_check = halal(symbol)
-    live_block = build_live_price_block(symbol, prev, intraday)
-
-    return {
-        "symbol": symbol,
-        "available": True,
-        "company": info.get("company", ""),
-        "sector": info.get("sector", ""),
-        "industry": info.get("industry", ""),
-        "price": safe_round(prev.get("price", 0)),
-        "open": safe_round(prev.get("open", 0)),
-        "high": safe_round(prev.get("high", 0)),
-        "low": safe_round(prev.get("low", 0)),
-        "volume": safe_round(prev.get("volume", 0)),
-        "trend": trend_data.get("trend", "unknown"),
+        "quality_score": quality,
+        "rank_label": rank_label,
+        "valid_for": valid_for,
+        "trend": trend_data["trend"],
         "volume_ratio": safe_round(volume_ratio),
-        "news_note": news.get("note", ""),
-        "catalyst_score": news.get("catalyst_score", 0),
-        "news_freshness_label": news.get("freshness_label", "NONE"),
-        "news_sessions_since": news.get("sessions_since", None),
-        "near_ath": history.get("near_ath", False),
-        "ath_breakout_zone": history.get("ath_breakout_zone", False),
+        "volume_pace_ratio": safe_round(volume_pace_ratio),
+        "data_quality": data_quality,
+        "catalyst_score": catalyst_score,
+        "news_note": news_note,
+        "risk_flags": risk_flags,
+        "ai_summary": " - ".join(ai_summary_parts),
+        "breakout_quality": breakout_quality,
+        "execution_status": execution_status,
+        "owner_action": owner_action_text,
         "intraday": intraday,
-        "halal": halal_check.get("allowed", False),
-        "halal_reason": halal_check.get("reason", ""),
-        **live_block
+        **levels,
+        **timing,
+        **live_block,
+        "company": info["company"],
+        "sector": info["sector"],
+        "industry": info["industry"],
+        "financials": financials,
     }
 
 
+def scan_all():
+    symbols = get_active_universe(100)
+    rows = []
+    for s in symbols:
+        p = trade_plan_pro(s)
+        if p and p.get("type") != "Excluded":
+            p = apply_late_move_filter(p)
+            p = assign_execution_mode(p)
+            p = normalize_execution_labels(p)
+            p = recalc_reentry_plan(p)
+            p = enrich_signal_stage(p)
 
-@app.post("/watchlist/add")
-def add_to_manual_watchlist(payload: dict = Body(...)):
-    symbol = str((payload or {}).get("symbol", "")).upper().strip()
-    price = to_float((payload or {}).get("price", 0))
-    recommendation = str((payload or {}).get("recommendation", "")).strip()
-    note = str((payload or {}).get("note", "")).strip()
-    if not symbol:
-        return {"ok": False, "error": "رمز السهم مطلوب"}
-    items = load_manual_watchlist()
-    for item in items:
-        if str(item.get("symbol", "")).upper() == symbol:
-            return {"ok": True, "status": "exists"}
-    items.append({
-        "symbol": symbol,
-        "added_price": safe_round(price),
-        "recommendation": recommendation,
-        "note": note,
-        "added_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
-    })
-    save_manual_watchlist(items)
-    return {"ok": True, "status": "added"}
+            if not p.get("price_reliable_for_execution", True) and p.get("market_phase") in {"open", "pre_market", "after_hours"}:
+                p["decision"] = "مراقبة"
+                p["execution_mode"] = "مراقبة 👀"
+                p["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
+                p["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
+                p.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
+                p.setdefault("ai_summary", "")
+                if p["ai_summary"]:
+                    p["ai_summary"] += " - "
+                p["ai_summary"] += "السعر اللحظي غير موثوق"
 
-@app.get("/watchlist/manual")
-def get_manual_watchlist():
-    items = load_manual_watchlist()
-    out = []
-    for item in items:
-        symbol = str(item.get("symbol", "")).upper().strip()
-        snap = get_snapshot_quote(symbol)
-        prev = get_prev(symbol) or {}
-        current = to_float(snap.get("current_price", 0))
-        if current <= 0:
-            current = to_float(prev.get("price", 0))
-        added_price = to_float(item.get("added_price", 0))
-        change_pct = ((current - added_price) / added_price) * 100 if added_price > 0 and current > 0 else 0.0
-        phase = get_market_phase()
-        out.append({
-            "symbol": symbol,
-            "added_price": safe_round(added_price),
-            "current_price": safe_round(current),
-            "change_pct": safe_round(change_pct),
-            "recommendation": item.get("recommendation", ""),
-            "note": item.get("note", ""),
-            "added_at": item.get("added_at", ""),
-            "price_source_label": "بعد الإغلاق" if phase == "after_hours" else "قبل الافتتاح" if phase == "pre_market" else "مباشر" if phase == "open" else "آخر إغلاق"
-        })
-    return {"count": len(out), "items": out}
+            rows.append(p)
+            upsert_performance_signal(p)
 
-@app.post("/watchlist/remove")
-def remove_from_manual_watchlist(payload: dict = Body(...)):
-    symbol = str((payload or {}).get("symbol", "")).upper().strip()
-    items = load_manual_watchlist()
-    new_items = [x for x in items if str(x.get("symbol", "")).upper() != symbol]
-    save_manual_watchlist(new_items)
-    return {"ok": True, "removed": symbol}
+    rows.sort(key=lambda x: (decision_priority(x.get("decision", "")), x.get("quality_score", 0)), reverse=True)
+    return rows
+
 
 @app.get("/")
-def home():
+def root():
     return FileResponse("index.html")
 
 
 @app.get("/health")
 def health():
     return {
-        "message": "Stock Radar AI is running 🚀",
-        "loaded": {
-            "companies": len(COMPANIES_DATA),
-            "sector_industry": len(SECTOR_DATA),
-            "balance_rows": len(BALANCE_DATA),
-            "income_rows": len(INCOME_DATA),
-        },
-        "market_open_now": is_market_open_now(),
+        "ok": True,
         "market_phase": get_market_phase(),
-        "market_phase_label": market_phase_label(get_market_phase())
+        "market_phase_label": market_phase_label(get_market_phase()),
+        "timestamp": datetime.now(ZoneInfo("America/New_York")).isoformat()
     }
 
 
 @app.get("/trade-scan")
 def trade_scan():
-    trades = []
-    rejected = []
-    errors = []
+    results = scan_all()
 
-    universe = get_active_universe(max_symbols=100)
+    strong = [x for x in results if x.get("decision") == "دخول قوي"]
+    cautious = [x for x in results if x.get("decision") == "دخول بحذر"]
+    watch = [x for x in results if x.get("decision") == "مراقبة"]
 
-    for s in universe:
-        try:
-            prev = get_prev(s)
-            if prev and prev["price"] < LOW_PRICE_HARD_BLOCK:
-                rejected.append({"symbol": s, "reason": f"سعر أقل من {LOW_PRICE_HARD_BLOCK}$"})
-                continue
-
-            h = halal(s)
-            if not h["allowed"]:
-                rejected.append({"symbol": s, "reason": h["reason"]})
-                continue
-
-            t = trade_plan_pro(s)
-            if not t:
-                t = build_fallback_trade(s)
-
-            if t:
-                info = get_info(s)
-                t["company"] = info.get("company", t.get("company", ""))
-                t["sector"] = info.get("sector", t.get("sector", ""))
-                t["industry"] = info.get("industry", t.get("industry", ""))
-                t["financials"] = h.get("financials", t.get("financials", {}))
-                t = execution_filter(t)
-                t = apply_late_move_filter(t)
-                t = assign_execution_mode(t)
-                t = normalize_execution_labels(t)
-                t = enrich_signal_stage(t)
-                trades.append(t)
-
-        except Exception as e:
-            errors.append({"symbol": s, "error": str(e)})
-            continue
-
-    trades = sorted(trades, key=lambda x: (decision_priority(x["decision"]), x["quality_score"]), reverse=True)
-
-    top_ranked = trades[:5]
-    strong_entries = [x for x in trades if x["decision"] == "دخول قوي"]
-    cautious_entries = [x for x in trades if x["decision"] == "دخول بحذر"]
-    watch = [x for x in trades if x["decision"] == "مراقبة"]
-
-    phase = get_market_phase()
     return {
-        "generated_at_utc": datetime.utcnow().isoformat() + "Z",
-        "generated_at_label": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
-        "market_phase": phase,
-        "market_phase_label": market_phase_label(phase),
-        "universe_count": len(universe),
-        "count": len(trades),
-        "strong_entries_count": len(strong_entries),
-        "cautious_entries_count": len(cautious_entries),
+        "market_phase": get_market_phase(),
+        "market_phase_label": market_phase_label(get_market_phase()),
+        "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "universe_count": 100,
+        "count": len(results),
+        "strong_entries_count": len(strong),
+        "cautious_entries_count": len(cautious),
         "watchlist_count": len(watch),
-        "top_ranked_count": len(top_ranked),
-        "top_ranked": top_ranked,
-        "strong_entries": strong_entries,
-        "cautious_entries": cautious_entries,
-        "watchlist": watch,
-        "rejected_count": len(rejected),
-        "rejected": rejected[:30],
-        "errors_count": len(errors),
-        "errors": errors[:20]
+        "top_ranked": results[:25],
+        "cautious_entries": cautious[:25],
+        "watchlist": watch[:50],
+        "all_results": results,
     }
-
 
 
 @app.get("/single-stock")
 def single_stock(symbol: str):
+    symbol = str(symbol).upper().strip()
+    overview = None
+    trade_plan = None
+    overview_error = None
+    trade_error = None
+
     try:
-        symbol = str(symbol).upper().strip()
-        if not symbol:
-            return {"error": "يرجى إدخال رمز السهم"}
-
-        overview = {}
-        trade = None
-        overview_error = None
-        trade_error = None
-
-        try:
-            overview = analyze_symbol_overview(symbol)
-        except Exception as e:
-            overview = {}
-            overview_error = str(e)
-
-        try:
-            trade = trade_plan_pro(symbol)
-            if not trade:
-                trade = build_fallback_trade(symbol)
-        except Exception as e:
-            trade = build_fallback_trade(symbol)
-            trade_error = str(e)
-
-        if trade:
-            try:
-                info = get_info(symbol) or {}
-            except Exception:
-                info = {}
-
-            try:
-                h = halal(symbol) or {}
-            except Exception:
-                h = {}
-
-            trade["company"] = info.get("company", trade.get("company", ""))
-            trade["sector"] = info.get("sector", trade.get("sector", ""))
-            trade["industry"] = info.get("industry", trade.get("industry", ""))
-            trade["financials"] = h.get("financials", trade.get("financials", {}))
-
-            try:
-                trade = execution_filter(trade)
-            except Exception:
-                pass
-
-            try:
-                trade = apply_late_move_filter(trade)
-            except Exception:
-                pass
-
-            try:
-                trade = assign_execution_mode(trade)
-            except Exception:
-                pass
-
-            try:
-                trade = normalize_execution_labels(trade)
-            except Exception:
-                pass
-
-            try:
-                trade = enrich_signal_stage(trade)
-            except Exception:
-                pass
-
-        response = {
-            "symbol": symbol,
-            "overview": overview,
-            "trade_plan": trade
-        }
-
-        if overview_error:
-            response["overview_error"] = overview_error
-        if trade_error:
-            response["trade_error"] = trade_error
-
-        return response
-
+        prev = get_prev(symbol)
+        if not prev:
+            overview = {"symbol": symbol, "available": False, "reason": "No daily data"}
+        else:
+            info = get_info(symbol)
+            financials = get_financials(symbol)
+            hist = get_history_levels(symbol)
+            trend_data = get_trend(symbol)
+            intraday = get_intraday_snapshot(symbol)
+            volume_ratio = get_volume_ratio(symbol)
+            news_note, catalyst_score = get_news(symbol, info["company"])
+            halal_ok, halal_reason = is_halal(info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"])
+            live_block = build_live_price_block(symbol, prev, intraday)
+            overview = {
+                "symbol": symbol,
+                "available": True,
+                "company": info["company"],
+                "sector": info["sector"],
+                "industry": info["industry"],
+                "price": prev["price"],
+                "open": prev["open"],
+                "high": prev["high"],
+                "low": prev["low"],
+                "volume": prev["volume"],
+                "trend": trend_data["trend"],
+                "volume_ratio": safe_round(volume_ratio),
+                "news_note": news_note,
+                "catalyst_score": catalyst_score,
+                "near_ath": hist["near_ath"],
+                "ath_breakout_zone": hist["ath_breakout_zone"],
+                "intraday": intraday,
+                "halal": halal_ok,
+                "halal_reason": halal_reason,
+                **live_block,
+            }
     except Exception as e:
-        return {
-            "error": f"single-stock server error: {str(e)}",
-            "symbol": str(symbol).upper().strip() if symbol else ""
-        }
+        overview_error = str(e)
+        overview = {"symbol": symbol, "available": False}
 
-@app.get("/debug/{symbol}")
-def debug_symbol(symbol: str):
-    symbol = symbol.upper()
-    overview = analyze_symbol_overview(symbol)
-    trade = trade_plan_pro(symbol) or build_fallback_trade(symbol)
-
-    if trade:
-        info = get_info(symbol)
-        h = halal(symbol)
-        trade["company"] = info["company"]
-        trade["sector"] = info["sector"]
-        trade["industry"] = info["industry"]
-        trade["financials"] = h["financials"]
-        trade = execution_filter(trade)
-        trade = apply_late_move_filter(trade)
-        trade = assign_execution_mode(trade)
-        trade = normalize_execution_labels(trade)
+    try:
+        trade_plan = trade_plan_pro(symbol)
+        if trade_plan:
+            trade_plan = apply_late_move_filter(trade_plan)
+            trade_plan = assign_execution_mode(trade_plan)
+            trade_plan = normalize_execution_labels(trade_plan)
+            trade_plan = recalc_reentry_plan(trade_plan)
+            trade_plan = enrich_signal_stage(trade_plan)
+            if not trade_plan.get("price_reliable_for_execution", True) and trade_plan.get("market_phase") in {"open", "pre_market", "after_hours"}:
+                trade_plan["decision"] = "مراقبة"
+                trade_plan["execution_mode"] = "مراقبة 👀"
+                trade_plan["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
+                trade_plan["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
+                trade_plan.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
+    except Exception as e:
+        trade_error = str(e)
 
     return {
         "symbol": symbol,
-        "sector_info": get_info(symbol),
-        "balance": BALANCE_DATA.get(symbol, {}),
-        "income": INCOME_DATA.get(symbol, {}),
-        "history_levels": get_history_levels(symbol),
-        "halal_check": halal(symbol),
-        "base_analysis": base_analysis(symbol),
-        "news_catalyst": get_news_catalyst(symbol),
-        "trade_plan": trade,
         "overview": overview,
-        "market_open_now": is_market_open_now(),
-        "market_phase": get_market_phase(),
-        "market_phase_label": market_phase_label(get_market_phase())
+        "trade_plan": trade_plan,
+        "overview_error": overview_error,
+        "trade_error": trade_error,
+    }
+
+
+@app.post("/watchlist/add")
+def watchlist_add(payload: dict = Body(...)):
+    symbol = str(payload.get("symbol", "") or "").upper().strip()
+    price = safe_round(payload.get("price", 0))
+    if not symbol:
+        return {"ok": False, "message": "رمز السهم مطلوب"}
+
+    items = load_manual_watchlist()
+    if any(str(x.get("symbol", "")).upper().strip() == symbol for x in items):
+        return {"ok": True, "message": "السهم موجود مسبقًا", "items": items}
+
+    items.insert(0, {
+        "symbol": symbol,
+        "added_price": price,
+        "added_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    })
+    save_manual_watchlist(items)
+    return {"ok": True, "message": "تمت الإضافة للمراقبة", "items": items}
+
+
+@app.post("/watchlist/remove")
+def watchlist_remove(payload: dict = Body(...)):
+    symbol = str(payload.get("symbol", "") or "").upper().strip()
+    items = load_manual_watchlist()
+    items = [x for x in items if str(x.get("symbol", "")).upper().strip() != symbol]
+    save_manual_watchlist(items)
+    return {"ok": True, "message": "تم حذف السهم من المراقبة", "items": items}
+
+
+@app.get("/watchlist")
+def watchlist_get():
+    items = load_manual_watchlist()
+    out = []
+    for item in items:
+        symbol = str(item.get("symbol", "") or "").upper().strip()
+        prev = get_prev(symbol)
+        intraday = get_intraday_snapshot(symbol)
+        live_block = build_live_price_block(symbol, prev or {}, intraday)
+        current_display = live_block.get("display_price", 0)
+        added_price = safe_round(item.get("added_price", 0))
+        change_pct = 0.0
+        if current_display and added_price:
+            change_pct = ((current_display - added_price) / added_price) * 100
+        out.append({
+            "symbol": symbol,
+            "added_price": added_price,
+            "added_at": item.get("added_at", ""),
+            "current_price": safe_round(current_display),
+            "change_pct": safe_round(change_pct),
+            "price_source": live_block.get("price_source", ""),
+            "price_source_label": live_block.get("price_source_label", ""),
+            "market_phase_label": live_block.get("market_phase_label", ""),
+        })
+    return {"items": out}
+
+
+@app.get("/performance")
+def performance_get():
+    items = load_performance_items()
+    updated = []
+    wins = 0
+    losses = 0
+    flats = 0
+    total_change = 0.0
+    counted = 0
+
+    for item in items[:200]:
+        symbol = str(item.get("symbol", "") or "").upper().strip()
+        entry_price = float(item.get("entry_price", 0) or 0)
+        prev = get_prev(symbol)
+        intraday = get_intraday_snapshot(symbol)
+        live_block = build_live_price_block(symbol, prev or {}, intraday)
+        current_price = float(live_block.get("display_price", 0) or 0)
+        change_pct = 0.0
+        status = "محايد"
+        if entry_price > 0 and current_price > 0:
+            change_pct = ((current_price - entry_price) / entry_price) * 100
+            if change_pct >= 1.0:
+                status = "رابحة"
+                wins += 1
+            elif change_pct <= -1.0:
+                status = "خاسرة"
+                losses += 1
+            else:
+                flats += 1
+            total_change += change_pct
+            counted += 1
+        updated.append({
+            **item,
+            "current_price": safe_round(current_price),
+            "change_pct": safe_round(change_pct),
+            "status": status,
+            "price_source_label": live_block.get("price_source_label", ""),
+        })
+
+    avg_change = safe_round(total_change / counted) if counted > 0 else 0.0
+    return {
+        "items": updated,
+        "summary": {
+            "count": len(updated),
+            "wins": wins,
+            "losses": losses,
+            "flats": flats,
+            "avg_change_pct": avg_change,
+        }
     }
