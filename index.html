@@ -218,18 +218,26 @@
       details.push(detailBox('الوقف الذكي', formatNumber(stock.smart_stop_price)));
       details.push(detailBox('الهدف الذكي', formatNumber(stock.smart_target_1)));
       details.push(detailBox('منطقة الارتداد', safeText(stock.pullback_zone_low && stock.pullback_zone_high ? `${formatNumber(stock.pullback_zone_low)} - ${formatNumber(stock.pullback_zone_high)}` : '')));
+      details.push(detailBox('نمط الارتداد', safeText(stock.pullback_pattern_label)));
+      details.push(detailBox('تأكيد سيولة الارتداد', safeText(stock.pullback_volume_label)));
+      details.push(detailBox('تراجع متعدد الشموع', safeText(stock.pullback_multi_bar_label)));
       details.push(detailBox('Fibonacci 38.2%', formatNumber(stock.fib_38)));
       details.push(detailBox('Fibonacci 50%', formatNumber(stock.fib_50)));
       details.push(detailBox('Fibonacci 61.8%', formatNumber(stock.fib_62)));
       details.push(detailBox('السيولة اليومية', formatNumber(stock.volume_ratio)));
       details.push(detailBox('سيولة السرعة', formatNumber(stock.volume_pace_ratio)));
       details.push(detailBox('السيولة الفعلية', formatNumber(stock.effective_volume_ratio)));
+      details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
+      details.push(detailBox('Continuation Score', formatNumber(stock.continuation_score)));
       details.push(detailBox('VWAP اللحظي', safeText(stock.vwap_status)));
       details.push(detailBox('حالة السيولة', safeText(stock.volume_status)));
       details.push(detailBox('العائد/المخاطرة', formatNumber(stock.rr_1)));
       details.push(detailBox('جودة البيانات', safeText(stock.data_quality)));
       details.push(detailBox('الترند', safeText(stock.trend)));
       details.push(detailBox('صالح لمدة', safeText(stock.valid_for)));
+      details.push(detailBox('تقييم الاستمرار', safeText(stock.continuation_label)));
+      details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
+      details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
       details.push(detailBox('الخبر / المحفز', safeText(stock.news_note), true));
       if (Array.isArray(stock.risk_flags) && stock.risk_flags.length) {
         details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${x}</li>`).join('')}</ul>`, true));
@@ -260,7 +268,9 @@
           ${compactRow('حالة الاختراق', safeText(stock.breakout_status))}
           ${compactRow('مرحلة الإشارة', safeText(stock.signal_stage_label))}
           ${compactRow('استراتيجية السهم', safeText(stock.strategy_label))}
-          ${compactRow('تقييم الاستمرار', safeText(stock.runner_label))}
+          ${compactRow('تقييم الاستمرار', safeText(stock.runner_label || stock.continuation_label))}
+          ${compactRow('تعويض التأخير', safeText(stock.delayed_compensation_label))}
+          ${compactRow('الإنذار المبكر', safeText(stock.early_warning_label))}
           ${compactRow('ملخص', safeText(stock.ai_summary))}
 
           <div class="actions" style="margin-top:12px;">
