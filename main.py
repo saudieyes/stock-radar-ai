@@ -8,7 +8,10 @@ from datetime import datetime, timedelta
 import time
 import json
 from zoneinfo import ZoneInfo
-from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage
+try:
+    from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile
+except Exception:
+    from scanner_resend_momentum_suite import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile
 
 app = FastAPI()
 
@@ -170,6 +173,13 @@ def safe_round(x, digits=2):
         return round(float(x), digits)
     except:
         return x
+
+
+def clamp(value, min_value, max_value):
+    try:
+        return max(float(min_value), min(float(value), float(max_value)))
+    except:
+        return min_value
 
 
 def _cache_get(cache_obj, key):
@@ -768,7 +778,26 @@ def get_trend(symbol):
         return {"trend": "unknown", "ma20": 0.0, "ma50": 0.0}
 
 
-def get_volume_ratio(symbol):
+def get_session_elapsed_ratio() -> float:
+    try:
+        ny = ZoneInfo("America/New_York")
+        now_ny = datetime.now(ny)
+        if now_ny.weekday() >= 5:
+            return 0.0
+        session_start = 9 * 60 + 30
+        session_end = 16 * 60
+        current_minutes = now_ny.hour * 60 + now_ny.minute
+        if current_minutes <= session_start:
+            return 0.0
+        if current_minutes >= session_end:
+            return 1.0
+        elapsed = (current_minutes - session_start) / float(session_end - session_start)
+        return clamp(elapsed, 0.0, 1.0)
+    except:
+        return 0.0
+
+
+def get_volume_ratio(symbol, intraday=None):
     try:
         url = (
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
@@ -776,12 +805,62 @@ def get_volume_ratio(symbol):
         )
         r = requests.get(url, timeout=22).json()
         data = r.get("results", [])
-        volumes = [to_float(x.get("v")) for x in data if to_float(x.get("v")) > 0]
-        if len(volumes) < 20:
+        if not data:
             return 1.0
-        avg_volume = sum(volumes[-20:]) / 20
-        today_volume = volumes[-1]
-        return today_volume / avg_volume if avg_volume > 0 else 1.0
+
+        market_open = is_market_open_now()
+        ny = ZoneInfo("America/New_York")
+        today_ny = datetime.now(ny).date()
+
+        historical_volumes = []
+        current_session_daily_volume = 0.0
+
+        for row in data:
+            volume = to_float(row.get("v"))
+            if volume <= 0:
+                continue
+            row_date = None
+            ts = row.get("t")
+            try:
+                if ts:
+                    row_date = datetime.fromtimestamp(float(ts) / 1000.0, ny).date()
+            except:
+                row_date = None
+
+            if market_open and row_date == today_ny:
+                current_session_daily_volume = volume
+                continue
+
+            historical_volumes.append(volume)
+
+        if len(historical_volumes) < 20:
+            if len(historical_volumes) >= 5:
+                avg_volume = sum(historical_volumes) / len(historical_volumes)
+            else:
+                return 1.0
+        else:
+            avg_volume = sum(historical_volumes[-20:]) / 20.0
+
+        if avg_volume <= 0:
+            return 1.0
+
+        if market_open:
+            intraday = intraday or get_intraday_snapshot(symbol)
+            session_volume = float((intraday or {}).get("session_volume", 0) or 0)
+            if session_volume <= 0:
+                session_volume = current_session_daily_volume
+            elapsed_ratio = float((intraday or {}).get("session_elapsed_ratio", 0) or 0)
+            if elapsed_ratio <= 0:
+                elapsed_ratio = get_session_elapsed_ratio()
+            if session_volume > 0 and elapsed_ratio > 0:
+                normalized_elapsed = max(elapsed_ratio, 0.08)
+                projected_day_volume = session_volume / normalized_elapsed
+                return clamp(projected_day_volume / avg_volume, 0.2, 8.0)
+
+        latest_complete_volume = historical_volumes[-1] if historical_volumes else current_session_daily_volume
+        if latest_complete_volume <= 0:
+            return 1.0
+        return clamp(latest_complete_volume / avg_volume, 0.2, 8.0)
     except:
         return 1.0
 
@@ -810,7 +889,16 @@ def get_intraday_snapshot(symbol):
         "vwap_proxy": 0.0,
         "above_vwap_proxy": False,
         "opening_drive": "unknown",
-        "bars_count": 0
+        "bars_count": 0,
+        "session_elapsed_ratio": 0.0,
+        "projected_day_volume": 0.0,
+        "recent_red_bars": 0,
+        "recent_green_bars": 0,
+        "pullback_volume_dry": False,
+        "pullback_volume_ratio": 0.0,
+        "spike_from_open_pct": 0.0,
+        "pullback_from_high_pct": 0.0,
+        "session_position_pct": 0.0,
     }
 
     if not market_open:
@@ -835,7 +923,8 @@ def get_intraday_snapshot(symbol):
 
         session_open = to_float(bars[0].get("o"))
         session_high = max(to_float(x.get("h")) for x in bars)
-        session_low = min(to_float(x.get("l")) for x in bars if to_float(x.get("l")) > 0)
+        lows = [to_float(x.get("l")) for x in bars if to_float(x.get("l")) > 0]
+        session_low = min(lows) if lows else 0.0
         session_volume = sum(volumes)
         latest_5m_volume = volumes[-1]
         avg_5m_volume = sum(volumes) / len(volumes) if volumes else 0.0
@@ -853,6 +942,9 @@ def get_intraday_snapshot(symbol):
         vwap_proxy = weighted_total / volume_total if volume_total > 0 else closes[-1]
         current_price = closes[-1]
         first_close = to_float(bars[0].get("c"))
+        elapsed_ratio = get_session_elapsed_ratio()
+        normalized_elapsed = max(elapsed_ratio, 0.08) if elapsed_ratio > 0 else 0.0
+        projected_day_volume = (session_volume / normalized_elapsed) if normalized_elapsed > 0 else 0.0
 
         if current_price > session_open and current_price >= first_close:
             opening_drive = "صاعد"
@@ -860,6 +952,29 @@ def get_intraday_snapshot(symbol):
             opening_drive = "هابط"
         else:
             opening_drive = "متذبذب"
+
+        recent_red_bars = 0
+        recent_green_bars = 0
+        recent_slice = bars[-4:]
+        for idx in range(1, len(recent_slice)):
+            prev_close = to_float(recent_slice[idx - 1].get("c"))
+            cur_close = to_float(recent_slice[idx].get("c"))
+            if cur_close < prev_close:
+                recent_red_bars += 1
+            elif cur_close > prev_close:
+                recent_green_bars += 1
+
+        last3 = volumes[-3:] if len(volumes) >= 3 else volumes
+        prior6 = volumes[-9:-3] if len(volumes) >= 9 else volumes[:-3]
+        last3_avg = sum(last3) / len(last3) if last3 else 0.0
+        prior6_avg = sum(prior6) / len(prior6) if prior6 else avg_5m_volume
+        pullback_volume_ratio = (last3_avg / prior6_avg) if prior6_avg > 0 else 0.0
+        pullback_volume_dry = pullback_volume_ratio <= 0.85 if prior6_avg > 0 else False
+
+        spike_from_open_pct = ((session_high - session_open) / session_open) if session_open > 0 and session_high > 0 else 0.0
+        pullback_from_high_pct = ((session_high - current_price) / session_high) if session_high > 0 and current_price > 0 else 0.0
+        session_range = max(session_high - session_low, 0.0001)
+        session_position_pct = ((current_price - session_low) / session_range) * 100 if session_range > 0 else 0.0
 
         out = {
             "available": True,
@@ -875,7 +990,16 @@ def get_intraday_snapshot(symbol):
             "vwap_proxy": vwap_proxy,
             "above_vwap_proxy": current_price >= vwap_proxy if vwap_proxy > 0 else False,
             "opening_drive": opening_drive,
-            "bars_count": len(bars)
+            "bars_count": len(bars),
+            "session_elapsed_ratio": safe_round(elapsed_ratio, 4),
+            "projected_day_volume": safe_round(projected_day_volume),
+            "recent_red_bars": recent_red_bars,
+            "recent_green_bars": recent_green_bars,
+            "pullback_volume_dry": pullback_volume_dry,
+            "pullback_volume_ratio": safe_round(pullback_volume_ratio, 2),
+            "spike_from_open_pct": safe_round(spike_from_open_pct * 100, 2),
+            "pullback_from_high_pct": safe_round(pullback_from_high_pct * 100, 2),
+            "session_position_pct": safe_round(session_position_pct, 2),
         }
     except:
         pass
@@ -986,19 +1110,14 @@ def compute_volume_pace_ratio(intraday: dict, daily_volume_ratio: float) -> floa
     try:
         if not intraday or not intraday.get("available"):
             return float(daily_volume_ratio or 0)
-        bars_count = int(intraday.get("bars_count", 0) or 0)
-        if bars_count <= 0:
-            return float(daily_volume_ratio or 0)
-        session_volume = float(intraday.get("session_volume", 0) or 0)
+        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
         latest_5m = float(intraday.get("latest_5m_volume", 0) or 0)
         avg_5m = float(intraday.get("avg_5m_volume", 0) or 0)
-        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
-        if avg_5m <= 0:
-            return max(float(daily_volume_ratio or 0), intraday_ratio)
-        projected_factor = 78 / max(bars_count, 1)
-        projected_session_ratio = (session_volume * projected_factor) / max(session_volume, 1)
-        pace = max(intraday_ratio, latest_5m / avg_5m if avg_5m > 0 else 0)
-        return max(float(daily_volume_ratio or 0), pace)
+        pullback_volume_ratio = float(intraday.get("pullback_volume_ratio", 0) or 0)
+        burst_ratio = (latest_5m / avg_5m) if avg_5m > 0 else intraday_ratio
+        if pullback_volume_ratio > 0:
+            return clamp(max(float(daily_volume_ratio or 0), intraday_ratio, burst_ratio, 1 / max(pullback_volume_ratio, 0.01) if pullback_volume_ratio < 1 else pullback_volume_ratio), 0.2, 8.0)
+        return clamp(max(float(daily_volume_ratio or 0), intraday_ratio, burst_ratio), 0.2, 8.0)
     except:
         return float(daily_volume_ratio or 0)
 
@@ -1008,15 +1127,19 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         effective = float(volume_ratio or 0)
         if intraday and intraday.get("available"):
             intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
-            if intraday_ratio >= 2.0:
-                effective = max(effective, 1.3)
-            elif intraday_ratio >= 1.5:
-                effective = max(effective, 1.15)
-            elif intraday_ratio >= 1.2:
-                effective = max(effective, 1.0)
-            elif intraday_ratio >= 1.0:
-                effective = max(effective, 0.9)
-        return effective
+            pace_ratio = compute_volume_pace_ratio(intraday, volume_ratio)
+            projected_bias = 0.0
+            projected_day_volume = float(intraday.get("projected_day_volume", 0) or 0)
+            session_volume = float(intraday.get("session_volume", 0) or 0)
+            if projected_day_volume > 0 and session_volume > 0:
+                projected_bias = projected_day_volume / max(session_volume, 1.0)
+            effective = max(
+                effective,
+                intraday_ratio * 0.9,
+                pace_ratio,
+                min(max(float(volume_ratio or 0), 0.0) + (projected_bias * 0.02), 8.0)
+            )
+        return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
 
@@ -1226,12 +1349,122 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
     return 0, ""
 
 
-def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str):
+def compute_pullback_context(current_price: float, high_price: float, low_price: float, intraday: dict, trend: str) -> dict:
+    try:
+        session_high = float((intraday or {}).get("session_high", 0) or 0)
+        session_low = float((intraday or {}).get("session_low", 0) or 0)
+        session_open = float((intraday or {}).get("session_open", 0) or 0)
+        above_vwap = bool((intraday or {}).get("above_vwap_proxy", False))
+        spike_from_open_pct = float((intraday or {}).get("spike_from_open_pct", 0) or 0)
+        pullback_volume_dry = bool((intraday or {}).get("pullback_volume_dry", False))
+        recent_red_bars = int((intraday or {}).get("recent_red_bars", 0) or 0)
+        session_position_pct = float((intraday or {}).get("session_position_pct", 0) or 0)
+
+        swing_high = session_high if session_high > 0 else high_price
+        base_low = session_low if session_low > 0 else low_price
+        if session_open > 0 and base_low > 0:
+            base_low = min(base_low, session_open)
+        swing_low = base_low if base_low > 0 else low_price
+        swing_range = max(swing_high - swing_low, 0.0)
+
+        fib_38 = 0.0
+        fib_50 = 0.0
+        fib_62 = 0.0
+        in_pullback_zone = False
+        near_support = current_price <= low_price * 1.05 if low_price > 0 else False
+        strong_spike = False
+        pullback_score = 0
+        pattern_label = ""
+
+        if swing_high > 0 and swing_low > 0 and swing_range > 0:
+            fib_38 = swing_high - (swing_range * 0.382)
+            fib_50 = swing_high - (swing_range * 0.5)
+            fib_62 = swing_high - (swing_range * 0.618)
+            zone_low = min(fib_38, fib_62)
+            zone_high = max(fib_38, fib_62)
+            in_pullback_zone = zone_low <= current_price <= zone_high if current_price > 0 else False
+            strong_spike = spike_from_open_pct >= 3.0 or ((swing_high - swing_low) / max(swing_low, 0.01)) >= 0.04
+            if trend in {"صاعد", "صاعد قوي"}:
+                if strong_spike:
+                    pullback_score += 25
+                if in_pullback_zone:
+                    pullback_score += 24
+                if pullback_volume_dry:
+                    pullback_score += 18
+                if 2 <= recent_red_bars <= 4:
+                    pullback_score += 10
+                if above_vwap:
+                    pullback_score += 8
+                if session_position_pct >= 45:
+                    pullback_score += 8
+                elif session_position_pct < 30:
+                    pullback_score -= 8
+                if near_support:
+                    pullback_score += 10
+
+            if strong_spike and in_pullback_zone and pullback_volume_dry:
+                pattern_label = "ارتداد فيبوناتشي بعد قفزة قوية"
+            elif in_pullback_zone:
+                pattern_label = "ارتداد داخل منطقة فيبوناتشي"
+            elif near_support:
+                pattern_label = "ارتداد قرب دعم يومي"
+
+            return {
+                "fib_38": safe_round(fib_38),
+                "fib_50": safe_round(fib_50),
+                "fib_62": safe_round(fib_62),
+                "pullback_zone_low": safe_round(zone_low),
+                "pullback_zone_high": safe_round(zone_high),
+                "in_pullback_zone": in_pullback_zone,
+                "near_support": near_support,
+                "strong_spike_detected": strong_spike,
+                "pullback_score": max(0, min(99, int(round(pullback_score)))),
+                "pullback_pattern_label": pattern_label,
+                "pullback_volume_label": "جفاف سيولة على الارتداد ✅" if pullback_volume_dry else "سيولة الارتداد ما زالت مرتفعة ⚠️",
+                "pullback_multi_bar_label": f"{recent_red_bars} شموع تراجع" if recent_red_bars > 0 else "لا يوجد تراجع متعدد واضح",
+                "pullback_candidate": trend in {"صاعد", "صاعد قوي"} and (in_pullback_zone or near_support),
+            }
+
+        return {
+            "fib_38": 0.0,
+            "fib_50": 0.0,
+            "fib_62": 0.0,
+            "pullback_zone_low": 0.0,
+            "pullback_zone_high": 0.0,
+            "in_pullback_zone": False,
+            "near_support": near_support,
+            "strong_spike_detected": False,
+            "pullback_score": 0,
+            "pullback_pattern_label": "",
+            "pullback_volume_label": "",
+            "pullback_multi_bar_label": "",
+            "pullback_candidate": trend in {"صاعد", "صاعد قوي"} and near_support,
+        }
+    except:
+        return {
+            "fib_38": 0.0,
+            "fib_50": 0.0,
+            "fib_62": 0.0,
+            "pullback_zone_low": 0.0,
+            "pullback_zone_high": 0.0,
+            "in_pullback_zone": False,
+            "near_support": False,
+            "strong_spike_detected": False,
+            "pullback_score": 0,
+            "pullback_pattern_label": "",
+            "pullback_volume_label": "",
+            "pullback_multi_bar_label": "",
+            "pullback_candidate": False,
+        }
+
+
+def compute_breakout_levels(current_price: float, high_price: float, low_price: float, intraday: dict, trade_type: str, pullback_context: dict | None = None):
     breakout_price = 0.0
     confirmation_price = 0.0
     entry_price_real = 0.0
     late_entry_price = 0.0
     breakout_status = ""
+    pullback_context = pullback_context or {}
 
     if trade_type == "Breakout" and high_price > 0:
         breakout_price = high_price
@@ -1249,12 +1482,22 @@ def compute_breakout_levels(current_price: float, high_price: float, low_price: 
             breakout_status = "اختراق مؤكد - دخول بحذر"
         else:
             breakout_status = "اختراق متأخر"
-    elif trade_type == "Pullback" and low_price > 0:
-        breakout_price = low_price * 1.03
-        confirmation_price = low_price * 1.02
-        entry_price_real = low_price * 1.01
-        late_entry_price = low_price * 1.025
-        breakout_status = "ارتداد من دعم"
+    elif trade_type == "Pullback":
+        fib_38 = float(pullback_context.get("fib_38", 0) or 0)
+        fib_50 = float(pullback_context.get("fib_50", 0) or 0)
+        fib_62 = float(pullback_context.get("fib_62", 0) or 0)
+        zone_low = float(pullback_context.get("pullback_zone_low", 0) or 0)
+        zone_high = float(pullback_context.get("pullback_zone_high", 0) or 0)
+
+        breakout_price = high_price if high_price > 0 else (fib_38 if fib_38 > 0 else low_price * 1.03)
+        confirmation_price = fib_38 if fib_38 > 0 else low_price * 1.02
+        entry_price_real = fib_50 if fib_50 > 0 else (current_price if current_price > 0 else low_price * 1.01)
+        if current_price > 0 and zone_high > 0 and current_price < zone_low:
+            entry_price_real = zone_low
+        late_entry_price = zone_high if zone_high > 0 else (fib_38 if fib_38 > 0 else low_price * 1.025)
+        breakout_status = str(pullback_context.get("pullback_pattern_label", "ارتداد من دعم") or "ارتداد من دعم")
+        if fib_62 > 0 and current_price > 0 and current_price < fib_62 * 0.995:
+            breakout_status = "كسر منطقة الارتداد"
 
     return {
         "breakout_price": safe_round(breakout_price),
@@ -1365,7 +1608,7 @@ def trade_plan_pro(symbol):
     hist = get_history_levels(symbol)
     trend_data = get_trend(symbol)
     intraday = get_intraday_snapshot(symbol)
-    volume_ratio = get_volume_ratio(symbol)
+    volume_ratio = get_volume_ratio(symbol, intraday)
     news_note, catalyst_score = get_news(symbol, info["company"])
 
     halal_ok, halal_reason = is_halal(
@@ -1388,6 +1631,7 @@ def trade_plan_pro(symbol):
             "valid_for": "-",
             "trend": trend_data["trend"],
             "volume_ratio": volume_ratio,
+            "effective_volume_ratio": volume_ratio,
             "data_quality": "high",
             "catalyst_score": catalyst_score,
             "news_note": news_note,
@@ -1407,11 +1651,12 @@ def trade_plan_pro(symbol):
     high = max(prev["high"], live_block["high_live"] if live_block["high_live"] > 0 else prev["high"])
     low = min(prev["low"], live_block["low_live"] if live_block["low_live"] > 0 else prev["low"])
 
-    price_penalty, price_flag = dynamic_price_penalty(current_price, "Breakout")
-    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
-    volume_pace_ratio = compute_volume_pace_ratio(intraday, volume_ratio)
+    pullback_context = compute_pullback_context(current_price, high, low, intraday, trend_data["trend"])
+    trade_type = "Pullback" if pullback_context.get("pullback_candidate") else "Breakout"
 
-    trade_type = "Pullback" if (trend_data["trend"] in ["صاعد", "صاعد قوي"] and current_price <= low * 1.05) else "Breakout"
+    price_penalty, price_flag = dynamic_price_penalty(current_price, trade_type)
+    volume_pace_ratio = compute_volume_pace_ratio(intraday, volume_ratio)
+    effective_volume_ratio = get_effective_volume_ratio(volume_ratio, intraday)
 
     if trade_type == "Breakout":
         entry = high * 1.01
@@ -1419,10 +1664,15 @@ def trade_plan_pro(symbol):
         target1 = high * 1.07
         target2 = high * 1.10
     else:
-        entry = current_price
-        stop = low * 0.97
-        target1 = current_price * 1.08
-        target2 = current_price * 1.12
+        fib_50 = float(pullback_context.get("fib_50", 0) or 0)
+        fib_62 = float(pullback_context.get("fib_62", 0) or 0)
+        zone_high = float(pullback_context.get("pullback_zone_high", 0) or 0)
+        entry = fib_50 if fib_50 > 0 else current_price
+        if current_price > 0 and zone_high > 0 and current_price < zone_high:
+            entry = max(current_price, fib_62 if fib_62 > 0 else current_price)
+        stop = min(low * 0.985, fib_62 * 0.985) if fib_62 > 0 and low > 0 else low * 0.97
+        target1 = max(high * 0.995, entry * 1.04)
+        target2 = max(high * 1.02, entry * 1.08)
 
     risk_pct = ((entry - stop) / entry) * 100 if entry > 0 else 0
 
@@ -1445,6 +1695,13 @@ def trade_plan_pro(symbol):
     else:
         quality -= 6
 
+    if volume_pace_ratio >= 1.25:
+        quality += 7
+    elif volume_pace_ratio >= 1.0:
+        quality += 3
+    elif intraday.get("market_open"):
+        quality -= 4
+
     if catalyst_score > 0:
         quality += catalyst_score
 
@@ -1453,13 +1710,28 @@ def trade_plan_pro(symbol):
     elif hist["near_52w_high"]:
         quality -= 2
 
-    breakout_quality = breakout_quality_label(trade_type, "صاعد" if trend_data["trend"] in ["صاعد", "صاعد قوي"] else trend_data["trend"], 0.7, 0.75, effective_volume_ratio)
+    breakout_quality = breakout_quality_label(
+        trade_type,
+        "صاعد" if trend_data["trend"] in ["صاعد", "صاعد قوي"] else trend_data["trend"],
+        0.7,
+        0.75,
+        effective_volume_ratio,
+    )
     if breakout_quality == "FAILED":
         quality -= 25
     elif breakout_quality == "WEAK":
         quality -= 8
     elif breakout_quality == "STRONG":
         quality += 6
+
+    pullback_score = int(pullback_context.get("pullback_score", 0) or 0)
+    if trade_type == "Pullback":
+        if pullback_score >= 70:
+            quality += 10
+        elif pullback_score >= 58:
+            quality += 5
+        else:
+            quality -= 4
 
     quality += price_penalty
 
@@ -1506,6 +1778,8 @@ def trade_plan_pro(symbol):
         risk_flags.append("سيولة لحظية قوية")
     if breakout_quality == "FAILED":
         risk_flags.append("سلوك اختراق فاشل")
+    if trade_type == "Pullback" and not pullback_context.get("in_pullback_zone"):
+        risk_flags.append("الارتداد خارج المنطقة المثالية")
 
     ai_summary_parts = [
         f"الاتجاه {trend_data['trend']}",
@@ -1517,6 +1791,8 @@ def trade_plan_pro(symbol):
             ai_summary_parts.append("فوق VWAP اللحظي")
         if intraday.get("intraday_volume_ratio", 0) >= 1.2:
             ai_summary_parts.append("السيولة اللحظية داعمة")
+    if trade_type == "Pullback" and pullback_context.get("pullback_pattern_label"):
+        ai_summary_parts.append(str(pullback_context.get("pullback_pattern_label")))
     if catalyst_score > 0:
         ai_summary_parts.append("يوجد محفز إيجابي")
     if hist["ath_breakout_zone"]:
@@ -1533,10 +1809,10 @@ def trade_plan_pro(symbol):
 
     data_quality = "low" if (info["sector"] == "" or financials["total_assets"] <= 0 or financials["shares"] <= 0) else ("medium" if financials["approx_market_cap"] <= 0 else "high")
 
-    levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type)
+    levels = compute_breakout_levels(live_block["current_price_live"], high, low, intraday, trade_type, pullback_context)
     timing = compute_timing_layer(live_block["current_price_live"], intraday, effective_volume_ratio, levels, live_block.get("market_phase", "closed"))
 
-    return {
+    plan = {
         "symbol": symbol,
         "type": trade_type,
         "decision": decision,
@@ -1551,6 +1827,7 @@ def trade_plan_pro(symbol):
         "trend": trend_data["trend"],
         "volume_ratio": safe_round(volume_ratio),
         "volume_pace_ratio": safe_round(volume_pace_ratio),
+        "effective_volume_ratio": safe_round(effective_volume_ratio),
         "data_quality": data_quality,
         "catalyst_score": catalyst_score,
         "news_note": news_note,
@@ -1560,6 +1837,7 @@ def trade_plan_pro(symbol):
         "execution_status": execution_status,
         "owner_action": owner_action_text,
         "intraday": intraday,
+        **pullback_context,
         **levels,
         **timing,
         **live_block,
@@ -1568,10 +1846,12 @@ def trade_plan_pro(symbol):
         "industry": info["industry"],
         "financials": financials,
     }
+    plan = enrich_strategy_profile(plan)
+    return plan
 
 
 def scan_all():
-    symbols = get_active_universe(100)
+    symbols = get_active_universe(150)
     rows = []
     for s in symbols:
         p = trade_plan_pro(s)
@@ -1602,7 +1882,9 @@ def scan_all():
 
 @app.get("/")
 def root():
-    return FileResponse("index.html")
+    if os.path.exists("index.html"):
+        return FileResponse("index.html")
+    return FileResponse("index-new.html")
 
 
 @app.get("/health")
@@ -1627,7 +1909,7 @@ def trade_scan():
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase()),
         "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
-        "universe_count": 100,
+        "universe_count": 150,
         "count": len(results),
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
@@ -1657,7 +1939,7 @@ def single_stock(symbol: str):
             hist = get_history_levels(symbol)
             trend_data = get_trend(symbol)
             intraday = get_intraday_snapshot(symbol)
-            volume_ratio = get_volume_ratio(symbol)
+            volume_ratio = get_volume_ratio(symbol, intraday)
             news_note, catalyst_score = get_news(symbol, info["company"])
             halal_ok, halal_reason = is_halal(info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"])
             live_block = build_live_price_block(symbol, prev, intraday)
@@ -1818,4 +2100,4 @@ def performance_get():
             "flats": flats,
             "avg_change_pct": avg_change,
         }
-    }
+        }
