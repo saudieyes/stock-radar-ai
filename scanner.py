@@ -1120,9 +1120,6 @@ def assign_execution_mode(stock: dict) -> dict:
         strategy_label = str(stock.get("strategy_label", "") or "")
         delayed_comp_label = str(stock.get("delayed_compensation_label", "") or "")
         close_strength_hint = "قوية" if quality_score >= 78 else "متوسطة" if quality_score >= 66 else "ضعيفة"
-        zone_low = float(stock.get("pullback_zone_low", 0) or 0)
-        zone_high = float(stock.get("pullback_zone_high", 0) or 0)
-        fib_62 = float(stock.get("fib_62", 0) or 0)
 
         rr = 0.0
         if entry_price_real > 0 and stop_loss > 0 and target_1 > 0 and entry_price_real > stop_loss:
@@ -1136,12 +1133,24 @@ def assign_execution_mode(stock: dict) -> dict:
             distance_to_entry = ((entry_price_real - current_price) / entry_price_real) * 100
         stock["distance_to_entry_pct"] = round(distance_to_entry, 2)
 
-        pullback_stop_candidates = [x for x in [stop_loss, fib_62 * 0.985 if fib_62 > 0 else 0.0, zone_low * 0.985 if zone_low > 0 else 0.0] if x > 0]
-        pullback_structural_stop = min(pullback_stop_candidates) if pullback_stop_candidates else stop_loss
-        stock["pullback_structural_stop"] = round2(pullback_structural_stop) if pullback_structural_stop > 0 else 0.0
-
         execution_mode = "انتظار تأكيد 📊"
         execution_note = timing_reason or "يحتاج السهم إلى تأكيد إضافي"
+
+        pullback_candidate = bool(stock.get("pullback_candidate", False))
+        in_pullback_zone = bool(stock.get("in_pullback_zone", False))
+        if current_price > 0 and stop_loss > 0 and current_price <= stop_loss:
+            if trade_type == "Breakout":
+                stock["decision"] = "مراقبة"
+                stock["broken_plan"] = True
+                stock["broken_plan_reason"] = "breakout_stop_broken"
+                execution_mode = "مراقبة 👀"
+                execution_note = "❌ كسر وقف خطة الاختراق السابقة - انتظر تكوين اختراق جديد"
+            elif trade_type == "Pullback" and not (pullback_candidate or in_pullback_zone):
+                stock["decision"] = "مراقبة"
+                stock["broken_plan"] = True
+                stock["broken_plan_reason"] = "pullback_stop_broken"
+                execution_mode = "مراقبة 👀"
+                execution_note = "❌ كسر وقف الارتداد السابق - انتظر ارتدادًا جديدًا"
 
         if not price_reliable and market_phase in {"open", "pre_market", "after_hours"}:
             stock["decision"] = "مراقبة"
@@ -1150,20 +1159,13 @@ def assign_execution_mode(stock: dict) -> dict:
             stock["owner_action"] = "👀 راقب حتى تتوفر بيانات لحظية موثوقة"
             return classify_runner_stage(stock)
 
-        if trade_type == "Breakout" and current_price > 0 and stop_loss > 0 and current_price <= stop_loss:
-            stock["decision"] = "مراقبة"
-            stock["plan_invalidated"] = True
-            stock["plan_invalidated_reason"] = "❌ كسر وقف الاختراق - الخطة الحالية لم تعد صالحة"
-            stock["execution_mode"] = "مراقبة 👀"
-            stock["execution_note"] = stock["plan_invalidated_reason"]
-            stock["owner_action"] = "🚫 تم كسر الوقف - انتظر اختراقًا جديدًا بخطة جديدة"
-            return classify_runner_stage(stock)
-
         if timing_signal:
             execution_mode = timing_signal
             execution_note = timing_reason or execution_note
 
-        if risk_pct > 25:
+        if stock.get("broken_plan"):
+            pass
+        elif risk_pct > 25:
             execution_mode = "تجنب ❌"
             execution_note = "المخاطرة مرتفعة جدًا"
         elif late_move_flag in {"CONFIRMED_LATE"} or execution_status in {"SKIP_FAR_FROM_ENTRY"}:
@@ -1232,13 +1234,7 @@ def assign_execution_mode(stock: dict) -> dict:
             pullback_confirmed = bool(stock.get("pullback_volume_confirmed", False))
             zone_low = float(stock.get("pullback_zone_low", 0) or 0)
             zone_high = float(stock.get("pullback_zone_high", 0) or 0)
-            if current_price > 0 and pullback_structural_stop > 0 and current_price <= pullback_structural_stop:
-                stock["decision"] = "مراقبة"
-                stock["plan_invalidated"] = True
-                stock["plan_invalidated_reason"] = "❌ كسر وقف الارتداد الحالي - انتظر تكوين ارتداد جديد"
-                execution_mode = "مراقبة 👀"
-                execution_note = stock["plan_invalidated_reason"]
-            elif trend in {"صاعد", "صاعد قوي"} and risk_pct <= 8 and (effective_volume_ratio >= 0.9 or continuation_score >= 64):
+            if trend in {"صاعد", "صاعد قوي"} and risk_pct <= 8 and (effective_volume_ratio >= 0.9 or continuation_score >= 64):
                 execution_mode = "دخول بحذر 🟠"
                 if pullback_confirmed and zone_low > 0 and zone_high > 0:
                     execution_note = f"🟠 ارتداد محسّن من {round(zone_low,2)} - {round(zone_high,2)} مع تأكيد سيولة"
@@ -1266,6 +1262,8 @@ def assign_execution_mode(stock: dict) -> dict:
             stock["owner_action"] = execution_note
         elif execution_mode == "مراقبة إعادة دخول 👀":
             stock["owner_action"] = stock.get("reentry_note", "👀 راقب إعادة دخول")
+        elif stock.get("broken_plan"):
+            stock["owner_action"] = execution_note
         elif execution_mode in {"متأخر ⚠️", "تجنب ❌"}:
             stock["owner_action"] = "🚫 لا تطارد السعر الآن"
         else:
@@ -1389,6 +1387,8 @@ def finalize_display_contract(stock: dict) -> dict:
         zone_high = _safe_float(stock.get("pullback_zone_high", 0))
 
         is_reentry = bool(stock.get("reentry_plan_active", False)) or signal_stage == "reentry" or "إعادة دخول" in execution_mode
+        broken_plan = bool(stock.get("broken_plan", False))
+        broken_reason = str(stock.get("broken_plan_reason", "") or "")
 
         display_plan_family = "normal"
         display_plan_family_label = "الخطة الحالية"
@@ -1401,7 +1401,29 @@ def finalize_display_contract(stock: dict) -> dict:
         alternate_entry_label = ""
         alternate_entry_price = 0.0
 
-        if is_reentry:
+        if broken_plan and broken_reason == "breakout_stop_broken":
+            display_plan_family = "watch"
+            display_plan_family_label = "خطة سابقة مكسورة"
+            display_entry_label = "اختراق جديد مطلوب"
+            display_entry_price = breakout_price if breakout_price > 0 else confirmation_price if confirmation_price > 0 else 0.0
+            display_stop_label = "وقف الخطة السابقة"
+            display_stop_price = ""
+            display_target_label = "الهدف"
+            display_target_price = ""
+        elif broken_plan and broken_reason == "pullback_stop_broken":
+            display_plan_family = "watch"
+            display_plan_family_label = "ارتداد جديد قيد التكوين"
+            if zone_low > 0 and zone_high > 0:
+                display_entry_label = "منطقة ارتداد جديدة"
+                display_entry_price = round2((zone_low + zone_high) / 2)
+            else:
+                display_entry_label = "بانتظار ارتداد جديد"
+                display_entry_price = ""
+            display_stop_label = "وقف الارتداد"
+            display_stop_price = ""
+            display_target_label = "الهدف"
+            display_target_price = ""
+        elif is_reentry:
             display_plan_family = "reentry"
             display_plan_family_label = "خطة إعادة الدخول"
 
@@ -1467,13 +1489,8 @@ def finalize_display_contract(stock: dict) -> dict:
             if zone_low > 0 and zone_high > 0:
                 alternate_entry_label = "منطقة الارتداد"
                 alternate_entry_price = round2((zone_low + zone_high) / 2)
-            structural_pullback_stop = _safe_float(stock.get("pullback_structural_stop", 0))
-            if structural_pullback_stop <= 0:
-                fib_62 = _safe_float(stock.get("fib_62", 0))
-                pullback_candidates = [x for x in [stop_loss, fib_62 * 0.985 if fib_62 > 0 else 0.0, zone_low * 0.985 if zone_low > 0 else 0.0] if x > 0]
-                structural_pullback_stop = min(pullback_candidates) if pullback_candidates else stop_loss
             display_stop_label = "وقف الارتداد"
-            display_stop_price = structural_pullback_stop if structural_pullback_stop > 0 else stop_loss
+            display_stop_price = stop_loss if stop_loss > 0 else smart_stop_price
             display_target_label = "هدف الارتداد"
             display_target_price = target_1 if target_1 > 0 else smart_target_1
 
@@ -1482,32 +1499,27 @@ def finalize_display_contract(stock: dict) -> dict:
             display_stop_price = smart_stop_price if smart_stop_price > 0 else stop_loss
             display_target_price = smart_target_1 if smart_target_1 > 0 else target_1
 
-        if display_entry_price <= 0:
+        if isinstance(display_entry_price, (int, float)) and display_entry_price <= 0:
             display_entry_price = smart_entry_price if smart_entry_price > 0 else entry_price_real if entry_price_real > 0 else breakout_price
-        if display_stop_price <= 0:
+        if isinstance(display_stop_price, (int, float)) and display_stop_price <= 0:
             display_stop_price = smart_stop_price if smart_stop_price > 0 else stop_loss
-        if display_target_price <= 0:
+        if isinstance(display_target_price, (int, float)) and display_target_price <= 0:
             display_target_price = smart_target_1 if smart_target_1 > 0 else target_1
 
         display_risk_pct = 0.0
-        if display_entry_price > 0 and display_stop_price > 0 and display_entry_price > display_stop_price:
+        if isinstance(display_entry_price, (int, float)) and isinstance(display_stop_price, (int, float)) and display_entry_price > 0 and display_stop_price > 0 and display_entry_price > display_stop_price:
             display_risk_pct = ((display_entry_price - display_stop_price) / display_entry_price) * 100
         else:
             display_risk_pct = _safe_float(stock.get("risk_pct", 0))
 
-        if bool(stock.get("plan_invalidated", False)):
-            stock["signal_stage"] = "invalidated"
-            stock["signal_stage_label"] = "خطة مكسورة"
-            stock["decision"] = "مراقبة"
-
         stock["display_plan_family"] = display_plan_family
         stock["display_plan_family_label"] = display_plan_family_label
         stock["display_entry_label"] = display_entry_label
-        stock["display_entry_price"] = round2(display_entry_price)
+        stock["display_entry_price"] = round2(display_entry_price) if isinstance(display_entry_price, (int, float)) else display_entry_price
         stock["display_stop_label"] = display_stop_label
-        stock["display_stop_price"] = round2(display_stop_price)
+        stock["display_stop_price"] = round2(display_stop_price) if isinstance(display_stop_price, (int, float)) else display_stop_price
         stock["display_target_label"] = display_target_label
-        stock["display_target_price"] = round2(display_target_price)
+        stock["display_target_price"] = round2(display_target_price) if isinstance(display_target_price, (int, float)) else display_target_price
         stock["alternate_entry_label"] = alternate_entry_label
         stock["alternate_entry_price"] = round2(alternate_entry_price) if alternate_entry_price > 0 else 0.0
         stock["display_risk_pct"] = round2(display_risk_pct)
@@ -1618,3 +1630,4 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         return get_seed_universe()[:max_symbols]
 
     return final_universe[:max_symbols]
+
