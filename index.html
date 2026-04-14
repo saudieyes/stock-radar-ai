@@ -157,6 +157,33 @@
     .red { color:#ef4444; }
     .yellow { color:#f59e0b; }
     .muted { color:#94a3b8; }
+    .hidden-section { display:none; }
+    .quick-nav {
+      display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px 0;
+      position: sticky; top: 92px; z-index: 15;
+      background: rgba(7,17,31,.88); backdrop-filter: blur(8px);
+      padding: 10px; border-radius: 16px; border:1px solid #1f2937;
+    }
+    .quick-link {
+      display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+      color:#e5e7eb; background:#111827; border:1px solid #334155;
+      border-radius:999px; padding:9px 12px; font-size:13px; font-weight:800;
+    }
+    .quick-link:hover { background:#0f172a; }
+    .scroll-anchor { scroll-margin-top: 150px; }
+    .summary-row {
+      display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:12px;
+    }
+    .summary-card {
+      background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:12px;
+    }
+    .summary-title { font-size:15px; font-weight:900; color:#f8fafc; margin-bottom:6px; }
+    .summary-sub { font-size:12px; color:#94a3b8; line-height:1.7; }
+    .summary-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .small-note {
+      color:#94a3b8; font-size:12px; line-height:1.8;
+      background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:12px;
+    }
 
     @media (max-width: 860px) {
       .topbar, .hero { grid-template-columns:1fr; display:block; }
@@ -172,9 +199,10 @@
     <div class="topbar">
       <div>
         <div class="title">Stock Radar AI</div>
-        <div class="subtitle">نسخة أسرع وأوضح: بطاقات مختصرة، شرح عربي للمؤشرات، محفظة ثابتة، تتبع أداء أدق، وتمييز الخبر الإيجابي/السلبي/القديم.</div>
       </div>
       <div class="actions">
+        <button class="ghost" onclick="toggleSection('introHelp', this, 'إظهار الشرح', 'إخفاء الشرح')">إظهار الشرح</button>
+        <button class="ghost" onclick="toggleSection('glossaryHelp', this, 'إظهار الرموز', 'إخفاء الرموز')">إظهار الرموز</button>
         <button class="primary" onclick="loadAll()">تحديث الكل</button>
       </div>
     </div>
@@ -186,7 +214,7 @@
           <span class="hero-chip" id="heroUpdated">آخر تحديث: —</span>
           <span class="hero-chip" id="heroOpeningMode">وضع الافتتاح: —</span>
         </div>
-        <div class="subtitle" id="heroExplain">جاري تحميل حالة السوق...</div>
+        <div class="small-note" id="heroExplain">جاري تحميل حالة السوق...</div>
       </div>
       <div class="hero-right" id="heroQuickStats">
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">—</div></div>
@@ -196,8 +224,29 @@
       </div>
     </div>
 
-    <details class="glossary-box section" open>
-      <summary>📘 شرح الإشارات والمصطلحات</summary>
+    <div class="quick-nav">
+      <a class="quick-link" href="#portfolioSection">💼 محفظتي</a>
+      <a class="quick-link" href="#openingSection">🚀 الافتتاح</a>
+      <a class="quick-link" href="#strong-section">🔥 دخول قوي</a>
+      <a class="quick-link" href="#cautious-section">🟠 دخول بحذر</a>
+      <a class="quick-link" href="#watch-section">👀 المراقبة</a>
+      <a class="quick-link" href="#watchlistSection">📌 المتابعة</a>
+      <a class="quick-link" href="#performanceSection">📊 الأداء</a>
+      <a class="quick-link" href="#singleScanSection">🔎 فحص سهم</a>
+    </div>
+
+    <div id="introHelp" class="glossary-box section hidden-section scroll-anchor">
+      <div class="summary-title">ℹ️ شرح سريع</div>
+      <div class="glossary-grid">
+        <div class="glossary-item">الصفحة أصبحت مختصرة، والتفاصيل الكاملة داخل كل بطاقة عند الضغط على <b>عرض التفاصيل الكاملة</b>.</div>
+        <div class="glossary-item">الأقسام الرئيسية تبدأ <b>مخفية</b> لتصل بسرعة لأي قائمة تريدها دون تمرير طويل.</div>
+        <div class="glossary-item">الأداء الأسبوعي يعرض <b>ملخصًا سريعًا</b> لكل نوع، وتفاصيل الصفقات تظهر فقط عند الطلب.</div>
+        <div class="glossary-item">محفظتي وقائمة المتابعة تساعدانك على مراقبة الأسهم الحالية بدل ضياعها بين الفرص الجديدة.</div>
+      </div>
+    </div>
+
+    <div id="glossaryHelp" class="glossary-box section hidden-section scroll-anchor">
+      <div class="summary-title">📘 شرح الإشارات والمصطلحات</div>
       <div class="glossary-grid">
         <div class="glossary-item">⬆️ / 🟢 <b>إيجابي</b>: الاتجاه أو المؤشر يدعم الفكرة.</div>
         <div class="glossary-item">⬇️ / 🔴 <b>سلبي</b>: الاتجاه أو الخبر أو الحركة ضد الفكرة.</div>
@@ -209,11 +258,11 @@
         <div class="glossary-item">جاهزية التنفيذ: هل السهم صالح <b>الآن</b> للتنفيذ أم فقط للمراقبة.</div>
         <div class="glossary-item">حداثة السعر: هل السعر <b>حديث</b> أم قديم أم آخر إغلاق فقط.</div>
       </div>
-    </details>
+    </div>
 
     <div id="statusbar" class="statusbar"></div>
 
-    <div class="section">
+    <div class="section scroll-anchor" id="portfolioSection">
       <div class="section-header">
         <div class="section-heading">
           <div class="section-title">💼 محفظتي</div>
@@ -231,32 +280,35 @@
       </div>
     </div>
 
-    <div class="section" id="openingSection">
+    <div class="section scroll-anchor" id="openingSection">
       <div class="section-header">
         <div class="section-heading">
           <div class="section-title">🚀 وضع الافتتاح</div>
           <div class="section-count" id="openingCount">أولوية المتابعة عند الافتتاح</div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('openingContent', this)">إخفاء</button>
+          <button class="ghost" onclick="toggleSection('openingContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
-      <div id="openingContent" class="opening-box">جاري تحميل وضع الافتتاح...</div>
+      <div id="openingContent" class="opening-box hidden-section">جاري تحميل وضع الافتتاح...</div>
     </div>
 
     <div id="content"><div class="loading">جاري تحميل الفرص...</div></div>
 
-    <div class="section">
+    <div class="section scroll-anchor" id="watchlistSection">
       <div class="section-header">
         <div class="section-heading">
           <div class="section-title">📌 قائمة المتابعة اليدوية</div>
           <div class="section-count" id="watchlistCount"></div>
         </div>
+        <div class="section-tools">
+          <button class="ghost" onclick="toggleSection('manualWatchlistContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+        </div>
       </div>
-      <div class="panel" id="manualWatchlistContent">جاري تحميل القائمة...</div>
+      <div class="panel hidden-section" id="manualWatchlistContent">جاري تحميل القائمة...</div>
     </div>
 
-    <div class="section">
+    <div class="section scroll-anchor" id="performanceSection">
       <div class="section-header">
         <div class="section-heading">
           <div class="section-title">📊 تتبع الأداء الأسبوعي</div>
@@ -266,7 +318,7 @@
       <div class="panel" id="performanceContent">جاري تحميل تتبع الأداء...</div>
     </div>
 
-    <div class="search-section section">
+    <div class="search-section section scroll-anchor" id="singleScanSection">
       <div class="section-header">
         <div class="section-heading">
           <div class="section-title">🔎 فحص سهم واحد</div>
@@ -384,12 +436,18 @@
       ].join('');
     }
 
-    function toggleSection(contentId, buttonEl) {
+    function toggleSection(contentId, buttonEl, showLabel='إظهار', hideLabel='إخفاء') {
       const el = document.getElementById(contentId);
       if (!el) return;
-      const hidden = el.style.display === 'none';
-      el.style.display = hidden ? '' : 'none';
-      if (buttonEl) buttonEl.textContent = hidden ? 'إخفاء' : 'إظهار';
+      const hidden = el.classList.contains('hidden-section') || el.style.display === 'none';
+      if (hidden) {
+        el.classList.remove('hidden-section');
+        el.style.display = '';
+      } else {
+        el.classList.add('hidden-section');
+        el.style.display = 'none';
+      }
+      if (buttonEl) buttonEl.textContent = hidden ? hideLabel : showLabel;
     }
 
     async function addToWatchlist(symbol, price) {
@@ -532,19 +590,19 @@
         </div>`;
     }
 
-    function renderSection(title, count, key, items) {
+    function renderSection(title, count, key, items, sectionId='') {
       return `
-        <div class="section">
+        <div class="section scroll-anchor" id="${sectionId}">
           <div class="section-header">
             <div class="section-heading">
               <div class="section-title">${title}</div>
               <div class="section-count">${count} سهم</div>
             </div>
             <div class="section-tools">
-              <button class="ghost" onclick="toggleSection('${key}', this)">إخفاء</button>
+              <button class="ghost" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
             </div>
           </div>
-          <div id="${key}">
+          <div id="${key}" class="hidden-section">
             <div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>
           </div>
         </div>`;
@@ -586,9 +644,9 @@
       const cautious = data.cautious_entries || [];
       const watch = data.watchlist || [];
       document.getElementById('content').innerHTML = `
-        ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', strong)}
-        ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', cautious)}
-        ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', watch)}
+        ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', strong, 'strong-section')}
+        ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', cautious, 'cautious-section')}
+        ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', watch, 'watch-section')}
       `;
     }
 
@@ -759,14 +817,22 @@
       }
     }
 
+    function summarizePerformanceGroup(items) {
+      const wins = items.filter(x => x.outcome === 'win').length;
+      const losses = items.filter(x => x.outcome === 'loss').length;
+      const pending = items.filter(x => !['win','loss'].includes(x.outcome)).length;
+      const total = items.length;
+      const winRate = total ? ((wins / total) * 100).toFixed(1) : '0.0';
+      return { wins, losses, pending, total, winRate };
+    }
+
     function renderPerformanceActive(items) {
-      if (!items.length) return '<div class="empty">لا توجد فرص محفوظة لهذا الأسبوع بعد</div>';
+      if (!items.length) return '<div class="empty">لا توجد فرص محفوظة لهذا النوع هذا الأسبوع</div>';
       const rows = items.map(item => `
         <tr>
           <td>${safeText(item.status_mark)}</td>
           <td>${safeText(item.signal_date || '')}</td>
           <td>${safeText(item.symbol)}</td>
-          <td>${safeText(item.signal_type)}</td>
           <td>${safeText(item.plan_family || '')}</td>
           <td>${formatNumber(item.entry_price)}</td>
           <td>${formatNumber(item.target_price)}</td>
@@ -782,11 +848,25 @@
           <table class="list-table">
             <thead>
               <tr>
-                <th>الحكم</th><th>تاريخ الإشارة</th><th>السهم</th><th>النوع</th><th>الخطة</th><th>الدخول</th><th>الهدف</th><th>الوقف</th><th>السعر الآن</th><th>التغير</th><th>الحالة</th><th>أول ظهور</th><th>آخر تحديث</th>
+                <th>الحكم</th><th>تاريخ الإشارة</th><th>السهم</th><th>الخطة</th><th>الدخول</th><th>الهدف</th><th>الوقف</th><th>السعر الآن</th><th>التغير</th><th>الحالة</th><th>أول ظهور</th><th>آخر تحديث</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
+        </div>`;
+    }
+
+    function renderPerformanceGroupCard(title, items, key, accent='') {
+      const s = summarizePerformanceGroup(items);
+      return `
+        <div class="summary-card">
+          <div class="summary-title">${title}</div>
+          <div class="summary-sub">عدد الفرص: <b>${formatNumber(s.total)}</b> | ناجحة: <b class="green">${formatNumber(s.wins)}</b> | خاسرة: <b class="red">${formatNumber(s.losses)}</b> | معلقة: <b class="yellow">${formatNumber(s.pending)}</b></div>
+          <div class="summary-sub">تقييم النجاح: <b>${s.winRate}%</b></div>
+          <div class="summary-actions">
+            <button class="ghost" onclick="toggleSection('${key}', this, 'إظهار التفاصيل', 'إخفاء التفاصيل')">إظهار التفاصيل</button>
+          </div>
+          <div id="${key}" class="hidden-section" style="margin-top:12px;">${renderPerformanceActive(items)}</div>
         </div>`;
     }
 
@@ -824,6 +904,10 @@
         const s = data.summary || {};
         const activeWeek = data.active_week || {};
         const weekText = activeWeek.week_start && activeWeek.week_end ? `${activeWeek.week_start} إلى ${activeWeek.week_end}` : '';
+
+        const strongItems = items.filter(x => x.signal_type === 'دخول قوي');
+        const cautiousItems = items.filter(x => x.signal_type === 'دخول بحذر');
+
         document.getElementById('performanceSummary').innerHTML = weekText;
         document.getElementById('performanceContent').innerHTML = `
           <div class="week-box" style="margin-bottom:14px;">
@@ -832,11 +916,23 @@
               <div class="week-metric"><div class="week-metric-label">الفرص الناجحة</div><div class="week-metric-value green">${formatNumber(s.wins || 0)}</div></div>
               <div class="week-metric"><div class="week-metric-label">الفرص الخاسرة</div><div class="week-metric-value red">${formatNumber(s.losses || 0)}</div></div>
               <div class="week-metric"><div class="week-metric-label">المعلقة</div><div class="week-metric-value yellow">${formatNumber(s.pending || 0)}</div></div>
-              <div class="week-metric"><div class="week-metric-label">التقييم</div><div class="week-metric-value">${formatNumber(s.win_rate_pct || 0)}%</div></div>
+              <div class="week-metric"><div class="week-metric-label">التقييم العام</div><div class="week-metric-value">${formatNumber(s.win_rate_pct || 0)}%</div></div>
             </div>
-            ${renderPerformanceActive(items)}
-          </div>
-          <div class="archive-box">${renderPerformanceArchive(archive)}</div>`;
+
+            <div class="summary-row">
+              ${renderPerformanceGroupCard('🔥 دخول قوي', strongItems, 'perf-strong-details')}
+              ${renderPerformanceGroupCard('🟠 دخول بحذر', cautiousItems, 'perf-cautious-details')}
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-title">🗂️ أرشيف الأسابيع</div>
+              <div class="summary-sub">ملخص عددي فقط للأسابيع السابقة حتى تبقى الشاشة مرتبة.</div>
+              <div class="summary-actions">
+                <button class="ghost" onclick="toggleSection('perf-archive-details', this, 'إظهار الأرشيف', 'إخفاء الأرشيف')">إظهار الأرشيف</button>
+              </div>
+              <div id="perf-archive-details" class="hidden-section" style="margin-top:12px;">${renderPerformanceArchive(archive)}</div>
+            </div>
+          </div>`;
       } catch (e) {
         document.getElementById('performanceContent').innerHTML = '<div class="error">تعذر تحميل تتبع الأداء</div>';
       }
