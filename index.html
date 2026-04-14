@@ -6,113 +6,161 @@
   <title>Stock Radar AI</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin:0; font-family: Arial, sans-serif; background:#0b1220; color:#e5e7eb; }
-    .container { max-width: 1380px; margin: 0 auto; padding: 16px; }
-    .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
-    .title { font-size:30px; font-weight:800; color:#f8fafc; }
-    .subtitle { color:#94a3b8; font-size:14px; margin-top:6px; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(180deg, #07111f 0%, #0b1220 100%);
+      color: #e5e7eb;
+    }
+    .container { max-width: 1440px; margin: 0 auto; padding: 18px; }
+    .topbar, .hero, .stat, .card, .panel, .search-box, .table-wrap, .glossary-box, .section-box, .opening-box {
+      background: rgba(17,24,39,.96);
+      border: 1px solid #1f2937;
+      border-radius: 18px;
+      box-shadow: 0 10px 25px rgba(0,0,0,.18);
+    }
+    .topbar {
+      display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:14px; padding:18px;
+      position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+    }
+    .title { font-size: 30px; font-weight: 900; color: #f8fafc; }
+    .subtitle { color:#94a3b8; font-size:14px; line-height:1.8; margin-top:6px; }
     .actions { display:flex; gap:10px; flex-wrap:wrap; }
-
     button {
       border:none; border-radius:12px; padding:10px 14px; font-size:14px; cursor:pointer;
-      background:#1e293b; color:#f8fafc; transition:opacity .2s ease;
+      background:#1f2937; color:#f8fafc; font-weight:700;
     }
-    button:hover { opacity:.95; }
     button.primary { background:#2563eb; }
     button.watch { background:#065f46; }
     button.delete { background:#7f1d1d; }
-    button.ghost { background:#0f172a; border:1px solid #1f2937; }
-
-    input[type="text"]{
+    button.ghost { background:#111827; border:1px solid #334155; }
+    button:hover { opacity:.96; }
+    input[type="text"], input[type="number"] {
       width:100%; background:#0f172a; color:#f8fafc; border:1px solid #1f2937;
       border-radius:12px; padding:12px 14px; font-size:15px;
     }
 
-    .statusbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:18px; }
-    .stat,.panel,.card,.loading,.error,.empty,.search-box,.week-box,.archive-box {
-      background:#111827; border:1px solid #1f2937; border-radius:16px;
+    .hero {
+      padding:16px; margin-bottom:16px;
+      display:grid; grid-template-columns:1.4fr 1fr; gap:14px;
+    }
+    .hero-left { display:flex; flex-direction:column; gap:10px; }
+    .hero-line { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .hero-chip {
+      display:inline-flex; align-items:center; gap:8px; border-radius:999px;
+      padding:8px 12px; font-size:13px; font-weight:700; background:#0f172a; border:1px solid #1e293b;
+    }
+    .hero-market {
+      font-size:22px; font-weight:900;
+    }
+    .hero-right {
+      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;
+    }
+    .statusbar {
+      display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px;
     }
     .stat { padding:14px; }
     .stat-label { color:#94a3b8; font-size:13px; margin-bottom:8px; }
-    .stat-value { font-size:22px; font-weight:800; color:#f8fafc; }
-
-    .section { margin-bottom:20px; }
-    .section-header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
-    .section-heading { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .section-title { font-size:20px; font-weight:800; }
+    .stat-value { font-size:22px; font-weight:900; color:#f8fafc; }
+    .section { margin-bottom:18px; }
+    .section-header {
+      display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px;
+    }
+    .section-heading { display:flex; flex-direction:column; gap:4px; }
+    .section-title { font-size:20px; font-weight:900; }
     .section-count { color:#94a3b8; font-size:13px; }
-    .section-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .section-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 
-    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; }
-    .card { padding:14px; box-shadow:0 8px 20px rgba(0,0,0,.18); }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; }
+    .card { padding:14px; }
     .card-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
     .symbol { font-size:28px; font-weight:900; color:#f8fafc; line-height:1; }
-    .company { color:#94a3b8; font-size:12px; margin-top:6px; }
-    .badges { display:flex; flex-wrap:wrap; gap:6px; }
-    .badge { border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; display:inline-block; }
-    .badge-strong { background:#14532d; color:#dcfce7; }
-    .badge-cautious { background:#78350f; color:#fef3c7; }
-    .badge-watch { background:#1e3a8a; color:#dbeafe; }
-    .badge-phase { background:#3f3f46; color:#f4f4f5; }
-    .badge-plan { background:#312e81; color:#e0e7ff; }
-    .badge-stage { background:#164e63; color:#cffafe; }
+    .company { color:#94a3b8; font-size:12px; margin-top:6px; line-height:1.7; }
+    .badges { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
+    .badge {
+      display:inline-flex; align-items:center; gap:6px;
+      border-radius:999px; padding:6px 10px; font-size:12px; font-weight:800;
+      border:1px solid transparent;
+    }
+    .badge-strong { background:#153927; color:#dcfce7; }
+    .badge-cautious { background:#4b2f10; color:#fef3c7; }
+    .badge-watch { background:#162d56; color:#dbeafe; }
+    .badge-phase { background:#27272a; color:#f4f4f5; }
+    .badge-plan { background:#2e2a6d; color:#e0e7ff; }
+    .badge-stage { background:#154e63; color:#cffafe; }
+    .badge-news-pos { background:#123c28; color:#d1fae5; }
+    .badge-news-neg { background:#4c1d1d; color:#fecaca; }
+    .badge-news-neu { background:#1f2937; color:#e2e8f0; }
+    .badge-news-op { background:#3f2a00; color:#fde68a; }
+    .badge-news-legal { background:#4c1d1d; color:#fecaca; }
 
     .compact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
-    .compact-item { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:10px; }
+    .compact-item { background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:11px; }
     .compact-label { color:#94a3b8; font-size:12px; margin-bottom:6px; }
-    .compact-value { color:#f8fafc; font-size:16px; font-weight:700; }
+    .compact-value { color:#f8fafc; font-size:16px; font-weight:800; line-height:1.4; }
 
     .indicator-strip { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
     .indicator-pill {
-      background:#0f172a; border:1px solid #1e293b; border-radius:999px; padding:6px 10px;
-      color:#cbd5e1; font-size:12px;
+      background:#0f172a; border:1px solid #1e293b; border-radius:999px; padding:7px 10px;
+      color:#cbd5e1; font-size:12px; line-height:1.6;
     }
-
     .summary-line {
-      background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:12px;
+      background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:12px;
       color:#cbd5e1; font-size:14px; line-height:1.8; margin-bottom:12px;
     }
-
+    .news-line {
+      display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px;
+      background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:10px 12px;
+      color:#cbd5e1; font-size:13px; line-height:1.7;
+    }
     .card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
-
-    details.detail-panel {
-      background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:10px;
+    details.detail-panel, details.glossary-box, details.table-wrap {
+      background:#0f172a; border:1px solid #1e293b; border-radius:16px; padding:10px;
     }
-    details.detail-panel summary {
-      cursor:pointer; font-weight:800; color:#f8fafc; outline:none;
-    }
+    details summary { cursor:pointer; font-weight:900; color:#f8fafc; outline:none; }
     .details-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
     .detail-box { background:#111827; border:1px solid #1f2937; border-radius:12px; padding:10px; }
     .detail-box.full { grid-column:1 / -1; }
     .detail-label { color:#94a3b8; font-size:12px; margin-bottom:6px; }
-    .detail-value { color:#f8fafc; font-size:14px; line-height:1.7; word-break:break-word; }
-
+    .detail-value { color:#f8fafc; font-size:14px; line-height:1.8; word-break:break-word; }
     .flags { margin:6px 0 0; padding-right:18px; color:#cbd5e1; font-size:13px; }
 
-    .loading,.error,.empty,.panel { padding:16px; }
+    .loading,.error,.empty,.panel,.table-wrap,.glossary-box,.section-box,.opening-box { padding:16px; }
     .error { color:#fecaca; border-color:#7f1d1d; }
     .empty { color:#94a3b8; }
-
-    .search-section { margin:20px 0; }
-    .search-row { display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:10px; }
-    .footer-note { margin-top:20px; color:#94a3b8; font-size:12px; text-align:center; }
-
+    .table-wrap { overflow:auto; }
     .list-table { width:100%; border-collapse:collapse; font-size:13px; }
-    .list-table th, .list-table td { border-bottom:1px solid #1f2937; padding:10px 8px; text-align:right; vertical-align:top; }
-    .list-table th { color:#94a3b8; font-weight:700; }
+    .list-table th, .list-table td {
+      border-bottom:1px solid #1f2937; padding:10px 8px; text-align:right; vertical-align:top;
+    }
+    .list-table th { color:#94a3b8; font-weight:800; }
     .list-table tr:hover { background:#111827; }
 
-    .week-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:14px; }
-    .week-metric { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:12px; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:10px; }
+    .week-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
+    .week-metric { background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:12px; }
     .week-metric-label { color:#94a3b8; font-size:12px; margin-bottom:6px; }
-    .week-metric-value { font-size:18px; font-weight:800; color:#f8fafc; }
+    .week-metric-value { font-size:18px; font-weight:900; color:#f8fafc; }
+
+    .glossary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; margin-top:10px; }
+    .glossary-item {
+      background:#111827; border:1px solid #1f2937; border-radius:14px; padding:12px;
+      color:#cbd5e1; font-size:13px; line-height:1.8;
+    }
+
+    .mini-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; }
+    .mini-card { background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:12px; }
+    .mini-title { font-size:16px; font-weight:900; margin-bottom:6px; color:#f8fafc; }
+    .mini-sub { color:#94a3b8; font-size:12px; margin-bottom:8px; line-height:1.6; }
 
     .green { color:#22c55e; }
     .red { color:#ef4444; }
     .yellow { color:#f59e0b; }
+    .muted { color:#94a3b8; }
 
-    @media (max-width: 760px) {
-      .compact-grid, .details-grid, .search-row { grid-template-columns:1fr; }
+    @media (max-width: 860px) {
+      .topbar, .hero { grid-template-columns:1fr; display:block; }
+      .hero-right, .compact-grid, .details-grid, .form-grid { grid-template-columns:1fr; }
       .title { font-size:24px; }
       .symbol { font-size:22px; }
       .list-table { display:block; overflow:auto; white-space:nowrap; }
@@ -124,16 +172,79 @@
     <div class="topbar">
       <div>
         <div class="title">Stock Radar AI</div>
-        <div class="subtitle">عرض مختصر للفرص مع تفاصيل كاملة عند الحاجة وتتبع أسبوعي ثابت للنتائج</div>
+        <div class="subtitle">نسخة أسرع وأوضح: بطاقات مختصرة، شرح عربي للمؤشرات، محفظة ثابتة، تتبع أداء أدق، وتمييز الخبر الإيجابي/السلبي/القديم.</div>
       </div>
       <div class="actions">
-        <button class="primary" onclick="loadScan()">تحديث الفرص</button>
+        <button class="primary" onclick="loadAll()">تحديث الكل</button>
       </div>
     </div>
 
-    <div id="lastUpdateNote" class="subtitle" style="margin-bottom:12px;"></div>
+    <div class="hero">
+      <div class="hero-left">
+        <div class="hero-line">
+          <span class="hero-market" id="heroMarketLabel">—</span>
+          <span class="hero-chip" id="heroUpdated">آخر تحديث: —</span>
+          <span class="hero-chip" id="heroOpeningMode">وضع الافتتاح: —</span>
+        </div>
+        <div class="subtitle" id="heroExplain">جاري تحميل حالة السوق...</div>
+      </div>
+      <div class="hero-right" id="heroQuickStats">
+        <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">—</div></div>
+        <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">—</div></div>
+        <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">—</div></div>
+        <div class="stat"><div class="stat-label">المراقبة</div><div class="stat-value">—</div></div>
+      </div>
+    </div>
+
+    <details class="glossary-box section" open>
+      <summary>📘 شرح الإشارات والمصطلحات</summary>
+      <div class="glossary-grid">
+        <div class="glossary-item">⬆️ / 🟢 <b>إيجابي</b>: الاتجاه أو المؤشر يدعم الفكرة.</div>
+        <div class="glossary-item">⬇️ / 🔴 <b>سلبي</b>: الاتجاه أو الخبر أو الحركة ضد الفكرة.</div>
+        <div class="glossary-item">🟰 <b>محايد</b>: لا يوجد دعم أو ضعف واضح.</div>
+        <div class="glossary-item">✅ <b>جيد</b>: قراءة داعمة لكن ليست مثالية.</div>
+        <div class="glossary-item">🔥 / 🏅 <b>قوي جدًا</b>: جودة أو زخم أو جاهزية مرتفعة.</div>
+        <div class="glossary-item">⏳ <b>يحتاج تأكيد</b>: لا تتعجل، انتظر اختراقًا أو ثباتًا.</div>
+        <div class="glossary-item">🚫 / ⛔ <b>غير معتمد</b>: خبر رأي أو سلبي قانوني لا يعتبر محفزًا إيجابيًا.</div>
+        <div class="glossary-item">جاهزية التنفيذ: هل السهم صالح <b>الآن</b> للتنفيذ أم فقط للمراقبة.</div>
+        <div class="glossary-item">حداثة السعر: هل السعر <b>حديث</b> أم قديم أم آخر إغلاق فقط.</div>
+      </div>
+    </details>
+
     <div id="statusbar" class="statusbar"></div>
-    <div id="content"><div class="loading">جاري تحميل البيانات...</div></div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-heading">
+          <div class="section-title">💼 محفظتي</div>
+          <div class="section-count" id="portfolioCount">0 سهم</div>
+        </div>
+      </div>
+      <div class="section-box">
+        <div class="form-grid" style="margin-bottom:12px;">
+          <input id="portfolioSymbol" type="text" placeholder="رمز السهم مثل AAPL" />
+          <input id="portfolioBuyPrice" type="number" step="0.01" placeholder="سعر الشراء" />
+          <input id="portfolioQty" type="number" step="0.01" placeholder="الكمية (اختياري)" />
+          <button class="primary" onclick="savePortfolioItem()">حفظ في المحفظة</button>
+        </div>
+        <div id="portfolioContent" class="table-wrap">جاري تحميل المحفظة...</div>
+      </div>
+    </div>
+
+    <div class="section" id="openingSection">
+      <div class="section-header">
+        <div class="section-heading">
+          <div class="section-title">🚀 وضع الافتتاح</div>
+          <div class="section-count" id="openingCount">أولوية المتابعة عند الافتتاح</div>
+        </div>
+        <div class="section-tools">
+          <button class="ghost" onclick="toggleSection('openingContent', this)">إخفاء</button>
+        </div>
+      </div>
+      <div id="openingContent" class="opening-box">جاري تحميل وضع الافتتاح...</div>
+    </div>
+
+    <div id="content"><div class="loading">جاري تحميل الفرص...</div></div>
 
     <div class="section">
       <div class="section-header">
@@ -155,37 +266,49 @@
       <div class="panel" id="performanceContent">جاري تحميل تتبع الأداء...</div>
     </div>
 
-    <div class="search-section">
+    <div class="search-section section">
       <div class="section-header">
         <div class="section-heading">
-          <div class="section-title">فحص سهم واحد</div>
+          <div class="section-title">🔎 فحص سهم واحد</div>
+          <div class="section-count">تحليل سريع برمز السهم</div>
         </div>
       </div>
       <div class="search-box">
-        <div class="subtitle" style="margin:0 0 10px 0;">اكتب رمز السهم مثل: AAPL أو TSLA أو NVO أو IOT</div>
-        <div class="search-row">
-          <input id="singleSymbol" type="text" placeholder="مثال: AAPL" />
+        <div class="form-grid">
+          <input id="singleSymbol" type="text" placeholder="مثال: AAPL أو TSLA" />
+          <div></div><div></div>
           <button class="primary" onclick="scanSingleStock()">فحص السهم</button>
         </div>
       </div>
       <div id="singleStockResult" style="margin-top:12px;"></div>
     </div>
 
-    <div class="footer-note">البطاقات مختصرة، والتفاصيل الكاملة داخل قسم منفصل لكل سهم. تتبع الأداء أصبح أسبوعيًا وثابتًا ولا يُعاد تصفيره مع كل تحديث.</div>
+    <div class="subtitle" style="text-align:center; margin:18px 0 28px 0;">
+      البطاقات الرئيسية مختصرة، والتفاصيل الكاملة داخل كل بطاقة. تتبع الأداء أسبوعي، والمحفظة ثابتة، ووضع الافتتاح يركّز على أهم الأسهم أول الجلسة.
+    </div>
   </div>
 
   <script>
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
     function formatNumber(value) {
       if (value === null || value === undefined || value === "") return "";
       const num = Number(value);
-      if (Number.isNaN(num)) return value;
+      if (Number.isNaN(num)) return escapeHtml(value);
       return num.toLocaleString("en-US", { maximumFractionDigits: 2 });
     }
 
     function formatPercent(value) {
       if (value === null || value === undefined || value === "") return "";
       const num = Number(value);
-      if (Number.isNaN(num)) return value;
+      if (Number.isNaN(num)) return escapeHtml(value);
       const cls = num > 0 ? "green" : num < 0 ? "red" : "";
       const sign = num > 0 ? "+" : "";
       return `<span class="${cls}">${sign}${num.toFixed(2)}%</span>`;
@@ -193,22 +316,33 @@
 
     function safeText(value) {
       if (value === null || value === undefined || value === "") return "";
-      return String(value);
+      return escapeHtml(String(value));
+    }
+
+    function compactItem(label, value) {
+      return `
+        <div class="compact-item">
+          <div class="compact-label">${safeText(label)}</div>
+          <div class="compact-value">${value || '—'}</div>
+        </div>`;
     }
 
     function detailBox(label, value, full=false) {
       if (value === null || value === undefined || value === "") return '';
-      return `<div class="detail-box ${full ? 'full' : ''}"><div class="detail-label">${label}</div><div class="detail-value">${value}</div></div>`;
+      return `<div class="detail-box ${full ? 'full' : ''}">
+        <div class="detail-label">${safeText(label)}</div>
+        <div class="detail-value">${value}</div>
+      </div>`;
     }
 
     function badgeDecision(decision) {
-      if (decision === "دخول قوي") return '<span class="badge badge-strong">دخول قوي</span>';
-      if (decision === "دخول بحذر") return '<span class="badge badge-cautious">دخول بحذر</span>';
-      return '<span class="badge badge-watch">مراقبة</span>';
+      if (decision === "دخول قوي") return '<span class="badge badge-strong">🔥 دخول قوي</span>';
+      if (decision === "دخول بحذر") return '<span class="badge badge-cautious">🟠 دخول بحذر</span>';
+      return '<span class="badge badge-watch">👀 مراقبة</span>';
     }
 
     function phaseBadge(label) {
-      return `<span class="badge badge-phase">${safeText(label || "—")}</span>`;
+      return `<span class="badge badge-phase">🕒 ${safeText(label || "—")}</span>`;
     }
 
     function stageBadge(stock) {
@@ -218,17 +352,36 @@
     }
 
     function planBadge(stock) {
-      const label = safeText(stock.display_plan_family_label || stock.strategy_label || "");
+      const label = safeText(stock.display_plan_family_label || stock.strategy_label || stock.trade_type_label_ar || "");
       if (!label) return '';
       return `<span class="badge badge-plan">${label}</span>`;
     }
 
-    function compactItem(label, value) {
-      return `
-        <div class="compact-item">
-          <div class="compact-label">${label}</div>
-          <div class="compact-value">${value || '—'}</div>
-        </div>`;
+    function newsBadge(stock) {
+      const badge = String(stock.news_badge || "");
+      if (!badge) return "";
+      let cls = "badge-news-neu";
+      if ((stock.news_category || "") === "positive") cls = "badge-news-pos";
+      else if ((stock.news_category || "") === "negative") cls = "badge-news-neg";
+      else if ((stock.news_category || "") === "legal") cls = "badge-news-legal";
+      else if ((stock.news_category || "") === "opinion") cls = "badge-news-op";
+      return `<span class="badge ${cls}">${safeText(badge)}</span>`;
+    }
+
+    function indicatorPill(title, meta) {
+      if (!meta || !meta.label) return '';
+      return `<span class="indicator-pill">${safeText(meta.icon || '')} ${safeText(title)}: ${safeText(meta.label)}</span>`;
+    }
+
+    function importantIndicators(stock) {
+      return [
+        indicatorPill('الجودة', stock.metric_quality),
+        indicatorPill('السيولة', stock.metric_volume),
+        indicatorPill('العائد/المخاطرة', stock.metric_rr),
+        indicatorPill('الاتجاه', stock.metric_trend),
+        indicatorPill('الاستمرار', stock.metric_continuation),
+        indicatorPill('الخبر', stock.metric_news),
+      ].join('');
     }
 
     function toggleSection(contentId, buttonEl) {
@@ -239,56 +392,65 @@
       if (buttonEl) buttonEl.textContent = hidden ? 'إخفاء' : 'إظهار';
     }
 
-    function importantIndicators(stock) {
-      const pills = [];
-      if (stock.trend) pills.push(`<span class="indicator-pill">الاتجاه: ${safeText(stock.trend)}</span>`);
-      if (stock.effective_volume_ratio !== undefined && stock.effective_volume_ratio !== null && stock.effective_volume_ratio !== "") {
-        pills.push(`<span class="indicator-pill">السيولة الفعلية: ${formatNumber(stock.effective_volume_ratio)}x</span>`);
-      }
-      if (stock.continuation_label || stock.runner_label) {
-        pills.push(`<span class="indicator-pill">الاستمرار: ${safeText(stock.continuation_label || stock.runner_label)}</span>`);
-      }
-      if (stock.breakout_quality && stock.display_plan_family === 'breakout') {
-        pills.push(`<span class="indicator-pill">قوة الاختراق: ${safeText(stock.breakout_quality)}</span>`);
-      } else if (stock.pullback_pattern_label && stock.display_plan_family === 'pullback') {
-        pills.push(`<span class="indicator-pill">نمط الارتداد: ${safeText(stock.pullback_pattern_label)}</span>`);
-      }
-      if (stock.catalyst_score > 0 || stock.news_note) {
-        pills.push(`<span class="indicator-pill">المحفز: ${safeText(stock.news_note || 'إيجابي')}</span>`);
-      }
-      if (stock.quality_score) pills.push(`<span class="indicator-pill">الجودة: ${formatNumber(stock.quality_score)}</span>`);
-      return pills.slice(0, 5).join('');
+    async function addToWatchlist(symbol, price) {
+      try {
+        await fetch('/watchlist/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, price })
+        });
+        loadWatchlist();
+      } catch (e) {}
+    }
+
+    async function addCardToPortfolio(symbol, currentPrice) {
+      const buy = prompt(`أدخل سعر الشراء لسهم ${symbol}`, currentPrice ? String(currentPrice) : "");
+      if (!buy) return;
+      const qty = prompt(`أدخل الكمية لسهم ${symbol} (اختياري)`, "");
+      try {
+        await fetch('/portfolio/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, buy_price: Number(buy), quantity: Number(qty || 0) })
+        });
+        loadPortfolio();
+      } catch (e) {}
     }
 
     function createCard(stock) {
       const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
       const details = [];
-
-      details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || 'الخطة الحالية')));
+      details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
       details.push(detailBox(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price)));
       details.push(detailBox(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price)));
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
       details.push(detailBox('مدة الصلاحية', safeText(stock.valid_for)));
-      details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
-      details.push(detailBox('ملخص سريع', safeText(stock.ai_summary), true));
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
-      details.push(detailBox('حالة السوق', safeText(stock.market_phase_label)));
-      details.push(detailBox('العائد/المخاطرة', formatNumber(stock.rr_1)));
+      details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
+      details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
+      details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`));
+      details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
+      details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
+      details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
+      details.push(detailBox('العائد/المخاطرة', `${formatNumber(stock.rr_1)} | ${(stock.metric_rr?.icon || '')} ${safeText(stock.metric_rr?.label || '')}`));
       details.push(detailBox('المخاطرة %', formatNumber(stock.display_risk_pct ?? stock.risk_pct)));
-      details.push(detailBox('الجودة', formatNumber(stock.quality_score)));
-      details.push(detailBox('الاتجاه', safeText(stock.trend)));
+      details.push(detailBox('الجودة', `${formatNumber(stock.quality_score)} | ${(stock.metric_quality?.icon || '')} ${safeText(stock.metric_quality?.label || '')}`));
+      details.push(detailBox('الاتجاه', `${safeText(stock.trend)} | ${(stock.metric_trend?.icon || '')} ${safeText(stock.metric_trend?.label || '')}`));
       details.push(detailBox('السيولة اليومية', formatNumber(stock.volume_ratio)));
       details.push(detailBox('سيولة السرعة', formatNumber(stock.volume_pace_ratio)));
-      details.push(detailBox('السيولة الفعلية', formatNumber(stock.effective_volume_ratio)));
-      details.push(detailBox('تقييم الاستمرار', safeText(stock.continuation_label)));
+      details.push(detailBox('السيولة الفعلية', `${formatNumber(stock.effective_volume_ratio)} | ${(stock.metric_volume?.icon || '')} ${safeText(stock.metric_volume?.label || '')}`));
+      details.push(detailBox('تقييم الاستمرار', `${safeText(stock.continuation_label || '')} | ${(stock.metric_continuation?.icon || '')} ${safeText(stock.metric_continuation?.label || '')}`));
       details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
       details.push(detailBox('Continuation Score', formatNumber(stock.continuation_score)));
-      details.push(detailBox('الخبر / المحفز', safeText(stock.news_note), true));
+      details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(stock.news_title || stock.news_note || '')}</div>`, true));
+      details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
       details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
       details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
       details.push(detailBox('إجراء المالك', safeText(stock.owner_action), true));
+      details.push(detailBox('ملخص عربي سريع', safeText(stock.quick_explainer || ''), true));
+      details.push(detailBox('ملخص فني', safeText(stock.ai_summary || ''), true));
 
       if (stock.alternate_entry_label && Number(stock.alternate_entry_price || 0) > 0) {
         details.push(detailBox(safeText(stock.alternate_entry_label), formatNumber(stock.alternate_entry_price)));
@@ -315,7 +477,7 @@
       }
 
       if (Array.isArray(stock.risk_flags) && stock.risk_flags.length) {
-        details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${x}</li>`).join('')}</ul>`, true));
+        details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`, true));
       }
 
       return `
@@ -340,16 +502,27 @@
             ${compactItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
             ${compactItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
             ${compactItem(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price))}
+            ${compactItem('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || ''))}
             ${compactItem('مدة الصلاحية', safeText(stock.valid_for))}
-            ${compactItem('وضع التنفيذ', safeText(stock.execution_mode))}
+            ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
+            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`)}
           </div>
 
           <div class="indicator-strip">${importantIndicators(stock)}</div>
 
-          <div class="summary-line">${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
+          <div class="news-line">
+            ${newsBadge(stock)}
+            <span>${safeText(stock.news_title || stock.news_note || 'لا يوجد خبر بارز')}</span>
+          </div>
+
+          <div class="summary-line">
+            <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
+            <div>${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
+          </div>
 
           <div class="card-actions">
-            <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 إضافة</button>
+            <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
+            <button onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
 
           <details class="detail-panel">
@@ -379,28 +552,65 @@
 
     function renderStatusbar(data) {
       const phase = data?.market_phase || 'closed';
-      const phaseLabel = data?.market_phase_label || (phase === 'open' ? 'مفتوح' : 'مغلق');
+      const phaseLabel = data?.market_phase_label || '—';
       const isOpen = phase === 'open';
-      document.getElementById('statusbar').innerHTML = `
-        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>
+      const opening = data?.opening_mode_active ? '✅ نشط الآن' : '🕘 غير نشط';
+      document.getElementById('heroMarketLabel').innerHTML = `${isOpen ? '🟢' : (phase === 'pre_market' ? '🌅' : phase === 'after_hours' ? '🌙' : '⏸️')} ${safeText(phaseLabel)}`;
+      document.getElementById('heroUpdated').innerHTML = `آخر تحديث: ${safeText(data.updated_at || '—')}`;
+      document.getElementById('heroOpeningMode').innerHTML = `وضع الافتتاح: ${opening}`;
+      document.getElementById('heroExplain').innerHTML =
+        phase === 'open'
+          ? 'السوق مفتوح. اعتمد أكثر على حداثة السعر وجاهزية التنفيذ قبل القرار.'
+          : phase === 'pre_market'
+          ? 'قبل الافتتاح. بعض الأسعار قابلة للمتابعة لكن القرار الأقوى يكون مع الافتتاح.'
+          : phase === 'after_hours'
+          ? 'بعد الإغلاق. راقب الأخبار والحركة الممتدة لكن لا تخلطها بجلسة السوق الأساسية.'
+          : 'السوق مغلق. استخدم النتائج للتحضير لليوم التالي ومراجعة المحفظة.';
+      document.getElementById('heroQuickStats').innerHTML = `
         <div class="stat"><div class="stat-label">Universe</div><div class="stat-value">${formatNumber(data.universe_count)}</div></div>
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
-        <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">${formatNumber(data.strong_entries_count)}</div></div>
-        <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
-        <div class="stat"><div class="stat-label">مراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>`;
-      document.getElementById('lastUpdateNote').innerHTML = `آخر تحديث: ${safeText(data.updated_at)}`;
+        <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value green">${formatNumber(data.strong_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value yellow">${formatNumber(data.cautious_entries_count)}</div></div>
+      `;
+
+      document.getElementById('statusbar').innerHTML = `
+        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>
+        <div class="stat"><div class="stat-label">المراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
+        <div class="stat"><div class="stat-label">وضع الافتتاح</div><div class="stat-value">${data?.opening_mode_active ? 'نشط' : '—'}</div></div>
+        <div class="stat"><div class="stat-label">آخر تحديث</div><div class="stat-value" style="font-size:16px;">${safeText(data.updated_at || '—')}</div></div>
+      `;
     }
 
     function renderSections(data) {
       const strong = data.strong_entries || [];
       const cautious = data.cautious_entries || [];
       const watch = data.watchlist || [];
-
       document.getElementById('content').innerHTML = `
         ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', strong)}
         ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', cautious)}
         ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', watch)}
       `;
+    }
+
+    function renderOpeningFocus(data) {
+      const box = document.getElementById('openingContent');
+      const items = data?.opening_focus || [];
+      document.getElementById('openingCount').innerHTML = data?.opening_mode_active ? 'الأهم قبل/أول الجلسة' : 'سيظهر عند قبل الافتتاح وأول 45 دقيقة';
+      if (!items.length) {
+        box.innerHTML = `<div class="empty">${data?.opening_mode_active ? 'لا توجد عناصر أولوية الآن' : 'وضع الافتتاح غير نشط حاليًا، لكنه سيفيدك قبل الافتتاح وأول الجلسة.'}</div>`;
+        return;
+      }
+      box.innerHTML = `<div class="mini-cards">
+        ${items.map(item => `
+          <div class="mini-card">
+            <div class="mini-title">${safeText(item.symbol)} - ${safeText(item.decision)}</div>
+            <div class="mini-sub">${safeText(item.trade_type_label_ar || item.display_plan_family_label || '')}</div>
+            <div class="mini-sub">${safeText(item.execution_readiness_icon || '')} ${safeText(item.execution_readiness_label || '')} | ${safeText(item.price_freshness_icon || '')} ${safeText(item.price_freshness_label || '')}</div>
+            <div class="mini-sub">السعر: ${formatNumber(item.display_price || item.current_price_live || 0)} | الدخول: ${formatNumber(item.display_entry_price)}</div>
+            <div class="mini-sub">الهدف: ${formatNumber(item.display_target_price)} | الوقف: ${formatNumber(item.display_stop_price)}</div>
+          </div>
+        `).join('')}
+      </div>`;
     }
 
     async function loadScan() {
@@ -410,11 +620,11 @@
         const data = await res.json();
         renderStatusbar(data);
         renderSections(data);
+        renderOpeningFocus(data);
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
+        document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
       }
-      loadWatchlist();
-      loadPerformance();
     }
 
     async function scanSingleStock() {
@@ -425,25 +635,11 @@
       try {
         const res = await fetch(`/single-stock?symbol=${encodeURIComponent(symbol)}`);
         const data = await res.json();
-        if (data.trade_plan) {
-          holder.innerHTML = createCard(data.trade_plan);
-        } else {
-          holder.innerHTML = '<div class="error">تعذر استخراج خطة السهم</div>';
-        }
+        if (data.trade_plan) holder.innerHTML = createCard(data.trade_plan);
+        else holder.innerHTML = '<div class="error">تعذر استخراج خطة السهم</div>';
       } catch (e) {
         holder.innerHTML = '<div class="error">تعذر فحص السهم</div>';
       }
-    }
-
-    async function addToWatchlist(symbol, price) {
-      try {
-        await fetch('/watchlist/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, price })
-        });
-        loadWatchlist();
-      } catch (e) {}
     }
 
     async function removeFromWatchlist(symbol) {
@@ -479,16 +675,87 @@
             <td><button class="delete" onclick="removeFromWatchlist('${safeText(item.symbol)}')">حذف</button></td>
           </tr>`).join('');
         document.getElementById('manualWatchlistContent').innerHTML = `
+          <div class="table-wrap">
+            <table class="list-table">
+              <thead>
+                <tr>
+                  <th>السهم</th><th>سعر الإضافة</th><th>السعر الآن</th><th>التغير</th><th>مصدر السعر</th><th>حالة السوق</th><th>وقت الإضافة</th><th></th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      } catch (e) {
+        document.getElementById('manualWatchlistContent').innerHTML = '<div class="error">تعذر تحميل قائمة المراقبة</div>';
+      }
+    }
+
+    async function savePortfolioItem() {
+      const symbol = (document.getElementById('portfolioSymbol').value || '').trim().toUpperCase();
+      const buyPrice = Number(document.getElementById('portfolioBuyPrice').value || 0);
+      const quantity = Number(document.getElementById('portfolioQty').value || 0);
+      if (!symbol || !buyPrice) return;
+      try {
+        await fetch('/portfolio/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, buy_price: buyPrice, quantity })
+        });
+        document.getElementById('portfolioSymbol').value = '';
+        document.getElementById('portfolioBuyPrice').value = '';
+        document.getElementById('portfolioQty').value = '';
+        loadPortfolio();
+      } catch (e) {}
+    }
+
+    async function removePortfolioItem(symbol) {
+      try {
+        await fetch('/portfolio/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol })
+        });
+        loadPortfolio();
+      } catch (e) {}
+    }
+
+    async function loadPortfolio() {
+      try {
+        const res = await fetch('/portfolio');
+        const data = await res.json();
+        const items = data.items || [];
+        document.getElementById('portfolioCount').innerHTML = `${items.length} سهم`;
+        if (!items.length) {
+          document.getElementById('portfolioContent').innerHTML = '<div class="empty">لا توجد أسهم في المحفظة بعد</div>';
+          return;
+        }
+        const rows = items.map(item => `
+          <tr>
+            <td>${safeText(item.symbol)}</td>
+            <td>${formatNumber(item.buy_price)}</td>
+            <td>${formatNumber(item.current_price)}</td>
+            <td>${formatPercent(item.holding_change_pct)}</td>
+            <td>${safeText(item.price_source_label)}</td>
+            <td>${safeText(item.market_phase_label)}</td>
+            <td>${safeText(item.type_label)}</td>
+            <td>${safeText(item.execution_readiness_icon || '')} ${safeText(item.execution_readiness_label || '')}</td>
+            <td>${safeText(item.price_freshness_icon || '')} ${safeText(item.price_freshness_label || '')}</td>
+            <td><b>${safeText(item.recommendation)}</b><br><span class="muted">${safeText(item.recommendation_note)}</span></td>
+            <td>${formatNumber(item.target_price)}</td>
+            <td>${formatNumber(item.stop_loss)}</td>
+            <td><button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button></td>
+          </tr>`).join('');
+        document.getElementById('portfolioContent').innerHTML = `
           <table class="list-table">
             <thead>
               <tr>
-                <th>السهم</th><th>سعر الإضافة</th><th>السعر الآن</th><th>التغير</th><th>مصدر السعر</th><th>حالة السوق</th><th>وقت الإضافة</th><th></th>
+                <th>السهم</th><th>سعر الشراء</th><th>السعر الحالي</th><th>الربح/الخسارة</th><th>مصدر السعر</th><th>السوق</th><th>نوع الفرصة</th><th>الجاهزية</th><th>حداثة السعر</th><th>التوصية</th><th>الهدف</th><th>الوقف</th><th></th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>`;
       } catch (e) {
-        document.getElementById('manualWatchlistContent').innerHTML = '<div class="error">تعذر تحميل قائمة المراقبة</div>';
+        document.getElementById('portfolioContent').innerHTML = '<div class="error">تعذر تحميل المحفظة</div>';
       }
     }
 
@@ -497,8 +764,10 @@
       const rows = items.map(item => `
         <tr>
           <td>${safeText(item.status_mark)}</td>
+          <td>${safeText(item.signal_date || '')}</td>
           <td>${safeText(item.symbol)}</td>
           <td>${safeText(item.signal_type)}</td>
+          <td>${safeText(item.plan_family || '')}</td>
           <td>${formatNumber(item.entry_price)}</td>
           <td>${formatNumber(item.target_price)}</td>
           <td>${formatNumber(item.stop_loss)}</td>
@@ -509,14 +778,16 @@
           <td>${safeText(item.last_seen_at)}</td>
         </tr>`).join('');
       return `
-        <table class="list-table">
-          <thead>
-            <tr>
-              <th>الحكم</th><th>السهم</th><th>النوع</th><th>الدخول</th><th>الهدف الأول</th><th>الوقف</th><th>السعر الآن</th><th>التغير</th><th>الحالة</th><th>أول ظهور</th><th>آخر تحديث</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>`;
+        <div class="table-wrap">
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>الحكم</th><th>تاريخ الإشارة</th><th>السهم</th><th>النوع</th><th>الخطة</th><th>الدخول</th><th>الهدف</th><th>الوقف</th><th>السعر الآن</th><th>التغير</th><th>الحالة</th><th>أول ظهور</th><th>آخر تحديث</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
     }
 
     function renderPerformanceArchive(archive) {
@@ -532,14 +803,16 @@
           <td>${formatNumber(item.win_rate_pct)}%</td>
         </tr>`).join('');
       return `
-        <table class="list-table">
-          <thead>
-            <tr>
-              <th>من</th><th>إلى</th><th>عدد الفرص</th><th>ناجحة</th><th>خاسرة</th><th>معلقة</th><th>التقييم</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>`;
+        <div class="table-wrap">
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>من</th><th>إلى</th><th>عدد الفرص</th><th>ناجحة</th><th>خاسرة</th><th>معلقة</th><th>التقييم</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
     }
 
     async function loadPerformance() {
@@ -552,15 +825,8 @@
         const activeWeek = data.active_week || {};
         const weekText = activeWeek.week_start && activeWeek.week_end ? `${activeWeek.week_start} إلى ${activeWeek.week_end}` : '';
         document.getElementById('performanceSummary').innerHTML = weekText;
-
         document.getElementById('performanceContent').innerHTML = `
-          <div class="week-box" style="margin-bottom:14px; padding:14px;">
-            <div class="section-header" style="margin-bottom:10px;">
-              <div class="section-heading">
-                <div class="section-title">الأسبوع الحالي</div>
-                <div class="section-count">${weekText}</div>
-              </div>
-            </div>
+          <div class="week-box" style="margin-bottom:14px;">
             <div class="week-grid">
               <div class="week-metric"><div class="week-metric-label">إجمالي الفرص</div><div class="week-metric-value">${formatNumber(s.count || 0)}</div></div>
               <div class="week-metric"><div class="week-metric-label">الفرص الناجحة</div><div class="week-metric-value green">${formatNumber(s.wins || 0)}</div></div>
@@ -570,22 +836,19 @@
             </div>
             ${renderPerformanceActive(items)}
           </div>
-
-          <div class="archive-box" style="padding:14px;">
-            <div class="section-header" style="margin-bottom:10px;">
-              <div class="section-heading">
-                <div class="section-title">أرشيف الأسابيع</div>
-                <div class="section-count">ملخص عددي فقط</div>
-              </div>
-            </div>
-            ${renderPerformanceArchive(archive)}
-          </div>`;
+          <div class="archive-box">${renderPerformanceArchive(archive)}</div>`;
       } catch (e) {
         document.getElementById('performanceContent').innerHTML = '<div class="error">تعذر تحميل تتبع الأداء</div>';
       }
     }
 
-    loadScan();
+    async function loadAll() {
+      await loadScan();
+      await Promise.all([loadWatchlist(), loadPerformance(), loadPortfolio()]);
+    }
+
+    loadAll();
   </script>
 </body>
 </html>
+
