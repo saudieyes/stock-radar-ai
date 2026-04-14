@@ -295,9 +295,10 @@
     .hidden-section { display:none; }
     .quick-nav {
       display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px 0;
-      position: sticky; top: 92px; z-index: 15;
+      position: sticky; top: 8px; z-index: 15;
       background: var(--quick-bg); backdrop-filter: blur(8px);
-      padding: 10px; border-radius: 16px; border:1px solid var(--border-main);
+      padding: 8px 10px; border-radius: 16px; border:1px solid var(--border-main);
+      box-shadow: 0 10px 24px rgba(0,0,0,.16);
     }
     .quick-link {
       display:inline-flex; align-items:center; gap:6px; text-decoration:none;
@@ -305,7 +306,7 @@
       border-radius:999px; padding:9px 12px; font-size:13px; font-weight:800;
     }
     .quick-link:hover { background:var(--panel-bg-soft); }
-    .scroll-anchor { scroll-margin-top: 150px; }
+    .scroll-anchor { scroll-margin-top: 88px; }
     .summary-row {
       display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:12px;
     }
@@ -327,7 +328,14 @@
       .symbol { font-size:22px; }
       .list-table { display:block; overflow:auto; white-space:nowrap; }
     }
-  </style>
+  
+    @media (max-width: 760px) {
+      .quick-nav { top: 6px; gap:8px; padding:8px; }
+      .quick-link { padding:8px 11px; font-size:12px; }
+      .scroll-anchor { scroll-margin-top: 82px; }
+    }
+
+</style>
 </head>
 <body>
   <div class="container">
