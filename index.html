@@ -139,8 +139,8 @@
       box-shadow: var(--shadow-main);
     }
     .topbar {
-      display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:14px; padding:18px;
-      position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+      display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:12px; padding:18px;
+      position: relative;
     }
     .title { font-size: 30px; font-weight: 900; color: var(--text-strong); }
     .subtitle { color:var(--text-muted); font-size:14px; line-height:1.8; margin-top:6px; }
@@ -926,6 +926,44 @@
       }
     }
 
+
+    function summarizePerformanceGroup(items) {
+      const list = Array.isArray(items) ? items : [];
+      const wins = list.filter(x => x.outcome === 'win').length;
+      const losses = list.filter(x => x.outcome === 'loss').length;
+      const pending = list.filter(x => x.outcome !== 'win' && x.outcome !== 'loss').length;
+      const total = list.length;
+      const winRate = total ? ((wins / total) * 100).toFixed(2) : '0.00';
+      return { total, wins, losses, pending, winRate };
+    }
+
+    function renderPerformanceActive(items) {
+      const list = Array.isArray(items) ? items : [];
+      if (!list.length) return '<div class="empty">لا توجد فرص مسجلة في هذا النوع خلال هذا الأسبوع</div>';
+      const rows = list.map(item => `
+        <tr>
+          <td>${safeText(item.symbol)}</td>
+          <td>${safeText(item.signal_type)}</td>
+          <td>${formatNumber(item.entry_price)}</td>
+          <td>${formatNumber(item.target_price)}</td>
+          <td>${formatNumber(item.stop_loss)}</td>
+          <td>${formatNumber(item.current_price)}</td>
+          <td>${formatPercent(item.last_change_pct)}</td>
+          <td>${safeText(item.status_mark || '')} ${safeText(item.status_label || '')}</td>
+        </tr>`).join('');
+      return `
+        <div class="table-wrap">
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>السهم</th><th>النوع</th><th>الدخول</th><th>الهدف</th><th>الوقف</th><th>السعر الحالي</th><th>التغير</th><th>الحالة</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
     function renderPerformanceGroupCard(title, items, key, accent='') {
       const s = summarizePerformanceGroup(items);
       return `
@@ -965,43 +1003,35 @@
         </div>`;
     }
 
+
     async function loadPerformance() {
       try {
         const res = await fetch('/performance');
         const data = await res.json();
-        const items = data.items || [];
-        const archive = data.weekly_archive || [];
-        const s = data.summary || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+        const archive = Array.isArray(data.weekly_archive) ? data.weekly_archive : [];
         const activeWeek = data.active_week || {};
-        const weekText = activeWeek.week_start && activeWeek.week_end ? `${activeWeek.week_start} إلى ${activeWeek.week_end}` : '';
+        const weekText = activeWeek.week_start && activeWeek.week_end ? `${activeWeek.week_start} إلى ${activeWeek.week_end}` : 'هذا الأسبوع';
 
-        const strongItems = items.filter(x => x.signal_type === 'دخول قوي');
-        const cautiousItems = items.filter(x => x.signal_type === 'دخول بحذر');
+        const strongItems = items.filter(x => x && x.signal_type === 'دخول قوي');
+        const cautiousItems = items.filter(x => x && x.signal_type === 'دخول بحذر');
+        const strongSummary = summarizePerformanceGroup(strongItems);
+        const cautiousSummary = summarizePerformanceGroup(cautiousItems);
 
         document.getElementById('performanceSummary').innerHTML = weekText;
         document.getElementById('performanceContent').innerHTML = `
-          <div class="week-box" style="margin-bottom:14px;">
-            <div class="week-grid">
-              <div class="week-metric"><div class="week-metric-label">إجمالي الفرص</div><div class="week-metric-value">${formatNumber(s.count || 0)}</div></div>
-              <div class="week-metric"><div class="week-metric-label">الفرص الناجحة</div><div class="week-metric-value green">${formatNumber(s.wins || 0)}</div></div>
-              <div class="week-metric"><div class="week-metric-label">الفرص الخاسرة</div><div class="week-metric-value red">${formatNumber(s.losses || 0)}</div></div>
-              <div class="week-metric"><div class="week-metric-label">المعلقة</div><div class="week-metric-value yellow">${formatNumber(s.pending || 0)}</div></div>
-              <div class="week-metric"><div class="week-metric-label">التقييم العام</div><div class="week-metric-value">${formatNumber(s.win_rate_pct || 0)}%</div></div>
+          <div class="summary-line" style="margin-bottom:14px;">يعرض هذا القسم فرص <b>دخول قوي</b> و<b>دخول بحذر</b> فقط. التفاصيل تبقى مخفية حتى تضغط زر الإظهار.</div>
+          <div class="summary-row">
+            ${renderPerformanceGroupCard(`🔥 دخول قوي — ${formatNumber(strongSummary.total)} فرصة — نجاح ${strongSummary.winRate}%`, strongItems, 'perf-strong-details')}
+            ${renderPerformanceGroupCard(`🟠 دخول بحذر — ${formatNumber(cautiousSummary.total)} فرصة — نجاح ${cautiousSummary.winRate}%`, cautiousItems, 'perf-cautious-details')}
+          </div>
+          <div class="summary-card" style="margin-top:14px;">
+            <div class="summary-title">🗂️ أرشيف الأسابيع</div>
+            <div class="summary-sub">ملخص عددي فقط للأسابيع السابقة.</div>
+            <div class="summary-actions">
+              <button class="ghost detail-toggle" onclick="toggleSection('perf-archive-details', this, 'إظهار الأرشيف', 'إخفاء الأرشيف')">إظهار الأرشيف</button>
             </div>
-
-            <div class="summary-row">
-              ${renderPerformanceGroupCard('🔥 دخول قوي', strongItems, 'perf-strong-details')}
-              ${renderPerformanceGroupCard('🟠 دخول بحذر', cautiousItems, 'perf-cautious-details')}
-            </div>
-
-            <div class="summary-card">
-              <div class="summary-title">🗂️ أرشيف الأسابيع</div>
-              <div class="summary-sub">ملخص عددي فقط للأسابيع السابقة حتى تبقى الشاشة مرتبة.</div>
-              <div class="summary-actions">
-                <button class="ghost" onclick="toggleSection('perf-archive-details', this, 'إظهار الأرشيف', 'إخفاء الأرشيف')">إظهار الأرشيف</button>
-              </div>
-              <div id="perf-archive-details" class="hidden-section" style="margin-top:12px;">${renderPerformanceArchive(archive)}</div>
-            </div>
+            <div id="perf-archive-details" class="hidden-section" style="margin-top:12px;">${renderPerformanceArchive(archive)}</div>
           </div>`;
       } catch (e) {
         document.getElementById('performanceContent').innerHTML = '<div class="error">تعذر تحميل تتبع الأداء</div>';
@@ -1009,6 +1039,7 @@
     }
 
     async function loadAll() {
+
       await loadScan();
     }
 
@@ -1017,3 +1048,4 @@
   </script>
 </body>
 </html>
+
