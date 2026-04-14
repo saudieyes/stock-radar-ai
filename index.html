@@ -373,6 +373,7 @@
       <a class="quick-link" href="#strong-section">🔥 دخول قوي</a>
       <a class="quick-link" href="#cautious-section">🟠 دخول بحذر</a>
       <a class="quick-link" href="#watch-section">👀 المراقبة</a>
+      <a class="quick-link" href="#portfolioSection">💼 المحفظة</a>
       <a class="quick-link" href="#watchlistSection">📌 المتابعة</a>
       <a class="quick-link" href="#performanceSection">📊 الأداء</a>
       <a class="quick-link" href="#singleScanSection">🔎 فحص سهم</a>
@@ -403,6 +404,27 @@
     </div>
 
     <div id="statusbar" class="statusbar"></div>
+
+    <div class="section scroll-anchor" id="portfolioSection">
+      <div class="section-header">
+        <div class="section-heading">
+          <div class="section-title">💼 محفظتي</div>
+          <div class="section-count" id="portfolioCount">0 سهم</div>
+        </div>
+        <div class="section-tools">
+          <button class="ghost" onclick="toggleSection('portfolioContentWrap', this, 'إظهار', 'إخفاء')">إظهار</button>
+        </div>
+      </div>
+      <div id="portfolioContentWrap" class="panel hidden-section">
+        <div class="form-grid" style="margin-bottom:12px;">
+          <input id="portfolioSymbol" type="text" placeholder="رمز السهم مثل AAPL" />
+          <input id="portfolioBuyPrice" type="number" step="0.01" placeholder="سعر الشراء" />
+          <input id="portfolioQty" type="number" step="0.01" placeholder="الكمية (اختياري)" />
+          <button class="primary" onclick="savePortfolioItem()">حفظ في المحفظة</button>
+        </div>
+        <div id="portfolioContent">اضغط إظهار لتحميل المحفظة...</div>
+      </div>
+    </div>
 
     <div class="section scroll-anchor" id="openingSection">
       <div class="section-header">
@@ -621,6 +643,10 @@
           loadWatchlist();
           el.dataset.loaded = '1';
         }
+        if (contentId === 'portfolioContentWrap' && el.dataset.loaded !== '1') {
+          loadPortfolio();
+          el.dataset.loaded = '1';
+        }
         if (contentId === 'performanceContent' && el.dataset.loaded !== '1') {
           loadPerformance();
           el.dataset.loaded = '1';
@@ -651,7 +677,20 @@
     }
 
     async function addCardToPortfolio(symbol, currentPrice) {
-      alert('ميزة المحفظة غير مفعلة في هذه النسخة السريعة حتى لا يحصل تعارض مع الخلفية الحالية.');
+      try {
+        await fetch('/portfolio/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, buy_price: Number(currentPrice || 0), quantity: 0 })
+        });
+        const wrap = document.getElementById('portfolioContentWrap');
+        if (wrap) {
+          wrap.classList.remove('hidden-section');
+          wrap.style.display = '';
+          wrap.dataset.loaded = '1';
+        }
+        loadPortfolio();
+      } catch (e) {}
     }
 
     function createCard(stock) {
@@ -897,6 +936,73 @@
       } catch (e) {}
     }
 
+    async function savePortfolioItem() {
+      const symbol = (document.getElementById('portfolioSymbol').value || '').trim().toUpperCase();
+      const buyPrice = Number(document.getElementById('portfolioBuyPrice').value || 0);
+      const quantity = Number(document.getElementById('portfolioQty').value || 0);
+      if (!symbol || !buyPrice) return;
+      try {
+        await fetch('/portfolio/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, buy_price: buyPrice, quantity })
+        });
+        document.getElementById('portfolioSymbol').value = '';
+        document.getElementById('portfolioBuyPrice').value = '';
+        document.getElementById('portfolioQty').value = '';
+        loadPortfolio();
+      } catch (e) {}
+    }
+
+    async function removePortfolioItem(symbol) {
+      try {
+        await fetch('/portfolio/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol })
+        });
+        loadPortfolio();
+      } catch (e) {}
+    }
+
+    async function loadPortfolio() {
+      try {
+        const res = await fetch('/portfolio');
+        const data = await res.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        document.getElementById('portfolioCount').innerHTML = `${items.length} سهم`;
+        if (!items.length) {
+          document.getElementById('portfolioContent').innerHTML = '<div class="empty">لا توجد أسهم في المحفظة بعد</div>';
+          return;
+        }
+        const rows = items.map(item => `
+          <tr>
+            <td>${safeText(item.symbol)}</td>
+            <td>${formatNumber(item.buy_price)}</td>
+            <td>${formatNumber(item.current_price)}</td>
+            <td>${formatPercent(item.holding_change_pct)}</td>
+            <td>${safeText(item.price_source_label)}</td>
+            <td>${safeText(item.market_phase_label)}</td>
+            <td>${safeText(item.type_label)}</td>
+            <td><b>${safeText(item.recommendation)}</b><br><span class="muted">${safeText(item.recommendation_note)}</span></td>
+            <td>${formatNumber(item.target_price)}</td>
+            <td>${formatNumber(item.stop_loss)}</td>
+            <td><button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button></td>
+          </tr>`).join('');
+        document.getElementById('portfolioContent').innerHTML = `
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>السهم</th><th>سعر الشراء</th><th>السعر الحالي</th><th>الربح/الخسارة</th><th>مصدر السعر</th><th>السوق</th><th>نوع الفرصة</th><th>التوصية</th><th>الهدف</th><th>الوقف</th><th></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      } catch (e) {
+        document.getElementById('portfolioContent').innerHTML = '<div class="error">تعذر تحميل المحفظة</div>';
+      }
+    }
+
     async function loadWatchlist() {
       try {
         const res = await fetch('/watchlist');
@@ -1056,4 +1162,3 @@
   </script>
 </body>
 </html>
-
