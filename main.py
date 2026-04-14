@@ -4,19 +4,39 @@ import requests
 import os
 import csv
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import time
 import json
 from zoneinfo import ZoneInfo
+from requests.adapters import HTTPAdapter
 try:
     from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 except Exception:
     try:
         from scanner_resend_momentum_suite import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
     except Exception:
-        from scanner_resend_momentum_suite_no_conflict import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
+        try:
+            from scanner_resend_momentum_suite_speed import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
+        except ImportError:
+            from scanner_resend_momentum_suite_no_conflict import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 
 app = FastAPI()
+
+HTTP_SESSION = requests.Session()
+HTTP_ADAPTER = HTTPAdapter(pool_connections=256, pool_maxsize=256, max_retries=0)
+HTTP_SESSION.mount("https://", HTTP_ADAPTER)
+HTTP_SESSION.mount("http://", HTTP_ADAPTER)
+
+
+def http_get_json(url, timeout=12):
+    try:
+        r = HTTP_SESSION.get(url, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+    except:
+        return {}
+
 
 @app.middleware("http")
 async def disable_http_cache(request, call_next):
@@ -525,7 +545,7 @@ def get_snapshot_data(symbol):
 
     try:
         url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=12).json()
+        r = http_get_json(url, timeout=12)
         data = r.get("ticker") or r.get("results") or {}
         last_trade = data.get("lastTrade", {}) or {}
         prev_day = data.get("prevDay", {}) or {}
@@ -693,12 +713,61 @@ def get_active_universe(max_symbols: int = 60):
     return get_scan_universe(max_symbols=max_symbols)
 
 
+def get_daily_bars(symbol):
+    try:
+        today = datetime.utcnow().date()
+        from_5y = (today - timedelta(days=365 * 5)).isoformat()
+        to_date = today.isoformat()
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
+            f"{from_5y}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
+        )
+        r = http_get_json(url, timeout=22)
+        return r.get("results", []) or []
+    except:
+        return []
+
+
+def get_prev_from_daily_bars(daily_bars):
+    if not daily_bars:
+        return None
+    try:
+        ny = ZoneInfo("America/New_York")
+        today_ny = datetime.now(ny).date()
+        market_open = is_market_open_now()
+        candidates = []
+        for row in daily_bars:
+            close_price = to_float(row.get("c"))
+            if close_price <= 0:
+                continue
+            row_date = None
+            ts = row.get("t")
+            try:
+                if ts:
+                    row_date = datetime.fromtimestamp(float(ts) / 1000.0, ny).date()
+            except:
+                row_date = None
+            if market_open and row_date == today_ny:
+                continue
+            candidates.append(row)
+        source = candidates[-1] if candidates else daily_bars[-1]
+        return {
+            "price": to_float(source.get("c")),
+            "high": to_float(source.get("h")),
+            "low": to_float(source.get("l")),
+            "volume": to_float(source.get("v")),
+            "open": to_float(source.get("o")),
+        }
+    except:
+        return None
+
+
 def get_prev(symbol):
     try:
-        r = requests.get(
+        r = http_get_json(
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={POLYGON_API_KEY}",
             timeout=12
-        ).json()
+        )
         results = r.get("results", [])
         if not results:
             return None
@@ -721,7 +790,7 @@ def get_latest_minute_price(symbol):
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/"
             f"{today_ny}/{today_ny}?adjusted=true&sort=desc&limit=5&apiKey={POLYGON_API_KEY}"
         )
-        r = requests.get(url, timeout=12).json()
+        r = http_get_json(url, timeout=12)
         bars = r.get("results", []) or []
         if not bars:
             return {
@@ -766,7 +835,7 @@ def get_snapshot_quote(symbol):
             return cached
 
         url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=12).json()
+        r = http_get_json(url, timeout=12)
         t = (r.get("ticker") or {})
         day = (t.get("day") or {})
         prev_day = (t.get("prevDay") or {})
@@ -851,7 +920,7 @@ def get_reference_info(symbol):
     out = {"company": "", "sector": "", "industry": "", "industry_id": ""}
     try:
         url = f"https://api.polygon.io/v3/reference/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=12).json()
+        r = http_get_json(url, timeout=12)
         res = r.get("results", {}) or {}
         sic_description = str(res.get("sic_description", "")).strip()
         sector = ""
@@ -901,14 +970,9 @@ def get_info(symbol):
     }
 
 
-def get_history_levels(symbol):
+def get_history_levels(symbol, prev_data=None, daily_bars=None):
     if symbol in HISTORY_CACHE:
         return HISTORY_CACHE[symbol]
-
-    today = datetime.utcnow().date()
-    from_52w = (today - timedelta(days=365)).isoformat()
-    from_5y = (today - timedelta(days=365 * 5)).isoformat()
-    to_date = today.isoformat()
 
     out = {
         "year_high": 0.0,
@@ -918,31 +982,33 @@ def get_history_levels(symbol):
         "ath_breakout_zone": False,
     }
 
-    try:
-        url_52w = (
-            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
-            f"{from_52w}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
-        )
-        r52 = requests.get(url_52w, timeout=18).json()
-        highs_52 = [to_float(x.get("h")) for x in r52.get("results", []) if to_float(x.get("h")) > 0]
+    bars = daily_bars if daily_bars is not None else get_daily_bars(symbol)
+    if bars:
+        ny = ZoneInfo("America/New_York")
+        cutoff_52w = datetime.utcnow().date() - timedelta(days=365)
+        highs_5 = []
+        highs_52 = []
+        for row in bars:
+            high = to_float(row.get("h"))
+            if high <= 0:
+                continue
+            highs_5.append(high)
+            row_date = None
+            ts = row.get("t")
+            try:
+                if ts:
+                    row_date = datetime.fromtimestamp(float(ts) / 1000.0, ny).date()
+            except:
+                row_date = None
+            if row_date and row_date >= cutoff_52w:
+                highs_52.append(high)
+
         if highs_52:
             out["year_high"] = max(highs_52)
-    except:
-        pass
-
-    try:
-        url_5y = (
-            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
-            f"{from_5y}/{to_date}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
-        )
-        r5 = requests.get(url_5y, timeout=22).json()
-        highs_5 = [to_float(x.get("h")) for x in r5.get("results", []) if to_float(x.get("h")) > 0]
         if highs_5:
             out["ath_high"] = max(highs_5)
-    except:
-        pass
 
-    prev = get_prev(symbol)
+    prev = prev_data if prev_data is not None else get_prev_from_daily_bars(bars) or get_prev(symbol)
     if prev:
         price = prev["price"]
         if out["year_high"] > 0:
@@ -955,14 +1021,10 @@ def get_history_levels(symbol):
     return out
 
 
-def get_trend(symbol):
+
+def get_trend(symbol, daily_bars=None):
     try:
-        url = (
-            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
-            f"2024-01-01/2026-12-31?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
-        )
-        r = requests.get(url, timeout=22).json()
-        data = r.get("results", [])
+        data = daily_bars if daily_bars is not None else get_daily_bars(symbol)
         closes = [to_float(x.get("c")) for x in data if to_float(x.get("c")) > 0]
         if len(closes) < 50:
             return {"trend": "unknown", "ma20": 0.0, "ma50": 0.0}
@@ -985,6 +1047,7 @@ def get_trend(symbol):
         return {"trend": "unknown", "ma20": 0.0, "ma50": 0.0}
 
 
+
 def get_session_elapsed_ratio() -> float:
     try:
         ny = ZoneInfo("America/New_York")
@@ -1004,14 +1067,9 @@ def get_session_elapsed_ratio() -> float:
         return 0.0
 
 
-def get_volume_ratio(symbol, intraday=None):
+def get_volume_ratio(symbol, intraday=None, daily_bars=None):
     try:
-        url = (
-            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/"
-            f"2024-01-01/2026-12-31?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
-        )
-        r = requests.get(url, timeout=22).json()
-        data = r.get("results", [])
+        data = daily_bars if daily_bars is not None else get_daily_bars(symbol)
         if not data:
             return 1.0
 
@@ -1072,6 +1130,7 @@ def get_volume_ratio(symbol, intraday=None):
         return 1.0
 
 
+
 def get_intraday_snapshot(symbol):
     symbol = str(symbol).upper().strip()
     market_open = is_market_open_now()
@@ -1118,7 +1177,7 @@ def get_intraday_snapshot(symbol):
             f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/5/minute/"
             f"{today_ny}/{today_ny}?adjusted=true&sort=asc&limit=5000&apiKey={POLYGON_API_KEY}"
         )
-        r = requests.get(url, timeout=15).json()
+        r = http_get_json(url, timeout=15)
         bars = r.get("results", [])
         if not bars:
             return _cache_set(INTRADAY_CACHE, cache_key, out, ttl)
@@ -1222,7 +1281,9 @@ def build_live_price_block(symbol, prev_data, intraday_data):
     prev_low = to_float(prev_data.get("low", 0)) if prev_data else 0.0
     prev_volume = to_float(prev_data.get("volume", 0)) if prev_data else 0.0
 
-    snap = get_snapshot_quote(symbol)
+    snap = {}
+    if not (phase == "open" and intraday_data.get("available") and to_float(intraday_data.get("current_price", 0)) > 0):
+        snap = get_snapshot_quote(symbol)
 
     current_price = prev_price
     open_price = prev_open
@@ -1289,6 +1350,20 @@ def build_live_price_block(symbol, prev_data, intraday_data):
     display_change_pct = change_vs_prev_close_pct if previous_close > 0 else change_from_open_pct
     display_change_available = abs(display_change_pct) > 0 or live_price_available
 
+    high_live = prev_high
+    low_live = prev_low
+    volume_live = prev_volume
+    last_price_update_ms = int(time.time() * 1000) if phase == "open" and intraday_data.get("available") else int(to_float(snap.get("updated", 0)))
+
+    if phase == "open" and intraday_data.get("available"):
+        high_live = safe_round(to_float(intraday_data.get("session_high", 0)) or prev_high)
+        low_live = safe_round(to_float(intraday_data.get("session_low", 0)) or prev_low)
+        volume_live = safe_round(to_float(intraday_data.get("session_volume", 0)) or prev_volume)
+    else:
+        high_live = safe_round(to_float(snap.get("high", prev_high)) or prev_high)
+        low_live = safe_round(to_float(snap.get("low", prev_low)) or prev_low)
+        volume_live = safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume)
+
     return {
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
@@ -1302,15 +1377,16 @@ def build_live_price_block(symbol, prev_data, intraday_data):
         "display_change_pct": safe_round(display_change_pct),
         "display_change_available": display_change_available,
         "live_price_available": live_price_available,
-        "high_live": safe_round(to_float(snap.get("high", prev_high)) or prev_high),
-        "low_live": safe_round(to_float(snap.get("low", prev_low)) or prev_low),
-        "volume_live": safe_round(to_float(snap.get("volume", prev_volume)) or prev_volume),
+        "high_live": high_live,
+        "low_live": low_live,
+        "volume_live": volume_live,
         "price_source": price_source,
         "price_source_label": price_source_label_map.get(price_source, price_source),
         "price_reliable_for_execution": price_reliable_for_execution,
-        "last_price_update_ms": int(to_float(snap.get("updated", 0))),
+        "last_price_update_ms": last_price_update_ms,
         "last_price_update_label": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
     }
+
 
 
 def compute_volume_pace_ratio(intraday: dict, daily_volume_ratio: float) -> float:
@@ -1450,7 +1526,7 @@ def get_news(symbol, company_name=""):
     catalyst_score = 0
     try:
         url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&order=desc&sort=published_utc&apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=12).json()
+        r = http_get_json(url, timeout=12)
         results = r.get("results", [])
         if not results:
             return news_note, catalyst_score
@@ -1520,7 +1596,7 @@ def is_halal(sector, industry, total_assets, cash, total_debt):
     return True, "مطابق للضوابط الشرعية المبدئية"
 
 
-def get_financials(symbol):
+def get_financials(symbol, prev_data=None):
     b = BALANCE_DATA.get(symbol, {})
     i = INCOME_DATA.get(symbol, {})
 
@@ -1528,7 +1604,7 @@ def get_financials(symbol):
     cash = to_float(b.get("Cash And Cash Equivalents", 0))
     total_debt = to_float(b.get("Total Debt", 0))
     shares = to_float(i.get("Shares (Diluted)", 0)) or to_float(i.get("Shares (Basic)", 0))
-    prev = get_prev(symbol)
+    prev = prev_data if prev_data is not None else get_prev(symbol)
     current_price = prev["price"] if prev else 0.0
     approx_market_cap = current_price * shares if shares > 0 and current_price > 0 else 0.0
     debt_to_market_cap = (total_debt / approx_market_cap) if approx_market_cap > 0 else None
@@ -1806,16 +1882,17 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
 
 
 def trade_plan_pro(symbol):
-    prev = get_prev(symbol)
+    daily_bars = get_daily_bars(symbol)
+    prev = get_prev_from_daily_bars(daily_bars) or get_prev(symbol)
     if not prev:
         return None
 
     info = get_info(symbol)
-    financials = get_financials(symbol)
-    hist = get_history_levels(symbol)
-    trend_data = get_trend(symbol)
+    financials = get_financials(symbol, prev)
+    hist = get_history_levels(symbol, prev, daily_bars)
+    trend_data = get_trend(symbol, daily_bars)
     intraday = get_intraday_snapshot(symbol)
-    volume_ratio = get_volume_ratio(symbol, intraday)
+    volume_ratio = get_volume_ratio(symbol, intraday, daily_bars)
     news_note, catalyst_score = get_news(symbol, info["company"])
 
     halal_ok, halal_reason = is_halal(
@@ -2060,28 +2137,42 @@ def trade_plan_pro(symbol):
 def scan_all():
     symbols = get_active_universe(150)
     rows = []
-    for s in symbols:
+
+    def process_symbol(s):
         p = trade_plan_pro(s)
-        if p and p.get("type") != "Excluded":
-            p = apply_late_move_filter(p)
-            p = assign_execution_mode(p)
-            p = normalize_execution_labels(p)
-            p = enrich_signal_stage(p)
-            p = finalize_display_contract(p)
+        if not p or p.get("type") == "Excluded":
+            return None
 
-            if not p.get("price_reliable_for_execution", True) and p.get("market_phase") in {"open", "pre_market", "after_hours"}:
-                p["decision"] = "مراقبة"
-                p["execution_mode"] = "مراقبة 👀"
-                p["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
-                p["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
-                p.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
-                p.setdefault("ai_summary", "")
-                if p["ai_summary"]:
-                    p["ai_summary"] += " - "
-                p["ai_summary"] += "السعر اللحظي غير موثوق"
+        p = apply_late_move_filter(p)
+        p = assign_execution_mode(p)
+        p = normalize_execution_labels(p)
+        p = enrich_signal_stage(p)
+        p = finalize_display_contract(p)
 
-            rows.append(p)
-            upsert_performance_signal(p)
+        if not p.get("price_reliable_for_execution", True) and p.get("market_phase") in {"open", "pre_market", "after_hours"}:
+            p["decision"] = "مراقبة"
+            p["execution_mode"] = "مراقبة 👀"
+            p["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
+            p["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
+            p.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
+            p.setdefault("ai_summary", "")
+            if p["ai_summary"]:
+                p["ai_summary"] += " - "
+            p["ai_summary"] += "السعر اللحظي غير موثوق"
+
+        upsert_performance_signal(p)
+        return p
+
+    max_workers = min(12, max(4, len(symbols)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_symbol, s) for s in symbols]
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    rows.append(result)
+            except:
+                continue
 
     rows.sort(key=lambda x: (decision_priority(x.get("decision", "")), x.get("quality_score", 0)), reverse=True)
     return rows
