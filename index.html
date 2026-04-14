@@ -361,7 +361,6 @@
     </div>
 
     <div class="quick-nav">
-      <a class="quick-link" href="#portfolioSection">💼 محفظتي</a>
       <a class="quick-link" href="#openingSection">🚀 الافتتاح</a>
       <a class="quick-link" href="#strong-section">🔥 دخول قوي</a>
       <a class="quick-link" href="#cautious-section">🟠 دخول بحذر</a>
@@ -377,7 +376,6 @@
         <div class="glossary-item">الصفحة أصبحت مختصرة، والتفاصيل الكاملة داخل كل بطاقة عند الضغط على <b>عرض التفاصيل الكاملة</b>.</div>
         <div class="glossary-item">الأقسام الرئيسية تبدأ <b>مخفية</b> لتصل بسرعة لأي قائمة تريدها دون تمرير طويل.</div>
         <div class="glossary-item">الأداء الأسبوعي يعرض <b>ملخصًا سريعًا</b> لكل نوع، وتفاصيل الصفقات تظهر فقط عند الطلب.</div>
-        <div class="glossary-item">محفظتي وقائمة المتابعة تساعدانك على مراقبة الأسهم الحالية بدل ضياعها بين الفرص الجديدة.</div>
       </div>
     </div>
 
@@ -397,24 +395,6 @@
     </div>
 
     <div id="statusbar" class="statusbar"></div>
-
-    <div class="section scroll-anchor" id="portfolioSection">
-      <div class="section-header">
-        <div class="section-heading">
-          <div class="section-title">💼 محفظتي</div>
-          <div class="section-count" id="portfolioCount">0 سهم</div>
-        </div>
-      </div>
-      <div class="section-box">
-        <div class="form-grid" style="margin-bottom:12px;">
-          <input id="portfolioSymbol" type="text" placeholder="رمز السهم مثل AAPL" />
-          <input id="portfolioBuyPrice" type="number" step="0.01" placeholder="سعر الشراء" />
-          <input id="portfolioQty" type="number" step="0.01" placeholder="الكمية (اختياري)" />
-          <button class="primary" onclick="savePortfolioItem()">حفظ في المحفظة</button>
-        </div>
-        <div id="portfolioContent" class="table-wrap">جاري تحميل المحفظة...</div>
-      </div>
-    </div>
 
     <div class="section scroll-anchor" id="openingSection">
       <div class="section-header">
@@ -450,8 +430,11 @@
           <div class="section-title">📊 تتبع الأداء الأسبوعي</div>
           <div class="section-count" id="performanceSummary"></div>
         </div>
+        <div class="section-tools">
+          <button class="ghost" onclick="toggleSection('performanceContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+        </div>
       </div>
-      <div class="panel" id="performanceContent">جاري تحميل تتبع الأداء...</div>
+      <div class="panel hidden-section" id="performanceContent">اضغط إظهار لتحميل تتبع الأداء...</div>
     </div>
 
     <div class="search-section section scroll-anchor" id="singleScanSection">
@@ -626,6 +609,14 @@
       if (!el) return;
       const hidden = el.classList.contains('hidden-section') || el.style.display === 'none';
       if (hidden) {
+        if (contentId === 'manualWatchlistContent' && el.dataset.loaded !== '1') {
+          loadWatchlist();
+          el.dataset.loaded = '1';
+        }
+        if (contentId === 'performanceContent' && el.dataset.loaded !== '1') {
+          loadPerformance();
+          el.dataset.loaded = '1';
+        }
         if (el.dataset && el.dataset.rendered !== '1' && window.__sectionItems && window.__sectionItems[contentId]) {
           const items = window.__sectionItems[contentId] || [];
           el.innerHTML = `<div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
@@ -652,17 +643,7 @@
     }
 
     async function addCardToPortfolio(symbol, currentPrice) {
-      const buy = prompt(`أدخل سعر الشراء لسهم ${symbol}`, currentPrice ? String(currentPrice) : "");
-      if (!buy) return;
-      const qty = prompt(`أدخل الكمية لسهم ${symbol} (اختياري)`, "");
-      try {
-        await fetch('/portfolio/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, buy_price: Number(buy), quantity: Number(qty || 0) })
-        });
-        loadPortfolio();
-      } catch (e) {}
+      alert('ميزة المحفظة غير مفعلة في هذه النسخة السريعة حتى لا يحصل تعارض مع الخلفية الحالية.');
     }
 
     function createCard(stock) {
@@ -945,114 +926,6 @@
       }
     }
 
-    async function savePortfolioItem() {
-      const symbol = (document.getElementById('portfolioSymbol').value || '').trim().toUpperCase();
-      const buyPrice = Number(document.getElementById('portfolioBuyPrice').value || 0);
-      const quantity = Number(document.getElementById('portfolioQty').value || 0);
-      if (!symbol || !buyPrice) return;
-      try {
-        await fetch('/portfolio/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, buy_price: buyPrice, quantity })
-        });
-        document.getElementById('portfolioSymbol').value = '';
-        document.getElementById('portfolioBuyPrice').value = '';
-        document.getElementById('portfolioQty').value = '';
-        loadPortfolio();
-      } catch (e) {}
-    }
-
-    async function removePortfolioItem(symbol) {
-      try {
-        await fetch('/portfolio/remove', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol })
-        });
-        loadPortfolio();
-      } catch (e) {}
-    }
-
-    async function loadPortfolio() {
-      try {
-        const res = await fetch('/portfolio');
-        const data = await res.json();
-        const items = data.items || [];
-        document.getElementById('portfolioCount').innerHTML = `${items.length} سهم`;
-        if (!items.length) {
-          document.getElementById('portfolioContent').innerHTML = '<div class="empty">لا توجد أسهم في المحفظة بعد</div>';
-          return;
-        }
-        const rows = items.map(item => `
-          <tr>
-            <td>${safeText(item.symbol)}</td>
-            <td>${formatNumber(item.buy_price)}</td>
-            <td>${formatNumber(item.current_price)}</td>
-            <td>${formatPercent(item.holding_change_pct)}</td>
-            <td>${safeText(item.price_source_label)}</td>
-            <td>${safeText(item.market_phase_label)}</td>
-            <td>${safeText(item.type_label)}</td>
-            <td>${safeText(item.execution_readiness_icon || '')} ${safeText(item.execution_readiness_label || '')}</td>
-            <td>${safeText(item.price_freshness_icon || '')} ${safeText(item.price_freshness_label || '')}</td>
-            <td><b>${safeText(item.recommendation)}</b><br><span class="muted">${safeText(item.recommendation_note)}</span></td>
-            <td>${formatNumber(item.target_price)}</td>
-            <td>${formatNumber(item.stop_loss)}</td>
-            <td><button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button></td>
-          </tr>`).join('');
-        document.getElementById('portfolioContent').innerHTML = `
-          <table class="list-table">
-            <thead>
-              <tr>
-                <th>السهم</th><th>سعر الشراء</th><th>السعر الحالي</th><th>الربح/الخسارة</th><th>مصدر السعر</th><th>السوق</th><th>نوع الفرصة</th><th>الجاهزية</th><th>حداثة السعر</th><th>التوصية</th><th>الهدف</th><th>الوقف</th><th></th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>`;
-      } catch (e) {
-        document.getElementById('portfolioContent').innerHTML = '<div class="error">تعذر تحميل المحفظة</div>';
-      }
-    }
-
-    function summarizePerformanceGroup(items) {
-      const wins = items.filter(x => x.outcome === 'win').length;
-      const losses = items.filter(x => x.outcome === 'loss').length;
-      const pending = items.filter(x => !['win','loss'].includes(x.outcome)).length;
-      const total = items.length;
-      const winRate = total ? ((wins / total) * 100).toFixed(1) : '0.0';
-      return { wins, losses, pending, total, winRate };
-    }
-
-    function renderPerformanceActive(items) {
-      if (!items.length) return '<div class="empty">لا توجد فرص محفوظة لهذا النوع هذا الأسبوع</div>';
-      const rows = items.map(item => `
-        <tr>
-          <td>${safeText(item.status_mark)}</td>
-          <td>${safeText(item.signal_date || '')}</td>
-          <td>${safeText(item.symbol)}</td>
-          <td>${safeText(item.plan_family || '')}</td>
-          <td>${formatNumber(item.entry_price)}</td>
-          <td>${formatNumber(item.target_price)}</td>
-          <td>${formatNumber(item.stop_loss)}</td>
-          <td>${formatNumber(item.current_price)}</td>
-          <td>${formatPercent(item.last_change_pct)}</td>
-          <td>${safeText(item.status_label)}</td>
-          <td>${safeText(item.first_seen_at)}</td>
-          <td>${safeText(item.last_seen_at)}</td>
-        </tr>`).join('');
-      return `
-        <div class="table-wrap">
-          <table class="list-table">
-            <thead>
-              <tr>
-                <th>الحكم</th><th>تاريخ الإشارة</th><th>السهم</th><th>الخطة</th><th>الدخول</th><th>الهدف</th><th>الوقف</th><th>السعر الآن</th><th>التغير</th><th>الحالة</th><th>أول ظهور</th><th>آخر تحديث</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>`;
-    }
-
     function renderPerformanceGroupCard(title, items, key, accent='') {
       const s = summarizePerformanceGroup(items);
       return `
@@ -1137,7 +1010,6 @@
 
     async function loadAll() {
       await loadScan();
-      await Promise.all([loadWatchlist(), loadPerformance(), loadPortfolio()]);
     }
 
     initThemeMode();
@@ -1145,4 +1017,3 @@
   </script>
 </body>
 </html>
-
