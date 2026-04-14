@@ -565,7 +565,7 @@
       ].some(k => text.includes(k));
       const legalNegative = ['lawsuit','investigation','investigates','class action','investor alert','law firm'].some(k => text.includes(k));
       const clearNegative = ['downgrade','guidance cut','missed estimates','weak earnings','offering','crashed','plunged','fell'].some(k => text.includes(k));
-      const opinionOnly = ['is it time to buy','why this stock','opinion','analysis','article','i finally pulled the trigger','here's what this means'].some(k => text.includes(k));
+      const opinionOnly = ['is it time to buy','why this stock','opinion','analysis','article','i finally pulled the trigger',"here's what this means"].some(k => text.includes(k));
       const positive = ['upgrade','approval','partnership','contract','buyback','beats','beat estimates','record revenue'].some(k => text.includes(k));
 
       if (insiderNegative) return { category: 'negative', badge: '🔴 بيع داخلي سلبي' };
