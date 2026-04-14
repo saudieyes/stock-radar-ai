@@ -1,8 +1,16 @@
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from requests.adapters import HTTPAdapter
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+
+HTTP_SESSION = requests.Session()
+HTTP_ADAPTER = HTTPAdapter(pool_connections=128, pool_maxsize=128, max_retries=0)
+HTTP_SESSION.mount("https://", HTTP_ADAPTER)
+HTTP_SESSION.mount("http://", HTTP_ADAPTER)
+
 
 EXCLUDED_TYPES = {
     "ETF", "ETN", "ETV", "WARRANT", "RIGHT", "UNIT",
@@ -34,7 +42,7 @@ BIG_CAPS = [
 
 def safe_get_json(url: str, timeout: int = 20):
     try:
-        r = requests.get(url, timeout=timeout)
+        r = HTTP_SESSION.get(url, timeout=timeout)
         r.raise_for_status()
         return r.json()
     except:
@@ -162,6 +170,13 @@ def get_reference_details(ticker: str) -> dict:
     url = f"https://api.polygon.io/v3/reference/tickers/{ticker}?apiKey={POLYGON_API_KEY}"
     data = safe_get_json(url, timeout=10)
     return data.get("results", {}) or {}
+
+
+def get_small_cap_score(item: tuple[str, dict]) -> tuple[str, float]:
+    ticker, daily = item
+    ref = get_reference_details(ticker)
+    score = score_small_cap_candidate(ticker, daily, ref)
+    return ticker, score
 
 
 def calc_metrics(d: dict) -> dict:
@@ -1541,15 +1556,19 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
 
     small_cap_candidates = [t for t, _ in fast_pool[:180]]
     small_cap_scored = []
+    small_cap_inputs = [(ticker, grouped_map.get(ticker)) for ticker in small_cap_candidates if grouped_map.get(ticker)]
 
-    for ticker in small_cap_candidates:
-        daily = grouped_map.get(ticker)
-        if not daily:
-            continue
-        ref = get_reference_details(ticker)
-        s_small = score_small_cap_candidate(ticker, daily, ref)
-        if s_small != -9999:
-            small_cap_scored.append((ticker, s_small))
+    if small_cap_inputs:
+        max_workers = min(12, max(4, len(small_cap_inputs)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(get_small_cap_score, item) for item in small_cap_inputs]
+            for future in as_completed(futures):
+                try:
+                    ticker, s_small = future.result()
+                    if s_small != -9999:
+                        small_cap_scored.append((ticker, s_small))
+                except:
+                    continue
 
     small_cap_scored.sort(key=lambda x: x[1], reverse=True)
 
@@ -1567,4 +1586,3 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         return get_seed_universe()[:max_symbols]
 
     return final_universe[:max_symbols]
-
