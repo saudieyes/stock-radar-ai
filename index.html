@@ -520,36 +520,6 @@
       return escapeHtml(String(value));
     }
 
-    function hasValue(value) {
-      return !(value === null || value === undefined || value === "");
-    }
-
-    function cleanInline(text) {
-      return String(text || '').replace(/\s+/g, ' ').trim();
-    }
-
-    function joinNonEmpty(parts, sep=' | ') {
-      return parts.map(p => cleanInline(p)).filter(Boolean).join(sep);
-    }
-
-    function metricValueWithLabel(value, metric) {
-      const parts = [];
-      if (hasValue(value)) parts.push(String(value));
-      const metricText = joinNonEmpty([metric?.icon || '', safeText(metric?.label || '')], ' ');
-      if (metricText) parts.push(metricText);
-      return joinNonEmpty(parts, ' | ');
-    }
-
-    function executionReadinessText(stock) {
-      const main = joinNonEmpty([
-        safeText(stock.execution_readiness_icon || ''),
-        safeText(stock.execution_readiness_label || '')
-      ], ' ');
-      const score = Number(stock.execution_readiness_score || 0);
-      if (score > 0) return joinNonEmpty([main, `درجة ${formatNumber(score)}`], ' | ');
-      return main;
-    }
-
     function compactItem(label, value) {
       return `
         <div class="compact-item">
@@ -559,11 +529,46 @@
     }
 
     function detailBox(label, value, full=false) {
-      if (value === null || value === undefined || value === "") return '';
+      const raw = value === null || value === undefined ? '' : String(value);
+      const check = raw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      if (!check) return '';
       return `<div class="detail-box ${full ? 'full' : ''}">
         <div class="detail-label">${safeText(label)}</div>
         <div class="detail-value">${value}</div>
       </div>`;
+    }
+
+    function joinPlainParts(parts, fallback='لا توجد بيانات كافية') {
+      const text = (parts || []).map(x => String(x ?? '').trim()).filter(Boolean).join(' — ').trim();
+      return text || fallback;
+    }
+
+    function numberWithMeta(numberValue, meta, fallback='لا توجد بيانات كافية') {
+      const num = formatNumber(numberValue);
+      const icon = safeText(meta?.icon || '');
+      const label = safeText(meta?.label || '');
+      return joinPlainParts([num, icon ? `${icon} ${label}`.trim() : label], fallback);
+    }
+
+    function textWithMeta(textValue, meta, fallback='لا توجد بيانات كافية') {
+      const base = safeText(textValue || '');
+      const icon = safeText(meta?.icon || '');
+      const label = safeText(meta?.label || '');
+      return joinPlainParts([base, icon ? `${icon} ${label}`.trim() : label], fallback);
+    }
+
+    function readinessText(stock) {
+      const icon = safeText(stock.execution_readiness_icon || '');
+      const label = safeText(stock.execution_readiness_label || '');
+      const score = Number(stock.execution_readiness_score || 0);
+      const scoreText = score > 0 ? `${score}/100` : '';
+      return joinPlainParts([icon ? `${icon} ${label}`.trim() : label, scoreText], 'لا توجد بيانات كافية');
+    }
+
+    function freshnessText(stock) {
+      const icon = safeText(stock.price_freshness_icon || '');
+      const label = safeText(stock.price_freshness_label || '');
+      return joinPlainParts([icon ? `${icon} ${label}`.trim() : label], 'لا توجد بيانات كافية');
     }
 
     function badgeDecision(decision) {
@@ -734,24 +739,24 @@
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
       details.push(detailBox('مدة الصلاحية', safeText(stock.valid_for)));
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
-      details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
-      details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
-      details.push(detailBox('جاهزية التنفيذ', executionReadinessText(stock)));
-      details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
+      details.push(detailBox('حداثة السعر', freshnessText(stock)));
+      details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || 'لا توجد بيانات كافية'), true));
+      details.push(detailBox('جاهزية التنفيذ', readinessText(stock)));
+      details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || 'لا توجد بيانات كافية'), true));
       details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
       details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
-      details.push(detailBox('العائد/المخاطرة', metricValueWithLabel(formatNumber(stock.rr_1), stock.metric_rr)));
-      details.push(detailBox('المخاطرة %', formatNumber(stock.display_risk_pct ?? stock.risk_pct)));
-      details.push(detailBox('الجودة', metricValueWithLabel(formatNumber(stock.quality_score), stock.metric_quality)));
-      details.push(detailBox('الاتجاه', metricValueWithLabel(safeText(stock.trend), stock.metric_trend)));
-      details.push(detailBox('السيولة اليومية', formatNumber(stock.volume_ratio)));
-      details.push(detailBox('سيولة السرعة', formatNumber(stock.volume_pace_ratio)));
-      details.push(detailBox('السيولة الفعلية', metricValueWithLabel(formatNumber(stock.effective_volume_ratio), stock.metric_volume)));
-      details.push(detailBox('تقييم الاستمرار', metricValueWithLabel(safeText(stock.continuation_label || ''), stock.metric_continuation)));
-      details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
-      details.push(detailBox('Continuation Score', formatNumber(stock.continuation_score)));
+      details.push(detailBox('العائد/المخاطرة', numberWithMeta(stock.rr_1, stock.metric_rr)));
+      details.push(detailBox('المخاطرة %', numberWithMeta(stock.display_risk_pct ?? stock.risk_pct, stock.metric_risk_pct)));
+      details.push(detailBox('الجودة', numberWithMeta(stock.quality_score, stock.metric_quality)));
+      details.push(detailBox('الاتجاه', textWithMeta(stock.trend, stock.metric_trend)));
+      details.push(detailBox('السيولة اليومية', numberWithMeta(stock.volume_ratio, stock.metric_volume_daily)));
+      details.push(detailBox('سيولة السرعة', numberWithMeta(stock.volume_pace_ratio, stock.metric_volume_pace)));
+      details.push(detailBox('السيولة الفعلية', numberWithMeta(stock.effective_volume_ratio, stock.metric_volume)));
+      details.push(detailBox('تقييم الاستمرار', textWithMeta(stock.continuation_label || stock.runner_label || '', stock.metric_continuation)));
+      details.push(detailBox('Runner Score', numberWithMeta(stock.runner_score, stock.metric_runner_score)));
+      details.push(detailBox('Continuation Score', numberWithMeta(stock.continuation_score, stock.metric_continuation_score)));
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(stock.news_title || stock.news_note || '')}</div>`, true));
-      details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
+      details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || 'لا توجد بيانات كافية'), true));
       details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
       details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
       details.push(detailBox('إجراء المالك', safeText(stock.owner_action), true));
@@ -810,8 +815,8 @@
             ${compactItem(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price))}
             ${compactItem('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || ''))}
             ${compactItem('مدة الصلاحية', safeText(stock.valid_for))}
-            ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
-            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`)}
+            ${compactItem('حداثة السعر', freshnessText(stock))}
+            ${compactItem('جاهزية التنفيذ', readinessText(stock))}
           </div>
 
           <div class="indicator-strip">${importantIndicators(stock)}</div>
@@ -822,8 +827,8 @@
           </div>
 
           <div class="summary-line">
-            <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
-            <div>${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
+            <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || 'لا توجد بيانات كافية')}</div>
+            <div>${safeText(stock.ai_summary || 'لا توجد بيانات كافية')}</div>
           </div>
 
           <div class="card-actions">
