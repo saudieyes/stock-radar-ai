@@ -243,6 +243,12 @@
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px;
       color:var(--text-main); font-size:14px; line-height:1.8; margin-bottom:12px;
     }
+    .explain-line {
+      background: linear-gradient(180deg, rgba(37,99,235,.10) 0%, rgba(37,99,235,.05) 100%);
+      border:1px solid var(--border-soft); border-right:4px solid #3b82f6; border-radius:14px; padding:12px;
+      color:var(--text-main); font-size:14px; line-height:1.9; margin-bottom:12px;
+    }
+    .explain-title { font-weight:900; color:var(--text-strong); margin-bottom:6px; }
     .news-line {
       display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px;
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px 12px;
@@ -791,9 +797,14 @@
             <span>${safeText(stock.news_title || stock.news_note || 'لا يوجد خبر بارز')}</span>
           </div>
 
+          <div class="explain-line">
+            <div class="explain-title">📝 الشرح السريع</div>
+            <div>${safeText(stock.quick_explainer || stock.ai_summary || 'لا يوجد شرح مختصر حاليًا')}</div>
+          </div>
+
           <div class="summary-line">
-            <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
-            <div>${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
+            <div style="font-weight:800; margin-bottom:6px;">📊 السبب الفني</div>
+            <div>${safeText(stock.ai_summary || stock.quick_explainer || 'لا يوجد ملخص')}</div>
           </div>
 
           <div class="card-actions">
