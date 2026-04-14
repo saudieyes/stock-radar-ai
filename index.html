@@ -243,12 +243,6 @@
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px;
       color:var(--text-main); font-size:14px; line-height:1.8; margin-bottom:12px;
     }
-    .explain-line {
-      background: linear-gradient(180deg, rgba(37,99,235,.10) 0%, rgba(37,99,235,.05) 100%);
-      border:1px solid var(--border-soft); border-right:4px solid #3b82f6; border-radius:14px; padding:12px;
-      color:var(--text-main); font-size:14px; line-height:1.9; margin-bottom:12px;
-    }
-    .explain-title { font-weight:900; color:var(--text-strong); margin-bottom:6px; }
     .news-line {
       display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px;
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px 12px;
@@ -526,6 +520,36 @@
       return escapeHtml(String(value));
     }
 
+    function hasValue(value) {
+      return !(value === null || value === undefined || value === "");
+    }
+
+    function cleanInline(text) {
+      return String(text || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function joinNonEmpty(parts, sep=' | ') {
+      return parts.map(p => cleanInline(p)).filter(Boolean).join(sep);
+    }
+
+    function metricValueWithLabel(value, metric) {
+      const parts = [];
+      if (hasValue(value)) parts.push(String(value));
+      const metricText = joinNonEmpty([metric?.icon || '', safeText(metric?.label || '')], ' ');
+      if (metricText) parts.push(metricText);
+      return joinNonEmpty(parts, ' | ');
+    }
+
+    function executionReadinessText(stock) {
+      const main = joinNonEmpty([
+        safeText(stock.execution_readiness_icon || ''),
+        safeText(stock.execution_readiness_label || '')
+      ], ' ');
+      const score = Number(stock.execution_readiness_score || 0);
+      if (score > 0) return joinNonEmpty([main, `درجة ${formatNumber(score)}`], ' | ');
+      return main;
+    }
+
     function compactItem(label, value) {
       return `
         <div class="compact-item">
@@ -712,18 +736,18 @@
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
-      details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`));
+      details.push(detailBox('جاهزية التنفيذ', executionReadinessText(stock)));
       details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
       details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
       details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
-      details.push(detailBox('العائد/المخاطرة', `${formatNumber(stock.rr_1)} | ${(stock.metric_rr?.icon || '')} ${safeText(stock.metric_rr?.label || '')}`));
+      details.push(detailBox('العائد/المخاطرة', metricValueWithLabel(formatNumber(stock.rr_1), stock.metric_rr)));
       details.push(detailBox('المخاطرة %', formatNumber(stock.display_risk_pct ?? stock.risk_pct)));
-      details.push(detailBox('الجودة', `${formatNumber(stock.quality_score)} | ${(stock.metric_quality?.icon || '')} ${safeText(stock.metric_quality?.label || '')}`));
-      details.push(detailBox('الاتجاه', `${safeText(stock.trend)} | ${(stock.metric_trend?.icon || '')} ${safeText(stock.metric_trend?.label || '')}`));
+      details.push(detailBox('الجودة', metricValueWithLabel(formatNumber(stock.quality_score), stock.metric_quality)));
+      details.push(detailBox('الاتجاه', metricValueWithLabel(safeText(stock.trend), stock.metric_trend)));
       details.push(detailBox('السيولة اليومية', formatNumber(stock.volume_ratio)));
       details.push(detailBox('سيولة السرعة', formatNumber(stock.volume_pace_ratio)));
-      details.push(detailBox('السيولة الفعلية', `${formatNumber(stock.effective_volume_ratio)} | ${(stock.metric_volume?.icon || '')} ${safeText(stock.metric_volume?.label || '')}`));
-      details.push(detailBox('تقييم الاستمرار', `${safeText(stock.continuation_label || '')} | ${(stock.metric_continuation?.icon || '')} ${safeText(stock.metric_continuation?.label || '')}`));
+      details.push(detailBox('السيولة الفعلية', metricValueWithLabel(formatNumber(stock.effective_volume_ratio), stock.metric_volume)));
+      details.push(detailBox('تقييم الاستمرار', metricValueWithLabel(safeText(stock.continuation_label || ''), stock.metric_continuation)));
       details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
       details.push(detailBox('Continuation Score', formatNumber(stock.continuation_score)));
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(stock.news_title || stock.news_note || '')}</div>`, true));
@@ -797,14 +821,9 @@
             <span>${safeText(stock.news_title || stock.news_note || 'لا يوجد خبر بارز')}</span>
           </div>
 
-          <div class="explain-line">
-            <div class="explain-title">📝 الشرح السريع</div>
-            <div>${safeText(stock.quick_explainer || stock.ai_summary || 'لا يوجد شرح مختصر حاليًا')}</div>
-          </div>
-
           <div class="summary-line">
-            <div style="font-weight:800; margin-bottom:6px;">📊 السبب الفني</div>
-            <div>${safeText(stock.ai_summary || stock.quick_explainer || 'لا يوجد ملخص')}</div>
+            <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
+            <div>${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
           </div>
 
           <div class="card-actions">
@@ -1173,3 +1192,4 @@
   </script>
 </body>
 </html>
+
