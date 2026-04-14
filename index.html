@@ -49,9 +49,9 @@
     :root[data-theme="light"] {
       --bg-start: #eef5ff;
       --bg-end: #dce9ff;
-      --text-main: #142033;
-      --text-strong: #0f172a;
-      --text-muted: #52627a;
+      --text-main: #0c172b;
+      --text-strong: #081224;
+      --text-muted: #394b67;
       --panel-bg: rgba(255,255,255,.92);
       --panel-bg-soft: #f7fbff;
       --panel-bg-soft-2: #eef4ff;
@@ -90,6 +90,46 @@
       font-family: Arial, sans-serif;
       background: linear-gradient(180deg, var(--bg-start) 0%, var(--bg-end) 100%);
       color: var(--text-main);
+    }
+    :root[data-theme="light"] body {
+      font-size: 17px;
+    }
+    :root[data-theme="light"] .title {
+      font-size: 33px;
+      letter-spacing: -.3px;
+    }
+    :root[data-theme="light"] .subtitle,
+    :root[data-theme="light"] .compact-help,
+    :root[data-theme="light"] .detail-label,
+    :root[data-theme="light"] .metric-label,
+    :root[data-theme="light"] .stat-label,
+    :root[data-theme="light"] .section-count {
+      color: #31435f;
+      font-weight: 700;
+    }
+    :root[data-theme="light"] .section-title,
+    :root[data-theme="light"] .symbol,
+    :root[data-theme="light"] .compact-value,
+    :root[data-theme="light"] .detail-value,
+    :root[data-theme="light"] .summary-title,
+    :root[data-theme="light"] .summary-text,
+    :root[data-theme="light"] .week-metric-value,
+    :root[data-theme="light"] .mini-title,
+    :root[data-theme="light"] .stat-value,
+    :root[data-theme="light"] details summary,
+    :root[data-theme="light"] .quick-link {
+      color: var(--text-strong);
+    }
+    :root[data-theme="light"] button,
+    :root[data-theme="light"] input,
+    :root[data-theme="light"] .hero-chip,
+    :root[data-theme="light"] .badge,
+    :root[data-theme="light"] .compact-help,
+    :root[data-theme="light"] .detail-value {
+      font-size: 15px;
+    }
+    :root[data-theme="light"] button.primary {
+      box-shadow: 0 8px 20px rgba(37,99,235,.18);
     }
     .container { max-width: 1440px; margin: 0 auto; padding: 18px; }
     .topbar, .hero, .stat, .card, .panel, .search-box, .table-wrap, .glossary-box, .section-box, .opening-box {
@@ -156,7 +196,7 @@
     }
     .stat { padding:14px; }
     .stat-label { color:var(--text-muted); font-size:13px; margin-bottom:8px; }
-    .stat-value { font-size:22px; font-weight:900; color:#f8fafc; }
+    .stat-value { font-size:22px; font-weight:900; color:var(--text-strong); }
     .section { margin-bottom:18px; }
     .section-header {
       display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px;
@@ -169,7 +209,7 @@
     .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; }
     .card { padding:14px; }
     .card-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
-    .symbol { font-size:28px; font-weight:900; color:#f8fafc; line-height:1; }
+    .symbol { font-size:28px; font-weight:900; color:var(--text-strong); line-height:1; }
     .company { color:var(--text-muted); font-size:12px; margin-top:6px; line-height:1.7; }
     .badges { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
     .badge {
@@ -185,40 +225,40 @@
     .badge-stage { background:#154e63; color:#cffafe; }
     .badge-news-pos { background:#123c28; color:#d1fae5; }
     .badge-news-neg { background:#4c1d1d; color:#fecaca; }
-    .badge-news-neu { background:#1f2937; color:#e2e8f0; }
+    .badge-news-neu { background:var(--ghost-bg); color:var(--text-strong); }
     .badge-news-op { background:#3f2a00; color:#fde68a; }
     .badge-news-legal { background:#4c1d1d; color:#fecaca; }
 
     .compact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
     .compact-item { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:11px; }
     .compact-label { color:var(--text-muted); font-size:12px; margin-bottom:6px; }
-    .compact-value { color:#f8fafc; font-size:16px; font-weight:800; line-height:1.4; }
+    .compact-value { color:var(--text-strong); font-size:16px; font-weight:800; line-height:1.4; }
 
     .indicator-strip { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
     .indicator-pill {
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:999px; padding:7px 10px;
-      color:#cbd5e1; font-size:12px; line-height:1.6;
+      color:var(--text-main); font-size:12px; line-height:1.6;
     }
     .summary-line {
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px;
-      color:#cbd5e1; font-size:14px; line-height:1.8; margin-bottom:12px;
+      color:var(--text-main); font-size:14px; line-height:1.8; margin-bottom:12px;
     }
     .news-line {
       display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px;
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px 12px;
-      color:#cbd5e1; font-size:13px; line-height:1.7;
+      color:var(--text-main); font-size:13px; line-height:1.7;
     }
     .card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
     details.detail-panel, details.glossary-box, details.table-wrap {
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:16px; padding:10px;
     }
-    details summary { cursor:pointer; font-weight:900; color:#f8fafc; outline:none; }
+    details summary { cursor:pointer; font-weight:900; color:var(--text-strong); outline:none; }
     .details-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
     .detail-box { background:var(--panel-bg-soft-2); border:1px solid var(--border-main); border-radius:12px; padding:10px; }
     .detail-box.full { grid-column:1 / -1; }
     .detail-label { color:var(--text-muted); font-size:12px; margin-bottom:6px; }
-    .detail-value { color:#f8fafc; font-size:14px; line-height:1.8; word-break:break-word; }
-    .flags { margin:6px 0 0; padding-right:18px; color:#cbd5e1; font-size:13px; }
+    .detail-value { color:var(--text-strong); font-size:14px; line-height:1.8; word-break:break-word; }
+    .flags { margin:6px 0 0; padding-right:18px; color:var(--text-main); font-size:13px; }
 
     .loading,.error,.empty,.panel,.table-wrap,.glossary-box,.section-box,.opening-box { padding:16px; }
     .error { color:#fecaca; border-color:#7f1d1d; }
@@ -235,17 +275,17 @@
     .week-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
     .week-metric { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px; }
     .week-metric-label { color:var(--text-muted); font-size:12px; margin-bottom:6px; }
-    .week-metric-value { font-size:18px; font-weight:900; color:#f8fafc; }
+    .week-metric-value { font-size:18px; font-weight:900; color:var(--text-strong); }
 
     .glossary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; margin-top:10px; }
     .glossary-item {
       background:var(--panel-bg-soft-2); border:1px solid var(--border-main); border-radius:14px; padding:12px;
-      color:#cbd5e1; font-size:13px; line-height:1.8;
+      color:var(--text-main); font-size:13px; line-height:1.8;
     }
 
     .mini-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; }
     .mini-card { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px; }
-    .mini-title { font-size:16px; font-weight:900; margin-bottom:6px; color:#f8fafc; }
+    .mini-title { font-size:16px; font-weight:900; margin-bottom:6px; color:var(--text-strong); }
     .mini-sub { color:var(--text-muted); font-size:12px; margin-bottom:8px; line-height:1.6; }
 
     .green { color:#22c55e; }
@@ -261,10 +301,10 @@
     }
     .quick-link {
       display:inline-flex; align-items:center; gap:6px; text-decoration:none;
-      color:#e5e7eb; background:var(--ghost-bg); border:1px solid var(--ghost-border);
+      color:var(--text-strong); background:var(--ghost-bg); border:1px solid var(--ghost-border);
       border-radius:999px; padding:9px 12px; font-size:13px; font-weight:800;
     }
-    .quick-link:hover { background:#0f172a; }
+    .quick-link:hover { background:var(--panel-bg-soft); }
     .scroll-anchor { scroll-margin-top: 150px; }
     .summary-row {
       display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:12px;
@@ -272,7 +312,7 @@
     .summary-card {
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px;
     }
-    .summary-title { font-size:15px; font-weight:900; color:#f8fafc; margin-bottom:6px; }
+    .summary-title { font-size:15px; font-weight:900; color:var(--text-strong); margin-bottom:6px; }
     .summary-sub { font-size:12px; color:var(--text-muted); line-height:1.7; }
     .summary-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
     .small-note {
@@ -298,7 +338,7 @@
       <div class="actions">
         <button class="ghost" onclick="toggleSection('introHelp', this, 'إظهار الشرح', 'إخفاء الشرح')">إظهار الشرح</button>
         <button class="ghost" onclick="toggleSection('glossaryHelp', this, 'إظهار الرموز', 'إخفاء الرموز')">إظهار الرموز</button>
-        <button class="ghost" id="themeToggleBtn" onclick="toggleThemeMode()">الوضع النهاري</button>
+        <button class="ghost" id="themeToggleBtn" onclick="toggleThemeMode()">الوضع الليلي</button>
         <button class="primary" onclick="loadAll()">تحديث الكل</button>
       </div>
     </div>
@@ -507,27 +547,27 @@
 
     function applyThemeMode(mode) {
       const root = document.documentElement;
-      if (mode === 'light') root.setAttribute('data-theme', 'light');
-      else if (mode === 'dark') root.setAttribute('data-theme', 'dark');
-      else root.removeAttribute('data-theme');
+      const nextMode = mode === 'dark' ? 'dark' : 'light';
+      root.setAttribute('data-theme', nextMode);
       const btn = document.getElementById('themeToggleBtn');
       if (btn) {
-        const active = root.getAttribute('data-theme') || 'auto';
-        btn.textContent = active === 'light' ? 'الوضع الليلي' : active === 'dark' ? 'الوضع التلقائي' : 'الوضع النهاري';
+        btn.textContent = nextMode === 'light' ? 'الوضع الليلي' : 'الوضع النهاري';
+        btn.setAttribute('aria-label', nextMode === 'light' ? 'التبديل إلى الوضع الليلي' : 'التبديل إلى الوضع النهاري');
       }
-      try { localStorage.setItem('stockRadarThemeMode', mode); } catch(e) {}
+      try { localStorage.setItem('stockRadarThemeMode', nextMode); } catch(e) {}
     }
 
     function initThemeMode() {
-      let mode = 'auto';
-      try { mode = localStorage.getItem('stockRadarThemeMode') || 'auto'; } catch(e) {}
+      let mode = 'light';
+      try {
+        mode = localStorage.getItem('stockRadarThemeMode') || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
+      } catch(e) {}
       applyThemeMode(mode);
     }
 
     function toggleThemeMode() {
-      const current = document.documentElement.getAttribute('data-theme') || 'auto';
-      const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
-      applyThemeMode(next);
+      const current = document.documentElement.getAttribute('data-theme') || 'light';
+      applyThemeMode(current === 'light' ? 'dark' : 'light');
     }
 
     function classifyNewsVisual(stock) {
