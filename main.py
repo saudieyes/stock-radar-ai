@@ -59,6 +59,7 @@ SNAPSHOT_CACHE = {}
 PERFORMANCE_FILE = "signal_performance.json"
 
 MANUAL_WATCHLIST_FILE = "manual_watchlist.json"
+PORTFOLIO_FILE = "portfolio_holdings.json"
 
 def ny_now():
     return datetime.now(ZoneInfo("America/New_York"))
@@ -74,6 +75,23 @@ def load_manual_watchlist():
 def save_manual_watchlist(items):
     try:
         with open(MANUAL_WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+
+def load_portfolio_items():
+    try:
+        with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except:
+        return []
+
+
+def save_portfolio_items(items):
+    try:
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
     except:
         pass
@@ -163,9 +181,11 @@ def migrate_legacy_performance_items(items):
             continue
         created_at = f"{item_date} {str(item.get('time', '') or '').strip()}".strip()
         records.append({
-            "id": f"{store['active_week_key']}::{str(item.get('symbol', '')).upper().strip()}",
+            "id": f"{store['active_week_key']}::{item_date}::{str(item.get('symbol', '')).upper().strip()}::{signal_type}::legacy",
             "symbol": str(item.get("symbol", "") or "").upper().strip(),
             "signal_type": signal_type,
+            "signal_date": item_date,
+            "plan_family": "legacy",
             "entry_price": safe_round(entry_price),
             "target_price": 0.0,
             "stop_loss": 0.0,
@@ -298,7 +318,9 @@ def upsert_performance_signal(stock: dict):
 
         store = rollover_performance_store_if_needed(load_performance_store())
         records = store.get("active_records", [])
-        record_id = f"{store['active_week_key']}::{symbol}"
+        signal_date = ny_now().strftime("%Y-%m-%d")
+        plan_family = str(stock.get("display_plan_family", stock.get("type", "normal")) or "normal")
+        record_id = f"{store['active_week_key']}::{signal_date}::{symbol}::{signal_type}::{plan_family}"
         now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
 
         existing = None
@@ -312,6 +334,8 @@ def upsert_performance_signal(stock: dict):
                 "id": record_id,
                 "symbol": symbol,
                 "signal_type": signal_type,
+                "signal_date": signal_date,
+                "plan_family": plan_family,
                 "entry_price": safe_round(entry_price),
                 "target_price": safe_round(target_price),
                 "stop_loss": safe_round(stop_loss),
@@ -335,8 +359,9 @@ def upsert_performance_signal(stock: dict):
             existing["price_source_label"] = str(stock.get("price_source_label", stock.get("price_source", "")) or existing.get("price_source_label", ""))
             existing["strategy_label"] = str(stock.get("strategy_label", "") or existing.get("strategy_label", ""))
             existing["market_phase"] = str(stock.get("market_phase_label", stock.get("market_phase", "")) or existing.get("market_phase", ""))
-            if not existing.get("signal_type"):
-                existing["signal_type"] = signal_type
+            existing["signal_type"] = signal_type
+            existing["signal_date"] = signal_date
+            existing["plan_family"] = plan_family
             if float(existing.get("target_price", 0) or 0) <= 0 and target_price > 0:
                 existing["target_price"] = safe_round(target_price)
             if float(existing.get("stop_loss", 0) or 0) <= 0 and stop_loss > 0:
@@ -1165,6 +1190,8 @@ def get_intraday_snapshot(symbol):
         "spike_from_open_pct": 0.0,
         "pullback_from_high_pct": 0.0,
         "session_position_pct": 0.0,
+        "last_bar_ts_ms": 0,
+        "last_bar_label": "",
     }
 
     if not market_open:
@@ -1353,7 +1380,7 @@ def build_live_price_block(symbol, prev_data, intraday_data):
     high_live = prev_high
     low_live = prev_low
     volume_live = prev_volume
-    last_price_update_ms = int(time.time() * 1000) if phase == "open" and intraday_data.get("available") else int(to_float(snap.get("updated", 0)))
+    last_price_update_ms = int(float((intraday_data or {}).get("last_bar_ts_ms", 0)) or 0) if phase == "open" and intraday_data.get("available") else int(to_float(snap.get("updated", 0)))
 
     if phase == "open" and intraday_data.get("available"):
         high_live = safe_round(to_float(intraday_data.get("session_high", 0)) or prev_high)
@@ -1384,9 +1411,339 @@ def build_live_price_block(symbol, prev_data, intraday_data):
         "price_source_label": price_source_label_map.get(price_source, price_source),
         "price_reliable_for_execution": price_reliable_for_execution,
         "last_price_update_ms": last_price_update_ms,
-        "last_price_update_label": datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M:%S"),
+        "last_price_update_label": (datetime.fromtimestamp(last_price_update_ms / 1000.0, ZoneInfo("America/New_York")).strftime("%H:%M:%S") if last_price_update_ms > 0 else ""),
     }
 
+
+
+def get_price_freshness_meta(stock: dict) -> dict:
+    try:
+        phase = str(stock.get("market_phase", "") or "")
+        reliable = bool(stock.get("price_reliable_for_execution", False))
+        source = str(stock.get("price_source", "") or "")
+        last_ms = int(float(stock.get("last_price_update_ms", 0) or 0))
+        age_seconds = 0
+        if last_ms > 0:
+            age_seconds = max(0, int((time.time() * 1000 - last_ms) / 1000))
+
+        if source == "previous_close" or phase == "closed":
+            return {
+                "price_freshness_label": "آخر إغلاق",
+                "price_freshness_icon": "🌙",
+                "price_freshness_score": 55,
+                "price_freshness_detail": "السعر يمثل إغلاق الجلسة السابقة وليس سعرًا لحظيًا.",
+            }
+
+        if source in {"after_hours", "pre_market"}:
+            if age_seconds <= 120:
+                label = "ممتاز خارج الجلسة"
+                icon = "🟢"
+                score = 88
+            elif age_seconds <= 600:
+                label = "جيد خارج الجلسة"
+                icon = "🟡"
+                score = 72
+            else:
+                label = "متأخر خارج الجلسة"
+                icon = "🔴"
+                score = 48
+            return {
+                "price_freshness_label": label,
+                "price_freshness_icon": icon,
+                "price_freshness_score": score,
+                "price_freshness_detail": f"آخر تحديث منذ {age_seconds} ثانية تقريبًا.",
+            }
+
+        if reliable:
+            if age_seconds <= 90:
+                label = "حديث جدًا"
+                icon = "🟢"
+                score = 96
+            elif age_seconds <= 300:
+                label = "حديث"
+                icon = "🟢"
+                score = 88
+            elif age_seconds <= 900:
+                label = "متأخر قليلًا"
+                icon = "🟡"
+                score = 68
+            else:
+                label = "متأخر"
+                icon = "🔴"
+                score = 42
+            return {
+                "price_freshness_label": label,
+                "price_freshness_icon": icon,
+                "price_freshness_score": score,
+                "price_freshness_detail": f"آخر تحديث منذ {age_seconds} ثانية تقريبًا.",
+            }
+
+        return {
+            "price_freshness_label": "غير مناسب للتنفيذ",
+            "price_freshness_icon": "🚫",
+            "price_freshness_score": 25,
+            "price_freshness_detail": "السعر الحالي غير كافٍ لاتخاذ تنفيذ مباشر بثقة.",
+        }
+    except:
+        return {
+            "price_freshness_label": "غير معروف",
+            "price_freshness_icon": "❓",
+            "price_freshness_score": 0,
+            "price_freshness_detail": "",
+        }
+
+
+def get_execution_readiness_meta(stock: dict) -> dict:
+    try:
+        mode = str(stock.get("execution_mode", "") or "")
+        decision = str(stock.get("decision", "") or "")
+        price_reliable = bool(stock.get("price_reliable_for_execution", False))
+        phase = str(stock.get("market_phase", "") or "")
+        quality = float(stock.get("quality_score", 0) or 0)
+        rr = float(stock.get("rr_1", 0) or 0)
+        volume_ratio = float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)) or 0)
+        risk_pct = float(stock.get("display_risk_pct", stock.get("risk_pct", 0)) or 0)
+
+        score = 35
+        label = "ضعيفة"
+        icon = "👀"
+        detail = "تحتاج متابعة فقط."
+
+        if "جاهز" in mode:
+            score = 92
+            label = "جاهزة"
+            icon = "🔥"
+            detail = "الشروط الحالية تسمح بالتنفيذ إذا كان السعر اللحظي موثوقًا."
+        elif "دخول بحذر" in mode:
+            score = 75
+            label = "جيدة بحذر"
+            icon = "🟠"
+            detail = "الفرصة جيدة لكن تحتاج التزامًا أوضح بإدارة المخاطر."
+        elif "انتظار اختراق" in mode or "انتظار تأكيد" in mode:
+            score = 56
+            label = "تحت التجهيز"
+            icon = "⏳"
+            detail = "الفكرة جيدة لكن السعر يحتاج تأكيدًا أو اختراقًا."
+        elif "إعادة دخول" in mode:
+            score = 48
+            label = "مراقبة إعادة دخول"
+            icon = "🔁"
+            detail = "فات الدخول الأول، والخطة الحالية هي إعادة دخول أفضل."
+        elif "تجنب" in mode:
+            score = 10
+            label = "غير مناسبة"
+            icon = "🚫"
+            detail = "الوضع الحالي لا يناسب التنفيذ."
+        elif decision == "مراقبة":
+            score = 28
+            label = "مراقبة"
+            icon = "👀"
+            detail = "تحت المراقبة فقط."
+
+        if not price_reliable and phase in {"open", "pre_market", "after_hours"}:
+            score = min(score, 35)
+            detail = "السعر اللحظي غير موثوق، لذلك لا يفضّل التنفيذ الآن."
+        if quality >= 85:
+            score += 3
+        elif quality < 60:
+            score -= 8
+        if rr >= 1.8:
+            score += 4
+        elif rr < 1.2:
+            score -= 5
+        if volume_ratio >= 1.2:
+            score += 3
+        elif volume_ratio < 0.9:
+            score -= 4
+        if risk_pct > 8:
+            score -= 5
+
+        score = int(max(0, min(score, 99)))
+        return {
+            "execution_readiness_score": score,
+            "execution_readiness_label": label,
+            "execution_readiness_icon": icon,
+            "execution_readiness_detail": detail,
+        }
+    except:
+        return {
+            "execution_readiness_score": 0,
+            "execution_readiness_label": "غير معروف",
+            "execution_readiness_icon": "❓",
+            "execution_readiness_detail": "",
+        }
+
+
+def explain_metric_ar(name: str, value, stock: dict) -> dict:
+    try:
+        if name == "quality":
+            v = float(value or 0)
+            if v >= 85:
+                return {"icon": "🏅", "label": "ممتازة", "detail": "الجودة مرتفعة جدًا وتدعم القرار."}
+            if v >= 65:
+                return {"icon": "✅", "label": "جيدة", "detail": "الجودة جيدة لكن ليست مثالية."}
+            if v >= 50:
+                return {"icon": "🟰", "label": "متوسطة", "detail": "الجودة متوسطة وتحتاج انتقاء أفضل."}
+            return {"icon": "❌", "label": "ضعيفة", "detail": "الجودة منخفضة ولا تعطي ثقة كافية."}
+        if name == "volume":
+            v = float(value or 0)
+            if v >= 1.5:
+                return {"icon": "🔥", "label": "قوية جدًا", "detail": "السيولة أعلى بكثير من المعتاد."}
+            if v >= 1.2:
+                return {"icon": "✅", "label": "إيجابية", "detail": "السيولة داعمة للحركة."}
+            if v >= 0.95:
+                return {"icon": "🟰", "label": "مقبولة", "detail": "السيولة مقبولة لكنها ليست انفجارية."}
+            return {"icon": "❌", "label": "ضعيفة", "detail": "السيولة أقل من المطلوب غالبًا."}
+        if name == "rr":
+            v = float(value or 0)
+            if v >= 2.0:
+                return {"icon": "🏅", "label": "ممتاز", "detail": "العائد المتوقع جيد جدًا مقارنة بالخطر."}
+            if v >= 1.5:
+                return {"icon": "✅", "label": "جيد", "detail": "العائد إلى المخاطرة مناسب."}
+            if v >= 1.2:
+                return {"icon": "🟡", "label": "متوسط", "detail": "العائد مقبول لكنه ليس مريحًا جدًا."}
+            return {"icon": "❌", "label": "ضعيف", "detail": "العائد لا يبرر الخطر غالبًا."}
+        if name == "trend":
+            t = str(value or "")
+            mapping = {
+                "صاعد قوي": {"icon": "⬆️", "label": "إيجابي جدًا", "detail": "السهم أعلى من المتوسطات الرئيسية."},
+                "صاعد": {"icon": "🟢", "label": "إيجابي", "detail": "الاتجاه العام جيد."},
+                "متذبذب": {"icon": "🟰", "label": "محايد", "detail": "السهم غير واضح الاتجاه."},
+                "هابط": {"icon": "⬇️", "label": "سلبي", "detail": "الاتجاه الهابط يضعف الثقة."},
+            }
+            return mapping.get(t, {"icon": "❓", "label": "غير واضح", "detail": "الاتجاه غير مؤكد."})
+        if name == "continuation":
+            label = str(value or "")
+            if "بقوة" in label or "مرشح استمرار اليوم" in label:
+                return {"icon": "🔥", "label": "إيجابي", "detail": "احتمال استمرار الحركة جيد."}
+            if "محتمل" in label:
+                return {"icon": "🟠", "label": "بحذر", "detail": "الاستمرار ممكن لكن ليس مضمونًا."}
+            return {"icon": "⚠️", "label": "غير مؤكد", "detail": "الاستمرار غير واضح حتى الآن."}
+        if name == "news":
+            sentiment = str(stock.get("news_sentiment", "neutral") or "neutral")
+            category = str(stock.get("news_category", "neutral") or "neutral")
+            freshness = str(stock.get("news_freshness_label", "") or "")
+            if category == "positive":
+                return {"icon": "🟢", "label": f"إيجابي {freshness}".strip(), "detail": "خبر داعم ومصنف كمحفز فعلي."}
+            if category in {"negative", "legal"}:
+                return {"icon": "🔴", "label": f"سلبي {freshness}".strip(), "detail": "الخبر سلبي ولا يجب اعتباره محفزًا إيجابيًا."}
+            if category == "opinion":
+                return {"icon": "🚫", "label": "مقال رأي", "detail": "هذا رأي/مقال عام وليس محفز تداول معتمد."}
+            return {"icon": "⚪", "label": freshness or "محايد", "detail": "الخبر معلوماتي أو عام."}
+    except:
+        pass
+    return {"icon": "❓", "label": "غير معروف", "detail": ""}
+
+
+def enrich_display_meta(stock: dict) -> dict:
+    try:
+        stock.update(get_price_freshness_meta(stock))
+        stock.update(get_execution_readiness_meta(stock))
+
+        quality_meta = explain_metric_ar("quality", stock.get("quality_score"), stock)
+        volume_meta = explain_metric_ar("volume", stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)), stock)
+        rr_meta = explain_metric_ar("rr", stock.get("rr_1"), stock)
+        trend_meta = explain_metric_ar("trend", stock.get("trend"), stock)
+        continuation_meta = explain_metric_ar("continuation", stock.get("continuation_label", stock.get("runner_label", "")), stock)
+        news_meta = explain_metric_ar("news", stock.get("news_badge"), stock)
+
+        stock["metric_quality"] = quality_meta
+        stock["metric_volume"] = volume_meta
+        stock["metric_rr"] = rr_meta
+        stock["metric_trend"] = trend_meta
+        stock["metric_continuation"] = continuation_meta
+        stock["metric_news"] = news_meta
+
+        stock["trade_type_label_ar"] = (
+            "اختراق مقاومة" if str(stock.get("type", "")) == "Breakout"
+            else "ارتداد من دعم" if str(stock.get("type", "")) == "Pullback"
+            else "خطة متابعة"
+        )
+
+        summary_bits = [
+            f"{quality_meta.get('icon')} الجودة: {quality_meta.get('label')}",
+            f"{volume_meta.get('icon')} السيولة: {volume_meta.get('label')}",
+            f"{trend_meta.get('icon')} الاتجاه: {trend_meta.get('label')}",
+            f"{rr_meta.get('icon')} العائد/المخاطرة: {rr_meta.get('label')}",
+            f"{stock.get('execution_readiness_icon', '👀')} الجاهزية: {stock.get('execution_readiness_label', '')}",
+        ]
+        stock["quick_explainer"] = " | ".join([x for x in summary_bits if x])
+        return stock
+    except:
+        return stock
+
+
+def is_opening_window() -> bool:
+    try:
+        ny = ZoneInfo("America/New_York")
+        now_ny = datetime.now(ny)
+        if now_ny.weekday() >= 5:
+            return False
+        minutes = now_ny.hour * 60 + now_ny.minute
+        return (4 * 60) <= minutes <= (10 * 60 + 15)
+    except:
+        return False
+
+
+def build_opening_focus(results: list[dict]) -> list[dict]:
+    portfolio_symbols = {str(x.get("symbol", "")).upper().strip() for x in load_portfolio_items()}
+    watch_symbols = {str(x.get("symbol", "")).upper().strip() for x in load_manual_watchlist()}
+
+    def opening_rank(item: dict):
+        symbol = str(item.get("symbol", "")).upper().strip()
+        priority = 0
+        if symbol in portfolio_symbols:
+            priority += 40
+        if symbol in watch_symbols:
+            priority += 20
+        priority += int(float(item.get("execution_readiness_score", 0) or 0))
+        priority += int(float(item.get("quality_score", 0) or 0) * 0.25)
+        if item.get("decision") == "دخول قوي":
+            priority += 20
+        elif item.get("decision") == "دخول بحذر":
+            priority += 10
+        return priority
+
+    focus = sorted(results, key=opening_rank, reverse=True)
+    return focus[:8]
+
+
+def evaluate_portfolio_action(holding: dict, plan: dict) -> dict:
+    current_price = float(plan.get("display_price", plan.get("current_price_live", 0)) or 0)
+    buy_price = float(holding.get("buy_price", 0) or 0)
+    target_1 = float(plan.get("display_target_price", plan.get("target_1", 0)) or 0)
+    stop_loss = float(plan.get("display_stop_price", plan.get("stop_loss", 0)) or 0)
+    decision = str(plan.get("decision", "") or "")
+    trend = str(plan.get("trend", "") or "")
+    readiness_score = int(float(plan.get("execution_readiness_score", 0) or 0))
+    pnl_pct = ((current_price - buy_price) / buy_price) * 100 if current_price > 0 and buy_price > 0 else 0.0
+
+    recommendation = "احتفاظ"
+    note = "احتفظ بالسهم مع متابعة التحديثات."
+    if stop_loss > 0 and current_price > 0 and current_price <= stop_loss:
+        recommendation = "بيع"
+        note = "السعر عند الوقف أو تحته، والأفضل الخروج والانضباط."
+    elif target_1 > 0 and current_price >= target_1:
+        recommendation = "تقليل"
+        note = "السهم وصل للهدف الأول، وجني جزء من الربح منطقي."
+    elif decision == "دخول قوي" and readiness_score >= 80 and trend in {"صاعد", "صاعد قوي"} and pnl_pct > -6:
+        recommendation = "زيادة الكمية"
+        note = "الإشارة الحالية تدعم زيادة جزئية مدروسة إذا كانت إدارة المخاطر مناسبة."
+    elif decision == "دخول بحذر" and trend in {"صاعد", "صاعد قوي"}:
+        recommendation = "احتفاظ"
+        note = "الوضع جيد لكن الأفضل عدم التوسع بقوة."
+    elif decision == "مراقبة" and trend == "هابط":
+        recommendation = "تقليل"
+        note = "القوة الحالية لا تدعم الاحتفاظ الكامل بنفس الثقة."
+    elif pnl_pct <= -8:
+        recommendation = "تقليل"
+        note = "الخسارة اتسعت نسبيًا، ويستحق المركز تخفيفًا أو مراجعة وقفك."
+
+    return {
+        "recommendation": recommendation,
+        "recommendation_note": note,
+        "holding_change_pct": safe_round(pnl_pct),
+    }
 
 
 def compute_volume_pace_ratio(intraday: dict, daily_volume_ratio: float) -> float:
@@ -1472,103 +1829,193 @@ def trading_sessions_since_news(published_utc: str) -> int:
     except:
         return 999
 
-def classify_news_impact(title_lower: str, sessions_since: int):
+
+def classify_news_freshness_label(sessions_since: int) -> tuple[str, int]:
+    if sessions_since <= 0:
+        return "حديث جدًا", 100
+    if sessions_since == 1:
+        return "حديث", 85
+    if sessions_since <= 3:
+        return "حديث نسبيًا", 65
+    if sessions_since <= 5:
+        return "أقدم قليلًا", 40
+    return "قديم", 15
+
+
+def analyze_news_item(symbol: str, company_name: str, item: dict) -> dict:
+    title = str(item.get("title", "") or "").strip()
+    title_lower = normalize_text(title)
+    published_utc = str(item.get("published_utc", "") or "")
+    sessions_since = trading_sessions_since_news(published_utc)
+    freshness_label, freshness_score = classify_news_freshness_label(sessions_since)
+
     positive_keywords = [
         "beat", "beats", "strong guidance", "raises guidance", "buyback", "surge",
         "jumps", "soars", "wins", "upgrade", "partnership", "contract", "record revenue",
-        "secures", "launch", "breakthrough", "approval", "expands", "growth"
+        "secures", "launch", "breakthrough", "approval", "expands", "growth",
+        "order", "orders", "award", "fda", "clearance", "guidance raised", "raises forecast"
     ]
     negative_keywords = [
         "miss", "misses", "cuts guidance", "downgrade", "offering", "dilution", "lawsuit",
         "probe", "investigation", "warning", "declines", "falls", "plunges", "recall", "delay",
-        "bankruptcy", "default"
+        "bankruptcy", "default", "crashed", "crash", "drops", "drop", "slumps", "slump",
+        "investor alert", "class action", "law firm", "short report", "fraud", "sec probe"
+    ]
+    opinion_patterns = [
+        "is it time to buy", "should you buy", "i finally", "i bought", "i sold",
+        "why ", "what this means", "opinion", "analysis", "my take", "pulled the trigger",
+        "could this stock", "here is why"
+    ]
+    neutral_patterns = [
+        "earnings call transcript", "conference call", "presentation", "ceo interview"
     ]
 
-    is_positive = any(k in title_lower for k in positive_keywords)
-    is_negative = any(k in title_lower for k in negative_keywords)
+    category = "neutral"
+    sentiment = "neutral"
+    trusted_catalyst = False
+    impact = 0
+    badge = "⚪ خبر محايد"
+    relevance = 0
 
-    pos_score = 0
-    neg_score = 0
+    related = [str(x).upper().strip() for x in item.get("tickers", []) if str(x).strip()]
+    variants = get_company_name_variants(company_name)
+    if symbol in related:
+        relevance += 3
+    if any(v and v in title_lower for v in variants):
+        relevance += 2
+    if symbol.lower() in title_lower:
+        relevance += 1
 
-    if is_positive:
+    has_positive = any(k in title_lower for k in positive_keywords)
+    has_negative = any(k in title_lower for k in negative_keywords)
+    is_opinion = any(k in title_lower for k in opinion_patterns)
+    is_neutral_piece = any(k in title_lower for k in neutral_patterns)
+
+    if is_opinion and not has_positive and not has_negative:
+        category = "opinion"
+        sentiment = "neutral"
+        badge = "🚫 مقال رأي"
+    elif "investor alert" in title_lower or "law firm" in title_lower or "class action" in title_lower or "investigates claims" in title_lower:
+        category = "legal"
+        sentiment = "negative"
+        badge = "⛔ خبر قانوني سلبي"
+        if sessions_since <= 5:
+            impact = -8 if sessions_since <= 1 else -5
+    elif has_negative:
+        category = "negative"
+        sentiment = "negative"
+        badge = "🔴 خبر سلبي"
         if sessions_since == 0:
-            pos_score = 10
+            impact = -10
         elif sessions_since == 1:
-            pos_score = 7
-        elif sessions_since == 2:
-            pos_score = 4
+            impact = -8
+        elif sessions_since <= 3:
+            impact = -5
         else:
-            pos_score = 0
-
-    if is_negative:
+            impact = -2
+    elif has_positive and not is_opinion:
+        category = "positive"
+        sentiment = "positive"
+        trusted_catalyst = True
+        badge = "🟢 محفز إيجابي"
         if sessions_since == 0:
-            neg_score = -10
+            impact = 10
         elif sessions_since == 1:
-            neg_score = -8
-        elif sessions_since == 2:
-            neg_score = -6
-        elif sessions_since <= 5:
-            neg_score = -3
+            impact = 7
+        elif sessions_since <= 3:
+            impact = 4
         else:
-            neg_score = 0
+            impact = 1
+    elif is_neutral_piece:
+        category = "neutral"
+        sentiment = "neutral"
+        badge = "⚪ خبر معلوماتي"
+    else:
+        category = "neutral"
+        sentiment = "neutral"
+        badge = "⚪ خبر عام"
 
-    note = ""
-    if is_positive and pos_score > 0:
-        note = "محفز إيجابي حديث"
-    elif is_negative and neg_score < 0:
-        note = "محفز سلبي حديث"
+    if freshness_score <= 15:
+        badge += " | قديم"
+    elif freshness_score <= 40:
+        badge += " | ليس حديثًا"
+    else:
+        badge += f" | {freshness_label}"
 
-    return pos_score + neg_score, note
+    display_note = title if title else "لا يوجد خبر بارز"
+    if title:
+        display_note = f"{title} | {badge}"
+
+    selection_score = (relevance * 10) + freshness_score + impact
+    if category == "positive" and trusted_catalyst:
+        selection_score += 20
+    elif category in {"negative", "legal"}:
+        selection_score += 8
+    elif category == "opinion":
+        selection_score -= 12
+    elif category == "neutral":
+        selection_score -= 2
+
+    return {
+        "title": title,
+        "published_utc": published_utc,
+        "sessions_since": sessions_since,
+        "freshness_label": freshness_label,
+        "freshness_score": freshness_score,
+        "category": category,
+        "sentiment": sentiment,
+        "badge": badge,
+        "impact": impact,
+        "relevance": relevance,
+        "selection_score": selection_score,
+        "trusted_catalyst": trusted_catalyst,
+        "display_note": display_note,
+    }
 
 
-def get_news(symbol, company_name=""):
-    news_note = "لا يوجد خبر بارز"
-    catalyst_score = 0
+def get_news_bundle(symbol, company_name=""):
+    default = {
+        "news_note": "لا يوجد خبر بارز",
+        "catalyst_score": 0,
+        "news_title": "",
+        "news_sentiment": "neutral",
+        "news_category": "none",
+        "news_badge": "⚪ لا يوجد خبر مؤثر",
+        "news_freshness_label": "",
+        "news_published_utc": "",
+        "news_is_trusted_catalyst": False,
+    }
     try:
         url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&order=desc&sort=published_utc&apiKey={POLYGON_API_KEY}"
         r = http_get_json(url, timeout=12)
         results = r.get("results", [])
         if not results:
-            return news_note, catalyst_score
+            return default
 
-        variants = get_company_name_variants(company_name)
-        best = None
-        best_score = -999
-        best_note = ""
-
+        analyses = []
         for item in results:
             title = str(item.get("title", "") or "").strip()
-            title_lower = normalize_text(title)
             if not title:
                 continue
+            analyses.append(analyze_news_item(symbol, company_name, item))
 
-            related = [str(x).upper().strip() for x in item.get("tickers", []) if str(x).strip()]
-            published_utc = str(item.get("published_utc", "") or "")
-            sessions_since = trading_sessions_since_news(published_utc)
+        if not analyses:
+            return default
 
-            relevance = 0
-            if symbol in related:
-                relevance += 3
-            if any(v and v in title_lower for v in variants):
-                relevance += 2
-            if symbol.lower() in title_lower:
-                relevance += 1
-
-            impact, note = classify_news_impact(title_lower, sessions_since)
-            total = relevance + impact
-
-            if total > best_score:
-                best_score = total
-                best = title
-                best_note = note
-                catalyst_score = impact
-
-        if best:
-            news_note = best + (f" | {best_note}" if best_note else "")
+        best = sorted(analyses, key=lambda x: (x.get("selection_score", -999), x.get("freshness_score", 0)), reverse=True)[0]
+        return {
+            "news_note": best.get("display_note", default["news_note"]),
+            "catalyst_score": int(best.get("impact", 0) or 0) if best.get("trusted_catalyst") else int(min(best.get("impact", 0) or 0, 0)),
+            "news_title": best.get("title", ""),
+            "news_sentiment": best.get("sentiment", "neutral"),
+            "news_category": best.get("category", "neutral"),
+            "news_badge": best.get("badge", "⚪ خبر عام"),
+            "news_freshness_label": best.get("freshness_label", ""),
+            "news_published_utc": best.get("published_utc", ""),
+            "news_is_trusted_catalyst": bool(best.get("trusted_catalyst", False)),
+        }
     except:
-        pass
-
-    return news_note, catalyst_score
+        return default
 
 
 def is_halal(sector, industry, total_assets, cash, total_debt):
@@ -1893,7 +2340,9 @@ def trade_plan_pro(symbol):
     trend_data = get_trend(symbol, daily_bars)
     intraday = get_intraday_snapshot(symbol)
     volume_ratio = get_volume_ratio(symbol, intraday, daily_bars)
-    news_note, catalyst_score = get_news(symbol, info["company"])
+    news_bundle = get_news_bundle(symbol, info["company"])
+    news_note = news_bundle["news_note"]
+    catalyst_score = news_bundle["catalyst_score"]
 
     halal_ok, halal_reason = is_halal(
         info["sector"], info["industry"],
@@ -1919,6 +2368,13 @@ def trade_plan_pro(symbol):
             "data_quality": "high",
             "catalyst_score": catalyst_score,
             "news_note": news_note,
+        "news_title": news_bundle.get("news_title", ""),
+        "news_sentiment": news_bundle.get("news_sentiment", "neutral"),
+        "news_category": news_bundle.get("news_category", "none"),
+        "news_badge": news_bundle.get("news_badge", "⚪ لا يوجد خبر مؤثر"),
+        "news_freshness_label": news_bundle.get("news_freshness_label", ""),
+        "news_published_utc": news_bundle.get("news_published_utc", ""),
+        "news_is_trusted_catalyst": news_bundle.get("news_is_trusted_catalyst", False),
             "risk_flags": [halal_reason],
             "ai_summary": halal_reason,
             "breakout_quality": "N/A",
@@ -1988,6 +2444,8 @@ def trade_plan_pro(symbol):
 
     if catalyst_score > 0:
         quality += catalyst_score
+    elif catalyst_score < 0:
+        quality += max(catalyst_score * 0.25, -4)
 
     if hist["ath_breakout_zone"]:
         quality -= 6
@@ -2048,8 +2506,12 @@ def trade_plan_pro(symbol):
         risk_flags.append("قريب من القمة التاريخية")
     if hist["ath_breakout_zone"]:
         risk_flags.append("منطقة اختراق قمة تاريخية")
-    if catalyst_score > 0:
-        risk_flags.append("خبر إيجابي محفز")
+    if news_bundle.get("news_category") == "positive":
+        risk_flags.append("خبر إيجابي حديث")
+    elif news_bundle.get("news_category") in {"negative", "legal"}:
+        risk_flags.append("خبر سلبي يستحق الحذر")
+    elif news_bundle.get("news_category") == "opinion":
+        risk_flags.append("المذكور مجرد مقال رأي وليس محفزًا")
     if info["sector"] == "":
         risk_flags.append("بيانات القطاع/الصناعة ناقصة")
     if financials["total_assets"] <= 0:
@@ -2077,8 +2539,12 @@ def trade_plan_pro(symbol):
             ai_summary_parts.append("السيولة اللحظية داعمة")
     if trade_type == "Pullback" and pullback_context.get("pullback_pattern_label"):
         ai_summary_parts.append(str(pullback_context.get("pullback_pattern_label")))
-    if catalyst_score > 0:
+    if news_bundle.get("news_category") == "positive":
         ai_summary_parts.append("يوجد محفز إيجابي")
+    elif news_bundle.get("news_category") in {"negative", "legal"}:
+        ai_summary_parts.append("يوجد خبر سلبي")
+    elif news_bundle.get("news_category") == "opinion":
+        ai_summary_parts.append("الخبر المعروض مجرد مقال رأي")
     if hist["ath_breakout_zone"]:
         ai_summary_parts.append("في منطقة قمة تاريخية")
     if breakout_quality == "FAILED":
@@ -2115,6 +2581,13 @@ def trade_plan_pro(symbol):
         "data_quality": data_quality,
         "catalyst_score": catalyst_score,
         "news_note": news_note,
+        "news_title": news_bundle.get("news_title", ""),
+        "news_sentiment": news_bundle.get("news_sentiment", "neutral"),
+        "news_category": news_bundle.get("news_category", "none"),
+        "news_badge": news_bundle.get("news_badge", "⚪ لا يوجد خبر مؤثر"),
+        "news_freshness_label": news_bundle.get("news_freshness_label", ""),
+        "news_published_utc": news_bundle.get("news_published_utc", ""),
+        "news_is_trusted_catalyst": news_bundle.get("news_is_trusted_catalyst", False),
         "risk_flags": risk_flags,
         "ai_summary": " - ".join(ai_summary_parts),
         "breakout_quality": breakout_quality,
@@ -2160,6 +2633,7 @@ def scan_all():
                 p["ai_summary"] += " - "
             p["ai_summary"] += "السعر اللحظي غير موثوق"
 
+        p = enrich_display_meta(p)
         upsert_performance_signal(p)
         return p
 
@@ -2182,6 +2656,8 @@ def scan_all():
 def root():
     if os.path.exists("index.html"):
         return FileResponse("index.html")
+    if os.path.exists("index_polished.html"):
+        return FileResponse("index_polished.html")
     if os.path.exists("index_weekly_compact.html"):
         return FileResponse("index_weekly_compact.html")
     if os.path.exists("index_no_conflict.html"):
@@ -2206,10 +2682,11 @@ def trade_scan():
     strong = [x for x in results if x.get("decision") == "دخول قوي"]
     cautious = [x for x in results if x.get("decision") == "دخول بحذر"]
     watch = [x for x in results if x.get("decision") == "مراقبة"]
+    phase = get_market_phase()
 
     return {
-        "market_phase": get_market_phase(),
-        "market_phase_label": market_phase_label(get_market_phase()),
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
         "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
         "universe_count": 150,
         "count": len(results),
@@ -2220,6 +2697,8 @@ def trade_scan():
         "top_ranked": strong[:25],
         "cautious_entries": cautious[:25],
         "watchlist": watch[:50],
+        "opening_mode_active": is_opening_window(),
+        "opening_focus": build_opening_focus(results),
         "all_results": results,
     }
 
@@ -2243,7 +2722,9 @@ def single_stock(symbol: str):
             trend_data = get_trend(symbol)
             intraday = get_intraday_snapshot(symbol)
             volume_ratio = get_volume_ratio(symbol, intraday)
-            news_note, catalyst_score = get_news(symbol, info["company"])
+            news_bundle = get_news_bundle(symbol, info["company"])
+            news_note = news_bundle["news_note"]
+            catalyst_score = news_bundle["catalyst_score"]
             halal_ok, halal_reason = is_halal(info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"])
             live_block = build_live_price_block(symbol, prev, intraday)
             overview = {
@@ -2260,7 +2741,17 @@ def single_stock(symbol: str):
                 "trend": trend_data["trend"],
                 "volume_ratio": safe_round(volume_ratio),
                 "news_note": news_note,
+        "news_title": news_bundle.get("news_title", ""),
+        "news_sentiment": news_bundle.get("news_sentiment", "neutral"),
+        "news_category": news_bundle.get("news_category", "none"),
+        "news_badge": news_bundle.get("news_badge", "⚪ لا يوجد خبر مؤثر"),
+        "news_freshness_label": news_bundle.get("news_freshness_label", ""),
+        "news_published_utc": news_bundle.get("news_published_utc", ""),
+        "news_is_trusted_catalyst": news_bundle.get("news_is_trusted_catalyst", False),
                 "catalyst_score": catalyst_score,
+                "news_badge": news_bundle.get("news_badge", "⚪ لا يوجد خبر مؤثر"),
+                "news_category": news_bundle.get("news_category", "none"),
+                "news_freshness_label": news_bundle.get("news_freshness_label", ""),
                 "near_ath": hist["near_ath"],
                 "ath_breakout_zone": hist["ath_breakout_zone"],
                 "intraday": intraday,
@@ -2286,6 +2777,7 @@ def single_stock(symbol: str):
                 trade_plan["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
                 trade_plan["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
                 trade_plan.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
+            trade_plan = enrich_display_meta(trade_plan)
     except Exception as e:
         trade_error = str(e)
 
@@ -2354,6 +2846,103 @@ def watchlist_get():
     return {"items": out}
 
 
+@app.post("/portfolio/add")
+def portfolio_add(payload: dict = Body(...)):
+    symbol = str(payload.get("symbol", "") or "").upper().strip()
+    buy_price = safe_round(payload.get("buy_price", 0))
+    quantity = safe_round(payload.get("quantity", 0))
+    if not symbol or buy_price <= 0:
+        return {"ok": False, "message": "الرمز وسعر الشراء مطلوبان"}
+
+    items = load_portfolio_items()
+    existing = None
+    for item in items:
+        if str(item.get("symbol", "")).upper().strip() == symbol:
+            existing = item
+            break
+
+    if existing:
+        existing["buy_price"] = buy_price
+        existing["quantity"] = quantity if quantity > 0 else existing.get("quantity", 0)
+        existing["updated_at"] = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        items.insert(0, {
+            "symbol": symbol,
+            "buy_price": buy_price,
+            "quantity": quantity,
+            "added_at": ny_now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": ny_now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    save_portfolio_items(items)
+    return {"ok": True, "message": "تم حفظ السهم في المحفظة", "items": items}
+
+
+@app.post("/portfolio/remove")
+def portfolio_remove(payload: dict = Body(...)):
+    symbol = str(payload.get("symbol", "") or "").upper().strip()
+    items = load_portfolio_items()
+    items = [x for x in items if str(x.get("symbol", "")).upper().strip() != symbol]
+    save_portfolio_items(items)
+    return {"ok": True, "message": "تم حذف السهم من المحفظة", "items": items}
+
+
+@app.get("/portfolio")
+def portfolio_get():
+    items = load_portfolio_items()
+    out = []
+    for item in items:
+        symbol = str(item.get("symbol", "") or "").upper().strip()
+        if not symbol:
+            continue
+        plan = trade_plan_pro(symbol)
+        if not plan:
+            continue
+        plan = apply_late_move_filter(plan)
+        plan = assign_execution_mode(plan)
+        plan = normalize_execution_labels(plan)
+        plan = enrich_signal_stage(plan)
+        plan = finalize_display_contract(plan)
+        if not plan.get("price_reliable_for_execution", True) and plan.get("market_phase") in {"open", "pre_market", "after_hours"}:
+            plan["decision"] = "مراقبة"
+            plan["execution_mode"] = "مراقبة 👀"
+            plan["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
+            plan["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
+        plan = enrich_display_meta(plan)
+
+        recommendation = evaluate_portfolio_action(item, plan)
+        current_price = float(plan.get("display_price", plan.get("current_price_live", 0)) or 0)
+        buy_price = float(item.get("buy_price", 0) or 0)
+        quantity = float(item.get("quantity", 0) or 0)
+        market_value = current_price * quantity if current_price > 0 and quantity > 0 else 0.0
+        cost_value = buy_price * quantity if buy_price > 0 and quantity > 0 else 0.0
+
+        out.append({
+            "symbol": symbol,
+            "buy_price": safe_round(buy_price),
+            "quantity": safe_round(quantity),
+            "added_at": item.get("added_at", ""),
+            "updated_at": item.get("updated_at", ""),
+            "current_price": safe_round(current_price),
+            "price_source_label": str(plan.get("price_source_label", "") or ""),
+            "market_phase_label": str(plan.get("market_phase_label", "") or ""),
+            "holding_change_pct": recommendation.get("holding_change_pct", 0.0),
+            "market_value": safe_round(market_value),
+            "cost_value": safe_round(cost_value),
+            "recommendation": recommendation.get("recommendation", "احتفاظ"),
+            "recommendation_note": recommendation.get("recommendation_note", ""),
+            "type_label": str(plan.get("trade_type_label_ar", "") or ""),
+            "decision": str(plan.get("decision", "") or ""),
+            "execution_readiness_label": str(plan.get("execution_readiness_label", "") or ""),
+            "execution_readiness_icon": str(plan.get("execution_readiness_icon", "") or ""),
+            "price_freshness_label": str(plan.get("price_freshness_label", "") or ""),
+            "price_freshness_icon": str(plan.get("price_freshness_icon", "") or ""),
+            "target_price": safe_round(plan.get("display_target_price", 0)),
+            "stop_loss": safe_round(plan.get("display_stop_price", 0)),
+        })
+
+    return {"items": out}
+
+
 @app.get("/performance")
 def performance_get():
     store = rollover_performance_store_if_needed(load_performance_store())
@@ -2384,6 +2973,8 @@ def performance_get():
             "max_price_seen": safe_round(item.get("max_price_seen", 0)),
             "min_price_seen": safe_round(item.get("min_price_seen", 0)),
             "last_change_pct": safe_round(item.get("last_change_pct", 0)),
+            "signal_date": item.get("signal_date", ""),
+            "plan_family": item.get("plan_family", ""),
         })
 
     status_order = {"win": 0, "loss": 1, "pending": 2}
