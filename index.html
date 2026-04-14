@@ -92,7 +92,7 @@
       color: var(--text-main);
     }
     :root[data-theme="light"] body {
-      font-size: 17px;
+      font-size: 18px;
     }
     :root[data-theme="light"] .title {
       font-size: 33px;
@@ -126,7 +126,7 @@
     :root[data-theme="light"] .badge,
     :root[data-theme="light"] .compact-help,
     :root[data-theme="light"] .detail-value {
-      font-size: 15px;
+      font-size: 16px;
     }
     :root[data-theme="light"] button.primary {
       box-shadow: 0 8px 20px rgba(37,99,235,.18);
@@ -560,7 +560,7 @@
     function initThemeMode() {
       let mode = 'light';
       try {
-        mode = localStorage.getItem('stockRadarThemeMode') || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
+        mode = localStorage.getItem('stockRadarThemeMode') || 'light';
       } catch(e) {}
       applyThemeMode(mode);
     }
@@ -626,6 +626,11 @@
       if (!el) return;
       const hidden = el.classList.contains('hidden-section') || el.style.display === 'none';
       if (hidden) {
+        if (el.dataset && el.dataset.rendered !== '1' && window.__sectionItems && window.__sectionItems[contentId]) {
+          const items = window.__sectionItems[contentId] || [];
+          el.innerHTML = `<div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
+          el.dataset.rendered = '1';
+        }
         el.classList.remove('hidden-section');
         el.style.display = '';
       } else {
@@ -775,7 +780,9 @@
         </div>`;
     }
 
-    function renderSection(title, count, key, items, sectionId='') {
+    window.__sectionItems = window.__sectionItems || {};
+
+    function renderSection(title, count, key, sectionId='') {
       return `
         <div class="section scroll-anchor" id="${sectionId}">
           <div class="section-header">
@@ -784,11 +791,11 @@
               <div class="section-count">${count} سهم</div>
             </div>
             <div class="section-tools">
-              <button class="ghost" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
+              <button class="ghost detail-toggle" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
             </div>
           </div>
-          <div id="${key}" class="hidden-section">
-            <div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>
+          <div id="${key}" class="hidden-section" data-rendered="0">
+            <div class="cards"><div class="empty">اضغط إظهار لعرض القائمة</div></div>
           </div>
         </div>`;
     }
@@ -828,10 +835,15 @@
       const strong = data.strong_entries || [];
       const cautious = data.cautious_entries || [];
       const watch = data.watchlist || [];
+      window.__sectionItems = {
+        'strong-section-content': strong,
+        'cautious-section-content': cautious,
+        'watch-section-content': watch,
+      };
       document.getElementById('content').innerHTML = `
-        ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', strong, 'strong-section')}
-        ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', cautious, 'cautious-section')}
-        ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', watch, 'watch-section')}
+        ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', 'strong-section')}
+        ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section')}
+        ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', 'watch-section')}
       `;
     }
 
