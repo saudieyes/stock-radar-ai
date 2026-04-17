@@ -12,7 +12,6 @@ import secrets
 import hashlib
 from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
-from starlette.middleware.sessions import SessionMiddleware
 from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 
 app = FastAPI()
@@ -22,8 +21,8 @@ APP_AUTH_PASSWORD = str(os.getenv("APP_BASIC_AUTH_PASSWORD", "") or "").strip()
 APP_AUTH_ENABLED = bool(APP_AUTH_USERNAME and APP_AUTH_PASSWORD)
 APP_AUTH_SESSION_DAYS = int(float(os.getenv("APP_AUTH_SESSION_DAYS", "14") or 14))
 APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET") or hashlib.sha256(f"{APP_AUTH_USERNAME}:{APP_AUTH_PASSWORD}:stock-radar".encode("utf-8")).hexdigest()
+APP_AUTH_COOKIE_NAME = "sr_auth"
 AUTH_EXEMPT_PATHS = {"/health", "/login", "/logout", "/session"}
-app.add_middleware(SessionMiddleware, secret_key=APP_SESSION_SECRET, max_age=APP_AUTH_SESSION_DAYS * 24 * 60 * 60, same_site="lax")
 
 HTTP_SESSION = requests.Session()
 HTTP_ADAPTER = HTTPAdapter(pool_connections=256, pool_maxsize=256, max_retries=0)
@@ -40,6 +39,43 @@ def http_get_json(url, timeout=12):
         return {}
 
 
+def _auth_cookie_sign(payload: str) -> str:
+    return hashlib.sha256(f"{payload}|{APP_SESSION_SECRET}".encode("utf-8")).hexdigest()
+
+
+def build_auth_cookie_value(username: str) -> str:
+    expires_at = int(time.time()) + (APP_AUTH_SESSION_DAYS * 24 * 60 * 60)
+    payload = f"{username}|{expires_at}"
+    signature = _auth_cookie_sign(payload)
+    return f"{payload}|{signature}"
+
+
+def read_auth_cookie(request: Request):
+    token = str(request.cookies.get(APP_AUTH_COOKIE_NAME, "") or "").strip()
+    if not token:
+        return None
+    parts = token.split("|")
+    if len(parts) != 3:
+        return None
+    username, expires_at_raw, signature = parts
+    if not username or not expires_at_raw or not signature:
+        return None
+    try:
+        expires_at = int(expires_at_raw)
+    except:
+        return None
+    if expires_at < int(time.time()):
+        return None
+    expected = _auth_cookie_sign(f"{username}|{expires_at}")
+    if not secrets.compare_digest(signature, expected):
+        return None
+    if APP_AUTH_ENABLED and username != APP_AUTH_USERNAME:
+        return None
+    return {"username": username, "expires_at": expires_at}
+
+
+
+
 @app.middleware("http")
 async def auth_session_guard(request: Request, call_next):
     if not APP_AUTH_ENABLED:
@@ -49,7 +85,7 @@ async def auth_session_guard(request: Request, call_next):
     if path in AUTH_EXEMPT_PATHS or path.startswith("/login"):
         return await call_next(request)
 
-    if bool(request.session.get("auth_ok")):
+    if read_auth_cookie(request):
         return await call_next(request)
 
     wants_html = ("text/html" in str(request.headers.get("accept", ""))) or path == "/"
@@ -2709,7 +2745,7 @@ document.getElementById('loginPass').addEventListener('keydown', (e) => {{ if (e
 def login_page(request: Request):
     if not APP_AUTH_ENABLED:
         return RedirectResponse(url="/", status_code=307)
-    if bool(request.session.get("auth_ok")):
+    if read_auth_cookie(request):
         return RedirectResponse(url="/", status_code=307)
     return render_login_page()
 
@@ -2722,26 +2758,34 @@ async def login_submit(request: Request):
     username = str(payload.get("username", "") or "").strip()
     password = str(payload.get("password", "") or "")
     if secrets.compare_digest(username, APP_AUTH_USERNAME) and secrets.compare_digest(password, APP_AUTH_PASSWORD):
-        request.session.clear()
-        request.session["auth_ok"] = True
-        request.session["auth_user"] = username
-        request.session["auth_at"] = datetime.utcnow().isoformat()
-        return {"ok": True, "auth_enabled": True}
+        response = JSONResponse({"ok": True, "auth_enabled": True})
+        response.set_cookie(
+            key=APP_AUTH_COOKIE_NAME,
+            value=build_auth_cookie_value(username),
+            max_age=APP_AUTH_SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/",
+        )
+        return response
     return JSONResponse({"ok": False, "error": "invalid_credentials"}, status_code=401)
 
 
 @app.post("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return {"ok": True}
+def logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(APP_AUTH_COOKIE_NAME, path="/")
+    return response
 
 
 @app.get("/session")
 def session_state(request: Request):
+    auth_info = read_auth_cookie(request)
     return {
-        "authenticated": bool(request.session.get("auth_ok")),
+        "authenticated": bool(auth_info),
         "auth_enabled": APP_AUTH_ENABLED,
-        "username": request.session.get("auth_user", "") if bool(request.session.get("auth_ok")) else "",
+        "username": auth_info.get("username", "") if auth_info else "",
     }
 
 
@@ -3503,3 +3547,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
+
