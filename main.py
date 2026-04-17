@@ -424,9 +424,21 @@ def upsert_performance_signal(stock: dict):
         symbol = str(stock.get("symbol", "") or "").upper().strip()
         if not symbol:
             return
-        entry_price = float(stock.get("display_entry_price", 0) or 0)
-        target_price = float(stock.get("display_target_price", 0) or 0)
-        stop_loss = float(stock.get("display_stop_price", 0) or 0)
+        entry_price = float(
+            stock.get("display_entry_price",
+            stock.get("entry_price_real",
+            stock.get("entry", 0))) or 0
+        )
+        target_price = float(
+            stock.get("display_target_price",
+            stock.get("target_1",
+            stock.get("breakout_target", 0))) or 0
+        )
+        stop_loss = float(
+            stock.get("display_stop_price",
+            stock.get("stop_loss",
+            stock.get("atr_stop_price", 0))) or 0
+        )
         target_2_price = float(stock.get("target_2", 0) or 0)
         current_price = float(stock.get("display_price", stock.get("current_price_live", 0)) or 0)
         if entry_price <= 0:
@@ -434,7 +446,15 @@ def upsert_performance_signal(stock: dict):
         store = rollover_performance_store_if_needed(load_performance_store())
         records = store.get("active_records", [])
         plan_family = str(stock.get("display_plan_family", stock.get("type", "")) or "")
-        record_id = build_signal_record_id(store['active_week_key'], symbol, signal_type, plan_family, entry_price, target_price, stop_loss)
+        record_id = build_signal_record_id(
+            store['active_week_key'],
+            symbol,
+            signal_type,
+            plan_family,
+            entry_price,
+            target_price,
+            stop_loss,
+        )
         now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
         existing = next((item for item in records if item.get("id") == record_id), None)
         if existing is None:
@@ -3087,10 +3107,21 @@ def get_execution_readiness_meta(stock: dict) -> dict:
                 score = 10
                 detail = f"السعر كسر وقف الارتداد عند {safe_round(stop_price)}. انتظر ارتدادًا جديدًا من دعم أحدث."
             elif zone_low > 0 and zone_high > 0:
-                label = "ارتداد من الدعم"
-                icon = "↩️"
-                score = 72
-                detail = f"راقب الارتداد قرب منطقة {safe_round(zone_low)} - {safe_round(zone_high)} ثم تأكيد فوق {safe_round(entry_price or zone_high)}."
+                if decision == "دخول قوي":
+                    label = "دخول قوي"
+                    icon = "🔥"
+                    score = 82
+                    detail = f"الخطة قوية كارتداد من الدعم. راقب الارتداد قرب منطقة {safe_round(zone_low)} - {safe_round(zone_high)} ثم تأكيد فوق {safe_round(entry_price or zone_high)}."
+                elif decision == "دخول بحذر":
+                    label = "دخول بحذر"
+                    icon = "🟠"
+                    score = 70
+                    detail = f"الخطة بحذر كارتداد من الدعم. راقب الارتداد قرب منطقة {safe_round(zone_low)} - {safe_round(zone_high)} ثم تأكيد فوق {safe_round(entry_price or zone_high)}."
+                else:
+                    label = "ارتداد من الدعم"
+                    icon = "↩️"
+                    score = 72
+                    detail = f"راقب الارتداد قرب منطقة {safe_round(zone_low)} - {safe_round(zone_high)} ثم تأكيد فوق {safe_round(entry_price or zone_high)}."
             elif entry_price > 0:
                 label = "ارتداد قيد التكوين"
                 icon = "🟠"
@@ -3605,4 +3636,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
