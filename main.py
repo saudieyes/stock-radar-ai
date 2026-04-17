@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Body
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Body, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 import requests
 import os
 import csv
@@ -8,11 +8,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import time
 import json
+import secrets
+import hashlib
 from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
+from starlette.middleware.sessions import SessionMiddleware
 from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 
 app = FastAPI()
+
+APP_AUTH_USERNAME = str(os.getenv("APP_BASIC_AUTH_USERNAME", "") or "").strip()
+APP_AUTH_PASSWORD = str(os.getenv("APP_BASIC_AUTH_PASSWORD", "") or "").strip()
+APP_AUTH_ENABLED = bool(APP_AUTH_USERNAME and APP_AUTH_PASSWORD)
+APP_AUTH_SESSION_DAYS = int(float(os.getenv("APP_AUTH_SESSION_DAYS", "14") or 14))
+APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET") or hashlib.sha256(f"{APP_AUTH_USERNAME}:{APP_AUTH_PASSWORD}:stock-radar".encode("utf-8")).hexdigest()
+AUTH_EXEMPT_PATHS = {"/health", "/login", "/logout", "/session"}
+app.add_middleware(SessionMiddleware, secret_key=APP_SESSION_SECRET, max_age=APP_AUTH_SESSION_DAYS * 24 * 60 * 60, same_site="lax")
 
 HTTP_SESSION = requests.Session()
 HTTP_ADAPTER = HTTPAdapter(pool_connections=256, pool_maxsize=256, max_retries=0)
@@ -27,6 +38,24 @@ def http_get_json(url, timeout=12):
         return r.json()
     except:
         return {}
+
+
+@app.middleware("http")
+async def auth_session_guard(request: Request, call_next):
+    if not APP_AUTH_ENABLED:
+        return await call_next(request)
+
+    path = request.url.path or "/"
+    if path in AUTH_EXEMPT_PATHS or path.startswith("/login"):
+        return await call_next(request)
+
+    if bool(request.session.get("auth_ok")):
+        return await call_next(request)
+
+    wants_html = ("text/html" in str(request.headers.get("accept", ""))) or path == "/"
+    if wants_html:
+        return RedirectResponse(url="/login", status_code=307)
+    return JSONResponse({"ok": False, "error": "auth_required"}, status_code=401)
 
 
 @app.middleware("http")
@@ -112,10 +141,10 @@ def make_blank_performance_store(base_dt=None):
 
 
 def make_performance_summary(records):
-    wins = sum(1 for r in records if r.get("outcome") == "win")
-    losses = sum(1 for r in records if r.get("outcome") == "loss")
-    pending = sum(1 for r in records if r.get("outcome") not in {"win", "loss"})
     total = len(records)
+    wins = sum(1 for r in records if str(r.get("outcome", "") or "") in {"target_hit", "above_target"})
+    losses = sum(1 for r in records if str(r.get("outcome", "") or "") == "loss")
+    pending = sum(1 for r in records if str(r.get("outcome", "") or "") not in {"target_hit", "above_target", "loss"})
     win_rate = safe_round((wins / total) * 100, 2) if total > 0 else 0.0
     return {
         "count": total,
@@ -239,9 +268,49 @@ def rollover_performance_store_if_needed(store, base_dt=None):
     return new_store
 
 
+def parse_validity_days(valid_for: str) -> int:
+    txt = str(valid_for or "")
+    if "اليوم فقط" in txt:
+        return 1
+    if "الجلسة القادمة" in txt:
+        return 2
+    if "1-2" in txt:
+        return 2
+    if "1-3" in txt:
+        return 3
+    if "مراقبة" in txt:
+        return 5
+    return 3
+
+
+def estimate_signal_expired(record: dict) -> bool:
+    try:
+        first_seen = str(record.get("first_seen_at", "") or "")
+        if not first_seen:
+            return False
+        first_dt = datetime.strptime(first_seen[:19], "%Y-%m-%d %H:%M:%S")
+        days_allowed = int(record.get("signal_ttl_days", 3) or 3)
+        return (ny_now().replace(tzinfo=None) - first_dt).days >= days_allowed
+    except:
+        return False
+
+
+def outcome_sort_rank(outcome: str) -> int:
+    order = {
+        "above_target": 0,
+        "target_hit": 1,
+        "partial_gain": 2,
+        "ongoing": 3,
+        "loss": 4,
+        "expired": 5,
+    }
+    return order.get(str(outcome or "ongoing"), 9)
+
+
 def evaluate_performance_record(record, current_price):
     entry_price = float(record.get("entry_price", 0) or 0)
     target_price = float(record.get("target_price", 0) or 0)
+    target_2_price = float(record.get("target_2_price", 0) or 0)
     stop_loss = float(record.get("stop_loss", 0) or 0)
     current_price = float(current_price or 0)
 
@@ -263,29 +332,41 @@ def evaluate_performance_record(record, current_price):
         change_pct = ((current_price - entry_price) / entry_price) * 100
     record["last_change_pct"] = safe_round(change_pct)
 
-    if record.get("outcome") in {"win", "loss"}:
-        return record
-
     max_seen = float(record.get("max_price_seen", 0) or 0)
     min_seen = float(record.get("min_price_seen", 0) or 0)
     now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if target_price > 0 and max_seen >= target_price:
-        record["outcome"] = "win"
-        record["status_mark"] = "✅"
-        record["status_label"] = "ناجحة"
-        record["closed_at"] = now_str
-    elif stop_loss > 0 and min_seen > 0 and min_seen <= stop_loss:
-        record["outcome"] = "loss"
-        record["status_mark"] = "❌"
-        record["status_label"] = "خاسرة"
-        record["closed_at"] = now_str
-    else:
-        record["outcome"] = "pending"
-        record["status_mark"] = "⏳"
-        record["status_label"] = "قيد المتابعة"
+    outcome = "ongoing"
+    label = "مستمرة"
+    mark = "⏳"
 
+    if target_2_price > 0 and max_seen >= target_2_price:
+        outcome, label, mark = "above_target", "تجاوزت الهدف", "🚀"
+    elif target_price > 0 and max_seen >= target_price:
+        outcome, label, mark = "target_hit", "وصلت الهدف", "✅"
+    elif stop_loss > 0 and min_seen > 0 and min_seen <= stop_loss:
+        outcome, label, mark = "loss", "خاسرة", "❌"
+    else:
+        expired = estimate_signal_expired(record)
+        positive_move_pct = ((max_seen - entry_price) / entry_price) * 100 if entry_price > 0 and max_seen > 0 else 0.0
+        if expired:
+            if positive_move_pct >= 0.8 or change_pct >= 0.8:
+                outcome, label, mark = "partial_gain", "صعد أقل من الهدف", "⚠️"
+            else:
+                outcome, label, mark = "expired", "منتهية بلا حسم", "🕓"
+        else:
+            outcome, label, mark = "ongoing", "مستمرة", "⏳"
+
+    record["outcome"] = outcome
+    record["status_mark"] = mark
+    record["status_label"] = label
+    if outcome in {"above_target", "target_hit", "loss", "partial_gain", "expired"}:
+        record["closed_at"] = record.get("closed_at") or now_str
     return record
+
+
+def build_signal_record_id(week_key: str, symbol: str, signal_type: str, plan_family: str, entry_price: float, target_price: float, stop_loss: float) -> str:
+    return f"{week_key}::{symbol}::{signal_type}::{plan_family}::{safe_round(entry_price)}::{safe_round(target_price)}::{safe_round(stop_loss)}"
 
 
 def upsert_performance_signal(stock: dict):
@@ -293,36 +374,31 @@ def upsert_performance_signal(stock: dict):
         signal_type = str(stock.get("decision", "") or "")
         if signal_type not in {"دخول قوي", "دخول بحذر"}:
             return
-
         symbol = str(stock.get("symbol", "") or "").upper().strip()
         if not symbol:
             return
-
         entry_price = float(stock.get("display_entry_price", 0) or 0)
         target_price = float(stock.get("display_target_price", 0) or 0)
         stop_loss = float(stock.get("display_stop_price", 0) or 0)
+        target_2_price = float(stock.get("target_2", 0) or 0)
         current_price = float(stock.get("display_price", stock.get("current_price_live", 0)) or 0)
         if entry_price <= 0:
             return
-
         store = rollover_performance_store_if_needed(load_performance_store())
         records = store.get("active_records", [])
-        record_id = f"{store['active_week_key']}::{symbol}"
+        plan_family = str(stock.get("display_plan_family", stock.get("type", "")) or "")
+        record_id = build_signal_record_id(store['active_week_key'], symbol, signal_type, plan_family, entry_price, target_price, stop_loss)
         now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
-
-        existing = None
-        for item in records:
-            if item.get("id") == record_id:
-                existing = item
-                break
-
+        existing = next((item for item in records if item.get("id") == record_id), None)
         if existing is None:
             existing = {
                 "id": record_id,
                 "symbol": symbol,
                 "signal_type": signal_type,
+                "plan_family": plan_family,
                 "entry_price": safe_round(entry_price),
                 "target_price": safe_round(target_price),
+                "target_2_price": safe_round(target_2_price),
                 "stop_loss": safe_round(stop_loss),
                 "first_seen_at": now_str,
                 "last_seen_at": now_str,
@@ -332,11 +408,13 @@ def upsert_performance_signal(stock: dict):
                 "price_source_label": str(stock.get("price_source_label", stock.get("price_source", "")) or ""),
                 "strategy_label": str(stock.get("strategy_label", "") or ""),
                 "status_mark": "⏳",
-                "status_label": "قيد المتابعة",
-                "outcome": "pending",
+                "status_label": "مستمرة",
+                "outcome": "ongoing",
                 "closed_at": "",
                 "market_phase": str(stock.get("market_phase_label", stock.get("market_phase", "")) or ""),
                 "last_change_pct": 0.0,
+                "valid_for": str(stock.get("valid_for", "") or ""),
+                "signal_ttl_days": parse_validity_days(stock.get("valid_for", "")),
             }
             records.insert(0, existing)
         else:
@@ -344,15 +422,10 @@ def upsert_performance_signal(stock: dict):
             existing["price_source_label"] = str(stock.get("price_source_label", stock.get("price_source", "")) or existing.get("price_source_label", ""))
             existing["strategy_label"] = str(stock.get("strategy_label", "") or existing.get("strategy_label", ""))
             existing["market_phase"] = str(stock.get("market_phase_label", stock.get("market_phase", "")) or existing.get("market_phase", ""))
-            if not existing.get("signal_type"):
-                existing["signal_type"] = signal_type
-            if float(existing.get("target_price", 0) or 0) <= 0 and target_price > 0:
-                existing["target_price"] = safe_round(target_price)
-            if float(existing.get("stop_loss", 0) or 0) <= 0 and stop_loss > 0:
-                existing["stop_loss"] = safe_round(stop_loss)
+            existing["target_2_price"] = max(float(existing.get("target_2_price", 0) or 0), target_2_price)
 
         evaluate_performance_record(existing, current_price)
-        store["active_records"] = records[:300]
+        store["active_records"] = records[:500]
         save_performance_store(store)
     except:
         pass
@@ -735,6 +808,306 @@ def get_daily_bars(symbol):
         return r.get("results", []) or []
     except:
         return []
+
+
+
+def calculate_atr(daily_bars, period: int = 14) -> float:
+    try:
+        if not daily_bars or len(daily_bars) < period + 1:
+            return 0.0
+        true_ranges = []
+        prev_close = None
+        for row in daily_bars[-(period + 40):]:
+            high = to_float(row.get("h"))
+            low = to_float(row.get("l"))
+            close = to_float(row.get("c"))
+            if high <= 0 or low <= 0 or close <= 0:
+                prev_close = close or prev_close
+                continue
+            if prev_close is None or prev_close <= 0:
+                tr = high - low
+            else:
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            true_ranges.append(tr)
+            prev_close = close
+        if len(true_ranges) < period:
+            return 0.0
+        return safe_round(sum(true_ranges[-period:]) / period, 4)
+    except:
+        return 0.0
+
+
+def get_atr_overlay(entry_price: float, daily_bars) -> dict:
+    try:
+        entry_price = float(entry_price or 0)
+        atr_14 = float(calculate_atr(daily_bars, 14) or 0)
+        if entry_price <= 0:
+            return {
+                "atr_14": 0.0,
+                "atr_pct": 0.0,
+                "volatility_label": "لا توجد بيانات كافية",
+                "volatility_detail": "لا توجد بيانات كافية لتحديد التذبذب.",
+                "atr_stop_suggestion": 0.0,
+                "atr_target_1_suggestion": 0.0,
+                "atr_target_2_suggestion": 0.0,
+            }
+        effective_atr = atr_14 if atr_14 > 0 else entry_price * 0.03
+        atr_pct = (effective_atr / entry_price) * 100 if entry_price > 0 else 0.0
+        if atr_pct <= 2.0:
+            label = "هادئ"
+            detail = "تذبذب السهم منخفض نسبيًا، ويمكن أن يتحمل وقفًا أقرب."
+        elif atr_pct <= 4.5:
+            label = "متوازن"
+            detail = "تذبذب السهم طبيعي ومناسب لمعظم الخطط."
+        elif atr_pct <= 7.0:
+            label = "نشط"
+            detail = "السهم متذبذب نسبيًا ويحتاج وقفًا أوسع وإدارة أدق."
+        else:
+            label = "عنيف"
+            detail = "السهم عالي التذبذب وقد يضرب الوقف بسهولة إذا كان ضيقًا."
+        return {
+            "atr_14": safe_round(effective_atr, 4),
+            "atr_pct": safe_round(atr_pct, 2),
+            "volatility_label": label,
+            "volatility_detail": detail,
+            "atr_stop_suggestion": safe_round(entry_price - (effective_atr * 1.5)),
+            "atr_target_1_suggestion": safe_round(entry_price + (effective_atr * 2.0)),
+            "atr_target_2_suggestion": safe_round(entry_price + (effective_atr * 4.0)),
+        }
+    except:
+        return {
+            "atr_14": 0.0,
+            "atr_pct": 0.0,
+            "volatility_label": "لا توجد بيانات كافية",
+            "volatility_detail": "لا توجد بيانات كافية لتحديد التذبذب.",
+            "atr_stop_suggestion": 0.0,
+            "atr_target_1_suggestion": 0.0,
+            "atr_target_2_suggestion": 0.0,
+        }
+
+
+def _avg(values):
+    vals = [float(x) for x in values if float(x or 0) > 0]
+    return (sum(vals) / len(vals)) if vals else 0.0
+
+
+def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
+    base = {
+        "historical_behavior_ready": False,
+        "historical_breakout_success_pct": 0.0,
+        "historical_pullback_success_pct": 0.0,
+        "historical_volume_followthrough_pct": 0.0,
+        "historical_breakout_speed_label": "لا توجد بيانات كافية",
+        "historical_pullback_speed_label": "لا توجد بيانات كافية",
+        "historical_behavior_label": "لا توجد بيانات كافية",
+        "historical_behavior_detail": "لا توجد بيانات تاريخية كافية لبناء رأي سلوكي موثوق.",
+    }
+    try:
+        if not daily_bars or len(daily_bars) < 120:
+            return base
+        bars = []
+        for row in daily_bars:
+            bars.append({
+                "o": to_float(row.get("o")),
+                "h": to_float(row.get("h")),
+                "l": to_float(row.get("l")),
+                "c": to_float(row.get("c")),
+                "v": to_float(row.get("v")),
+            })
+        breakout_cases = breakout_success = 0
+        breakout_days = []
+        pullback_cases = pullback_success = 0
+        pullback_days = []
+        volume_cases = volume_success = 0
+        for i in range(60, len(bars) - 6):
+            close_i = bars[i]["c"]
+            open_i = bars[i]["o"]
+            high_i = bars[i]["h"]
+            low_i = bars[i]["l"]
+            vol_i = bars[i]["v"]
+            if close_i <= 0 or high_i <= 0 or low_i <= 0:
+                continue
+            prev20_high = max(b["h"] for b in bars[i-20:i])
+            avg20_vol = _avg([b["v"] for b in bars[i-20:i]])
+            sma20 = _avg([b["c"] for b in bars[i-20:i]])
+            sma50 = _avg([b["c"] for b in bars[i-50:i]])
+            future = bars[i+1:i+6]
+            future_highs = [b["h"] for b in future if b["h"] > 0]
+            future_lows = [b["l"] for b in future if b["l"] > 0]
+            if not future_highs or not future_lows:
+                continue
+
+            # Breakout profile
+            if close_i >= prev20_high * 1.002 and avg20_vol > 0 and vol_i >= avg20_vol * 1.15:
+                breakout_cases += 1
+                success = False
+                for days_ahead, fb in enumerate(future, start=1):
+                    if fb["h"] >= close_i * 1.03:
+                        success = True
+                        breakout_days.append(days_ahead)
+                        break
+                if success:
+                    breakout_success += 1
+
+            # Pullback profile
+            near_support = False
+            if sma20 > 0 and low_i <= sma20 * 1.01 and close_i >= sma20:
+                near_support = True
+            if not near_support and sma50 > 0 and low_i <= sma50 * 1.01 and close_i >= sma50:
+                near_support = True
+            if near_support and close_i > open_i:
+                pullback_cases += 1
+                success = False
+                for days_ahead, fb in enumerate(future, start=1):
+                    if fb["h"] >= close_i * 1.03:
+                        success = True
+                        pullback_days.append(days_ahead)
+                        break
+                if success:
+                    pullback_success += 1
+
+            # Volume follow-through
+            day_change = ((close_i - open_i) / open_i) * 100 if open_i > 0 else 0.0
+            if avg20_vol > 0 and vol_i >= avg20_vol * 1.5 and day_change >= 2.0:
+                volume_cases += 1
+                if max(future_highs) >= close_i * 1.02:
+                    volume_success += 1
+
+        breakout_pct = safe_round((breakout_success / breakout_cases) * 100, 1) if breakout_cases > 0 else 0.0
+        pullback_pct = safe_round((pullback_success / pullback_cases) * 100, 1) if pullback_cases > 0 else 0.0
+        volume_pct = safe_round((volume_success / volume_cases) * 100, 1) if volume_cases > 0 else 0.0
+
+        def speed_label(days_list):
+            if not days_list:
+                return "لا توجد بيانات كافية"
+            avg_days = sum(days_list) / len(days_list)
+            if avg_days <= 2.0:
+                return "سريع"
+            if avg_days <= 3.5:
+                return "متوسط"
+            return "بطيء"
+
+        breakout_speed = speed_label(breakout_days)
+        pullback_speed = speed_label(pullback_days)
+
+        setup = str(current_setup or "")
+        if setup == "Breakout":
+            main_pct = breakout_pct
+            main_speed = breakout_speed
+            main_label = "يدعم الاختراق" if breakout_pct >= 60 else "محايد" if breakout_pct >= 45 else "ضعيف في الاختراق"
+            detail = f"تاريخيًا نجحت الاختراقات المشابهة في {breakout_pct}% من الحالات، وسرعة الحركة غالبًا {breakout_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من الحالات."
+        elif setup == "Pullback":
+            main_pct = pullback_pct
+            main_speed = pullback_speed
+            main_label = "يحترم الارتداد" if pullback_pct >= 60 else "محايد" if pullback_pct >= 45 else "ضعيف في الارتداد"
+            detail = f"تاريخيًا نجحت الارتدادات المشابهة في {pullback_pct}% من الحالات، وسرعة التعافي غالبًا {pullback_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من الحالات."
+        else:
+            main_pct = max(breakout_pct, pullback_pct, volume_pct)
+            main_speed = breakout_speed if breakout_pct >= pullback_pct else pullback_speed
+            main_label = "سلوك تاريخي داعم" if main_pct >= 60 else "محايد" if main_pct >= 45 else "ضعيف"
+            detail = f"نجاح الاختراقات {breakout_pct}%، والارتدادات {pullback_pct}%. استجابة السيولة القوية {volume_pct}%."
+
+        return {
+            "historical_behavior_ready": True,
+            "historical_breakout_success_pct": breakout_pct,
+            "historical_pullback_success_pct": pullback_pct,
+            "historical_volume_followthrough_pct": volume_pct,
+            "historical_breakout_speed_label": breakout_speed,
+            "historical_pullback_speed_label": pullback_speed,
+            "historical_behavior_label": main_label,
+            "historical_behavior_detail": detail,
+        }
+    except:
+        return base
+
+
+def get_alignment_meta(stock: dict) -> dict:
+    try:
+        intraday = stock.get("intraday", {}) or {}
+        trend = str(stock.get("trend", "") or "")
+        opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
+        intraday_ratio = float(intraday.get("intraday_volume_ratio", 0) or 0)
+        above_vwap = bool(intraday.get("above_vwap_proxy", False))
+        score = 50
+        if trend == "صاعد قوي":
+            score += 25
+        elif trend == "صاعد":
+            score += 18
+        elif trend == "متذبذب":
+            score += 4
+        else:
+            score -= 18
+        if opening_drive == "صاعد":
+            score += 12
+        elif opening_drive == "متذبذب":
+            score += 4
+        elif opening_drive == "هابط":
+            score -= 10
+        if above_vwap:
+            score += 8
+        else:
+            score -= 5
+        if intraday_ratio >= 1.1:
+            score += 6
+        elif intraday_ratio < 0.85 and intraday_ratio > 0:
+            score -= 6
+        score = max(0, min(100, int(round(score))))
+        if score >= 80:
+            label = "متوافق جدًا"
+            detail = "الاتجاه اليومي والحركة القريبة يدعمان بعضهما بشكل جيد."
+        elif score >= 65:
+            label = "متوافق"
+            detail = "هناك توافق جيد لكنه ليس مثاليًا بالكامل."
+        elif score >= 50:
+            label = "متوسط"
+            detail = "يوجد بعض التوافق لكن ما زال يحتاج حذرًا."
+        else:
+            label = "ضعيف"
+            detail = "الحركة الحالية لا تتوافق جيدًا مع الاتجاه الأكبر."
+        return {
+            "alignment_score": score,
+            "alignment_label": label,
+            "alignment_detail": detail,
+        }
+    except:
+        return {
+            "alignment_score": 0,
+            "alignment_label": "لا توجد بيانات كافية",
+            "alignment_detail": "لا توجد بيانات كافية للتوافق الزمني.",
+        }
+
+
+def get_risk_profile_meta(stock: dict) -> dict:
+    try:
+        risk_pct = float(stock.get("display_risk_pct", stock.get("risk_pct", 0)) or 0)
+        quality = float(stock.get("quality_score", 0) or 0)
+        if risk_pct < 4 and quality >= 75:
+            label = "منخفضة"
+            detail = "الصفقة منخفضة المخاطرة نسبيًا مقارنة بجودتها."
+            min_risk = 1.0
+        elif (4 <= risk_pct <= 7) or (65 <= quality < 75):
+            label = "متوسطة"
+            detail = "الصفقة متوسطة المخاطرة وتحتاج التزامًا بالخطة."
+            min_risk = 1.5
+        else:
+            label = "مرتفعة"
+            detail = "الصفقة أعلى مخاطرة من المثالي، ولا تناسب إلا جزءًا صغيرًا من رأس المال."
+            min_risk = 2.0
+        fit_note = f"⚠️ هذه الصفقة غير مناسبة لك إذا كانت مخاطرتك أقل من {safe_round(min_risk, 1)}%." if min_risk >= 2 else f"✅ مناسبة لمخاطرة تقريبية بين {safe_round(min_risk, 1)}% و 2.0%."
+        return {
+            "risk_profile_label": label,
+            "risk_profile_detail": detail,
+            "risk_profile_fit_note": fit_note,
+            "risk_profile_min_pct": min_risk,
+        }
+    except:
+        return {
+            "risk_profile_label": "لا توجد بيانات كافية",
+            "risk_profile_detail": "لا توجد بيانات كافية لتوصيف المخاطرة.",
+            "risk_profile_fit_note": "",
+            "risk_profile_min_pct": 0.0,
+        }
+
 
 
 def get_prev_from_daily_bars(daily_bars):
@@ -2019,12 +2392,14 @@ def trade_plan_pro(symbol):
         }
 
     live_block = build_live_price_block(symbol, prev, intraday)
+    atr_overlay = get_atr_overlay(prev.get("price", 0), daily_bars)
     current_price = live_block["current_price_live"] if live_block["current_price_live"] > 0 else prev["price"]
     high = max(prev["high"], live_block["high_live"] if live_block["high_live"] > 0 else prev["high"])
     low = min(prev["low"], live_block["low_live"] if live_block["low_live"] > 0 else prev["low"])
 
     pullback_context = compute_pullback_context(current_price, high, low, intraday, trend_data["trend"])
     trade_type = "Pullback" if pullback_context.get("pullback_candidate") else "Breakout"
+    historical_behavior = analyze_historical_behavior(daily_bars, trade_type)
 
     price_penalty, price_flag = dynamic_price_penalty(current_price, trade_type)
     volume_pace_ratio = compute_volume_pace_ratio(intraday, volume_ratio)
@@ -2220,6 +2595,8 @@ def trade_plan_pro(symbol):
         **levels,
         **timing,
         **live_block,
+        **atr_overlay,
+        **historical_behavior,
         "company": info["company"],
         "sector": info["sector"],
         "industry": info["industry"],
@@ -2272,6 +2649,100 @@ def scan_all():
 
     rows.sort(key=lambda x: (decision_priority(x.get("decision", "")), x.get("quality_score", 0)), reverse=True)
     return rows
+
+
+
+def render_login_page(error_message: str = "") -> HTMLResponse:
+    error_html = f'<div style="margin-bottom:12px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;padding:10px;border-radius:12px;">{error_message}</div>' if error_message else ''
+    html = f"""
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>تسجيل دخول الأداة</title>
+<style>
+body{{margin:0;font-family:Arial,sans-serif;background:#eef5ff;color:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;}}
+.box{{width:min(420px,92vw);background:#fff;border:1px solid #dbeafe;border-radius:20px;box-shadow:0 18px 40px rgba(15,23,42,.12);padding:24px;}}
+h1{{margin:0 0 8px;font-size:26px}}
+p{{margin:0 0 18px;color:#475569;line-height:1.8}}
+input{{width:100%;padding:12px 14px;border-radius:12px;border:1px solid #cbd5e1;margin-bottom:12px;font-size:15px;box-sizing:border-box;}}
+button{{width:100%;padding:12px 14px;border:none;border-radius:12px;background:#2563eb;color:#fff;font-size:15px;font-weight:700;cursor:pointer;}}
+.note{{margin-top:14px;font-size:12px;color:#64748b;line-height:1.8}}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>🔒 دخول الأداة</h1>
+<p>هذه الأداة محمية. أدخل اسم المستخدم وكلمة المرور مرة واحدة وسيتم حفظ الجلسة على هذا الجهاز.</p>
+{error_html}
+<input id="loginUser" placeholder="اسم المستخدم" autocomplete="username" />
+<input id="loginPass" type="password" placeholder="كلمة المرور" autocomplete="current-password" />
+<button onclick="doLogin()">تسجيل الدخول</button>
+<div class="note">إذا سجّلت الدخول بنجاح فلن تحتاج لإعادة الإدخال في كل زيارة، إلا إذا انتهت الجلسة أو قمت بتسجيل الخروج.</div>
+</div>
+<script>
+async function doLogin() {{
+  const username = document.getElementById('loginUser').value || '';
+  const password = document.getElementById('loginPass').value || '';
+  const res = await fetch('/login', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ username, password }})
+  }});
+  if (res.ok) {{
+    window.location.href = '/';
+    return;
+  }}
+  const data = await res.json().catch(() => ({{}}));
+  alert(data.error === 'invalid_credentials' ? 'بيانات الدخول غير صحيحة' : 'تعذر تسجيل الدخول');
+}}
+document.getElementById('loginPass').addEventListener('keydown', (e) => {{ if (e.key === 'Enter') doLogin(); }});
+</script>
+</body>
+</html>
+"""
+    return HTMLResponse(html)
+
+
+@app.get("/login")
+def login_page(request: Request):
+    if not APP_AUTH_ENABLED:
+        return RedirectResponse(url="/", status_code=307)
+    if bool(request.session.get("auth_ok")):
+        return RedirectResponse(url="/", status_code=307)
+    return render_login_page()
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    if not APP_AUTH_ENABLED:
+        return {"ok": True, "auth_enabled": False}
+    payload = await request.json()
+    username = str(payload.get("username", "") or "").strip()
+    password = str(payload.get("password", "") or "")
+    if secrets.compare_digest(username, APP_AUTH_USERNAME) and secrets.compare_digest(password, APP_AUTH_PASSWORD):
+        request.session.clear()
+        request.session["auth_ok"] = True
+        request.session["auth_user"] = username
+        request.session["auth_at"] = datetime.utcnow().isoformat()
+        return {"ok": True, "auth_enabled": True}
+    return JSONResponse({"ok": False, "error": "invalid_credentials"}, status_code=401)
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"ok": True}
+
+
+@app.get("/session")
+def session_state(request: Request):
+    return {
+        "authenticated": bool(request.session.get("auth_ok")),
+        "auth_enabled": APP_AUTH_ENABLED,
+        "username": request.session.get("auth_user", "") if bool(request.session.get("auth_ok")) else "",
+    }
 
 
 @app.get("/")
@@ -2649,6 +3120,8 @@ def enrich_display_meta(stock: dict) -> dict:
     try:
         stock.update(get_price_freshness_meta(stock))
         stock.update(get_execution_readiness_meta(stock))
+        stock.update(get_alignment_meta(stock))
+        stock.update(get_risk_profile_meta(stock))
         stock["metric_quality"] = explain_metric_ar("quality", stock.get("quality_score"), stock)
         stock["metric_risk_pct"] = explain_metric_ar("risk_pct", stock.get("display_risk_pct", stock.get("risk_pct", 0)), stock)
         stock["metric_volume_daily"] = explain_metric_ar("volume_daily", stock.get("volume_ratio", 0), stock)
@@ -2672,6 +3145,10 @@ def enrich_display_meta(stock: dict) -> dict:
             f"{stock['metric_rr'].get('icon')} العائد/المخاطرة: {stock['metric_rr'].get('label')}",
             f"{stock.get('execution_readiness_icon', '👀')} الجاهزية: {stock.get('execution_readiness_label', '')}",
         ]
+        if stock.get("historical_behavior_label"):
+            summary_bits.append(f"📚 السلوك التاريخي: {stock.get('historical_behavior_label')}")
+        if stock.get("alignment_label"):
+            summary_bits.append(f"🧭 التوافق الزمني: {stock.get('alignment_label')}")
         stock["quick_explainer"] = " | ".join([x for x in summary_bits if x])
         return stock
     except:
@@ -2897,13 +3374,93 @@ def watchlist_get():
     return {"items": out}
 
 
+
+def summarize_outcomes(records: list[dict]) -> dict:
+    rows = list(records or [])
+    total = len(rows)
+    out = {
+        "count": total,
+        "target_hit": 0,
+        "above_target": 0,
+        "partial_gain": 0,
+        "ongoing": 0,
+        "loss": 0,
+        "expired": 0,
+    }
+    for row in rows:
+        key = str(row.get("outcome", "ongoing") or "ongoing")
+        if key in out:
+            out[key] += 1
+    if total > 0:
+        out.update({k + "_pct": safe_round((v / total) * 100, 2) for k, v in out.items() if k != "count"})
+    else:
+        out.update({k + "_pct": 0.0 for k in ["target_hit", "above_target", "partial_gain", "ongoing", "loss", "expired"]})
+    return out
+
+
+def simulate_equal_weight(records: list[dict], per_trade: float = 1000.0) -> dict:
+    rows = list(records or [])
+    starting_capital = per_trade * len(rows)
+    pnl = 0.0
+    for row in rows:
+        entry = float(row.get("entry_price", 0) or 0)
+        target = float(row.get("target_price", 0) or 0)
+        target2 = float(row.get("target_2_price", 0) or 0)
+        stop = float(row.get("stop_loss", 0) or 0)
+        current = float(row.get("current_price", 0) or 0)
+        max_seen = float(row.get("max_price_seen", current) or current)
+        if entry <= 0:
+            continue
+        outcome = str(row.get("outcome", "ongoing") or "ongoing")
+        if outcome == "above_target" and target2 > 0:
+            ret = (target2 - entry) / entry
+        elif outcome == "target_hit" and target > 0:
+            ret = (target - entry) / entry
+        elif outcome == "loss" and stop > 0:
+            ret = (stop - entry) / entry
+        elif outcome == "partial_gain":
+            ref = max(current, max_seen)
+            ret = (ref - entry) / entry
+        elif outcome == "ongoing":
+            ref = current if current > 0 else max_seen
+            ret = (ref - entry) / entry if ref > 0 else 0.0
+        else:
+            ret = 0.0
+        pnl += per_trade * ret
+    final_capital = starting_capital + pnl
+    roi_pct = safe_round((pnl / starting_capital) * 100, 2) if starting_capital > 0 else 0.0
+    return {
+        "per_trade": per_trade,
+        "starting_capital": safe_round(starting_capital),
+        "pnl": safe_round(pnl),
+        "final_capital": safe_round(final_capital),
+        "roi_pct": roi_pct,
+    }
+
+
+def build_performance_dashboard(records: list[dict]) -> dict:
+    rows = sorted(list(records or []), key=lambda r: (outcome_sort_rank(r.get("outcome")), r.get("first_seen_at", "")))
+    strong = [x for x in rows if str(x.get("signal_type", "") or "") == "دخول قوي"]
+    cautious = [x for x in rows if str(x.get("signal_type", "") or "") == "دخول بحذر"]
+    return {
+        "rows": rows,
+        "summary": summarize_outcomes(rows),
+        "groups": {
+            "strong": {"items": strong, "summary": summarize_outcomes(strong), "simulation": simulate_equal_weight(strong)},
+            "cautious": {"items": cautious, "summary": summarize_outcomes(cautious), "simulation": simulate_equal_weight(cautious)},
+        },
+        "simulation": simulate_equal_weight(rows),
+    }
+
+
+
 @app.get("/performance")
 def performance_get():
     store = rollover_performance_store_if_needed(load_performance_store())
     records = list(store.get("active_records", []))
     updated = []
 
-    for item in records[:300]:
+    for item in records[:500]:
         symbol = str(item.get("symbol", "") or "").upper().strip()
         current_price = float(item.get("current_price", 0) or 0)
         price_source_label = str(item.get("price_source_label", "") or "")
@@ -2923,16 +3480,15 @@ def performance_get():
             "current_price": safe_round(item.get("current_price", 0)),
             "entry_price": safe_round(item.get("entry_price", 0)),
             "target_price": safe_round(item.get("target_price", 0)),
+            "target_2_price": safe_round(item.get("target_2_price", 0)),
             "stop_loss": safe_round(item.get("stop_loss", 0)),
             "max_price_seen": safe_round(item.get("max_price_seen", 0)),
             "min_price_seen": safe_round(item.get("min_price_seen", 0)),
             "last_change_pct": safe_round(item.get("last_change_pct", 0)),
         })
 
-    status_order = {"win": 0, "loss": 1, "pending": 2}
-    updated.sort(key=lambda r: (status_order.get(r.get("outcome", "pending"), 9), r.get("first_seen_at", "")), reverse=False)
-
-    store["active_records"] = updated
+    dashboard = build_performance_dashboard(updated)
+    store["active_records"] = dashboard["rows"]
     save_performance_store(store)
 
     return {
@@ -2941,9 +3497,9 @@ def performance_get():
             "week_start": store.get("active_week_start"),
             "week_end": store.get("active_week_end"),
         },
-        "items": updated,
-        "summary": make_performance_summary(updated),
+        "items": dashboard["rows"],
+        "summary": dashboard["summary"],
+        "groups": dashboard["groups"],
+        "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
-
