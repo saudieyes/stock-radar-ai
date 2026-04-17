@@ -1258,7 +1258,7 @@
         const globalSim = data.simulation || {};
         document.getElementById('performanceSummary').innerHTML = `${weekText} | محاكاة إجمالية: $${formatNumber(globalSim.pnl || 0)} (${formatNumber(globalSim.roi_pct || 0)}%)`;
         document.getElementById('performanceContent').innerHTML = `
-          <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة حقيقية. لذلك قد يكون العدد هنا أقل من عدد الأسهم الظاهرة الآن في القوائم.</div>
+          <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة حقيقية. إذا كان العدد هنا أقل من القوائم الحالية، فالمعنى أن بعض الأسهم المعروضة ليست إشارة جديدة هذا الأسبوع أو أن الخطة نفسها تكررت.</div>
           <div class="summary-row">
             ${renderPerformanceGroupCard('🔥 دخول قوي', groups.strong || {})}
             ${renderPerformanceGroupCard('🟠 دخول بحذر', groups.cautious || {})}
