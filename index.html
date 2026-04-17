@@ -1199,15 +1199,15 @@
 
 
     function summarizePerformanceGroup(items) {
-      const list = Array.isArray(items) ? items : [];
+      const obj = (items && typeof items === 'object') ? items : {};
       return {
-        total: Number(list.count || list.length || 0),
-        target_hit: Number(list.target_hit || 0),
-        above_target: Number(list.above_target || 0),
-        partial_gain: Number(list.partial_gain || 0),
-        ongoing: Number(list.ongoing || 0),
-        loss: Number(list.loss || 0),
-        expired: Number(list.expired || 0),
+        total: Number(obj.count || 0),
+        target_hit: Number(obj.target_hit || 0),
+        above_target: Number(obj.above_target || 0),
+        partial_gain: Number(obj.partial_gain || 0),
+        ongoing: Number(obj.ongoing || 0),
+        loss: Number(obj.loss || 0),
+        expired: Number(obj.expired || 0),
       };
     }
 
