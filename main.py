@@ -1046,11 +1046,19 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
         if setup == "Breakout":
             main_pct = breakout_pct
             main_label = "يدعم الاختراق" if breakout_pct >= 60 else "محايد" if breakout_pct >= 45 else "ضعيف في الاختراق"
-            detail = f"نجحت الاختراقات المشابهة في {breakout_pct}% من {breakout_cases} حالة، وسرعة الحركة غالبًا {breakout_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من {volume_cases} حالة. درجة الثقة {confidence}."
+            parts = [f"في مثل حالة هذه الفرصة (اختراق)، نجحت الاختراقات المشابهة في {breakout_pct}% من {breakout_cases} حالة، وسرعة الحركة غالبًا {breakout_speed}."]
+            if volume_cases > 0:
+                parts.append(f"ومع السيولة القوية نجح الاستمرار في {volume_pct}% من {volume_cases} حالة.")
+            parts.append(f"درجة الثقة {confidence}.")
+            detail = " ".join(parts)
         elif setup == "Pullback":
             main_pct = pullback_pct
             main_label = "يحترم الارتداد" if pullback_pct >= 60 else "محايد" if pullback_pct >= 45 else "ضعيف في الارتداد"
-            detail = f"نجحت الارتدادات المشابهة في {pullback_pct}% من {pullback_cases} حالة، وسرعة التعافي غالبًا {pullback_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من {volume_cases} حالة. درجة الثقة {confidence}."
+            parts = [f"في مثل حالة هذه الفرصة (ارتداد)، نجحت الارتدادات المشابهة في {pullback_pct}% من {pullback_cases} حالة، وسرعة التعافي غالبًا {pullback_speed}."]
+            if volume_cases > 0:
+                parts.append(f"ومع السيولة القوية نجح الاستمرار في {volume_pct}% من {volume_cases} حالة.")
+            parts.append(f"درجة الثقة {confidence}.")
+            detail = " ".join(parts)
         else:
             main_pct = max(breakout_pct, pullback_pct, volume_pct)
             main_label = "سلوك تاريخي داعم" if main_pct >= 60 else "محايد" if main_pct >= 45 else "ضعيف"
@@ -2549,9 +2557,9 @@ def trade_plan_pro(symbol):
         rr_1_preview = (target1 - entry) / (entry - stop) if (entry - stop) > 0 else 0.0
 
     strong_ready = (
-        quality >= 88
-        and risk_pct <= 7
-        and rr_1_preview >= 0.85
+        quality >= 86
+        and risk_pct <= 7.5
+        and rr_1_preview >= 0.80
         and effective_volume_ratio >= 1.0
         and trend_data["trend"] in {"صاعد", "صاعد قوي"}
         and breakout_quality != "FAILED"
@@ -2559,7 +2567,7 @@ def trade_plan_pro(symbol):
     if trade_type == "Breakout":
         strong_ready = strong_ready and breakout_quality == "STRONG"
     elif trade_type == "Pullback":
-        strong_ready = strong_ready and pullback_score >= 70
+        strong_ready = strong_ready and pullback_score >= 68
 
     cautious_ready = quality >= 66 and risk_pct <= 12
 
@@ -2704,16 +2712,17 @@ def scan_all():
             p["ai_summary"] += "السعر اللحظي غير موثوق"
 
         p = enrich_display_meta(p)
-        # تثبيت دقة "دخول قوي": إذا كانت الجاهزية منخفضة أو التنفيذ غير مكتمل نهبطها إلى بحذر بدل المبالغة
+        # تثبيت دقة "دخول قوي" بدون قتل الإشارات الجيدة قبل التأكيد:
+        # نهبط فقط إذا كانت الجاهزية ضعيفة فعلاً أو إذا كانت مطاردة سعرية/خطة غير مكتملة بوضوح.
         try:
             if str(p.get("decision", "") or "") == "دخول قوي":
                 readiness_score = float(p.get("execution_readiness_score", 0) or 0)
                 readiness_label = str(p.get("execution_readiness_label", "") or "")
-                if readiness_score < 78 or readiness_label in {"انتظار اختراق", "اختراق أولي", "مطاردة سعرية", "ارتداد قيد التكوين"}:
+                if readiness_score < 62 or readiness_label in {"مطاردة سعرية", "ارتداد قيد التكوين"}:
                     p["decision"] = "دخول بحذر"
             if str(p.get("decision", "") or "") == "دخول بحذر":
                 readiness_score = float(p.get("execution_readiness_score", 0) or 0)
-                if readiness_score < 45:
+                if readiness_score < 35:
                     p["decision"] = "مراقبة"
         except:
             pass
@@ -3596,3 +3605,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
