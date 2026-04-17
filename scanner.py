@@ -1618,3 +1618,4 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         return get_seed_universe()[:max_symbols]
 
     return final_universe[:max_symbols]
+
