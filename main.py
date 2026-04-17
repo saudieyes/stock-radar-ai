@@ -10,11 +10,22 @@ import time
 import json
 import secrets
 import hashlib
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
 from scanner import get_scan_universe, apply_late_move_filter, assign_execution_mode, normalize_execution_labels, recalc_reentry_plan, enrich_signal_stage, enrich_strategy_profile, finalize_display_contract
 
 app = FastAPI()
+
+BASE_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+APP_DATA_DIR_ENV = str(os.getenv("APP_DATA_DIR", "") or "").strip()
+if APP_DATA_DIR_ENV:
+    DATA_DIR = Path(APP_DATA_DIR_ENV).expanduser()
+elif Path("/data").exists():
+    DATA_DIR = Path("/data")
+else:
+    DATA_DIR = BASE_DIR / "app_data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 APP_AUTH_USERNAME = str(os.getenv("APP_BASIC_AUTH_USERNAME", "") or "").strip()
 APP_AUTH_PASSWORD = str(os.getenv("APP_BASIC_AUTH_PASSWORD", "") or "").strip()
@@ -112,10 +123,10 @@ HISTORY_CACHE = {}
 REF_INFO_CACHE = {}
 INTRADAY_CACHE = {}
 SNAPSHOT_CACHE = {}
-PERFORMANCE_FILE = "signal_performance.json"
+PERFORMANCE_FILE = str(DATA_DIR / "signal_performance.json")
 
-MANUAL_WATCHLIST_FILE = "manual_watchlist.json"
-PORTFOLIO_FILE = "portfolio_holdings.json"
+MANUAL_WATCHLIST_FILE = str(DATA_DIR / "manual_watchlist.json")
+PORTFOLIO_FILE = str(DATA_DIR / "portfolio_holdings.json")
 
 def ny_now():
     return datetime.now(ZoneInfo("America/New_York"))
@@ -933,6 +944,10 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
         "historical_breakout_success_pct": 0.0,
         "historical_pullback_success_pct": 0.0,
         "historical_volume_followthrough_pct": 0.0,
+        "historical_breakout_cases": 0,
+        "historical_pullback_cases": 0,
+        "historical_volume_cases": 0,
+        "historical_confidence_label": "منخفضة",
         "historical_breakout_speed_label": "لا توجد بيانات كافية",
         "historical_pullback_speed_label": "لا توجد بيانات كافية",
         "historical_behavior_label": "لا توجد بيانات كافية",
@@ -961,7 +976,7 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
             high_i = bars[i]["h"]
             low_i = bars[i]["l"]
             vol_i = bars[i]["v"]
-            if close_i <= 0 or high_i <= 0 or low_i <= 0:
+            if close_i <= 0 or high_i <= 0 or low_i <= 0 or open_i <= 0:
                 continue
             prev20_high = max(b["h"] for b in bars[i-20:i])
             avg20_vol = _avg([b["v"] for b in bars[i-20:i]])
@@ -973,19 +988,14 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
             if not future_highs or not future_lows:
                 continue
 
-            # Breakout profile
             if close_i >= prev20_high * 1.002 and avg20_vol > 0 and vol_i >= avg20_vol * 1.15:
                 breakout_cases += 1
-                success = False
                 for days_ahead, fb in enumerate(future, start=1):
                     if fb["h"] >= close_i * 1.03:
-                        success = True
+                        breakout_success += 1
                         breakout_days.append(days_ahead)
                         break
-                if success:
-                    breakout_success += 1
 
-            # Pullback profile
             near_support = False
             if sma20 > 0 and low_i <= sma20 * 1.01 and close_i >= sma20:
                 near_support = True
@@ -993,16 +1003,12 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
                 near_support = True
             if near_support and close_i > open_i:
                 pullback_cases += 1
-                success = False
                 for days_ahead, fb in enumerate(future, start=1):
                     if fb["h"] >= close_i * 1.03:
-                        success = True
+                        pullback_success += 1
                         pullback_days.append(days_ahead)
                         break
-                if success:
-                    pullback_success += 1
 
-            # Volume follow-through
             day_change = ((close_i - open_i) / open_i) * 100 if open_i > 0 else 0.0
             if avg20_vol > 0 and vol_i >= avg20_vol * 1.5 and day_change >= 2.0:
                 volume_cases += 1
@@ -1023,31 +1029,42 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
                 return "متوسط"
             return "بطيء"
 
+        sample_size = max(breakout_cases, pullback_cases, volume_cases)
+        if sample_size >= 30:
+            confidence = "عالية"
+        elif sample_size >= 15:
+            confidence = "متوسطة"
+        elif sample_size >= 8:
+            confidence = "محدودة"
+        else:
+            confidence = "منخفضة"
+
         breakout_speed = speed_label(breakout_days)
         pullback_speed = speed_label(pullback_days)
 
         setup = str(current_setup or "")
         if setup == "Breakout":
             main_pct = breakout_pct
-            main_speed = breakout_speed
             main_label = "يدعم الاختراق" if breakout_pct >= 60 else "محايد" if breakout_pct >= 45 else "ضعيف في الاختراق"
-            detail = f"تاريخيًا نجحت الاختراقات المشابهة في {breakout_pct}% من الحالات، وسرعة الحركة غالبًا {breakout_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من الحالات."
+            detail = f"نجحت الاختراقات المشابهة في {breakout_pct}% من {breakout_cases} حالة، وسرعة الحركة غالبًا {breakout_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من {volume_cases} حالة. درجة الثقة {confidence}."
         elif setup == "Pullback":
             main_pct = pullback_pct
-            main_speed = pullback_speed
             main_label = "يحترم الارتداد" if pullback_pct >= 60 else "محايد" if pullback_pct >= 45 else "ضعيف في الارتداد"
-            detail = f"تاريخيًا نجحت الارتدادات المشابهة في {pullback_pct}% من الحالات، وسرعة التعافي غالبًا {pullback_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من الحالات."
+            detail = f"نجحت الارتدادات المشابهة في {pullback_pct}% من {pullback_cases} حالة، وسرعة التعافي غالبًا {pullback_speed}. استجابة السيولة القوية نجحت في {volume_pct}% من {volume_cases} حالة. درجة الثقة {confidence}."
         else:
             main_pct = max(breakout_pct, pullback_pct, volume_pct)
-            main_speed = breakout_speed if breakout_pct >= pullback_pct else pullback_speed
             main_label = "سلوك تاريخي داعم" if main_pct >= 60 else "محايد" if main_pct >= 45 else "ضعيف"
-            detail = f"نجاح الاختراقات {breakout_pct}%، والارتدادات {pullback_pct}%. استجابة السيولة القوية {volume_pct}%."
+            detail = f"نجاح الاختراقات {breakout_pct}% ({breakout_cases} حالة)، والارتدادات {pullback_pct}% ({pullback_cases} حالة)، واستجابة السيولة {volume_pct}% ({volume_cases} حالة). درجة الثقة {confidence}."
 
         return {
             "historical_behavior_ready": True,
             "historical_breakout_success_pct": breakout_pct,
             "historical_pullback_success_pct": pullback_pct,
             "historical_volume_followthrough_pct": volume_pct,
+            "historical_breakout_cases": breakout_cases,
+            "historical_pullback_cases": pullback_cases,
+            "historical_volume_cases": volume_cases,
+            "historical_confidence_label": confidence,
             "historical_breakout_speed_label": breakout_speed,
             "historical_pullback_speed_label": pullback_speed,
             "historical_behavior_label": main_label,
@@ -1055,7 +1072,6 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
         }
     except:
         return base
-
 
 def get_alignment_meta(stock: dict) -> dict:
     try:
@@ -2528,10 +2544,29 @@ def trade_plan_pro(symbol):
     quality = max(1, min(99, int(round(quality))))
     rank_label = make_rank_label(quality)
 
+    rr_1_preview = 0.0
+    if entry > 0 and stop > 0 and target1 > 0 and entry > stop:
+        rr_1_preview = (target1 - entry) / (entry - stop) if (entry - stop) > 0 else 0.0
+
+    strong_ready = (
+        quality >= 88
+        and risk_pct <= 7
+        and rr_1_preview >= 0.85
+        and effective_volume_ratio >= 1.0
+        and trend_data["trend"] in {"صاعد", "صاعد قوي"}
+        and breakout_quality != "FAILED"
+    )
+    if trade_type == "Breakout":
+        strong_ready = strong_ready and breakout_quality == "STRONG"
+    elif trade_type == "Pullback":
+        strong_ready = strong_ready and pullback_score >= 70
+
+    cautious_ready = quality >= 66 and risk_pct <= 12
+
     decision = "مراقبة"
-    if quality >= 85 and risk_pct <= 8:
+    if strong_ready:
         decision = "دخول قوي"
-    elif quality >= 65 and risk_pct <= 12:
+    elif cautious_ready:
         decision = "دخول بحذر"
 
     execution_status = compute_execution_status(
@@ -2669,6 +2704,19 @@ def scan_all():
             p["ai_summary"] += "السعر اللحظي غير موثوق"
 
         p = enrich_display_meta(p)
+        # تثبيت دقة "دخول قوي": إذا كانت الجاهزية منخفضة أو التنفيذ غير مكتمل نهبطها إلى بحذر بدل المبالغة
+        try:
+            if str(p.get("decision", "") or "") == "دخول قوي":
+                readiness_score = float(p.get("execution_readiness_score", 0) or 0)
+                readiness_label = str(p.get("execution_readiness_label", "") or "")
+                if readiness_score < 78 or readiness_label in {"انتظار اختراق", "اختراق أولي", "مطاردة سعرية", "ارتداد قيد التكوين"}:
+                    p["decision"] = "دخول بحذر"
+            if str(p.get("decision", "") or "") == "دخول بحذر":
+                readiness_score = float(p.get("execution_readiness_score", 0) or 0)
+                if readiness_score < 45:
+                    p["decision"] = "مراقبة"
+        except:
+            pass
         upsert_performance_signal(p)
         return p
 
@@ -3536,6 +3584,7 @@ def performance_get():
     save_performance_store(store)
 
     return {
+        "storage": {"data_dir": str(DATA_DIR), "performance_file": PERFORMANCE_FILE},
         "active_week": {
             "week_key": store.get("active_week_key"),
             "week_start": store.get("active_week_start"),
@@ -3547,5 +3596,3 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
-
