@@ -870,9 +870,10 @@
       details.push(detailBox('هدف ATR 2', formatNumber(stock.atr_target_2_suggestion)));
       details.push(detailBox('السلوك التاريخي', safeText(stock.historical_behavior_label || 'لا توجد بيانات كافية')));
       details.push(detailBox('شرح السلوك التاريخي', safeText(stock.historical_behavior_detail || ''), true));
-      details.push(detailBox('نجاح الاختراقات تاريخيًا', `${formatNumber(stock.historical_breakout_success_pct)}% | ${safeText(stock.historical_breakout_speed_label || '')}`));
-      details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% | ${safeText(stock.historical_pullback_speed_label || '')}`));
-      details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}%`));
+      details.push(detailBox('ثقة السلوك التاريخي', safeText(stock.historical_confidence_label || 'لا توجد بيانات كافية')));
+      details.push(detailBox('نجاح الاختراقات تاريخيًا', `${formatNumber(stock.historical_breakout_success_pct)}% من ${formatNumber(stock.historical_breakout_cases || 0)} حالة${stock.historical_breakout_speed_label ? ' | ' + safeText(stock.historical_breakout_speed_label) : ''}`));
+      details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% من ${formatNumber(stock.historical_pullback_cases || 0)} حالة${stock.historical_pullback_speed_label ? ' | ' + safeText(stock.historical_pullback_speed_label) : ''}`));
+      details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(stock.news_title || stock.news_note || '')}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
@@ -1210,37 +1211,7 @@
       };
     }
 
-    function renderPerformanceTable(items) {
-      const list = Array.isArray(items) ? items : [];
-      if (!list.length) return '<div class="empty">لا توجد إشارات مسجلة في هذا القسم هذا الأسبوع</div>';
-      const rows = list.map(item => `
-        <tr>
-          <td>${safeText(item.symbol)}</td>
-          <td>${safeText(item.signal_type)}</td>
-          <td>${safeText(item.plan_family || '')}</td>
-          <td>${formatNumber(item.entry_price)}</td>
-          <td>${formatNumber(item.target_price)}</td>
-          <td>${formatNumber(item.target_2_price)}</td>
-          <td>${formatNumber(item.stop_loss)}</td>
-          <td>${formatNumber(item.current_price)}</td>
-          <td>${formatPercent(item.last_change_pct)}</td>
-          <td>${safeText(item.status_mark || '')} ${safeText(item.status_label || '')}</td>
-        </tr>`).join('');
-      return `
-        <div class="table-wrap">
-          <table class="list-table">
-            <thead>
-              <tr>
-                <th>السهم</th><th>النوع</th><th>الخطة</th><th>الدخول</th><th>الهدف 1</th><th>الهدف 2</th><th>الوقف</th><th>السعر الحالي</th><th>التغير</th><th>الحالة</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>`;
-    }
-
-    function renderPerformanceGroupCard(title, group, key) {
-      const items = group?.items || [];
+    function renderPerformanceGroupCard(title, group) {
       const s = summarizePerformanceGroup(group?.summary || {});
       const sim = group?.simulation || {};
       return `
@@ -1251,10 +1222,6 @@
           <div class="summary-sub">⚠️ صعد أقل من الهدف: <b class="yellow">${formatNumber(s.partial_gain)}</b> | ⏳ مستمرة: <b class="yellow">${formatNumber(s.ongoing)}</b></div>
           <div class="summary-sub">❌ خاسرة: <b class="red">${formatNumber(s.loss)}</b> | 🕓 منتهية بلا حسم: <b>${formatNumber(s.expired)}</b></div>
           <div class="summary-sub">محاكاة نظرية: بدءًا من $${formatNumber(sim.starting_capital || 0)} | الربح/الخسارة $${formatNumber(sim.pnl || 0)} | العائد ${formatNumber(sim.roi_pct || 0)}%</div>
-          <div class="summary-actions">
-            <button class="ghost detail-toggle" onclick="toggleSection('${key}', this, 'إظهار التفاصيل', 'إخفاء التفاصيل')">إظهار التفاصيل</button>
-          </div>
-          <div id="${key}" class="hidden-section" style="margin-top:12px;">${renderPerformanceTable(items)}</div>
         </div>`;
     }
 
@@ -1280,7 +1247,6 @@
         </div>`;
     }
 
-
     async function loadPerformance() {
       try {
         const res = await apiFetch('/performance');
@@ -1294,8 +1260,8 @@
         document.getElementById('performanceContent').innerHTML = `
           <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة حقيقية.</div>
           <div class="summary-row">
-            ${renderPerformanceGroupCard('🔥 دخول قوي', groups.strong || {}, 'perf-strong-details')}
-            ${renderPerformanceGroupCard('🟠 دخول بحذر', groups.cautious || {}, 'perf-cautious-details')}
+            ${renderPerformanceGroupCard('🔥 دخول قوي', groups.strong || {})}
+            ${renderPerformanceGroupCard('🟠 دخول بحذر', groups.cautious || {})}
           </div>
           <div class="summary-card" style="margin-top:14px;">
             <div class="summary-title">🗂️ أرشيف الأسابيع</div>
