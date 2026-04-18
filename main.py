@@ -2171,6 +2171,223 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
     return 0, ""
 
 
+def compute_core_quality_score(
+    trend: str,
+    effective_volume_ratio: float,
+    catalyst_score: float,
+    hist: dict,
+    breakout_quality: str,
+    pullback_score: int,
+    trade_type: str,
+    price_penalty: int,
+    risk_pct: float,
+) -> int:
+    quality = 50
+
+    if trend == "صاعد قوي":
+        quality += 18
+    elif trend == "صاعد":
+        quality += 10
+    elif trend == "متذبذب":
+        quality -= 5
+    else:
+        quality -= 18
+
+    if effective_volume_ratio >= 1.5:
+        quality += 12
+    elif effective_volume_ratio >= 1.2:
+        quality += 8
+    elif effective_volume_ratio >= 1.0:
+        quality += 4
+    else:
+        quality -= 6
+
+    if catalyst_score > 0:
+        quality += float(catalyst_score or 0)
+
+    if bool((hist or {}).get("ath_breakout_zone", False)):
+        quality -= 6
+    elif bool((hist or {}).get("near_52w_high", False)):
+        quality -= 2
+
+    if breakout_quality == "FAILED":
+        quality -= 25
+    elif breakout_quality == "WEAK":
+        quality -= 8
+    elif breakout_quality == "STRONG":
+        quality += 6
+
+    if trade_type == "Pullback":
+        if pullback_score >= 70:
+            quality += 12
+        elif pullback_score >= 58:
+            quality += 6
+        else:
+            quality -= 6
+    elif trade_type == "Breakout":
+        if pullback_score >= 65:
+            quality += 3
+
+    quality += int(price_penalty or 0)
+
+    if risk_pct > 12:
+        quality -= 18
+    elif risk_pct > 8:
+        quality -= 10
+    elif risk_pct > 5:
+        quality -= 4
+
+    return max(1, min(99, int(round(quality))))
+
+
+def compute_execution_layer_score(stock: dict) -> tuple[int, str, int]:
+    try:
+        intraday = stock.get("intraday", {}) or {}
+        market_open = bool(intraday.get("market_open", False))
+        if not market_open:
+            return 50, "محايد", 0
+
+        score = 50
+        volume_pace_ratio = float(stock.get("volume_pace_ratio", stock.get("effective_volume_ratio", 0)) or 0)
+        above_vwap = bool(intraday.get("above_vwap_proxy", False))
+        session_position = float(intraday.get("session_position_pct", 0) or 0)
+        continuation_score = float(stock.get("continuation_score", 0) or 0)
+        runner_score = float(stock.get("runner_score", 0) or 0)
+        opening_drive = str(intraday.get("opening_drive", "unknown") or "unknown")
+
+        if volume_pace_ratio >= 1.3:
+            score += 8
+        elif volume_pace_ratio >= 1.0:
+            score += 4
+        elif volume_pace_ratio < 0.9:
+            score -= 5
+
+        if above_vwap:
+            score += 4
+        else:
+            score -= 4
+
+        if session_position >= 75:
+            score += 3
+        elif session_position < 35:
+            score -= 3
+
+        if continuation_score >= 75:
+            score += 4
+        elif continuation_score >= 65:
+            score += 2
+
+        if runner_score >= 80:
+            score += 3
+        elif runner_score >= 66:
+            score += 1
+
+        if opening_drive == "صاعد":
+            score += 2
+        elif opening_drive == "هابط":
+            score -= 3
+
+        score = max(1, min(99, int(round(score))))
+        adjustment = int(round((score - 50) * 0.35))
+
+        if score >= 68:
+            label = "داعم"
+        elif score >= 56:
+            label = "إيجابي"
+        elif score >= 44:
+            label = "محايد"
+        else:
+            label = "ضعيف"
+
+        return score, label, adjustment
+    except:
+        return 50, "محايد", 0
+
+
+def apply_decision_layers(stock: dict) -> dict:
+    try:
+        trend = str(stock.get("trend", "") or "")
+        trade_type = str(stock.get("type", "") or "")
+        breakout_quality = str(stock.get("breakout_quality", "") or "")
+        pullback_score = int(float(stock.get("pullback_score", 0) or 0))
+        hist = {
+            "ath_breakout_zone": bool(stock.get("ath_breakout_zone", False)),
+            "near_52w_high": bool(stock.get("near_52w_high", False)),
+        }
+        effective_volume_ratio = float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)) or 0)
+        catalyst_score = float(stock.get("catalyst_score", 0) or 0)
+        price_penalty = int(float(stock.get("price_penalty_points", 0) or 0))
+        risk_pct = float(stock.get("risk_pct", 0) or 0)
+        rr_1 = float(stock.get("rr_1", 0) or 0)
+
+        core_quality = compute_core_quality_score(
+            trend,
+            effective_volume_ratio,
+            catalyst_score,
+            hist,
+            breakout_quality,
+            pullback_score,
+            trade_type,
+            price_penalty,
+            risk_pct,
+        )
+        execution_layer_score, execution_layer_label, execution_adjustment = compute_execution_layer_score(stock)
+        blended_quality = max(1, min(99, int(round(core_quality + execution_adjustment))))
+
+        stock["quality_core_score"] = core_quality
+        stock["execution_layer_score"] = execution_layer_score
+        stock["execution_layer_label"] = execution_layer_label
+        stock["execution_layer_adjustment"] = execution_adjustment
+        stock["quality_score"] = blended_quality
+        stock["rank_label"] = make_rank_label(blended_quality)
+
+        market_open = bool((stock.get("intraday", {}) or {}).get("market_open", False))
+        in_pullback_zone = bool(stock.get("in_pullback_zone", False))
+
+        strong_ready = (
+            blended_quality >= 82
+            and core_quality >= 76
+            and risk_pct <= 8.5
+            and rr_1 >= 0.75
+            and effective_volume_ratio >= 0.95
+            and trend in {"صاعد", "صاعد قوي"}
+            and breakout_quality != "FAILED"
+        )
+        if market_open:
+            strong_ready = strong_ready and execution_layer_score >= 46
+
+        if trade_type == "Breakout":
+            strong_ready = strong_ready and breakout_quality in {"STRONG", "WEAK"} and effective_volume_ratio >= 1.0
+        elif trade_type == "Pullback":
+            strong_ready = strong_ready and pullback_score >= 64 and (
+                in_pullback_zone or effective_volume_ratio >= 1.0 or trend == "صاعد قوي"
+            )
+
+        cautious_ready = (
+            blended_quality >= 66
+            and core_quality >= 60
+            and risk_pct <= 12
+            and breakout_quality != "FAILED"
+        )
+        if market_open:
+            cautious_ready = cautious_ready and execution_layer_score >= 38
+
+        decision = "مراقبة"
+        if strong_ready:
+            decision = "دخول قوي"
+        elif cautious_ready:
+            decision = "دخول بحذر"
+
+        stock["decision"] = decision
+        stock["execution_status"] = compute_execution_status(
+            trade_type, decision, trend, effective_volume_ratio, catalyst_score, breakout_quality
+        )
+        stock["owner_action"] = owner_decision(decision, trend, breakout_quality, effective_volume_ratio, catalyst_score)
+        return stock
+    except:
+        return stock
+
+
 def compute_pullback_context(current_price: float, high_price: float, low_price: float, intraday: dict, trend: str) -> dict:
     try:
         session_high = float((intraday or {}).get("session_high", 0) or 0)
@@ -2503,40 +2720,6 @@ def trade_plan_pro(symbol):
 
     risk_pct = ((entry - stop) / entry) * 100 if entry > 0 else 0
 
-    quality = 50
-    if trend_data["trend"] == "صاعد قوي":
-        quality += 18
-    elif trend_data["trend"] == "صاعد":
-        quality += 10
-    elif trend_data["trend"] == "متذبذب":
-        quality -= 5
-    else:
-        quality -= 18
-
-    if effective_volume_ratio >= 1.5:
-        quality += 12
-    elif effective_volume_ratio >= 1.2:
-        quality += 8
-    elif effective_volume_ratio >= 1.0:
-        quality += 4
-    else:
-        quality -= 6
-
-    if volume_pace_ratio >= 1.25:
-        quality += 7
-    elif volume_pace_ratio >= 1.0:
-        quality += 3
-    elif intraday.get("market_open"):
-        quality -= 4
-
-    if catalyst_score > 0:
-        quality += catalyst_score
-
-    if hist["ath_breakout_zone"]:
-        quality -= 6
-    elif hist["near_52w_high"]:
-        quality -= 2
-
     breakout_quality = breakout_quality_label(
         trade_type,
         "صاعد" if trend_data["trend"] in ["صاعد", "صاعد قوي"] else trend_data["trend"],
@@ -2544,59 +2727,30 @@ def trade_plan_pro(symbol):
         0.75,
         effective_volume_ratio,
     )
-    if breakout_quality == "FAILED":
-        quality -= 25
-    elif breakout_quality == "WEAK":
-        quality -= 8
-    elif breakout_quality == "STRONG":
-        quality += 6
 
     pullback_score = int(pullback_context.get("pullback_score", 0) or 0)
-    if trade_type == "Pullback":
-        if pullback_score >= 70:
-            quality += 10
-        elif pullback_score >= 58:
-            quality += 5
-        else:
-            quality -= 4
-
-    quality += price_penalty
-
-    if risk_pct > 12:
-        quality -= 18
-    elif risk_pct > 8:
-        quality -= 10
-    elif risk_pct > 5:
-        quality -= 4
-
-    quality = max(1, min(99, int(round(quality))))
+    core_quality = compute_core_quality_score(
+        trend_data["trend"],
+        effective_volume_ratio,
+        catalyst_score,
+        hist,
+        breakout_quality,
+        pullback_score,
+        trade_type,
+        price_penalty,
+        risk_pct,
+    )
+    quality = core_quality
     rank_label = make_rank_label(quality)
 
     rr_1_preview = 0.0
     if entry > 0 and stop > 0 and target1 > 0 and entry > stop:
         rr_1_preview = (target1 - entry) / (entry - stop) if (entry - stop) > 0 else 0.0
 
-    strong_ready = (
-        quality >= 84
-        and risk_pct <= 8.5
-        and rr_1_preview >= 0.75
-        and effective_volume_ratio >= 0.95
-        and trend_data["trend"] in {"صاعد", "صاعد قوي"}
-        and breakout_quality != "FAILED"
-    )
-    if trade_type == "Breakout":
-        strong_ready = strong_ready and breakout_quality in {"STRONG", "WEAK"} and effective_volume_ratio >= 1.0
-    elif trade_type == "Pullback":
-        strong_ready = strong_ready and pullback_score >= 64 and (
-            bool(pullback_context.get("in_pullback_zone")) or effective_volume_ratio >= 1.0 or trend_data["trend"] == "صاعد قوي"
-        )
-
-    cautious_ready = quality >= 66 and risk_pct <= 12
-
     decision = "مراقبة"
-    if strong_ready:
+    if quality >= 82 and rr_1_preview >= 0.75 and risk_pct <= 8.5 and breakout_quality != "FAILED":
         decision = "دخول قوي"
-    elif cautious_ready:
+    elif quality >= 66 and risk_pct <= 12 and breakout_quality != "FAILED":
         decision = "دخول بحذر"
 
     execution_status = compute_execution_status(
@@ -2670,6 +2824,11 @@ def trade_plan_pro(symbol):
         "target_2": safe_round(target2),
         "risk_pct": safe_round(risk_pct),
         "quality_score": quality,
+        "quality_core_score": core_quality,
+        "execution_layer_score": 50,
+        "execution_layer_label": "محايد",
+        "execution_layer_adjustment": 0,
+        "price_penalty_points": price_penalty,
         "rank_label": rank_label,
         "valid_for": valid_for,
         "trend": trend_data["trend"],
@@ -2704,6 +2863,8 @@ def trade_plan_pro(symbol):
         "financials": financials,
     }
     plan = enrich_strategy_profile(plan)
+    plan["rr_1"] = safe_round(rr_1_preview)
+    plan = apply_decision_layers(plan)
     return plan
 
 
@@ -3645,3 +3806,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
+
