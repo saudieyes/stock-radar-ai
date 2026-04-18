@@ -752,6 +752,120 @@ def decision_priority(decision: str) -> int:
     return 0
 
 
+def _text_label(value) -> str:
+    return str(value or "").strip()
+
+
+def historical_confidence_bonus(label: str) -> float:
+    label = _text_label(label)
+    if "عالية" in label:
+        return 6.0
+    if "متوسطة" in label:
+        return 3.0
+    return 0.0
+
+
+def historical_behavior_bonus(label: str) -> float:
+    label = _text_label(label)
+    if "يدعم" in label:
+        return 4.0
+    if "محايد" in label:
+        return 0.0
+    if "ضعيف" in label or "لا يدعم" in label:
+        return -2.0
+    return 0.0
+
+
+def display_rank_score(item: dict) -> float:
+    try:
+        quality = float(item.get("quality_score", 0) or 0)
+        readiness = float(item.get("execution_readiness_score", 0) or 0)
+        rr = float(item.get("rr_1", 0) or 0)
+        continuation = float(item.get("continuation_score", 0) or 0)
+        runner = float(item.get("runner_score", 0) or 0)
+        alignment = float(item.get("alignment_score", 0) or 0)
+        risk_pct = float(item.get("display_risk_pct", item.get("risk_pct", 0)) or 0)
+        effective_volume = float(item.get("effective_volume_ratio", 0) or 0)
+        volume_pace = float(item.get("volume_pace_ratio", 0) or 0)
+
+        phase = _text_label(item.get("market_phase"))
+        readiness_label = _text_label(item.get("execution_readiness_label"))
+        freshness_label = _text_label(item.get("price_freshness_label"))
+        execution_status = _text_label(item.get("execution_status"))
+        signal_stage = _text_label(item.get("signal_stage"))
+        news_label = _text_label((item.get("metric_news") or {}).get("label"))
+        hist_conf = _text_label(item.get("historical_confidence_label"))
+        hist_behavior = _text_label(item.get("historical_behavior_label"))
+
+        score = quality
+        score += readiness * 0.45
+        score += max(-4.0, min(rr, 3.0)) * 7.0
+        score += continuation * 0.10
+        score += runner * 0.08
+        score += alignment * 0.08
+        score += min(effective_volume, 2.5) * 4.0
+
+        if phase == "open":
+            if volume_pace >= 1.2:
+                score += 3.0
+            elif volume_pace >= 1.0:
+                score += 1.5
+            elif volume_pace < 0.9:
+                score -= 2.0
+
+        score += historical_confidence_bonus(hist_conf)
+        score += historical_behavior_bonus(hist_behavior)
+
+        if readiness_label in {"جاهز", "اختراق مؤكد", "ارتداد مؤكد"}:
+            score += 5.0
+        elif "انتظار" in readiness_label:
+            score += 1.5
+        elif "مطاردة" in readiness_label:
+            score -= 8.0
+
+        if execution_status == "READY":
+            score += 4.0
+        elif execution_status == "WAIT_CONFIRM":
+            score += 1.0
+        elif execution_status == "AVOID":
+            score -= 10.0
+
+        if "إيجابي" in news_label:
+            score += 2.0
+        elif "سلبي" in news_label or "غير معتمد" in news_label:
+            score -= 6.0
+
+        if phase == "open" and "آخر إغلاق" in freshness_label:
+            score -= 4.0
+
+        if signal_stage == "إنذار مبكر":
+            score -= 1.5
+
+        if risk_pct > 8:
+            score -= 5.0
+        elif risk_pct > 6:
+            score -= 2.0
+
+        return round(score, 2)
+    except:
+        return float(item.get("quality_score", 0) or 0)
+
+
+def sort_display_bucket(items):
+    return sorted(
+        list(items or []),
+        key=lambda x: (
+            float(x.get("display_rank_score", display_rank_score(x)) or 0),
+            float(x.get("quality_score", 0) or 0),
+            float(x.get("execution_readiness_score", 0) or 0),
+            float(x.get("rr_1", 0) or 0),
+            float(x.get("continuation_score", 0) or 0),
+            float(x.get("runner_score", 0) or 0),
+        ),
+        reverse=True,
+    )
+
+
 def compute_execution_status(trade_type: str, decision: str, trend: str, volume_ratio: float, catalyst_score: float, breakout_quality: str) -> str:
     if breakout_quality == "FAILED" and trade_type == "Breakout":
         return "AVOID"
@@ -2961,7 +3075,22 @@ def scan_all():
             except:
                 continue
 
-    rows.sort(key=lambda x: (decision_priority(x.get("decision", "")), x.get("quality_score", 0)), reverse=True)
+    for item in rows:
+        try:
+            item["display_rank_score"] = display_rank_score(item)
+        except:
+            item["display_rank_score"] = float(item.get("quality_score", 0) or 0)
+
+    rows.sort(
+        key=lambda x: (
+            decision_priority(x.get("decision", "")),
+            float(x.get("display_rank_score", 0) or 0),
+            float(x.get("quality_score", 0) or 0),
+            float(x.get("execution_readiness_score", 0) or 0),
+            float(x.get("rr_1", 0) or 0),
+        ),
+        reverse=True,
+    )
 
     # تسجيل التتبع الأسبوعي بشكل تسلسلي بعد انتهاء الفحص كله لتجنب ضياع بعض الإشارات.
     for item in rows:
@@ -3101,9 +3230,9 @@ def health():
 def trade_scan():
     results = scan_all()
 
-    strong = [x for x in results if x.get("decision") == "دخول قوي"]
-    cautious = [x for x in results if x.get("decision") == "دخول بحذر"]
-    watch = [x for x in results if x.get("decision") == "مراقبة"]
+    strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي"])
+    cautious = sort_display_bucket([x for x in results if x.get("decision") == "دخول بحذر"])
+    watch = sort_display_bucket([x for x in results if x.get("decision") == "مراقبة"])
 
     return {
         "market_phase": get_market_phase(),
@@ -3846,5 +3975,3 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
-
