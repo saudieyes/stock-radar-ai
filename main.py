@@ -2344,33 +2344,72 @@ def apply_decision_layers(stock: dict) -> dict:
         market_open = bool((stock.get("intraday", {}) or {}).get("market_open", False))
         in_pullback_zone = bool(stock.get("in_pullback_zone", False))
 
+        if core_quality >= 84:
+            core_band = "ممتاز"
+        elif core_quality >= 76:
+            core_band = "قوي"
+        elif core_quality >= 64:
+            core_band = "جيد"
+        else:
+            core_band = "ضعيف"
+
+        if not market_open:
+            execution_band = "محايد"
+        elif execution_layer_score >= 60:
+            execution_band = "داعم قوي"
+        elif execution_layer_score >= 50:
+            execution_band = "داعم"
+        elif execution_layer_score >= 42:
+            execution_band = "محايد"
+        else:
+            execution_band = "ضعيف"
+
+        stock["quality_core_band"] = core_band
+        stock["execution_layer_band"] = execution_band
+
+        positive_trend = trend in {"صاعد", "صاعد قوي"}
+        breakout_ok = breakout_quality in {"STRONG", "WEAK"}
+        breakout_elite = breakout_quality == "STRONG"
+        pullback_ok = pullback_score >= 58
+        pullback_strong = pullback_score >= 66 and (in_pullback_zone or effective_volume_ratio >= 1.0 or trend == "صاعد قوي")
+
         strong_ready = (
-            blended_quality >= 82
-            and core_quality >= 76
+            core_quality >= 78
             and risk_pct <= 8.5
-            and rr_1 >= 0.75
+            and rr_1 >= 0.72
             and effective_volume_ratio >= 0.95
-            and trend in {"صاعد", "صاعد قوي"}
+            and positive_trend
             and breakout_quality != "FAILED"
         )
-        if market_open:
-            strong_ready = strong_ready and execution_layer_score >= 46
 
         if trade_type == "Breakout":
-            strong_ready = strong_ready and breakout_quality in {"STRONG", "WEAK"} and effective_volume_ratio >= 1.0
+            strong_ready = strong_ready and breakout_ok and (
+                breakout_elite
+                or (core_quality >= 84 and effective_volume_ratio >= 1.0)
+            )
         elif trade_type == "Pullback":
-            strong_ready = strong_ready and pullback_score >= 64 and (
-                in_pullback_zone or effective_volume_ratio >= 1.0 or trend == "صاعد قوي"
+            strong_ready = strong_ready and pullback_strong
+
+        if market_open:
+            strong_ready = strong_ready and (
+                execution_layer_score >= 54
+                or (core_quality >= 84 and execution_layer_score >= 48)
             )
 
         cautious_ready = (
-            blended_quality >= 66
-            and core_quality >= 60
+            core_quality >= 62
             and risk_pct <= 12
+            and positive_trend
             and breakout_quality != "FAILED"
         )
+
+        if trade_type == "Breakout":
+            cautious_ready = cautious_ready and breakout_ok and effective_volume_ratio >= 0.9
+        elif trade_type == "Pullback":
+            cautious_ready = cautious_ready and (pullback_ok or in_pullback_zone)
+
         if market_open:
-            cautious_ready = cautious_ready and execution_layer_score >= 38
+            cautious_ready = cautious_ready and execution_layer_score >= 36
 
         decision = "مراقبة"
         if strong_ready:
@@ -2379,6 +2418,7 @@ def apply_decision_layers(stock: dict) -> dict:
             decision = "دخول بحذر"
 
         stock["decision"] = decision
+        stock["decision_layer_note"] = f"Core: {core_band} | Execution: {execution_band}"
         stock["execution_status"] = compute_execution_status(
             trade_type, decision, trend, effective_volume_ratio, catalyst_score, breakout_quality
         )
