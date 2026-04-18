@@ -321,6 +321,29 @@
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px;
     }
 
+    .label-row, .section-title-row {
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+    }
+    .section-title-row { width:100%; }
+    .info-btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:26px; height:26px; min-width:26px; border-radius:999px;
+      background:var(--ghost-bg); border:1px solid var(--ghost-border);
+      color:var(--text-strong); font-size:13px; font-weight:900; cursor:pointer;
+      padding:0; line-height:1;
+    }
+    .info-btn:hover { opacity:1; transform:translateY(-1px); }
+    .info-popover {
+      position:fixed; z-index:60; width:300px; max-width:calc(100vw - 24px);
+      background:var(--panel-bg); color:var(--text-main);
+      border:1px solid var(--border-main); border-radius:16px; box-shadow:var(--shadow-main);
+      padding:12px 14px; display:none;
+    }
+    .info-popover.visible { display:block; }
+    .info-popover-title { color:var(--text-strong); font-size:14px; font-weight:900; margin-bottom:6px; }
+    .info-popover-body { color:var(--text-main); font-size:13px; line-height:1.8; }
+    .section-count-hint { color:var(--text-muted); font-size:12px; }
+
     @media (max-width: 860px) {
       .topbar, .hero { grid-template-columns:1fr; display:block; }
       .hero-right, .compact-grid, .details-grid, .form-grid { grid-template-columns:1fr; }
@@ -351,6 +374,8 @@
         <button class="ghost" onclick="logoutSession()">تسجيل الخروج</button>
       </div>
     </div>
+
+    <div id="infoPopover" class="info-popover" role="dialog" aria-live="polite"></div>
 
     <div class="hero">
       <div class="hero-left">
@@ -387,6 +412,7 @@
         <div class="glossary-item">الصفحة أصبحت مختصرة، والتفاصيل الكاملة داخل كل بطاقة عند الضغط على <b>عرض التفاصيل الكاملة</b>.</div>
         <div class="glossary-item">الأقسام الرئيسية تبدأ <b>مخفية</b> لتصل بسرعة لأي قائمة تريدها دون تمرير طويل.</div>
         <div class="glossary-item">الأداء الأسبوعي يعرض <b>ملخصًا سريعًا</b> لكل نوع، وتفاصيل الصفقات تظهر فقط عند الطلب.</div>
+        <div class="glossary-item">اضغط <b>ℹ️</b> بجانب الخانة لتظهر فائدتها بسرعة ثم تختفي عند الضغط في أي مكان خارجها.</div>
       </div>
     </div>
 
@@ -410,7 +436,7 @@
     <div class="section scroll-anchor" id="riskPanelSection">
       <div class="section-header">
         <div class="section-heading">
-          <div class="section-title">⚖️ Position Size & Risk Panel</div>
+          <div class="section-title-row"><div class="section-title">⚖️ Position Size & Risk Panel</div><button class="info-btn" type="button" data-info-key="risk_panel" onclick="toggleInfo(event)" aria-label="شرح لوحة الحجم والمخاطرة">ℹ️</button></div>
           <div class="section-count" id="riskSettingsLabel">إعدادات موحدة لحجم الصفقة والمخاطرة</div>
         </div>
       </div>
@@ -657,18 +683,143 @@
       return parts.join(' | ');
     }
 
-    function compactItem(label, value) {
+    const INFO_TEXTS = {
+      '🔥 دخول قوي': { title: 'دخول قوي', body: 'أفضل فرص القائمة حاليًا. الترتيب داخل القسم من الأعلى جودة ثم الأفضل تنفيذًا ثم الأنسب عائدًا.' },
+      '🟠 دخول بحذر': { title: 'دخول بحذر', body: 'فرصة جيدة لكنها تحتاج تأكيدًا أكبر أو تنفيذًا أدق أو أن عائدها/مخاطرتها ليست مثالية بعد.' },
+      '👀 المراقبة': { title: 'المراقبة', body: 'سهم تحت المتابعة وليس جاهزًا للتنفيذ الآن. استخدمه للترقب لا للدخول السريع.' },
+      'جاهزية التنفيذ': { title: 'جاهزية التنفيذ', body: 'هل الخطة صالحة للتنفيذ الآن أم ما زالت تحتاج اختراقًا أو تأكيدًا أو صبرًا أكثر.' },
+      'وضع التنفيذ': { title: 'وضع التنفيذ', body: 'الخلاصة العملية الآن: دخول مباشر أو انتظار اختراق أو مراقبة فقط.' },
+      'العائد/المخاطرة': { title: 'العائد/المخاطرة', body: 'تقارن الهدف المتوقع بالخسارة المحتملة. كلما ارتفعت كانت الصفقة أكثر جاذبية.' },
+      'الجودة': { title: 'الجودة', body: 'الدرجة الأساسية لجوهر الفرصة: اتجاه وسيولة وخطة ومخاطرة وجودة الكسر أو الارتداد.' },
+      'الاتجاه': { title: 'الاتجاه', body: 'يبين قوة الاتجاه العام للسهم. الاتجاه الأقوى يعطي الفكرة دعمًا أكبر.' },
+      'السيولة اليومية': { title: 'السيولة اليومية', body: 'تقارن حجم التداول المعتاد بتاريخ السهم. السيولة الأعلى تعني سهولة حركة وتنفيذ أفضل.' },
+      'سيولة السرعة': { title: 'سيولة السرعة', body: 'هل الوتيرة الحالية للحجم تدعم الزخم الآن، خصوصًا أثناء الجلسة.' },
+      'السيولة الفعلية': { title: 'السيولة الفعلية', body: 'الخلاصة العملية للسيولة بعد دمج الحجم المعتاد والسرعة الحالية. هذه أهم من قراءة الحجم الخام وحده.' },
+      'تقييم الاستمرار': { title: 'تقييم الاستمرار', body: 'احتمال استمرار الحركة بعد الدخول. الإيجابي يدعم بقاء الزخم، والحذر يعني احتمال تباطؤ أسرع.' },
+      'Runner Score': { title: 'Runner Score', body: 'يقيس صفات السهم القادر على تمديد الحركة. كلما ارتفع زادت قابلية السهم أن يصبح runner.' },
+      'Continuation Score': { title: 'Continuation Score', body: 'يقيس احتمال استمرار المسار الحالي بعد الاختراق أو الحركة. الأعلى يعني دعمًا أفضل للاستمرار.' },
+      'التوافق الزمني': { title: 'التوافق الزمني', body: 'هل الاتجاه اليومي والحركة الأقرب يدعمان بعضهما. التوافق الأعلى يزيد ثقة القرار.' },
+      'ATR 14': { title: 'ATR 14', body: 'متوسط التذبذب الطبيعي خلال آخر 14 يومًا. اخترناه لأنه متوازن: أسرع من 20 وأثبت من 10.' },
+      'ATR %': { title: 'ATR %', body: 'نفس ATR لكن كنسبة من السعر، لتسهيل مقارنة تذبذب الأسهم المختلفة.' },
+      'وصف التذبذب': { title: 'وصف التذبذب', body: 'يلخص هل السهم هادئ أو متوازن أو نشط. يفيدك في اختيار وقف يناسب طبيعة الحركة.' },
+      'وقف ATR المقترح': { title: 'وقف ATR المقترح', body: 'وقف مبني على تذبذب السهم الطبيعي لا على رقم عشوائي. يفيدك في وقف أكثر واقعية.' },
+      'هدف ATR 1': { title: 'هدف ATR 1', body: 'هدف أول تقريبي مبني على ATR. يعطيك قياسًا واقعيًا للحركة المتوقعة.' },
+      'هدف ATR 2': { title: 'هدف ATR 2', body: 'هدف ممتد أبعد من الهدف الأول، مناسب إذا استمر الزخم بشكل جيد.' },
+      'السلوك التاريخي': { title: 'السلوك التاريخي', body: 'القراءة التاريخية الأقرب لهذه الحالة: هل مثل هذه الفرص نجحت سابقًا أم كانت محايدة أو أضعف.' },
+      'ثقة السلوك التاريخي': { title: 'ثقة السلوك التاريخي', body: 'قوة الثقة مبنية على حجم العينة ومدى اتساق النتائج السابقة، لا على الانطباع فقط.' },
+      'نجاح الاختراقات تاريخيًا': { title: 'نجاح الاختراقات تاريخيًا', body: 'كم مرة نجح الاختراق في حالات مشابهة، وما سرعة الحركة المعتادة بعدها.' },
+      'نجاح الارتدادات تاريخيًا': { title: 'نجاح الارتدادات تاريخيًا', body: 'كم مرة نجحت الارتدادات المشابهة سابقًا. يفيدك حتى في أسهم الاختراق لمعرفة سلوكها العام.' },
+      'استجابة السيولة تاريخيًا': { title: 'استجابة السيولة تاريخيًا', body: 'هل كانت السيولة القوية تاريخيًا تتبعها حركة حقيقية أم مجرد نشاط مؤقت.' },
+      'لوحة الحجم والمخاطرة': { title: 'لوحة الحجم والمخاطرة', body: 'تحسب لك عدد الأسهم المناسب ورأس المال المطلوب والخطر بالدولار حسب إعداداتك.' },
+      'risk_panel': { title: 'Position Size & Risk Panel', body: 'أدخل حجم حسابك ونسبة مخاطرتك، ثم تستخدم الأداة هذه الإعدادات لحساب حجم صفقة منضبط لكل فرصة.' },
+      'الإنذار المبكر': { title: 'الإنذار المبكر', body: 'تنبيه قبل اكتمال الإشارة الكاملة. يفيدك في التحضير المبكر لكنه ليس بديلًا عن التأكيد.' },
+      'إجراء المالك': { title: 'إجراء المالك', body: 'أوضح خطوة عملية للمستخدم الآن: ادخل أو انتظر كسرًا أو تأكيدًا أو اكتفِ بالمراقبة.' },
+      'ملخص عربي سريع': { title: 'ملخص عربي سريع', body: 'خلاصة سريعة جدًا لسبب التوصية وفائدة الخانة للمستخدم دون الحاجة لقراءة كل التفاصيل.' },
+      'ملخص فني': { title: 'ملخص فني', body: 'وصف فني مختصر يجمع أهم العوامل المؤثرة في هذه الفرصة.' },
+      'المحفز/الخبر': { title: 'المحفز/الخبر', body: 'وجود خبر أو محفز حديث قد يدعم الحركة. الخبر الإيجابي الحقيقي أقوى من المقالات والرأي.' },
+      'شرح الخبر': { title: 'شرح الخبر', body: 'يوضح لماذا عُدّ الخبر إيجابيًا أو سلبيًا أو محايدًا، وهل يعتمد عليه أم لا.' },
+      'تعويض التأخير': { title: 'تعويض التأخير', body: 'تقدير داخلي يساعد على التعامل مع تأخر بعض البيانات حتى لا يبدو القرار مضللًا.' },
+      'مصدر السعر': { title: 'مصدر السعر', body: 'من أين جاءت قراءة السعر الحالية: لحظي أو ممتد أو آخر إغلاق. هذا مهم قبل التنفيذ.' },
+      'حداثة السعر': { title: 'حداثة السعر', body: 'هل السعر حديث وقابل للاعتماد الآن أم أنه آخر إغلاق فقط. في السوق المفتوح هذه الخانة مهمة جدًا.' },
+      'نوع الخطة': { title: 'نوع الخطة', body: 'هل الفكرة اختراق أو ارتداد أو إعادة دخول. نوع الخطة يغير طريقة التنفيذ والمتابعة.' },
+      'نوع الفرصة': { title: 'نوع الفرصة', body: 'النوع العملي للفرصة كما ستتعامل معها في السوق، مثل اختراق مقاومة أو ارتداد من دعم.' },
+      'سعر الاختراق': { title: 'سعر الاختراق', body: 'المستوى الذي إذا تجاوزه السعر يبدأ نموذج الاختراق بالتفعل.' },
+      'سعر التأكيد': { title: 'سعر التأكيد', body: 'مستوى إضافي لتقليل الاختراقات الكاذبة. بعده يصبح الدخول أكثر أمانًا.' },
+      'الدخول الفعلي': { title: 'الدخول الفعلي', body: 'السعر العملي المتوقع للدخول بعد تحقق الاختراق أو الارتداد والتأكيد.' },
+      'آخر دخول مناسب': { title: 'آخر دخول مناسب', body: 'أبعد سعر ما يزال مقبولًا للدخول قبل أن تصبح الصفقة مطاردة أو تقل جاذبيتها.' },
+      'المخاطرة %': { title: 'المخاطرة %', body: 'نسبة المسافة بين الدخول والوقف. كلما ارتفعت احتجت إدارة حجم أدق.' },
+      'تصنيف المخاطرة': { title: 'تصنيف المخاطرة', body: 'ملخص سريع لمدى اتساع الوقف وصعوبة إدارة الصفقة.' },
+      'حالة السوق': { title: 'حالة السوق', body: 'هل السوق مفتوح أم قبل الافتتاح أم بعد الإغلاق. هذا يغيّر وزن الجاهزية وحداثة السعر.' }
+    };
+
+    function renderInfoButton(key) {
+      if (!INFO_TEXTS[key]) return '';
+      const encoded = encodeURIComponent(key);
+      return `<button class="info-btn" type="button" data-info-key="${encoded}" onclick="toggleInfo(event)" aria-label="شرح ${safeText(key)}">ℹ️</button>`;
+    }
+
+    function renderLabelWithInfo(label, infoKey = '', className = 'detail-label') {
+      const key = infoKey || label;
+      return `<div class="label-row"><span class="${className}">${safeText(label)}</span>${renderInfoButton(key)}</div>`;
+    }
+
+    function closeInfoPopover() {
+      const pop = document.getElementById('infoPopover');
+      if (!pop) return;
+      pop.classList.remove('visible');
+      pop.style.display = 'none';
+      pop.dataset.key = '';
+    }
+
+    function toggleInfo(event) {
+      const btn = event.currentTarget || event.target.closest('.info-btn');
+      if (!btn) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const key = decodeURIComponent(btn.dataset.infoKey || '');
+      const info = INFO_TEXTS[key];
+      const pop = document.getElementById('infoPopover');
+      if (!info || !pop) return;
+
+      const sameKeyOpen = pop.classList.contains('visible') && pop.dataset.key === key;
+      if (sameKeyOpen) {
+        closeInfoPopover();
+        return;
+      }
+
+      pop.innerHTML = `
+        <div class="info-popover-title">${safeText(info.title || key)}</div>
+        <div class="info-popover-body">${safeText(info.body || '')}</div>
+      `;
+      pop.dataset.key = key;
+      pop.classList.add('visible');
+      pop.style.display = 'block';
+
+      const rect = btn.getBoundingClientRect();
+      const pad = 12;
+      const preferredWidth = Math.min(320, window.innerWidth - 24);
+      pop.style.width = `${preferredWidth}px`;
+
+      let left = rect.left + (rect.width / 2) - (preferredWidth / 2);
+      if (left < pad) left = pad;
+      if (left + preferredWidth > window.innerWidth - pad) left = window.innerWidth - preferredWidth - pad;
+
+      pop.style.left = `${left}px`;
+      pop.style.top = `${rect.bottom + 10}px`;
+
+      requestAnimationFrame(() => {
+        const currentRect = pop.getBoundingClientRect();
+        if (currentRect.bottom > window.innerHeight - pad) {
+          const top = Math.max(pad, rect.top - currentRect.height - 10);
+          pop.style.top = `${top}px`;
+        }
+      });
+    }
+
+    document.addEventListener('click', function(event) {
+      const pop = document.getElementById('infoPopover');
+      if (!pop || !pop.classList.contains('visible')) return;
+      if (pop.contains(event.target)) return;
+      if (event.target.closest('.info-btn')) return;
+      closeInfoPopover();
+    });
+
+    window.addEventListener('resize', closeInfoPopover);
+    window.addEventListener('scroll', closeInfoPopover, true);
+
+    function compactItem(label, value, infoKey='') {
       return `
         <div class="compact-item">
-          <div class="compact-label">${safeText(label)}</div>
+          ${renderLabelWithInfo(label, infoKey || label, 'compact-label')}
           <div class="compact-value">${value || '—'}</div>
         </div>`;
     }
 
-    function detailBox(label, value, full=false) {
+    function detailBox(label, value, full=false, infoKey='') {
       if (value === null || value === undefined || value === "") return '';
       return `<div class="detail-box ${full ? 'full' : ''}">
-        <div class="detail-label">${safeText(label)}</div>
+        ${renderLabelWithInfo(label, infoKey || label, 'detail-label')}
         <div class="detail-value">${value}</div>
       </div>`;
     }
@@ -972,7 +1123,10 @@
         <div class="section scroll-anchor" id="${sectionId}">
           <div class="section-header">
             <div class="section-heading">
-              <div class="section-title">${title}</div>
+              <div class="section-title-row">
+                <div class="section-title">${title}</div>
+                ${renderInfoButton(title)}
+              </div>
               <div class="section-count">${count} سهم</div>
             </div>
             <div class="section-tools">
@@ -983,6 +1137,29 @@
             <div class="cards"><div class="empty">اضغط إظهار لعرض القائمة</div></div>
           </div>
         </div>`;
+    }
+
+    function displaySortScore(item) {
+      const rank = Number(item?.display_rank_score || 0);
+      if (rank) return rank;
+      const quality = Number(item?.quality_score || 0);
+      const readiness = Number(item?.execution_readiness_score || 0);
+      const rr = Number(item?.rr_1 || 0);
+      const continuation = Number(item?.continuation_score || 0);
+      const runner = Number(item?.runner_score || 0);
+      const alignment = Number(item?.alignment_score || 0);
+      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08);
+    }
+
+    function sortDisplayItems(items) {
+      return [...(items || [])].sort((a, b) => {
+        return (
+          displaySortScore(b) - displaySortScore(a) ||
+          Number(b?.quality_score || 0) - Number(a?.quality_score || 0) ||
+          Number(b?.execution_readiness_score || 0) - Number(a?.execution_readiness_score || 0) ||
+          Number(b?.rr_1 || 0) - Number(a?.rr_1 || 0)
+        );
+      });
     }
 
     function renderStatusbar(data) {
@@ -1017,9 +1194,9 @@
     }
 
     function renderSections(data) {
-      const strong = data.strong_entries || [];
-      const cautious = data.cautious_entries || [];
-      const watch = data.watchlist || [];
+      const strong = sortDisplayItems(data.strong_entries || []);
+      const cautious = sortDisplayItems(data.cautious_entries || []);
+      const watch = sortDisplayItems(data.watchlist || []);
       window.__sectionItems = {
         'strong-section-content': strong,
         'cautious-section-content': cautious,
@@ -1287,4 +1464,3 @@
   </script>
 </body>
 </html>
-
