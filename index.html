@@ -879,36 +879,31 @@
       const badge = String(stock.news_badge || '').trim();
 
       if (scope === 'opinion' || baseCategory === 'opinion') {
-        return { category: 'opinion', badge: badge || '🚫 مقال رأي غير معتمد' };
+        return { category: 'opinion', badge };
       }
       if (baseCategory === 'legal') {
-        return { category: 'legal', badge: badge || '⛔ خبر قانوني مباشر' };
+        return { category: 'legal', badge };
       }
       if (scope === 'market') {
-        return { category: 'market', badge: badge || '📰 سياق سوق عام' };
+        return { category: 'market', badge };
       }
       if (scope === 'sector') {
-        if (baseCategory === 'negative') return { category: 'sector', badge: badge || '🏭 خبر قطاعي ضاغط' };
-        if (baseCategory === 'positive') return { category: 'sector', badge: badge || '🏭 خبر قطاعي داعم' };
-        return { category: 'sector', badge: badge || '🏭 سياق قطاعي' };
+        return { category: 'sector', badge };
       }
       if (baseCategory === 'negative') {
-        return { category: 'negative', badge: badge || '🔴 خبر شركة سلبي' };
+        return { category: 'negative', badge };
       }
       if (baseCategory === 'positive') {
-        return { category: 'positive', badge: badge || '🟢 خبر شركة إيجابي' };
+        return { category: 'positive', badge };
       }
-      if (!badge) {
-        return { category: 'neutral', badge: '' };
-      }
-      return { category: baseCategory || 'neutral', badge };
+      return { category: baseCategory || scope || 'neutral', badge };
     }
 
     function newsHeadlineText(stock) {
       const scope = String(stock.news_scope || '').toLowerCase();
       const title = String(stock.news_title || '').trim();
       const context = String(stock.news_context_note || stock.news_note || '').trim();
-      if (scope === 'opinion') return context || 'هذا محتوى رأي وليس خبرًا محفزًا.';
+      if (scope === 'opinion') return context || 'لا يوجد خبر محفز معتمد؛ الموجود مجرد مقال رأي أو قائمة تجميعية.';
       if (scope === 'neutral' || scope === 'unrelated') return context || title || 'لا يوجد خبر محفز معتمد';
       return title || context || 'لا يوجد خبر بارز';
     }
