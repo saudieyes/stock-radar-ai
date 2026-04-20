@@ -787,13 +787,14 @@ def display_rank_score(item: dict) -> float:
         risk_pct = float(item.get("display_risk_pct", item.get("risk_pct", 0)) or 0)
         effective_volume = float(item.get("effective_volume_ratio", 0) or 0)
         volume_pace = float(item.get("volume_pace_ratio", 0) or 0)
+        news_effect = float(item.get("news_effect_score", item.get("catalyst_score", 0)) or 0)
+        news_scope = _text_label(item.get("news_scope"))
 
         phase = _text_label(item.get("market_phase"))
         readiness_label = _text_label(item.get("execution_readiness_label"))
         freshness_label = _text_label(item.get("price_freshness_label"))
         execution_status = _text_label(item.get("execution_status"))
         signal_stage = _text_label(item.get("signal_stage"))
-        news_label = _text_label((item.get("metric_news") or {}).get("label"))
         hist_conf = _text_label(item.get("historical_confidence_label"))
         hist_behavior = _text_label(item.get("historical_behavior_label"))
 
@@ -830,10 +831,13 @@ def display_rank_score(item: dict) -> float:
         elif execution_status == "AVOID":
             score -= 10.0
 
-        if "إيجابي" in news_label:
-            score += 2.0
-        elif "سلبي" in news_label or "غير معتمد" in news_label:
-            score -= 6.0
+        if news_effect != 0:
+            if news_scope == "company":
+                score += news_effect * 0.45
+            elif news_scope == "sector":
+                score += news_effect * 0.30
+            elif news_scope == "market":
+                score += news_effect * 0.15
 
         if phase == "open" and "آخر إغلاق" in freshness_label:
             score -= 4.0
@@ -849,7 +853,6 @@ def display_rank_score(item: dict) -> float:
         return round(score, 2)
     except:
         return float(item.get("quality_score", 0) or 0)
-
 
 def sort_display_bucket(items):
     return sorted(
@@ -2049,53 +2052,7 @@ def trading_sessions_since_news(published_utc: str) -> int:
         return 999
 
 def classify_news_impact(title_lower: str, sessions_since: int):
-    positive_keywords = [
-        "beat", "beats", "strong guidance", "raises guidance", "buyback", "surge",
-        "jumps", "soars", "wins", "upgrade", "partnership", "contract", "record revenue",
-        "secures", "launch", "breakthrough", "approval", "expands", "growth"
-    ]
-    negative_keywords = [
-        "miss", "misses", "cuts guidance", "downgrade", "offering", "dilution", "lawsuit",
-        "probe", "investigation", "warning", "declines", "falls", "plunges", "recall", "delay",
-        "bankruptcy", "default"
-    ]
-
-    is_positive = any(k in title_lower for k in positive_keywords)
-    is_negative = any(k in title_lower for k in negative_keywords)
-
-    pos_score = 0
-    neg_score = 0
-
-    if is_positive:
-        if sessions_since == 0:
-            pos_score = 10
-        elif sessions_since == 1:
-            pos_score = 7
-        elif sessions_since == 2:
-            pos_score = 4
-        else:
-            pos_score = 0
-
-    if is_negative:
-        if sessions_since == 0:
-            neg_score = -10
-        elif sessions_since == 1:
-            neg_score = -8
-        elif sessions_since == 2:
-            neg_score = -6
-        elif sessions_since <= 5:
-            neg_score = -3
-        else:
-            neg_score = 0
-
-    note = ""
-    if is_positive and pos_score > 0:
-        note = "محفز إيجابي حديث"
-    elif is_negative and neg_score < 0:
-        note = "محفز سلبي حديث"
-
-    return pos_score + neg_score, note
-
+    return classify_news_effect("company", detect_news_sentiment(title_lower), sessions_since), ""
 
 
 
@@ -2111,48 +2068,242 @@ def classify_news_freshness_label(sessions_since: int) -> tuple[str, int]:
     return "قديم", 15
 
 
-def detect_news_category(title_lower: str) -> str:
-    insider_negative = [
-        "ceo sold", "chief executive officer sold", "insider sold", "insider selling", "director sold", "officer sold",
-        "board member sold", "sold shares", "disposed shares", "sale of shares", "share sale", "unloaded shares"
-    ]
-    legal_negative = ["lawsuit", "investigation", "investigates", "class action", "investor alert", "law firm", "claims on behalf"]
-    clear_negative = [
-        "downgrade", "guidance cut", "missed estimates", "weak earnings", "offering", "crashed", "crash",
-        "drops", "drop", "plunges", "plunge", "fell", "falls", "declines", "slumps", "slump", "revenue drops"
-    ]
-    positive = [
-        "upgrade", "approval", "partnership", "contract", "buyback", "beats", "beat estimates", "record revenue",
-        "raises guidance", "strong guidance", "wins", "surge", "soars", "jumps", "order", "award", "fda"
-    ]
+NEWS_SCOPE_LABELS = {
+    "company": "خبر شركة",
+    "sector": "خبر قطاعي",
+    "market": "سياق سوق عام",
+    "opinion": "مقال رأي",
+    "neutral": "محايد",
+    "unrelated": "غير ذي صلة",
+}
+
+
+def news_scope_label(scope: str) -> str:
+    return NEWS_SCOPE_LABELS.get(str(scope or "neutral"), "محايد")
+
+
+def get_sector_name_variants(sector: str, industry: str) -> list[str]:
+    stop_words = {
+        "and", "other", "general", "specialty", "services", "service", "products", "product",
+        "industries", "industry", "consumer", "capital", "markets", "market", "systems", "system",
+        "equipment", "devices", "technology", "technologies", "communications", "communication"
+    }
+    variants = set()
+    for raw in [sector, industry]:
+        txt = normalize_text(raw)
+        if not txt:
+            continue
+        variants.add(txt)
+        parts = [p for p in txt.split() if p and p not in stop_words]
+        if len(parts) >= 2:
+            variants.add(" ".join(parts[:2]))
+        for part in parts:
+            if len(part) >= 4:
+                variants.add(part)
+
+        if "semiconductor" in txt or "chip" in txt:
+            variants.update({"semiconductor", "semiconductors", "chip", "chips"})
+        if "software" in txt or "cloud" in txt:
+            variants.update({"software", "cloud", "saas"})
+        if "biotech" in txt or "pharma" in txt or "drug" in txt:
+            variants.update({"biotech", "biotechnology", "pharma", "pharmaceutical", "drug", "drugs"})
+        if "oil" in txt or "energy" in txt or "gas" in txt:
+            variants.update({"oil", "crude", "energy", "gas"})
+        if "bank" in txt or "financial" in txt:
+            variants.update({"bank", "banks", "financial", "financials"})
+        if "insurance" in txt:
+            variants.update({"insurance", "insurer", "insurers"})
+
+    cleaned = []
+    for v in variants:
+        v = v.strip()
+        if len(v) >= 4:
+            cleaned.append(v)
+    return list(dict.fromkeys(cleaned))
+
+
+def detect_news_sentiment(text_lower: str) -> str:
     opinion_only = [
         "is it finally time to buy", "is it time to buy", "why this stock", "opinion", "analysis", "article",
-        "i finally pulled the trigger", "here s what this means", "here's what this means", "better ev stock"
+        "i finally pulled the trigger", "here s what this means", "here's what this means", "better ev stock",
+        "top stocks to buy", "best stocks to buy", "why i like", "why i love", "my take", "analyst says"
+    ]
+    legal_negative = [
+        "lawsuit", "investigation", "investigates", "class action", "investor alert", "law firm",
+        "lead plaintiff", "securities class action", "claims on behalf", "probe", "subpoena"
+    ]
+    negative_keywords = [
+        "miss", "misses", "cuts guidance", "guidance cut", "downgrade", "offering", "dilution", "warning",
+        "declines", "falls", "plunges", "recall", "delay", "bankruptcy", "default", "selloff",
+        "pulls back", "pullback", "tension", "tensions", "tariff", "tariffs", "conflict", "war",
+        "pressure", "risk off", "slump", "slumps", "crash", "crashed", "fraud", "short report",
+        "weak earnings", "missed estimates", "insider sold", "shareholder alert"
+    ]
+    positive_keywords = [
+        "beat", "beats", "strong guidance", "raises guidance", "buyback", "surge", "jumps", "soars",
+        "wins", "upgrade", "partnership", "contract", "record revenue", "secures", "launch",
+        "breakthrough", "approval", "expands", "growth", "record", "tops estimates", "award",
+        "rebound", "rally", "gains", "strong demand", "new order", "orders"
     ]
 
-    if any(k in title_lower for k in insider_negative):
-        return "negative"
-    if any(k in title_lower for k in legal_negative):
-        return "legal"
-    if any(k in title_lower for k in clear_negative):
-        return "negative"
-    if any(k in title_lower for k in positive):
-        return "positive"
-    if any(k in title_lower for k in opinion_only):
+    if any(k in text_lower for k in opinion_only):
         return "opinion"
+    if any(k in text_lower for k in legal_negative):
+        return "legal"
+
+    positive_hits = sum(1 for k in positive_keywords if k in text_lower)
+    negative_hits = sum(1 for k in negative_keywords if k in text_lower)
+
+    if negative_hits and not positive_hits:
+        return "negative"
+    if positive_hits and not negative_hits:
+        return "positive"
+    if negative_hits and positive_hits:
+        return "negative" if negative_hits >= positive_hits else "positive"
     return "neutral"
 
 
-def get_news_bundle(symbol, company_name=""):
+def detect_news_category(title_lower: str) -> str:
+    sentiment = detect_news_sentiment(title_lower)
+    return "neutral" if sentiment == "opinion" else sentiment
+
+
+def detect_news_scope(symbol: str, company_variants: list[str], sector_variants: list[str], related: list[str], text_lower: str, sentiment: str) -> str:
+    market_keywords = [
+        "stock market today", "market today", "s p 500", "sp 500", "dow jones", "nasdaq", "wall street",
+        "federal reserve", "fed", "fomc", "interest rate", "rate cut", "rate hike", "treasury yield",
+        "treasury yields", "inflation", "cpi", "ppi", "jobs report", "oil", "crude", "hormuz",
+        "macro", "risk off", "risk on", "broad market", "market rally", "market selloff"
+    ]
+
+    company_hit = any(v and v in text_lower for v in company_variants)
+    sector_hit = any(v and v in text_lower for v in sector_variants)
+    symbol_hit = symbol.lower() in text_lower or symbol in related
+    market_hit = any(k in text_lower for k in market_keywords)
+
+    if sentiment == "opinion":
+        return "opinion"
+    if market_hit and not company_hit and not sector_hit:
+        return "market"
+    if company_hit:
+        return "company"
+    if sector_hit:
+        return "sector"
+    if symbol_hit and not market_hit:
+        return "company"
+    if market_hit:
+        return "market"
+    return "neutral"
+
+
+def classify_news_effect(scope: str, sentiment: str, sessions_since: int) -> int:
+    base_map = {
+        ("company", "positive"): 6,
+        ("company", "negative"): -6,
+        ("company", "legal"): -7,
+        ("sector", "positive"): 3,
+        ("sector", "negative"): -3,
+        ("sector", "legal"): -4,
+        ("market", "positive"): 1,
+        ("market", "negative"): -1,
+    }
+    base = int(base_map.get((str(scope or "neutral"), str(sentiment or "neutral")), 0) or 0)
+    if base == 0:
+        return 0
+
+    if sessions_since <= 0:
+        factor = 1.0
+    elif sessions_since == 1:
+        factor = 0.85
+    elif sessions_since == 2:
+        factor = 0.60
+    elif sessions_since <= 5:
+        factor = 0.35
+    else:
+        factor = 0.0
+
+    if base < 0 and sentiment == "legal" and sessions_since <= 10 and factor == 0.0:
+        factor = 0.20
+
+    effect = int(round(base * factor))
+    if effect == 0 and sessions_since <= 2:
+        return 1 if base > 0 else -1
+    return effect
+
+
+def build_news_badge(scope: str, sentiment: str, related_count: int = 0) -> str:
+    scope = str(scope or "neutral")
+    sentiment = str(sentiment or "neutral")
+    if scope == "company":
+        if sentiment == "legal":
+            return "⛔ خبر قانوني مباشر"
+        if sentiment == "negative":
+            return "🔴 خبر شركة سلبي"
+        if sentiment == "positive":
+            return "🟢 خبر شركة إيجابي" if related_count <= 1 else "🟢 خبر شركات ذات صلة"
+        return "⚪ خبر شركة محايد"
+    if scope == "sector":
+        if sentiment == "positive":
+            return "🏭 خبر قطاعي داعم"
+        if sentiment in {"negative", "legal"}:
+            return "🏭 خبر قطاعي ضاغط"
+        return "🏭 سياق قطاعي"
+    if scope == "market":
+        return "📰 سياق سوق عام"
+    if scope == "opinion":
+        return "🚫 مقال رأي غير معتمد"
+    if scope == "unrelated":
+        return "⚪ خبر غير ذي صلة"
+    return "⚪ لا يوجد خبر محفز"
+
+
+def build_news_context_note(scope: str, sentiment: str, freshness_label: str, effect_score: int, related_count: int = 0) -> str:
+    freshness = f" ({freshness_label})" if freshness_label else ""
+    if scope == "company":
+        if sentiment == "positive":
+            if related_count >= 2:
+                return f"خبر حقيقي يخص الشركة ضمن خبر مشترك مع شركات أخرى، وتأثيره مباشر على السهم{freshness}."
+            return f"خبر حقيقي خاص بالشركة وذو أثر مباشر داعم للفكرة{freshness}."
+        if sentiment == "legal":
+            return f"خبر قانوني مباشر على الشركة ويجب اعتباره عامل ضغط واضح على السهم{freshness}."
+        if sentiment == "negative":
+            return f"خبر سلبي مباشر على الشركة ويخصم من الفكرة الأساسية{freshness}."
+        return f"خبر يخص الشركة لكنه لا يقدم محفزًا واضحًا الآن{freshness}."
+    if scope == "sector":
+        if sentiment == "positive":
+            return f"خبر قطاعي داعم يفيد السهم بصورة غير مباشرة وبوزن أخف من خبر الشركة{freshness}."
+        if sentiment in {"negative", "legal"}:
+            return f"خبر قطاعي ضاغط يؤثر على السهم كجزء من القطاع وليس كمحفز خاص بالشركة{freshness}."
+        return f"هذا خبر أو سياق قطاعي يفيد الفهم العام لكنه ليس محفزًا مباشرًا للسهم{freshness}."
+    if scope == "market":
+        if effect_score < 0:
+            return f"هذا خبر سوق عام ضاغط يصف المؤشرات أو النفط أو الفيدرالي، ويُعرض كسياق فقط وليس محفزًا مباشرًا للسهم{freshness}."
+        if effect_score > 0:
+            return f"هذا خبر سوق عام داعم بصورة خفيفة، ويُعرض كسياق عام لا كمحفز خاص بالشركة{freshness}."
+        return f"هذا خبر سوق عام محايد يُعرض كسياق ولا يضيف نقاطًا مباشرة للسهم{freshness}."
+    if scope == "opinion":
+        return "هذا محتوى رأي أو تحليل عام، لذلك لا يُعامل كخبر محفز ولا يضيف نقاطًا."
+    if scope == "unrelated":
+        return "هذا الخبر غير ذي صلة مباشرة بالسهم، لذلك لا يدخل كمحفز."
+    return "لا يوجد خبر محفز واضح يمكن الاعتماد عليه الآن."
+
+
+def get_news_bundle(symbol, company_name="", sector="", industry=""):
     bundle = {
-        "news_note": "لا يوجد خبر حديث",
+        "news_note": "لا يوجد خبر محفز معتمد",
         "news_title": "",
         "news_badge": "",
         "news_category": "neutral",
         "news_sentiment": "neutral",
+        "news_scope": "neutral",
+        "news_scope_label": news_scope_label("neutral"),
         "news_freshness_label": "",
         "news_published_utc": "",
         "news_sessions_since": 999,
+        "news_effect_score": 0,
+        "news_is_catalyst": False,
+        "news_context_note": "لا يوجد خبر محفز واضح يمكن الاعتماد عليه الآن.",
+        "news_related_tickers_count": 0,
         "catalyst_score": 0,
     }
     try:
@@ -2162,67 +2313,115 @@ def get_news_bundle(symbol, company_name=""):
         if not results:
             return bundle
 
-        variants = get_company_name_variants(company_name)
+        company_variants = get_company_name_variants(company_name)
+        sector_variants = get_sector_name_variants(sector, industry)
         best = None
-        best_score = -999
+        best_score = -9999
+        best_opinion = None
+        best_opinion_score = -9999
 
         for item in results:
             title = str(item.get("title", "") or "").strip()
-            title_lower = normalize_text(title)
+            desc = str(item.get("description", "") or item.get("summary", "") or "").strip()
             if not title:
                 continue
 
+            full_text = normalize_text(f"{title} {desc}")
             related = [str(x).upper().strip() for x in item.get("tickers", []) if str(x).strip()]
             published_utc = str(item.get("published_utc", "") or "")
             sessions_since = trading_sessions_since_news(published_utc)
-            freshness_label, _ = classify_news_freshness_label(sessions_since)
+            freshness_label, freshness_score = classify_news_freshness_label(sessions_since)
+            sentiment = detect_news_sentiment(full_text)
+            scope = detect_news_scope(symbol, company_variants, sector_variants, related, full_text, sentiment)
+            effect = classify_news_effect(scope, sentiment, sessions_since)
+            badge = build_news_badge(scope, sentiment, len(related))
+            context_note = build_news_context_note(scope, sentiment, freshness_label, effect, len(related))
 
             relevance = 0
             if symbol in related:
+                relevance += 4
+            if any(v and v in full_text for v in company_variants):
                 relevance += 3
-            if any(v and v in title_lower for v in variants):
+            if any(v and v in full_text for v in sector_variants):
                 relevance += 2
-            if symbol.lower() in title_lower:
-                relevance += 1
 
-            impact, note = classify_news_impact(title_lower, sessions_since)
-            category = detect_news_category(title_lower)
-            if impact == 0 or not note:
+            scope_priority = {
+                "company": 60,
+                "sector": 42,
+                "market": 24,
+                "neutral": 10,
+                "opinion": 0,
+                "unrelated": -12,
+            }.get(scope, 0)
+            sentiment_bonus = {
+                "positive": 5,
+                "negative": 5,
+                "legal": 8,
+                "neutral": 0,
+                "opinion": -5,
+            }.get(sentiment, 0)
+            candidate_score = scope_priority + relevance + freshness_score + (abs(effect) * 5) + sentiment_bonus
+
+            candidate = {
+                "title": title,
+                "impact": effect,
+                "badge": badge,
+                "scope": scope,
+                "scope_label": news_scope_label(scope),
+                "category": "neutral" if sentiment == "opinion" else sentiment,
+                "sentiment": sentiment,
+                "freshness_label": freshness_label,
+                "published_utc": published_utc,
+                "sessions_since": sessions_since,
+                "context_note": context_note,
+                "related_count": len(related),
+            }
+
+            if scope == "opinion":
+                if candidate_score > best_opinion_score:
+                    best_opinion_score = candidate_score
+                    best_opinion = candidate
                 continue
 
-            total = relevance + abs(impact)
-            if total > best_score:
-                best_score = total
-                best = {
-                    "title": title,
-                    "note": note,
-                    "impact": impact,
-                    "category": category,
-                    "freshness_label": freshness_label,
-                    "published_utc": published_utc,
-                    "sessions_since": sessions_since,
-                }
+            if candidate_score > best_score:
+                best_score = candidate_score
+                best = candidate
 
-        if best:
-            bundle.update({
-                "news_note": best["title"],
-                "news_title": best["title"],
-                "news_badge": best["note"],
-                "news_category": best["category"],
-                "news_sentiment": "positive" if best["impact"] > 0 else "negative",
-                "news_freshness_label": best["freshness_label"],
-                "news_published_utc": best["published_utc"],
-                "news_sessions_since": best["sessions_since"],
-                "catalyst_score": best["impact"],
-            })
+        chosen = best or best_opinion
+        if not chosen:
+            return bundle
+
+        title_to_show = chosen["title"]
+        note_to_show = title_to_show or chosen.get("context_note", "")
+        if chosen.get("scope") == "opinion":
+            title_to_show = ""
+            note_to_show = chosen.get("context_note", "") or "لا يوجد خبر محفز معتمد"
+
+        bundle.update({
+            "news_note": note_to_show,
+            "news_title": title_to_show,
+            "news_badge": chosen.get("badge", ""),
+            "news_category": chosen.get("category", "neutral"),
+            "news_sentiment": chosen.get("sentiment", "neutral"),
+            "news_scope": chosen.get("scope", "neutral"),
+            "news_scope_label": chosen.get("scope_label", news_scope_label("neutral")),
+            "news_freshness_label": chosen.get("freshness_label", ""),
+            "news_published_utc": chosen.get("published_utc", ""),
+            "news_sessions_since": chosen.get("sessions_since", 999),
+            "news_effect_score": int(chosen.get("impact", 0) or 0),
+            "news_is_catalyst": chosen.get("scope") in {"company", "sector"} and int(chosen.get("impact", 0) or 0) != 0,
+            "news_context_note": chosen.get("context_note", ""),
+            "news_related_tickers_count": int(chosen.get("related_count", 0) or 0),
+            "catalyst_score": int(chosen.get("impact", 0) or 0),
+        })
     except:
         pass
     return bundle
 
-def get_news(symbol, company_name=""):
-    bundle = get_news_bundle(symbol, company_name)
-    return bundle.get("news_note", "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
 
+def get_news(symbol, company_name="", sector="", industry=""):
+    bundle = get_news_bundle(symbol, company_name, sector, industry)
+    return (bundle.get("news_title") or bundle.get("news_context_note") or bundle.get("news_note") or "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
 
 def is_halal(sector, industry, total_assets, cash, total_debt):
     sector_l = str(sector).lower().strip()
@@ -2316,7 +2515,7 @@ def compute_core_quality_score(
     else:
         quality -= 6
 
-    if catalyst_score > 0:
+    if catalyst_score != 0:
         quality += float(catalyst_score or 0)
 
     if bool((hist or {}).get("ath_breakout_zone", False)):
@@ -2803,7 +3002,7 @@ def trade_plan_pro(symbol):
     trend_data = get_trend(symbol, daily_bars)
     intraday = get_intraday_snapshot(symbol)
     volume_ratio = get_volume_ratio(symbol, intraday, daily_bars)
-    news_bundle = get_news_bundle(symbol, info["company"])
+    news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
     news_note = news_bundle.get("news_note", "لا يوجد خبر حديث")
     catalyst_score = news_bundle.get("catalyst_score", 0)
 
@@ -2920,8 +3119,22 @@ def trade_plan_pro(symbol):
         risk_flags.append("قريب من القمة التاريخية")
     if hist["ath_breakout_zone"]:
         risk_flags.append("منطقة اختراق قمة تاريخية")
+    news_scope = str(news_bundle.get("news_scope", "neutral") or "neutral")
+    news_sentiment = str(news_bundle.get("news_sentiment", "neutral") or "neutral")
     if catalyst_score > 0:
-        risk_flags.append("خبر إيجابي محفز")
+        if news_scope == "company":
+            risk_flags.append("خبر شركة داعم")
+        elif news_scope == "sector":
+            risk_flags.append("خبر قطاعي داعم")
+    elif catalyst_score < 0:
+        if news_sentiment == "legal" and news_scope == "company":
+            risk_flags.append("خبر قانوني مباشر")
+        elif news_scope == "company":
+            risk_flags.append("خبر شركة سلبي")
+        elif news_scope == "sector":
+            risk_flags.append("خبر قطاعي ضاغط")
+        elif news_scope == "market":
+            risk_flags.append("سياق سوق عام ضاغط")
     if info["sector"] == "":
         risk_flags.append("بيانات القطاع/الصناعة ناقصة")
     if financials["total_assets"] <= 0:
@@ -2950,7 +3163,21 @@ def trade_plan_pro(symbol):
     if trade_type == "Pullback" and pullback_context.get("pullback_pattern_label"):
         ai_summary_parts.append(str(pullback_context.get("pullback_pattern_label")))
     if catalyst_score > 0:
-        ai_summary_parts.append("يوجد محفز إيجابي")
+        if news_scope == "company":
+            ai_summary_parts.append("يوجد محفز شركة إيجابي")
+        elif news_scope == "sector":
+            ai_summary_parts.append("يوجد دعم قطاعي")
+    elif catalyst_score < 0:
+        if news_sentiment == "legal" and news_scope == "company":
+            ai_summary_parts.append("يوجد ضغط قانوني مباشر")
+        elif news_scope == "company":
+            ai_summary_parts.append("يوجد خبر شركة سلبي")
+        elif news_scope == "sector":
+            ai_summary_parts.append("يوجد خبر قطاعي ضاغط")
+        elif news_scope == "market":
+            ai_summary_parts.append("السياق العام ضاغط")
+    elif news_scope == "market":
+        ai_summary_parts.append("سياق سوق عام فقط")
     if hist["ath_breakout_zone"]:
         ai_summary_parts.append("في منطقة قمة تاريخية")
     if breakout_quality == "FAILED":
@@ -2996,6 +3223,12 @@ def trade_plan_pro(symbol):
         "news_badge": news_bundle.get("news_badge", ""),
         "news_category": news_bundle.get("news_category", "neutral"),
         "news_sentiment": news_bundle.get("news_sentiment", "neutral"),
+        "news_scope": news_bundle.get("news_scope", "neutral"),
+        "news_scope_label": news_bundle.get("news_scope_label", news_scope_label("neutral")),
+        "news_effect_score": news_bundle.get("news_effect_score", 0),
+        "news_is_catalyst": news_bundle.get("news_is_catalyst", False),
+        "news_context_note": news_bundle.get("news_context_note", ""),
+        "news_related_tickers_count": news_bundle.get("news_related_tickers_count", 0),
         "news_freshness_label": news_bundle.get("news_freshness_label", ""),
         "news_published_utc": news_bundle.get("news_published_utc", ""),
         "news_sessions_since": news_bundle.get("news_sessions_since", 999),
@@ -3272,7 +3505,9 @@ def single_stock(symbol: str):
             trend_data = get_trend(symbol)
             intraday = get_intraday_snapshot(symbol)
             volume_ratio = get_volume_ratio(symbol, intraday)
-            news_note, catalyst_score = get_news(symbol, info["company"])
+            news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
+            news_note = news_bundle.get("news_title") or news_bundle.get("news_context_note") or news_bundle.get("news_note", "لا يوجد خبر حديث")
+            catalyst_score = news_bundle.get("catalyst_score", 0)
             halal_ok, halal_reason = is_halal(info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"])
             live_block = build_live_price_block(symbol, prev, intraday)
             overview = {
@@ -3290,6 +3525,9 @@ def single_stock(symbol: str):
                 "volume_ratio": safe_round(volume_ratio),
                 "news_note": news_note,
                 "catalyst_score": catalyst_score,
+                "news_scope": news_bundle.get("news_scope", "neutral"),
+                "news_scope_label": news_bundle.get("news_scope_label", news_scope_label("neutral")),
+                "news_context_note": news_bundle.get("news_context_note", ""),
                 "near_ath": hist["near_ath"],
                 "ath_breakout_zone": hist["ath_breakout_zone"],
                 "intraday": intraday,
@@ -3574,14 +3812,29 @@ def explain_metric_ar(name: str, value, stock: dict) -> dict:
             return {"icon": "❌", "label": "ضعيف", "detail": "الدرجة ضعيفة ولا تعطي أفضلية كافية."}
         if name == "news":
             category = str(stock.get("news_category", "neutral") or "neutral")
+            scope = str(stock.get("news_scope", "neutral") or "neutral")
+            scope_label_ar = str(stock.get("news_scope_label", news_scope_label(scope)) or news_scope_label(scope))
             freshness = str(stock.get("news_freshness_label", "") or "")
-            if category == "positive":
-                return {"icon": "🟢", "label": f"إيجابي {freshness}".strip(), "detail": "خبر داعم ومصنف كمحفز فعلي."}
-            if category in {"negative", "legal"}:
-                return {"icon": "🔴", "label": f"سلبي {freshness}".strip(), "detail": "الخبر سلبي ولا يجب اعتباره محفزًا إيجابيًا."}
-            if category == "opinion":
-                return {"icon": "🚫", "label": "مقال رأي", "detail": "هذا رأي أو مقال عام وليس محفز تداول معتمد."}
-            return {"icon": "⚪", "label": freshness or "محايد", "detail": "لا يوجد خبر محفز حديث."}
+            context_note = str(stock.get("news_context_note", "") or "")
+            if scope == "company":
+                if category == "positive":
+                    return {"icon": "🟢", "label": f"شركة إيجابي {freshness}".strip(), "detail": context_note or "خبر مباشر يخص الشركة ويدعم الفكرة."}
+                if category == "legal":
+                    return {"icon": "⛔", "label": f"شركة قانوني سلبي {freshness}".strip(), "detail": context_note or "خبر قانوني مباشر على الشركة."}
+                if category == "negative":
+                    return {"icon": "🔴", "label": f"شركة سلبي {freshness}".strip(), "detail": context_note or "خبر سلبي مباشر على الشركة."}
+                return {"icon": "⚪", "label": f"شركة محايد {freshness}".strip(), "detail": context_note or "خبر يخص الشركة لكنه غير محفز."}
+            if scope == "sector":
+                if category == "positive":
+                    return {"icon": "🏭", "label": f"قطاعي داعم {freshness}".strip(), "detail": context_note or "خبر قطاعي داعم بوزن أخف من خبر الشركة."}
+                if category in {"negative", "legal"}:
+                    return {"icon": "🏭", "label": f"قطاعي ضاغط {freshness}".strip(), "detail": context_note or "خبر قطاعي ضاغط."}
+                return {"icon": "🏭", "label": f"سياق قطاعي {freshness}".strip(), "detail": context_note or "سياق قطاعي غير مباشر."}
+            if scope == "market":
+                return {"icon": "📰", "label": f"سوق عام {freshness}".strip(), "detail": context_note or "سياق سوق عام وليس محفزًا مباشرًا للسهم."}
+            if scope == "opinion" or category == "opinion":
+                return {"icon": "🚫", "label": "رأي غير معتمد", "detail": context_note or "هذا رأي أو مقال عام وليس محفز تداول معتمد."}
+            return {"icon": "⚪", "label": scope_label_ar if scope_label_ar else (freshness or "محايد"), "detail": context_note or "لا يوجد خبر محفز حديث."}
     except:
         pass
     return {"icon": "❓", "label": "لا توجد بيانات كافية", "detail": "لا توجد بيانات كافية."}
@@ -3975,3 +4228,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
