@@ -228,6 +228,8 @@
     .badge-news-neu { background:var(--ghost-bg); color:var(--text-strong); }
     .badge-news-op { background:#3f2a00; color:#fde68a; }
     .badge-news-legal { background:#4c1d1d; color:#fecaca; }
+    .badge-news-market { background:#1e3a8a; color:#dbeafe; }
+    .badge-news-sector { background:#134e4a; color:#ccfbf1; }
 
     .compact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
     .compact-item { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:11px; }
@@ -716,8 +718,8 @@
       'إجراء المالك': { title: 'إجراء المالك', body: 'أوضح خطوة عملية للمستخدم الآن: ادخل أو انتظر كسرًا أو تأكيدًا أو اكتفِ بالمراقبة.' },
       'ملخص عربي سريع': { title: 'ملخص عربي سريع', body: 'خلاصة سريعة جدًا لسبب التوصية وفائدة الخانة للمستخدم دون الحاجة لقراءة كل التفاصيل.' },
       'ملخص فني': { title: 'ملخص فني', body: 'وصف فني مختصر يجمع أهم العوامل المؤثرة في هذه الفرصة.' },
-      'المحفز/الخبر': { title: 'المحفز/الخبر', body: 'وجود خبر أو محفز حديث قد يدعم الحركة. الخبر الإيجابي الحقيقي أقوى من المقالات والرأي.' },
-      'شرح الخبر': { title: 'شرح الخبر', body: 'يوضح لماذا عُدّ الخبر إيجابيًا أو سلبيًا أو محايدًا، وهل يعتمد عليه أم لا.' },
+      'المحفز/الخبر': { title: 'المحفز/الخبر', body: 'خبر الشركة أو القطاع فقط قد يعمل كمحفز مباشر. أما خبر السوق العام فيظهر كسياق، ومقال الرأي لا يعامل كخبر محفز.' },
+      'شرح الخبر': { title: 'شرح الخبر', body: 'يوضح هل الخبر خاص بالشركة أو القطاع أو السوق العام، وهل هو داعم أو ضاغط أو مجرد رأي غير معتمد.' },
       'تعويض التأخير': { title: 'تعويض التأخير', body: 'تقدير داخلي يساعد على التعامل مع تأخر بعض البيانات حتى لا يبدو القرار مضللًا.' },
       'مصدر السعر': { title: 'مصدر السعر', body: 'من أين جاءت قراءة السعر الحالية: لحظي أو ممتد أو آخر إغلاق. هذا مهم قبل التنفيذ.' },
       'حداثة السعر': { title: 'حداثة السعر', body: 'هل السعر حديث وقابل للاعتماد الآن أم أنه آخر إغلاق فقط. في السوق المفتوح هذه الخانة مهمة جدًا.' },
@@ -873,26 +875,42 @@
 
     function classifyNewsVisual(stock) {
       const baseCategory = String(stock.news_category || '').toLowerCase();
-      const title = String(stock.news_title || stock.news_note || '').toLowerCase();
+      const scope = String(stock.news_scope || '').toLowerCase();
       const badge = String(stock.news_badge || '').trim();
-      const text = `${title} ${badge.toLowerCase()}`;
 
-      const insiderNegative = [
-        'ceo sold','chief executive officer sold','insider sold','insider selling','director sold','officer sold',
-        'board member sold','sold shares','disposed shares','sale of shares','share sale','unloaded shares'
-      ].some(k => text.includes(k));
-      const legalNegative = ['lawsuit','investigation','investigates','class action','investor alert','law firm'].some(k => text.includes(k));
-      const clearNegative = ['downgrade','guidance cut','missed estimates','weak earnings','offering','crashed','plunged','fell'].some(k => text.includes(k));
-      const opinionOnly = ['is it time to buy','why this stock','opinion','analysis','article','i finally pulled the trigger',"here's what this means"].some(k => text.includes(k));
-      const positive = ['upgrade','approval','partnership','contract','buyback','beats','beat estimates','record revenue'].some(k => text.includes(k));
-
-      if (insiderNegative) return { category: 'negative', badge: '🔴 بيع داخلي سلبي' };
-      if (legalNegative || baseCategory === 'legal') return { category: 'legal', badge: '⛔ خبر قانوني سلبي' };
-      if (clearNegative || baseCategory === 'negative') return { category: 'negative', badge: '🔴 خبر سلبي' };
-      if (positive || baseCategory === 'positive') return { category: 'positive', badge: '🟢 محفز إيجابي' };
-      if (opinionOnly || baseCategory === 'opinion') return { category: 'opinion', badge: '🚫 مقال رأي' };
-      if (!badge) return { category: 'neutral', badge: '' };
+      if (scope === 'opinion' || baseCategory === 'opinion') {
+        return { category: 'opinion', badge: badge || '🚫 مقال رأي غير معتمد' };
+      }
+      if (baseCategory === 'legal') {
+        return { category: 'legal', badge: badge || '⛔ خبر قانوني مباشر' };
+      }
+      if (scope === 'market') {
+        return { category: 'market', badge: badge || '📰 سياق سوق عام' };
+      }
+      if (scope === 'sector') {
+        if (baseCategory === 'negative') return { category: 'sector', badge: badge || '🏭 خبر قطاعي ضاغط' };
+        if (baseCategory === 'positive') return { category: 'sector', badge: badge || '🏭 خبر قطاعي داعم' };
+        return { category: 'sector', badge: badge || '🏭 سياق قطاعي' };
+      }
+      if (baseCategory === 'negative') {
+        return { category: 'negative', badge: badge || '🔴 خبر شركة سلبي' };
+      }
+      if (baseCategory === 'positive') {
+        return { category: 'positive', badge: badge || '🟢 خبر شركة إيجابي' };
+      }
+      if (!badge) {
+        return { category: 'neutral', badge: '' };
+      }
       return { category: baseCategory || 'neutral', badge };
+    }
+
+    function newsHeadlineText(stock) {
+      const scope = String(stock.news_scope || '').toLowerCase();
+      const title = String(stock.news_title || '').trim();
+      const context = String(stock.news_context_note || stock.news_note || '').trim();
+      if (scope === 'opinion') return context || 'هذا محتوى رأي وليس خبرًا محفزًا.';
+      if (scope === 'neutral' || scope === 'unrelated') return context || title || 'لا يوجد خبر محفز معتمد';
+      return title || context || 'لا يوجد خبر بارز';
     }
 
     function newsBadge(stock) {
@@ -903,6 +921,8 @@
       else if (visual.category === "negative") cls = "badge-news-neg";
       else if (visual.category === "legal") cls = "badge-news-legal";
       else if (visual.category === "opinion") cls = "badge-news-op";
+      else if (visual.category === "market") cls = "badge-news-market";
+      else if (visual.category === "sector") cls = "badge-news-sector";
       return `<span class="badge ${cls}">${safeText(visual.badge)}</span>`;
     }
 
@@ -1026,7 +1046,7 @@
       details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% من ${formatNumber(stock.historical_pullback_cases || 0)} حالة${stock.historical_pullback_speed_label ? ' | ' + safeText(stock.historical_pullback_speed_label) : ''}`));
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
-      details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(stock.news_title || stock.news_note || '')}</div>`, true));
+      details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
       details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
       details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
@@ -1096,7 +1116,7 @@
 
           <div class="news-line">
             ${newsBadge(stock)}
-            <span>${safeText(stock.news_title || stock.news_note || 'لا يوجد خبر بارز')}</span>
+            <span>${safeText(newsHeadlineText(stock))}</span>
           </div>
 
           <div class="summary-line">
