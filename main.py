@@ -135,22 +135,80 @@ SECTOR_ETF_MAP = {
     "technology": "XLK",
     "information technology": "XLK",
     "semiconductors": "XLK",
+    "semiconductor": "XLK",
+    "software": "XLK",
+    "hardware": "XLK",
+    "electronics": "XLK",
+    "electronic": "XLK",
+    "computer": "XLK",
+    "cybersecurity": "XLK",
+    "cloud": "XLK",
+    "ai": "XLK",
     "communication services": "XLC",
+    "communication": "XLC",
+    "telecom": "XLC",
+    "internet": "XLC",
+    "media": "XLC",
     "consumer cyclical": "XLY",
     "consumer discretionary": "XLY",
+    "consumer": "XLY",
+    "retail": "XLY",
+    "apparel": "XLY",
+    "restaurant": "XLY",
+    "restaurants": "XLY",
+    "travel": "XLY",
+    "auto": "XLY",
+    "automobile": "XLY",
     "consumer defensive": "XLP",
     "consumer staples": "XLP",
+    "staples": "XLP",
+    "food": "XLP",
+    "beverage": "XLP",
+    "grocery": "XLP",
+    "household": "XLP",
     "healthcare": "XLV",
     "health care": "XLV",
+    "biotech": "XLV",
+    "biotechnology": "XLV",
+    "pharma": "XLV",
+    "pharmaceutical": "XLV",
+    "drug": "XLV",
+    "medical": "XLV",
+    "diagnostic": "XLV",
+    "hospital": "XLV",
     "industrials": "XLI",
     "industrial": "XLI",
+    "aerospace": "XLI",
+    "defense": "XLI",
+    "transport": "XLI",
+    "transportation": "XLI",
+    "airline": "XLI",
+    "rail": "XLI",
+    "machinery": "XLI",
     "energy": "XLE",
+    "oil": "XLE",
+    "gas": "XLE",
+    "drilling": "XLE",
+    "exploration": "XLE",
     "utilities": "XLU",
+    "utility": "XLU",
+    "water": "XLU",
     "real estate": "XLRE",
+    "reit": "XLRE",
+    "property": "XLRE",
     "materials": "XLB",
     "basic materials": "XLB",
+    "chemical": "XLB",
+    "chemicals": "XLB",
+    "mining": "XLB",
+    "metals": "XLB",
+    "steel": "XLB",
     "financial services": "XLF",
     "financial": "XLF",
+    "bank": "XLF",
+    "banks": "XLF",
+    "insurance": "XLF",
+    "capital markets": "XLF",
 }
 
 def ny_now():
@@ -1000,12 +1058,13 @@ def apply_news_decision_guard(decision: str, news_scope: str, news_sentiment: st
     return decision
 
 
-def apply_market_sector_decision_guard(decision: str, market_sector_score: float, market_support_label: str = "", sector_support_label: str = "") -> str:
+def apply_market_sector_decision_guard(decision: str, market_sector_score: float, market_support_label: str = "", sector_support_label: str = "", sector_symbol: str = "") -> str:
     try:
         decision = str(decision or "")
         score = float(market_sector_score or 0)
         market_label = str(market_support_label or "")
         sector_label = str(sector_support_label or "")
+        sector_symbol = str(sector_symbol or "")
         if decision == "دخول قوي" and score <= -12:
             return "مراقبة"
         if decision == "دخول قوي" and score <= -7:
@@ -1013,6 +1072,8 @@ def apply_market_sector_decision_guard(decision: str, market_sector_score: float
         if decision == "دخول بحذر" and score <= -14:
             return "مراقبة"
         if decision == "دخول قوي" and ("ضاغط قوي" in market_label and "ضاغط" in sector_label):
+            return "دخول بحذر"
+        if decision == "دخول قوي" and not sector_symbol and score < 8:
             return "دخول بحذر"
         return decision
     except:
@@ -1700,13 +1761,39 @@ def _context_benchmark_for_sector(sector: str, industry: str = "") -> str:
     return "SPY"
 
 
-def _context_sector_etf(sector: str) -> str:
+def _context_sector_etf(sector: str, industry: str = "") -> str:
     s = str(sector or "").lower().strip()
-    if not s:
+    i = str(industry or "").lower().strip()
+    combined = " ".join(x for x in [s, i] if x).strip()
+    if not combined:
         return ""
+
     for key, value in SECTOR_ETF_MAP.items():
-        if key in s or s in key:
+        if key in combined:
             return value
+
+    if any(x in combined for x in ["semiconductor", "chip", "software", "cloud", "cyber", "computer", "electronics"]):
+        return "XLK"
+    if any(x in combined for x in ["internet", "streaming", "social media", "telecom", "wireless"]):
+        return "XLC"
+    if any(x in combined for x in ["retail", "apparel", "restaurant", "travel", "auto"]):
+        return "XLY"
+    if any(x in combined for x in ["food", "beverage", "grocery", "household"]):
+        return "XLP"
+    if any(x in combined for x in ["biotech", "pharma", "drug", "medical", "diagnostic", "hospital"]):
+        return "XLV"
+    if any(x in combined for x in ["aerospace", "defense", "transport", "airline", "machinery"]):
+        return "XLI"
+    if any(x in combined for x in ["oil", "gas", "drilling", "exploration", "energy"]):
+        return "XLE"
+    if any(x in combined for x in ["chemical", "mining", "metals", "steel", "materials"]):
+        return "XLB"
+    if any(x in combined for x in ["utility", "water"]):
+        return "XLU"
+    if any(x in combined for x in ["reit", "real estate", "property"]):
+        return "XLRE"
+    if any(x in combined for x in ["bank", "insurance", "capital markets", "financial"]):
+        return "XLF"
     return ""
 
 
@@ -1766,6 +1853,8 @@ def _context_alignment_detail(market_label: str, sector_label: str, benchmark_sy
     parts = [f"المؤشر المرجعي {benchmark_symbol}: {market_label}"]
     if sector_symbol:
         parts.append(f"ETF القطاع {sector_symbol}: {sector_label}")
+    else:
+        parts.append("ETF القطاع غير متوفر: هذه الفرصة بثقة أقل قليلًا لأن السياق القطاعي غير مكتمل")
     if abs(float(rel_market or 0)) >= 0.1:
         parts.append(f"أداء السهم مقابل المؤشر: {safe_round(rel_market, 1)}%")
     if sector_symbol and abs(float(rel_sector or 0)) >= 0.1:
@@ -1778,7 +1867,7 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
         stock_bars = daily_bars if daily_bars is not None else get_daily_bars(symbol)
         stock_return_20 = _context_return_pct(stock_bars, 20)
         benchmark_symbol = _context_benchmark_for_sector(sector, industry)
-        sector_symbol = _context_sector_etf(sector)
+        sector_symbol = _context_sector_etf(sector, industry)
 
         bench_key = f"ctx::{benchmark_symbol}"
         bench_cached = CONTEXT_CACHE.get(bench_key)
@@ -1815,6 +1904,8 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
         sector_support_label = _context_support_label(sector_support_score) if sector_cached else "غير متوفر"
 
         total_score = max(-18, min(18, int(round((market_support_score * 0.8) + (sector_support_score * 1.2)))))
+        if not sector_symbol:
+            total_score = max(-18, min(18, total_score - 3))
         alignment_label = _context_alignment_label(total_score)
         alignment_detail = _context_alignment_detail(market_support_label, sector_support_label, benchmark_symbol, sector_symbol, rel_vs_market, rel_vs_sector)
 
@@ -3749,6 +3840,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         market_sector_context.get("market_sector_score", 0),
         market_sector_context.get("market_support_label", ""),
         market_sector_context.get("sector_support_label", ""),
+        market_sector_context.get("sector_etf_symbol", ""),
     )
 
     execution_status = compute_execution_status(
@@ -3784,6 +3876,8 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         risk_flags.append(f"المؤشر {market_sector_context.get('benchmark_symbol', 'SPY')} {market_sector_context.get('market_support_label', '')}")
     if str(market_sector_context.get("sector_support_label", "") or "") in {"ضاغط", "ضاغط قوي"}:
         risk_flags.append(f"القطاع {market_sector_context.get('sector_support_label', '')}")
+    if not str(market_sector_context.get("sector_etf_symbol", "") or ""):
+        risk_flags.append("ETF القطاع غير متوفر: الثقة أقل قليلًا")
     if sharia_assessment.get("is_gray"):
         risk_flags.append("الحكم الشرعي غير محسوم")
     if info["sector"] == "":
@@ -4406,7 +4500,7 @@ def get_execution_readiness_meta(stock: dict) -> dict:
             "execution_readiness_score": score,
             "execution_readiness_label": label,
             "execution_readiness_icon": icon,
-            "execution_readiness_detail": detail,
+            "execution_readiness_detail": f"{detail} الدرجة رقم داخلي من 0 إلى 99: كلما ارتفعت كانت الخطة أقرب للتنفيذ الآن.",
         }
     except:
         return {
@@ -4517,6 +4611,8 @@ def explain_metric_ar(name: str, value, stock: dict) -> dict:
             score = float(stock.get("sector_support_score", 0) or 0)
             label = str(stock.get("sector_support_label", "محايد") or "محايد")
             detail = str(stock.get("market_sector_alignment_detail", "") or "")
+            if not str(stock.get("sector_etf_symbol", "") or ""):
+                return {"icon": "🏭", "label": label, "detail": detail or "لم نجد ETF قطاع واضحًا لهذه الشركة، لذلك تقل الثقة قليلًا في قراءة القطاع."}
             return {"icon": "🏭", "label": label, "detail": detail or "القطاع يوضح هل البيئة القطاعية تساعد السهم أو تضغط عليه."}
     except:
         pass
@@ -4560,8 +4656,10 @@ def enrich_display_meta(stock: dict) -> dict:
             summary_bits.append(f"🧭 التوافق الزمني: {stock.get('alignment_label')}")
         if stock.get("market_support_label"):
             summary_bits.append(f"📈 المؤشر: {stock.get('market_support_label')}")
-        if stock.get("sector_support_label"):
+        if stock.get("sector_etf_symbol"):
             summary_bits.append(f"🏭 القطاع: {stock.get('sector_support_label')}")
+        else:
+            summary_bits.append("🏭 القطاع: غير متوفر (ثقة أقل)")
         stock["quick_explainer"] = " | ".join([x for x in summary_bits if x])
         return stock
     except:
