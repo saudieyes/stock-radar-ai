@@ -824,6 +824,10 @@
       'هدف ATR 1': { title: 'هدف ATR 1', body: 'هدف أول تقريبي مبني على ATR. يعطيك قياسًا واقعيًا للحركة المتوقعة.' },
       'هدف ATR 2': { title: 'هدف ATR 2', body: 'هدف ممتد أبعد من الهدف الأول، مناسب إذا استمر الزخم بشكل جيد.' },
       'السلوك التاريخي': { title: 'السلوك التاريخي', body: 'القراءة التاريخية الأقرب لهذه الحالة: هل مثل هذه الفرص نجحت سابقًا أم كانت محايدة أو أضعف.' },
+      'درجة السلوك التاريخي': { title: 'درجة السلوك التاريخي', body: 'رقم داخلي من 0 إلى 99 يلخص جودة السلوك التاريخي للسهم في حالات مشابهة. الأعلى أفضل لكنه ليس وعدًا بالنجاح.' },
+      'التاريخ مع المؤشر والقطاع': { title: 'التاريخ مع المؤشر والقطاع', body: 'هل كان السهم ينجح تاريخيًا عندما يكون المؤشر والقطاع في وضع مشابه للوضع الحالي. هذه قراءة تربط التاريخ بالسياق الحالي.' },
+      'درجة التاريخ مع المؤشر والقطاع': { title: 'درجة التاريخ مع المؤشر والقطاع', body: 'رقم داخلي من 0 إلى 99 يوضح مدى دعم السجل التاريخي للسهم مع المؤشر والقطاع الحاليين.' },
+      'قوة الإشارة': { title: 'قوة الإشارة', body: 'ترتيب داخلي داخل نفس القسم. قوي جدًا أعلى أولوية، ثم قوي، ثم قوي مبكر. لا يعني ذلك أن الفرص الأخرى سيئة، بل أقل نضجًا أو ثقة.' },
       'ثقة السلوك التاريخي': { title: 'ثقة السلوك التاريخي', body: 'قوة الثقة مبنية على حجم العينة ومدى اتساق النتائج السابقة، لا على الانطباع فقط.' },
       'نجاح الاختراقات تاريخيًا': { title: 'نجاح الاختراقات تاريخيًا', body: 'كم مرة نجح الاختراق في حالات مشابهة، وما سرعة الحركة المعتادة بعدها.' },
       'نجاح الارتدادات تاريخيًا': { title: 'نجاح الارتدادات تاريخيًا', body: 'كم مرة نجحت الارتدادات المشابهة سابقًا. يفيدك حتى في أسهم الاختراق لمعرفة سلوكها العام.' },
@@ -971,6 +975,13 @@
       const label = safeText(stock.display_plan_family_label || stock.strategy_label || stock.trade_type_label_ar || "");
       if (!label) return '';
       return `<span class="badge badge-plan">${label}</span>`;
+    }
+
+    function strengthBadge(stock) {
+      const label = String(stock.signal_strength_label || '').trim();
+      if (!label || String(stock.decision || '') === 'مراقبة') return '';
+      const icon = label === 'قوي جدًا' ? '⭐' : label === 'قوي مبكر' ? '⚡' : label.includes('بحذر') ? '🟠' : '✅';
+      return `<span class="badge badge-stage">${icon} ${safeText(label)}</span>`;
     }
 
     function applyThemeMode(mode) {
@@ -1204,11 +1215,15 @@
       details.push(detailBox('هدف ATR 1', formatNumber(stock.atr_target_1_suggestion)));
       details.push(detailBox('هدف ATR 2', formatNumber(stock.atr_target_2_suggestion)));
       details.push(detailBox('السلوك التاريخي', safeText(stock.historical_behavior_label || 'لا توجد بيانات كافية')));
+      details.push(detailBox('درجة السلوك التاريخي', formatNumber(stock.historical_behavior_score || 0), false, 'درجة السلوك التاريخي'));
       details.push(detailBox('شرح السلوك التاريخي', safeText(stock.historical_behavior_detail || ''), true));
       details.push(detailBox('ثقة السلوك التاريخي', safeText(stock.historical_confidence_label || 'لا توجد بيانات كافية')));
+      details.push(detailBox('التاريخ مع المؤشر والقطاع', `${safeText(stock.historical_context_label || 'لا توجد بيانات كافية')} (${formatNumber(stock.historical_context_score || 0)})`, false, 'التاريخ مع المؤشر والقطاع'));
+      details.push(detailBox('شرح التاريخ مع المؤشر والقطاع', safeText(stock.historical_context_detail || ''), true, 'التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('نجاح الاختراقات تاريخيًا', `${formatNumber(stock.historical_breakout_success_pct)}% من ${formatNumber(stock.historical_breakout_cases || 0)} حالة${stock.historical_breakout_speed_label ? ' | ' + safeText(stock.historical_breakout_speed_label) : ''}`));
       details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% من ${formatNumber(stock.historical_pullback_cases || 0)} حالة${stock.historical_pullback_speed_label ? ' | ' + safeText(stock.historical_pullback_speed_label) : ''}`));
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
+      details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', `${formatNumber(stock.historical_context_score || 0)} | المؤشر ${formatNumber(stock.historical_market_context_success_pct || 0)}% من ${formatNumber(stock.historical_market_context_cases || 0)} حالة | القطاع ${formatNumber(stock.historical_sector_context_success_pct || 0)}% من ${formatNumber(stock.historical_sector_context_cases || 0)} حالة`, true, 'درجة التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
@@ -1258,6 +1273,7 @@
             <div class="badges">
               ${badgeDecision(stock.decision)}
               ${phaseBadge(stock.market_phase_label)}
+              ${strengthBadge(stock)}
               ${planBadge(stock)}
               ${stageBadge(stock)}
             </div>
@@ -1266,6 +1282,7 @@
           <div class="compact-grid">
             ${compactItem('السوق', safeText(stock.market_phase_label))}
             ${compactItem('النوع', safeText(stock.decision))}
+            ${compactItem('قوة الإشارة', `${safeText(stock.signal_strength_label || '—')} (${formatNumber(stock.signal_strength_score || 0)})`, 'قوة الإشارة')}
             ${compactItem('سعر السهم', formatNumber(displayPrice))}
             ${compactItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
             ${compactItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
@@ -1338,12 +1355,17 @@
       const continuation = Number(item?.continuation_score || 0);
       const runner = Number(item?.runner_score || 0);
       const alignment = Number(item?.alignment_score || 0);
-      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08);
+      const hist = Number(item?.historical_behavior_score || 50);
+      const histCtx = Number(item?.historical_context_score || 50);
+      const strength = Number(item?.signal_strength_score || 0);
+      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08) + ((hist - 50) * 0.16) + ((histCtx - 50) * 0.14) + (strength * 0.12);
     }
 
     function sortDisplayItems(items) {
       return [...(items || [])].sort((a, b) => {
         return (
+          Number(b?.signal_strength_bucket || -1) - Number(a?.signal_strength_bucket || -1) ||
+          Number(b?.signal_strength_score || 0) - Number(a?.signal_strength_score || 0) ||
           displaySortScore(b) - displaySortScore(a) ||
           Number(b?.quality_score || 0) - Number(a?.quality_score || 0) ||
           Number(b?.execution_readiness_score || 0) - Number(a?.execution_readiness_score || 0) ||
@@ -1750,7 +1772,7 @@
         const globalSim = data.simulation || {};
         document.getElementById('performanceSummary').innerHTML = `${weekText} | محاكاة إجمالية: $${formatNumber(globalSim.pnl || 0)} (${formatNumber(globalSim.roi_pct || 0)}%)`;
         document.getElementById('performanceContent').innerHTML = `
-          <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة حقيقية. إذا كان العدد هنا أقل من القوائم الحالية، فالمعنى أن بعض الأسهم المعروضة ليست إشارة جديدة هذا الأسبوع أو أن الخطة نفسها تكررت.</div>
+          <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة جوهرية. التغييرات الصغيرة جدًا في الدخول أو الهدف أو الوقف لا تنشئ سجلًا جديدًا وحدها.</div>
           <div class="summary-row">
             ${renderPerformanceGroupCard('🔥 دخول قوي', groups.strong || {})}
             ${renderPerformanceGroupCard('🟠 دخول بحذر', groups.cautious || {})}
