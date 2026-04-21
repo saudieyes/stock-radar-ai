@@ -296,7 +296,7 @@
     .muted { color:var(--text-muted); }
     .hidden-section { display:none; }
     .quick-nav {
-      display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px 0;
+      display:none; flex-wrap:wrap; gap:10px; margin:0 0 16px 0;
       position: sticky; top: 8px; z-index: 15;
       background: var(--quick-bg); backdrop-filter: blur(8px);
       padding: 8px 10px; border-radius: 16px; border:1px solid var(--border-main);
@@ -327,6 +327,52 @@
       display:flex; align-items:center; justify-content:space-between; gap:8px;
     }
     .section-title-row { width:100%; }
+
+    .floating-nav-wrap {
+      position: fixed;
+      left: 14px;
+      bottom: 18px;
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .floating-nav-toggle {
+      border: none;
+      border-radius: 999px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 900;
+      background: #2563eb;
+      color: #fff;
+      box-shadow: 0 12px 30px rgba(37,99,235,.28);
+    }
+    .floating-nav-menu {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-main);
+      border-radius: 18px;
+      padding: 10px;
+      min-width: 190px;
+      box-shadow: var(--shadow-main);
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .floating-nav-menu.open { display: flex; }
+    .floating-nav-link {
+      border: 1px solid var(--border-soft);
+      background: var(--panel-bg-soft);
+      color: var(--text-strong);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: right;
+      width: 100%;
+    }
     .info-btn {
       display:inline-flex; align-items:center; justify-content:center;
       width:26px; height:26px; min-width:26px; border-radius:999px;
@@ -378,6 +424,23 @@
     </div>
 
     <div id="infoPopover" class="info-popover" role="dialog" aria-live="polite"></div>
+
+    <div id="floatingNavWrap" class="floating-nav-wrap">
+      <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ الوصول</button>
+      <div id="floatingNavMenu" class="floating-nav-menu">
+        <button class="floating-nav-link" type="button" onclick="openByNav('openingSection', 'openingContent')">🚀 الافتتاح</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('strong-section', 'strong-section-content')">🔥 دخول قوي</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('cautious-section', 'cautious-section-content')">🟠 دخول بحذر</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('watch-section', 'watch-section-content')">👀 المراقبة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('riskPanelSection')">⚖️ المخاطرة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('portfolioSection', 'portfolioContentWrap')">💼 المحفظة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('watchlistSection', 'manualWatchlistContent')">📌 المتابعة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('shariaExcludedSection', 'shariaExcludedContent')">🚫 المستبعدة شرعيًا</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('performanceSection', 'performanceContent')">📊 الأداء</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('singleScanSection')">🔎 فحص سهم</button>
+      </div>
+    </div>
+
 
     <div class="hero">
       <div class="hero-left">
@@ -462,7 +525,7 @@
           <div class="section-count" id="portfolioCount">0 سهم</div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('portfolioContentWrap', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="portfolioContentWrap" onclick="toggleSection('portfolioContentWrap', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div id="portfolioContentWrap" class="panel hidden-section">
@@ -483,7 +546,7 @@
           <div class="section-count" id="openingCount">أولوية المتابعة عند الافتتاح</div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('openingContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="openingContent" onclick="toggleSection('openingContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div id="openingContent" class="opening-box hidden-section">جاري تحميل وضع الافتتاح...</div>
@@ -498,7 +561,7 @@
           <div class="section-count" id="watchlistCount"></div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('manualWatchlistContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="manualWatchlistContent" onclick="toggleSection('manualWatchlistContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div class="panel hidden-section" id="manualWatchlistContent">جاري تحميل القائمة...</div>
@@ -511,7 +574,7 @@
           <div class="section-count" id="shariaExcludedCount"></div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('shariaExcludedContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="shariaExcludedContent" onclick="toggleSection('shariaExcludedContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div class="panel hidden-section" id="shariaExcludedContent">جاري تحميل القائمة...</div>
@@ -524,7 +587,7 @@
           <div class="section-count" id="performanceSummary"></div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('performanceContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="performanceContent" onclick="toggleSection('performanceContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div class="panel hidden-section" id="performanceContent">اضغط إظهار لتحميل تتبع الأداء...</div>
@@ -823,6 +886,14 @@
 
     window.addEventListener('resize', closeInfoPopover);
     window.addEventListener('scroll', closeInfoPopover, true);
+    document.addEventListener('click', function(event) {
+      const menu = document.getElementById('floatingNavMenu');
+      const wrap = document.getElementById('floatingNavWrap');
+      if (!menu || !wrap) return;
+      if (!menu.classList.contains('open')) return;
+      if (wrap.contains(event.target)) return;
+      setFloatingQuickNavOpen(false);
+    });
 
     function compactItem(label, value, infoKey='') {
       return `
@@ -987,6 +1058,41 @@
       if (buttonEl) buttonEl.textContent = hidden ? hideLabel : showLabel;
     }
 
+
+    function isSectionHidden(contentId) {
+      const el = document.getElementById(contentId);
+      if (!el) return false;
+      return el.classList.contains('hidden-section') || el.style.display === 'none';
+    }
+
+    function ensureSectionOpen(contentId) {
+      const el = document.getElementById(contentId);
+      if (!el || !isSectionHidden(contentId)) return;
+      const toggleBtn = document.querySelector(`[data-section-toggle="${contentId}"]`);
+      toggleSection(contentId, toggleBtn || null, 'إظهار', 'إخفاء');
+    }
+
+    function setFloatingQuickNavOpen(isOpen) {
+      const menu = document.getElementById('floatingNavMenu');
+      const btn = document.getElementById('floatingNavToggle');
+      if (!menu || !btn) return;
+      menu.classList.toggle('open', !!isOpen);
+      btn.textContent = isOpen ? '✖ إخفاء' : '⚡ الوصول';
+    }
+
+    function toggleFloatingQuickNav() {
+      const menu = document.getElementById('floatingNavMenu');
+      if (!menu) return;
+      setFloatingQuickNavOpen(!menu.classList.contains('open'));
+    }
+
+    function openByNav(sectionId, contentId='') {
+      if (contentId) ensureSectionOpen(contentId);
+      const el = document.getElementById(sectionId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setFloatingQuickNavOpen(false);
+    }
+
     async function addToWatchlist(symbol, price) {
       try {
         await apiFetch('/watchlist/add', {
@@ -1045,6 +1151,11 @@
       details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
       details.push(detailBox('Continuation Score', joinMetric(formatNumber(stock.continuation_score), stock.metric_continuation_score)));
       details.push(detailBox('التوافق الزمني', `${safeText(stock.alignment_label || 'لا توجد بيانات كافية')} (${formatNumber(stock.alignment_score || 0)})`));
+      details.push(detailBox('المؤشر المرجعي', safeText(stock.benchmark_symbol || '—')));
+      details.push(detailBox('دعم المؤشر', `${safeText(stock.market_support_label || '—')} (${formatNumber(stock.market_support_score || 0)})`));
+      details.push(detailBox('ETF القطاع', safeText(stock.sector_etf_symbol || '—')));
+      details.push(detailBox('دعم القطاع', `${safeText(stock.sector_support_label || '—')} (${formatNumber(stock.sector_support_score || 0)})`));
+      details.push(detailBox('شرح المؤشر والقطاع', safeText(stock.market_sector_alignment_detail || ''), true));
       details.push(detailBox('شرح التوافق الزمني', safeText(stock.alignment_detail || ''), true));
       details.push(detailBox('ATR 14', formatNumber(stock.atr_14)));
       details.push(detailBox('ATR %', formatNumber(stock.atr_pct)));
@@ -1124,6 +1235,8 @@
             ${compactItem('مدة الصلاحية', safeText(stock.valid_for))}
             ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
             ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`)}
+            ${compactItem('المؤشر', safeText(stock.market_support_label || '—'))}
+            ${compactItem('القطاع', safeText(stock.sector_support_label || '—'))}
             ${compactItem('المخاطرة', safeText(stock.risk_profile_label || '—'))}
             ${compactItem('الشرعية', safeText(stock.sharia_label || '—'))}
             ${compactItem('التذبذب', safeText(stock.volatility_label || '—'))}
@@ -1168,7 +1281,7 @@
               <div class="section-count">${count} سهم</div>
             </div>
             <div class="section-tools">
-              <button class="ghost detail-toggle" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
+              <button class="ghost detail-toggle" data-section-toggle="${key}" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
             </div>
           </div>
           <div id="${key}" class="hidden-section" data-rendered="0">
@@ -1247,6 +1360,44 @@
       `;
     }
 
+
+
+    function setScanData(data) {
+      window.__scanData = { ...(data || {}) };
+      window.__scanData.strong_entries = [...(data?.strong_entries || [])];
+      window.__scanData.cautious_entries = [...(data?.cautious_entries || [])];
+      window.__scanData.watchlist = [...(data?.watchlist || [])];
+      window.__scanData.opening_focus = [...(data?.opening_focus || [])];
+      window.__scanData.top_ranked = [...(data?.top_ranked || [])];
+      window.__scanData.all_results = [...(data?.all_results || [])];
+    }
+
+    function renderScanData() {
+      if (!window.__scanData) return;
+      renderStatusbar(window.__scanData);
+      renderSections(window.__scanData);
+      renderOpeningFocus(window.__scanData);
+    }
+
+    function removeSymbolFromVisibleScan(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean || !window.__scanData) return false;
+      let changed = false;
+      const removeFrom = (key) => {
+        const before = Array.isArray(window.__scanData[key]) ? window.__scanData[key].length : 0;
+        window.__scanData[key] = (window.__scanData[key] || []).filter(item => String(item?.symbol || '').toUpperCase() !== clean);
+        if ((window.__scanData[key] || []).length !== before) changed = true;
+      };
+      ['strong_entries','cautious_entries','watchlist','top_ranked','all_results','opening_focus'].forEach(removeFrom);
+      if (!changed) return false;
+      window.__scanData.strong_entries_count = (window.__scanData.strong_entries || []).length;
+      window.__scanData.cautious_entries_count = (window.__scanData.cautious_entries || []).length;
+      window.__scanData.watchlist_count = (window.__scanData.watchlist || []).length;
+      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.watchlist_count;
+      renderScanData();
+      return true;
+    }
+
     function renderOpeningFocus(data) {
       const box = document.getElementById('openingContent');
       const items = data?.opening_focus || [];
@@ -1273,9 +1424,8 @@
       try {
         const res = await apiFetch('/trade-scan');
         const data = await res.json();
-        renderStatusbar(data);
-        renderSections(data);
-        renderOpeningFocus(data);
+        setScanData(data);
+        renderScanData();
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
         document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
@@ -1347,10 +1497,17 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: clean })
         });
-        loadAll();
+        removeSymbolFromVisibleScan(clean);
         const section = document.getElementById('shariaExcludedContent');
         if (section && !section.classList.contains('hidden-section')) {
           loadShariaExcluded();
+          section.dataset.loaded = '1';
+        } else {
+          const countEl = document.getElementById('shariaExcludedCount');
+          if (countEl) {
+            const current = Number(String(countEl.textContent || '0').replace(/[^0-9]/g, '') || 0);
+            countEl.textContent = `${current + 1} سهم`;
+          }
         }
         const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
         if (singleSymbol === clean) {
@@ -1370,8 +1527,8 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: clean })
         });
-        loadAll();
         loadShariaExcluded();
+        await loadScan();
         const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
         if (singleSymbol === clean) {
           scanSingleStock();
