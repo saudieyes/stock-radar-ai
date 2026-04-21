@@ -1427,7 +1427,14 @@ def _return_mode_from_series(bars, idx: int, lookback: int = 20) -> str:
         return "neutral"
 
 
-def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", sector_symbol: str = "", current_setup: str = "", market_support_score: float = 0.0, sector_support_score: float = 0.0) -> dict:
+def analyze_historical_context_behavior(
+    stock_bars,
+    benchmark_symbol: str = "",
+    sector_symbol: str = "",
+    current_setup: str = "",
+    market_support_score: float = 0.0,
+    sector_support_score: float = 0.0
+) -> dict:
     base = {
         "historical_context_ready": False,
         "historical_market_context_success_pct": 0.0,
@@ -1439,19 +1446,81 @@ def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", 
         "historical_context_score": 50.0,
         "historical_context_label": "محايد",
         "historical_context_detail": "لا توجد بيانات كافية لربط السهم تاريخيًا مع المؤشر والقطاع.",
+        "historical_context_partial": False,
     }
+
     try:
+        def _support_text(score: float) -> str:
+            score = float(score or 0)
+            if score >= 3:
+                return "داعم"
+            if score <= -3:
+                return "ضاغط"
+            return "محايد"
+
+        def _partial_label(score: float) -> str:
+            score = float(score or 0)
+            if score >= 58:
+                return "قراءة جزئية داعمة"
+            if score >= 52:
+                return "قراءة جزئية إيجابية"
+            if score >= 46:
+                return "قراءة جزئية محايدة"
+            return "قراءة جزئية حذرة"
+
+        def _partial_fallback(reason: str) -> dict:
+            partial = dict(base)
+
+            market_bias = clamp(market_support_score, -12, 12)
+            sector_bias = clamp(sector_support_score, -12, 12) if sector_symbol else 0.0
+
+            score = 50.0
+            detail_parts = []
+
+            if benchmark_symbol:
+                score += market_bias * 0.55
+                detail_parts.append(
+                    f"المؤشر {benchmark_symbol}: {_support_text(market_support_score)} حاليًا."
+                )
+            else:
+                detail_parts.append("المؤشر المرجعي غير متوفر.")
+
+            if sector_symbol:
+                score += sector_bias * 0.45
+                detail_parts.append(
+                    f"القطاع {sector_symbol}: {_support_text(sector_support_score)} حاليًا."
+                )
+            else:
+                detail_parts.append("ETF القطاع غير متوفر، لذا اعتمدنا على المؤشر فقط.")
+
+            score = round(max(35.0, min(65.0, score - 4.0)), 2)
+
+            partial.update({
+                "historical_context_ready": False,
+                "historical_context_score": score,
+                "historical_context_label": _partial_label(score),
+                "historical_context_detail": (
+                    " ".join(detail_parts)
+                    + f" {reason} خُفِّضت الثقة قليلًا لغياب الحالات التاريخية المطابقة."
+                ),
+                "historical_context_partial": True,
+            })
+            return partial
+
         if not stock_bars or len(stock_bars) < 120:
-            return base
+            return _partial_fallback("بيانات السهم التاريخية نفسها غير كافية لبناء مقارنة كاملة.")
+
         bench_bars = get_daily_bars(benchmark_symbol) if benchmark_symbol else []
         sector_bars = get_daily_bars(sector_symbol) if sector_symbol else []
+
         min_len = len(stock_bars)
         if bench_bars:
             min_len = min(min_len, len(bench_bars))
         if sector_bars:
             min_len = min(min_len, len(sector_bars))
+
         if min_len < 120:
-            return base
+            return _partial_fallback("لا توجد سلاسل مشتركة كافية بين السهم والمؤشر/القطاع لبناء مقارنة كاملة.")
 
         bars = list(stock_bars)[-min_len:]
         bench = list(bench_bars)[-min_len:] if bench_bars else []
@@ -1471,26 +1540,38 @@ def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", 
             l = to_float((row or {}).get("l"))
             c = to_float((row or {}).get("c"))
             v = to_float((row or {}).get("v"))
+
             if min(o, h, l, c) <= 0:
                 continue
-            prev20_high = max(to_float((b or {}).get("h", 0)) for b in bars[i-20:i])
-            avg20_vol = _avg([to_float((b or {}).get("v", 0)) for b in bars[i-20:i]])
-            sma20 = _avg([to_float((b or {}).get("c", 0)) for b in bars[i-20:i]])
-            sma50 = _avg([to_float((b or {}).get("c", 0)) for b in bars[i-50:i]])
-            future = bars[i+1:i+6]
+
+            prev20_high = max(to_float((b or {}).get("h", 0)) for b in bars[i - 20:i])
+            avg20_vol = _avg([to_float((b or {}).get("v", 0)) for b in bars[i - 20:i]])
+            sma20 = _avg([to_float((b or {}).get("c", 0)) for b in bars[i - 20:i]])
+            sma50 = _avg([to_float((b or {}).get("c", 0)) for b in bars[i - 50:i]])
+            future = bars[i + 1:i + 6]
             future_highs = [to_float((b or {}).get("h", 0)) for b in future if to_float((b or {}).get("h", 0)) > 0]
+
             if not future_highs:
                 continue
 
             breakout_case = c >= prev20_high * 1.002 and avg20_vol > 0 and v >= avg20_vol * 1.15
-            near_support = (sma20 > 0 and l <= sma20 * 1.01 and c >= sma20) or (sma50 > 0 and l <= sma50 * 1.01 and c >= sma50)
+            near_support = (
+                (sma20 > 0 and l <= sma20 * 1.01 and c >= sma20)
+                or
+                (sma50 > 0 and l <= sma50 * 1.01 and c >= sma50)
+            )
             pullback_case = near_support and c > o
 
-            setup_match = breakout_case if str(current_setup or "") == "Breakout" else pullback_case if str(current_setup or "") == "Pullback" else (breakout_case or pullback_case)
+            setup_match = (
+                breakout_case if str(current_setup or "") == "Breakout"
+                else pullback_case if str(current_setup or "") == "Pullback"
+                else (breakout_case or pullback_case)
+            )
             if not setup_match:
                 continue
 
             success = max(future_highs) >= c * 1.03
+
             bench_mode = _return_mode_from_series(bench, i, 20) if bench else "neutral"
             sec_mode = _return_mode_from_series(sect, i, 20) if sect else "neutral"
 
@@ -1501,10 +1582,12 @@ def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", 
                 market_cases += 1
                 if success:
                     market_success += 1
+
             if sect and sector_match:
                 sector_cases += 1
                 if success:
                     sector_success += 1
+
             if market_match and (not sect or sector_match):
                 combined_cases += 1
                 if success:
@@ -1514,18 +1597,65 @@ def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", 
         sector_pct = safe_round((sector_success / sector_cases) * 100, 1) if sector_cases > 0 else 0.0
         combined_pct = safe_round((combined_success / combined_cases) * 100, 1) if combined_cases > 0 else 0.0
 
-        reference_pct = combined_pct if combined_cases > 0 else market_pct if market_cases > 0 else sector_pct if sector_cases > 0 else 50.0
-        reference_cases = combined_cases if combined_cases > 0 else max(market_cases, sector_cases, 0)
-        score = _historical_pct_score(reference_pct, reference_cases, "عالية" if reference_cases >= 20 else "متوسطة" if reference_cases >= 10 else "محدودة")
+        reference_pct = (
+            combined_pct if combined_cases > 0
+            else market_pct if market_cases > 0
+            else sector_pct if sector_cases > 0
+            else 50.0
+        )
+        reference_cases = (
+            combined_cases if combined_cases > 0
+            else max(market_cases, sector_cases, 0)
+        )
 
-        label = "يدعم بقوة" if score >= 68 else "يدعم" if score >= 58 else "محايد" if score >= 45 else "ضعيف"
+        if reference_cases == 0:
+            return _partial_fallback("لم نعثر على حالات تاريخية مشابهة مطابقة لهذا السياق الحالي.")
+
+        score = _historical_pct_score(
+            reference_pct,
+            reference_cases,
+            "عالية" if reference_cases >= 20 else "متوسطة" if reference_cases >= 10 else "محدودة"
+        )
+
+        if score >= 68:
+            label = "يدعم بقوة"
+        elif score >= 58:
+            label = "يدعم"
+        elif score >= 45:
+            label = "محايد"
+        else:
+            label = "ضعيف"
+
         detail_parts = []
-        if benchmark_symbol:
-            detail_parts.append(f"حالات مشابهة مع {benchmark_symbol}: نجحت في {market_pct}% من {market_cases} حالة.")
+
+        if market_cases > 0:
+            detail_parts.append(
+                f"حالات مشابهة مع {benchmark_symbol}: نجحت في {market_pct}% من {market_cases} حالة."
+            )
+        elif benchmark_symbol:
+            detail_parts.append(
+                f"المؤشر {benchmark_symbol}: لا توجد حالات تاريخية كافية، لكن قراءته الحالية {_support_text(market_support_score)}."
+            )
+
         if sector_symbol:
-            detail_parts.append(f"ومع {sector_symbol}: نجحت في {sector_pct}% من {sector_cases} حالة.")
+            if sector_cases > 0:
+                detail_parts.append(
+                    f"ومع {sector_symbol}: نجحت في {sector_pct}% من {sector_cases} حالة."
+                )
+            else:
+                detail_parts.append(
+                    f"القطاع {sector_symbol}: لا توجد حالات تاريخية كافية، لكن قراءته الحالية {_support_text(sector_support_score)}."
+                )
+
         if combined_cases > 0 and sector_symbol:
-            detail_parts.append(f"وعند توافقهما معًا نجحت في {combined_pct}% من {combined_cases} حالة.")
+            detail_parts.append(
+                f"وعند توافقهما معًا نجحت في {combined_pct}% من {combined_cases} حالة."
+            )
+
+        if reference_cases < 6:
+            score = round(max(1.0, min(99.0, score - 3.0)), 2)
+            detail_parts.append("عدد الحالات محدود، لذلك خُفِّضت الثقة قليلًا.")
+
         detail_parts.append("هذه القراءة تربط نجاح السهم تاريخيًا بسياق المؤشر والقطاع الحاليين.")
 
         base.update({
@@ -1538,11 +1668,14 @@ def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", 
             "historical_combined_context_cases": combined_cases,
             "historical_context_score": score,
             "historical_context_label": label,
-            "historical_context_detail": " ".join([x for x in detail_parts if x]) if detail_parts else base["historical_context_detail"],
+            "historical_context_detail": " ".join([x for x in detail_parts if x]),
+            "historical_context_partial": False,
         })
         return base
+
     except:
         return base
+
 
 
 def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
