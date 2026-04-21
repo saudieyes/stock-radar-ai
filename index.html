@@ -741,6 +741,27 @@
       };
     }
 
+
+    function renderHistoricalContextBreakdown(stock){
+      const score = formatNumber(stock.historical_context_score || 0);
+      const marketCases = Number(stock.historical_market_context_cases || 0);
+      const sectorCases = Number(stock.historical_sector_context_cases || 0);
+
+      const marketText = marketCases > 0
+        ? `المؤشر ${formatNumber(stock.historical_market_context_success_pct || 0)}% من ${formatNumber(marketCases)} حالة`
+        : (stock.benchmark_symbol
+            ? `المؤشر ${safeText(stock.market_support_label || 'محايد')}`
+            : 'المؤشر غير متوفر');
+
+      const sectorText = sectorCases > 0
+        ? `القطاع ${formatNumber(stock.historical_sector_context_success_pct || 0)}% من ${formatNumber(sectorCases)} حالة`
+        : (stock.sector_etf_symbol
+            ? `القطاع ${safeText(stock.sector_support_label || 'محايد')}`
+            : 'القطاع غير متوفر');
+
+      return `${score} | ${marketText} | ${sectorText}`;
+    }
+
     function renderPositionSizingBlock(stock) {
       const calc = calculatePositionSize(stock);
       if (!calc.shares || !calc.perShareRisk) {
@@ -1223,7 +1244,7 @@
       details.push(detailBox('نجاح الاختراقات تاريخيًا', `${formatNumber(stock.historical_breakout_success_pct)}% من ${formatNumber(stock.historical_breakout_cases || 0)} حالة${stock.historical_breakout_speed_label ? ' | ' + safeText(stock.historical_breakout_speed_label) : ''}`));
       details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% من ${formatNumber(stock.historical_pullback_cases || 0)} حالة${stock.historical_pullback_speed_label ? ' | ' + safeText(stock.historical_pullback_speed_label) : ''}`));
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
-      details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', `${formatNumber(stock.historical_context_score || 0)} | المؤشر ${formatNumber(stock.historical_market_context_success_pct || 0)}% من ${formatNumber(stock.historical_market_context_cases || 0)} حالة | القطاع ${formatNumber(stock.historical_sector_context_success_pct || 0)}% من ${formatNumber(stock.historical_sector_context_cases || 0)} حالة`, true, 'درجة التاريخ مع المؤشر والقطاع'));
+      details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', renderHistoricalContextBreakdown(stock), true, 'درجة التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
@@ -1800,4 +1821,4 @@
     loadAll();
   </script>
 </body>
-</html>
+  </html>
