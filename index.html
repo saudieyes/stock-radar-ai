@@ -404,6 +404,7 @@
       <a class="quick-link" href="#riskPanelSection">⚖️ المخاطرة</a>
       <a class="quick-link" href="#portfolioSection">💼 المحفظة</a>
       <a class="quick-link" href="#watchlistSection">📌 المتابعة</a>
+      <a class="quick-link" href="#shariaExcludedSection">🚫 المستبعدة شرعيًا</a>
       <a class="quick-link" href="#performanceSection">📊 الأداء</a>
       <a class="quick-link" href="#singleScanSection">🔎 فحص سهم</a>
     </div>
@@ -501,6 +502,19 @@
         </div>
       </div>
       <div class="panel hidden-section" id="manualWatchlistContent">جاري تحميل القائمة...</div>
+    </div>
+
+    <div class="section scroll-anchor" id="shariaExcludedSection">
+      <div class="section-header">
+        <div class="section-heading">
+          <div class="section-title">🚫 المستبعدة شرعيًا يدويًا</div>
+          <div class="section-count" id="shariaExcludedCount"></div>
+        </div>
+        <div class="section-tools">
+          <button class="ghost" onclick="toggleSection('shariaExcludedContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+        </div>
+      </div>
+      <div class="panel hidden-section" id="shariaExcludedContent">جاري تحميل القائمة...</div>
     </div>
 
     <div class="section scroll-anchor" id="performanceSection">
@@ -829,6 +843,7 @@
     function badgeDecision(decision) {
       if (decision === "دخول قوي") return '<span class="badge badge-strong">🔥 دخول قوي</span>';
       if (decision === "دخول بحذر") return '<span class="badge badge-cautious">🟠 دخول بحذر</span>';
+      if (decision === "مرفوض شرعياً" || decision === "مستبعد يدويًا") return '<span class="badge badge-news-neg">🚫 ' + safeText(decision) + '</span>';
       return '<span class="badge badge-watch">👀 مراقبة</span>';
     }
 
@@ -954,6 +969,10 @@
           loadPerformance();
           el.dataset.loaded = '1';
         }
+        if (contentId === 'shariaExcludedContent' && el.dataset.loaded !== '1') {
+          loadShariaExcluded();
+          el.dataset.loaded = '1';
+        }
         if (el.dataset && el.dataset.rendered !== '1' && window.__sectionItems && window.__sectionItems[contentId]) {
           const items = window.__sectionItems[contentId] || [];
           el.innerHTML = `<div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
@@ -1043,6 +1062,8 @@
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
+      details.push(detailBox('الحالة الشرعية', safeText(stock.sharia_label || 'غير متوفر')));
+      details.push(detailBox('شرح الشرعية', safeText(stock.sharia_reason || ''), true));
       details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
       details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
       details.push(detailBox('إجراء المالك', safeText(stock.owner_action), true));
@@ -1104,6 +1125,7 @@
             ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
             ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`)}
             ${compactItem('المخاطرة', safeText(stock.risk_profile_label || '—'))}
+            ${compactItem('الشرعية', safeText(stock.sharia_label || '—'))}
             ${compactItem('التذبذب', safeText(stock.volatility_label || '—'))}
           </div>
 
@@ -1120,6 +1142,7 @@
           </div>
 
           <div class="card-actions">
+            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="delete" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
@@ -1312,6 +1335,87 @@
         });
         loadPortfolio();
       } catch (e) {}
+    }
+
+    async function excludeShariaSymbol(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean) return;
+      if (!confirm(`استبعاد ${clean} يدويًا من الفرص الشرعية؟`)) return;
+      try {
+        await apiFetch('/sharia-exclusions/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: clean })
+        });
+        loadAll();
+        const section = document.getElementById('shariaExcludedContent');
+        if (section && !section.classList.contains('hidden-section')) {
+          loadShariaExcluded();
+        }
+        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
+        if (singleSymbol === clean) {
+          scanSingleStock();
+        }
+      } catch (e) {
+        alert('تعذر استبعاد السهم يدويًا');
+      }
+    }
+
+    async function restoreShariaSymbol(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean) return;
+      try {
+        await apiFetch('/sharia-exclusions/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: clean })
+        });
+        loadAll();
+        loadShariaExcluded();
+        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
+        if (singleSymbol === clean) {
+          scanSingleStock();
+        }
+      } catch (e) {
+        alert('تعذر إعادة السهم');
+      }
+    }
+
+    async function loadShariaExcluded() {
+      try {
+        const res = await apiFetch('/sharia-exclusions');
+        const data = await res.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        document.getElementById('shariaExcludedCount').innerHTML = `${items.length} سهم`;
+        if (!items.length) {
+          document.getElementById('shariaExcludedContent').innerHTML = '<div class="empty">لا توجد أسهم مستبعدة يدويًا بعد</div>';
+          return;
+        }
+        const rows = items.map(item => `
+          <tr>
+            <td>${safeText(item.symbol)}</td>
+            <td>${safeText(item.company || '—')}</td>
+            <td>${safeText(item.sharia_label || '—')}</td>
+            <td>${safeText(item.sharia_reason || '—')}</td>
+            <td>${safeText(item.note || '—')}</td>
+            <td>${formatNumber(item.current_price)}</td>
+            <td>${safeText(item.excluded_at || '—')}</td>
+            <td><button class="ghost" onclick="restoreShariaSymbol('${safeText(item.symbol)}')">↩️ إعادة</button></td>
+          </tr>`).join('');
+        document.getElementById('shariaExcludedContent').innerHTML = `
+          <div class="table-wrap">
+            <table class="list-table">
+              <thead>
+                <tr>
+                  <th>السهم</th><th>الشركة</th><th>الحالة</th><th>السبب</th><th>ملاحظة</th><th>السعر</th><th>وقت الاستبعاد</th><th></th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      } catch (e) {
+        document.getElementById('shariaExcludedContent').innerHTML = '<div class="error">تعذر تحميل القائمة الشرعية المستبعدة</div>';
+      }
     }
 
     async function loadPortfolio() {
