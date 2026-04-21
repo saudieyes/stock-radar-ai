@@ -123,6 +123,7 @@ HISTORY_CACHE = {}
 REF_INFO_CACHE = {}
 INTRADAY_CACHE = {}
 SNAPSHOT_CACHE = {}
+PERFORMANCE_REFRESH_CACHE = {}
 PERFORMANCE_FILE = str(DATA_DIR / "signal_performance.json")
 
 MANUAL_WATCHLIST_FILE = str(DATA_DIR / "manual_watchlist.json")
@@ -412,6 +413,38 @@ def migrate_legacy_performance_items(items):
     return store
 
 
+def collapse_performance_duplicates(records: list[dict]) -> list[dict]:
+    collapsed = []
+    for row in list(records or []):
+        symbol = str(row.get("symbol", "") or "").upper().strip()
+        signal_type = str(row.get("signal_type", "") or "")
+        plan_family = str(row.get("plan_family", row.get("strategy_label", "")) or "")
+        week_key = str(row.get("id", "") or "").split("::")[0] if row.get("id") else ""
+        base_id = str(row.get("base_id", "") or "") or build_signal_record_base_id(week_key or get_performance_week_key(), symbol, signal_type, plan_family)
+        row["base_id"] = base_id
+        row["plan_signature"] = str(row.get("plan_signature", "") or "") or _plan_signature(row.get("entry_price", 0), row.get("target_price", 0), row.get("stop_loss", 0))
+        existing = next((item for item in collapsed if item.get("base_id") == base_id and not _plan_change_significant(item, row.get("entry_price", 0), row.get("target_price", 0), row.get("stop_loss", 0))), None)
+        if existing is None:
+            row.setdefault("revision", 1)
+            row.setdefault("times_seen_count", 1)
+            collapsed.append(row)
+            continue
+        existing["last_seen_at"] = max(str(existing.get("last_seen_at", "") or ""), str(row.get("last_seen_at", "") or ""))
+        existing["max_price_seen"] = max(float(existing.get("max_price_seen", 0) or 0), float(row.get("max_price_seen", 0) or 0))
+        min_candidates = [float(x.get("min_price_seen", 0) or 0) for x in [existing, row] if float(x.get("min_price_seen", 0) or 0) > 0]
+        if min_candidates:
+            existing["min_price_seen"] = min(min_candidates)
+        existing["times_seen_count"] = int(existing.get("times_seen_count", 1) or 1) + int(row.get("times_seen_count", 1) or 1)
+        if str(row.get("closed_at", "") or ""):
+            existing["closed_at"] = existing.get("closed_at") or row.get("closed_at")
+        if outcome_sort_rank(row.get("outcome")) < outcome_sort_rank(existing.get("outcome")):
+            existing["outcome"] = row.get("outcome")
+            existing["status_mark"] = row.get("status_mark")
+            existing["status_label"] = row.get("status_label")
+        existing["current_price"] = row.get("current_price", existing.get("current_price", 0))
+    return collapsed
+
+
 def load_performance_store():
     try:
         with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
@@ -420,9 +453,13 @@ def load_performance_store():
         return make_blank_performance_store()
 
     if isinstance(raw, list):
-        return migrate_legacy_performance_items(raw)
+        store = migrate_legacy_performance_items(raw)
+        store["active_records"] = collapse_performance_duplicates(store.get("active_records", []))[:500]
+        return store
 
-    return normalize_performance_store(raw)
+    store = normalize_performance_store(raw)
+    store["active_records"] = collapse_performance_duplicates(store.get("active_records", []))[:500]
+    return store
 
 
 def save_performance_store(store):
@@ -552,8 +589,48 @@ def evaluate_performance_record(record, current_price):
     return record
 
 
-def build_signal_record_id(week_key: str, symbol: str, signal_type: str, plan_family: str, entry_price: float, target_price: float, stop_loss: float) -> str:
-    return f"{week_key}::{symbol}::{signal_type}::{plan_family}::{safe_round(entry_price)}::{safe_round(target_price)}::{safe_round(stop_loss)}"
+def _bucket_plan_price(value: float) -> float:
+    try:
+        value = float(value or 0)
+        if value <= 0:
+            return 0.0
+        if value < 5:
+            return safe_round(value, 2)
+        if value < 25:
+            return safe_round(value, 1)
+        return safe_round(round(value * 2.0) / 2.0, 2)
+    except:
+        return 0.0
+
+
+def _plan_signature(entry_price: float, target_price: float, stop_loss: float) -> str:
+    return f"{_bucket_plan_price(entry_price)}::{_bucket_plan_price(target_price)}::{_bucket_plan_price(stop_loss)}"
+
+
+def _plan_change_significant(existing: dict, entry_price: float, target_price: float, stop_loss: float) -> bool:
+    try:
+        old_sig = str(existing.get("plan_signature", "") or "")
+        new_sig = _plan_signature(entry_price, target_price, stop_loss)
+        if not old_sig:
+            return True
+        if old_sig == new_sig:
+            return False
+        old_entry = float(existing.get("entry_price", 0) or 0)
+        old_target = float(existing.get("target_price", 0) or 0)
+        old_stop = float(existing.get("stop_loss", 0) or 0)
+        entry_diff = abs(float(entry_price or 0) - old_entry)
+        target_diff = abs(float(target_price or 0) - old_target)
+        stop_diff = abs(float(stop_loss or 0) - old_stop)
+        base = max(old_entry, float(entry_price or 0), 1.0)
+        if entry_diff <= max(0.12, base * 0.012) and target_diff <= max(0.18, base * 0.02) and stop_diff <= max(0.12, base * 0.012):
+            return False
+        return True
+    except:
+        return True
+
+
+def build_signal_record_base_id(week_key: str, symbol: str, signal_type: str, plan_family: str) -> str:
+    return f"{week_key}::{symbol}::{signal_type}::{plan_family}"
 
 
 def upsert_performance_signal(stock: dict):
@@ -586,20 +663,33 @@ def upsert_performance_signal(stock: dict):
         store = rollover_performance_store_if_needed(load_performance_store())
         records = store.get("active_records", [])
         plan_family = str(stock.get("display_plan_family", stock.get("type", "")) or "")
-        record_id = build_signal_record_id(
+        base_id = build_signal_record_base_id(
             store['active_week_key'],
             symbol,
             signal_type,
             plan_family,
-            entry_price,
-            target_price,
-            stop_loss,
         )
-        now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
-        existing = next((item for item in records if item.get("id") == record_id), None)
+        plan_signature = _plan_signature(entry_price, target_price, stop_loss)
+        same_base = [item for item in records if item.get("base_id") == base_id]
+        same_base.sort(key=lambda row: str(row.get("first_seen_at", "") or ""), reverse=True)
+        open_existing = next((item for item in same_base if str(item.get("outcome", "ongoing") or "ongoing") in {"ongoing", "pending"}), None)
+        latest_existing = same_base[0] if same_base else None
+        existing = None
+        if open_existing is not None and not _plan_change_significant(open_existing, entry_price, target_price, stop_loss):
+            existing = open_existing
+        elif latest_existing is not None and not _plan_change_significant(latest_existing, entry_price, target_price, stop_loss):
+            existing = latest_existing
+        revision = 1
+        if same_base:
+            revision = max(int(item.get("revision", 1) or 1) for item in same_base) + (0 if existing is not None else 1)
+        record_id = f"{base_id}::R{revision}"
         if existing is None:
             existing = {
                 "id": record_id,
+                "base_id": base_id,
+                "revision": revision,
+                "plan_signature": plan_signature,
+                "times_seen_count": 1,
                 "symbol": symbol,
                 "signal_type": signal_type,
                 "plan_family": plan_family,
@@ -630,6 +720,8 @@ def upsert_performance_signal(stock: dict):
             existing["strategy_label"] = str(stock.get("strategy_label", "") or existing.get("strategy_label", ""))
             existing["market_phase"] = str(stock.get("market_phase_label", stock.get("market_phase", "")) or existing.get("market_phase", ""))
             existing["target_2_price"] = max(float(existing.get("target_2_price", 0) or 0), target_2_price)
+            existing["plan_signature"] = plan_signature or existing.get("plan_signature", "")
+            existing["times_seen_count"] = int(existing.get("times_seen_count", 1) or 1) + 1
 
         evaluate_performance_record(existing, current_price)
         store["active_records"] = records[:500]
@@ -937,6 +1029,8 @@ def display_rank_score(item: dict) -> float:
         signal_stage = _text_label(item.get("signal_stage"))
         hist_conf = _text_label(item.get("historical_confidence_label"))
         hist_behavior = _text_label(item.get("historical_behavior_label"))
+        historical_behavior_score = float(item.get("historical_behavior_score", 50) or 50)
+        historical_context_score = float(item.get("historical_context_score", 50) or 50)
 
         score = quality
         score += readiness * 0.45
@@ -956,6 +1050,8 @@ def display_rank_score(item: dict) -> float:
 
         score += historical_confidence_bonus(hist_conf)
         score += historical_behavior_bonus(hist_behavior)
+        score += (historical_behavior_score - 50.0) * 0.18
+        score += (historical_context_score - 50.0) * 0.14
 
         if readiness_label in {"جاهز", "اختراق مؤكد", "ارتداد مؤكد"}:
             score += 5.0
@@ -1004,6 +1100,8 @@ def sort_display_bucket(items):
             float(x.get("rr_1", 0) or 0),
             float(x.get("continuation_score", 0) or 0),
             float(x.get("runner_score", 0) or 0),
+            float(x.get("historical_behavior_score", 50) or 50),
+            float(x.get("historical_context_score", 50) or 50),
         ),
         reverse=True,
     )
@@ -1257,6 +1355,195 @@ def _avg(values):
     vals = [float(x) for x in values if float(x or 0) > 0]
     return (sum(vals) / len(vals)) if vals else 0.0
 
+def _historical_confidence_weight(label: str) -> float:
+    txt = str(label or "")
+    if "عالية" in txt:
+        return 1.0
+    if "متوسطة" in txt:
+        return 0.8
+    if "محدودة" in txt:
+        return 0.55
+    return 0.35
+
+
+def _historical_pct_score(pct: float, cases: int, confidence_label: str, speed_label: str = "") -> float:
+    try:
+        pct = float(pct or 0)
+        cases = int(cases or 0)
+        confidence_weight = _historical_confidence_weight(confidence_label)
+        score = 50.0 + ((pct - 50.0) * 0.6 * confidence_weight)
+        if cases >= 30:
+            score += 8
+        elif cases >= 15:
+            score += 5
+        elif cases >= 8:
+            score += 2
+        elif cases <= 3:
+            score -= 4
+        speed = str(speed_label or "")
+        if "سريع" in speed:
+            score += 4
+        elif "متوسط" in speed:
+            score += 2
+        elif "بطيء" in speed:
+            score -= 2
+        return max(1.0, min(99.0, round(score, 2)))
+    except:
+        return 50.0
+
+
+def _support_mode_from_score(score: float) -> str:
+    score = float(score or 0)
+    if score >= 3:
+        return "positive"
+    if score <= -3:
+        return "negative"
+    return "neutral"
+
+
+def _series_close_at(bars, idx: int) -> float:
+    try:
+        row = bars[idx] if 0 <= idx < len(bars or []) else {}
+        return float((row or {}).get("c", 0) or 0)
+    except:
+        return 0.0
+
+
+def _return_mode_from_series(bars, idx: int, lookback: int = 20) -> str:
+    try:
+        if not bars or idx < lookback:
+            return "neutral"
+        start = _series_close_at(bars, idx - lookback)
+        end = _series_close_at(bars, idx)
+        if start <= 0 or end <= 0:
+            return "neutral"
+        ret = ((end - start) / start) * 100.0
+        if ret >= 1.5:
+            return "positive"
+        if ret <= -1.5:
+            return "negative"
+        return "neutral"
+    except:
+        return "neutral"
+
+
+def analyze_historical_context_behavior(stock_bars, benchmark_symbol: str = "", sector_symbol: str = "", current_setup: str = "", market_support_score: float = 0.0, sector_support_score: float = 0.0) -> dict:
+    base = {
+        "historical_context_ready": False,
+        "historical_market_context_success_pct": 0.0,
+        "historical_market_context_cases": 0,
+        "historical_sector_context_success_pct": 0.0,
+        "historical_sector_context_cases": 0,
+        "historical_combined_context_success_pct": 0.0,
+        "historical_combined_context_cases": 0,
+        "historical_context_score": 50.0,
+        "historical_context_label": "محايد",
+        "historical_context_detail": "لا توجد بيانات كافية لربط السهم تاريخيًا مع المؤشر والقطاع.",
+    }
+    try:
+        if not stock_bars or len(stock_bars) < 120:
+            return base
+        bench_bars = get_daily_bars(benchmark_symbol) if benchmark_symbol else []
+        sector_bars = get_daily_bars(sector_symbol) if sector_symbol else []
+        min_len = len(stock_bars)
+        if bench_bars:
+            min_len = min(min_len, len(bench_bars))
+        if sector_bars:
+            min_len = min(min_len, len(sector_bars))
+        if min_len < 120:
+            return base
+
+        bars = list(stock_bars)[-min_len:]
+        bench = list(bench_bars)[-min_len:] if bench_bars else []
+        sect = list(sector_bars)[-min_len:] if sector_bars else []
+
+        market_mode = _support_mode_from_score(market_support_score)
+        sector_mode = _support_mode_from_score(sector_support_score)
+
+        market_cases = market_success = 0
+        sector_cases = sector_success = 0
+        combined_cases = combined_success = 0
+
+        for i in range(60, len(bars) - 6):
+            row = bars[i]
+            o = to_float((row or {}).get("o"))
+            h = to_float((row or {}).get("h"))
+            l = to_float((row or {}).get("l"))
+            c = to_float((row or {}).get("c"))
+            v = to_float((row or {}).get("v"))
+            if min(o, h, l, c) <= 0:
+                continue
+            prev20_high = max(to_float((b or {}).get("h", 0)) for b in bars[i-20:i])
+            avg20_vol = _avg([to_float((b or {}).get("v", 0)) for b in bars[i-20:i]])
+            sma20 = _avg([to_float((b or {}).get("c", 0)) for b in bars[i-20:i]])
+            sma50 = _avg([to_float((b or {}).get("c", 0)) for b in bars[i-50:i]])
+            future = bars[i+1:i+6]
+            future_highs = [to_float((b or {}).get("h", 0)) for b in future if to_float((b or {}).get("h", 0)) > 0]
+            if not future_highs:
+                continue
+
+            breakout_case = c >= prev20_high * 1.002 and avg20_vol > 0 and v >= avg20_vol * 1.15
+            near_support = (sma20 > 0 and l <= sma20 * 1.01 and c >= sma20) or (sma50 > 0 and l <= sma50 * 1.01 and c >= sma50)
+            pullback_case = near_support and c > o
+
+            setup_match = breakout_case if str(current_setup or "") == "Breakout" else pullback_case if str(current_setup or "") == "Pullback" else (breakout_case or pullback_case)
+            if not setup_match:
+                continue
+
+            success = max(future_highs) >= c * 1.03
+            bench_mode = _return_mode_from_series(bench, i, 20) if bench else "neutral"
+            sec_mode = _return_mode_from_series(sect, i, 20) if sect else "neutral"
+
+            market_match = (market_mode == "neutral") or (bench_mode == market_mode)
+            sector_match = (sector_mode == "neutral") or (sec_mode == sector_mode)
+
+            if market_match:
+                market_cases += 1
+                if success:
+                    market_success += 1
+            if sect and sector_match:
+                sector_cases += 1
+                if success:
+                    sector_success += 1
+            if market_match and (not sect or sector_match):
+                combined_cases += 1
+                if success:
+                    combined_success += 1
+
+        market_pct = safe_round((market_success / market_cases) * 100, 1) if market_cases > 0 else 0.0
+        sector_pct = safe_round((sector_success / sector_cases) * 100, 1) if sector_cases > 0 else 0.0
+        combined_pct = safe_round((combined_success / combined_cases) * 100, 1) if combined_cases > 0 else 0.0
+
+        reference_pct = combined_pct if combined_cases > 0 else market_pct if market_cases > 0 else sector_pct if sector_cases > 0 else 50.0
+        reference_cases = combined_cases if combined_cases > 0 else max(market_cases, sector_cases, 0)
+        score = _historical_pct_score(reference_pct, reference_cases, "عالية" if reference_cases >= 20 else "متوسطة" if reference_cases >= 10 else "محدودة")
+
+        label = "يدعم بقوة" if score >= 68 else "يدعم" if score >= 58 else "محايد" if score >= 45 else "ضعيف"
+        detail_parts = []
+        if benchmark_symbol:
+            detail_parts.append(f"حالات مشابهة مع {benchmark_symbol}: نجحت في {market_pct}% من {market_cases} حالة.")
+        if sector_symbol:
+            detail_parts.append(f"ومع {sector_symbol}: نجحت في {sector_pct}% من {sector_cases} حالة.")
+        if combined_cases > 0 and sector_symbol:
+            detail_parts.append(f"وعند توافقهما معًا نجحت في {combined_pct}% من {combined_cases} حالة.")
+        detail_parts.append("هذه القراءة تربط نجاح السهم تاريخيًا بسياق المؤشر والقطاع الحاليين.")
+
+        base.update({
+            "historical_context_ready": bool(reference_cases >= 6),
+            "historical_market_context_success_pct": market_pct,
+            "historical_market_context_cases": market_cases,
+            "historical_sector_context_success_pct": sector_pct,
+            "historical_sector_context_cases": sector_cases,
+            "historical_combined_context_success_pct": combined_pct,
+            "historical_combined_context_cases": combined_cases,
+            "historical_context_score": score,
+            "historical_context_label": label,
+            "historical_context_detail": " ".join([x for x in detail_parts if x]) if detail_parts else base["historical_context_detail"],
+        })
+        return base
+    except:
+        return base
+
 
 def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
     base = {
@@ -1270,6 +1557,7 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
         "historical_confidence_label": "منخفضة",
         "historical_breakout_speed_label": "لا توجد بيانات كافية",
         "historical_pullback_speed_label": "لا توجد بيانات كافية",
+        "historical_behavior_score": 50.0,
         "historical_behavior_label": "لا توجد بيانات كافية",
         "historical_behavior_detail": "لا توجد بيانات تاريخية كافية لبناء رأي سلوكي موثوق.",
     }
@@ -1384,6 +1672,8 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
             main_label = "سلوك تاريخي داعم" if main_pct >= 60 else "محايد" if main_pct >= 45 else "ضعيف"
             detail = f"نجاح الاختراقات {breakout_pct}% ({breakout_cases} حالة)، والارتدادات {pullback_pct}% ({pullback_cases} حالة)، واستجابة السيولة {volume_pct}% ({volume_cases} حالة). درجة الثقة {confidence}."
 
+        main_speed = breakout_speed if setup == "Breakout" else pullback_speed if setup == "Pullback" else breakout_speed
+        historical_behavior_score = _historical_pct_score(main_pct, max(breakout_cases, pullback_cases, volume_cases), confidence, main_speed)
         return {
             "historical_behavior_ready": True,
             "historical_breakout_success_pct": breakout_pct,
@@ -1395,6 +1685,7 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
             "historical_confidence_label": confidence,
             "historical_breakout_speed_label": breakout_speed,
             "historical_pullback_speed_label": pullback_speed,
+            "historical_behavior_score": historical_behavior_score,
             "historical_behavior_label": main_label,
             "historical_behavior_detail": detail,
         }
@@ -1945,6 +2236,10 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "market_sector_score": 0,
             "market_sector_alignment_label": "محايد",
             "market_sector_alignment_detail": "لا توجد بيانات كافية عن المؤشر والقطاع.",
+            "historical_behavior_score": 50.0,
+            "historical_context_score": 50.0,
+            "historical_context_label": "محايد",
+            "historical_context_detail": "لا توجد بيانات كافية لربط السهم بالمؤشر والقطاع.",
         }
 
 
@@ -2554,11 +2849,11 @@ def detect_news_shape(text_lower: str, related_count: int = 0) -> str:
         "cheap stock", "cheap cloud stock", "best stock", "best stocks", "top stock", "top stocks",
         "stock to buy", "stocks to buy", "stock to watch", "stocks to watch", "watch these stocks",
         "looks cheap", "or does it", "ready to break out", "break out in 2026", "breakout in 2026",
-        "could make you", "millionaire", "millionaires", "top picks", "editorial", "motley fool",
+        "could make you", "millionaire", "millionaires", "top picks", "editorial", "motley fool", "seeking alpha",
         "here s why", "here's why", "here s what this means", "here's what this means",
         "prediction", "predictions", "predicts", "pick and shovel", "pick-and-shovel",
         "could follow suit", "could jump", "another incredibly", "best pick", "best ai stock",
-        "wall street expects", "wall street forecast", "wall street projects", "top idea", "if you buy", "here s where it could be", "here's where it could be", "in 5 years", "in five years", "could be in 5 years"
+        "wall street expects", "wall street forecast", "wall street projects", "top idea", "if you buy", "here s where it could be", "here's where it could be", "in 5 years", "in five years", "could be in 5 years", "best growth stock", "best value stock", "could soar", "rumors debunked", "stock could", "shares could"
     ]
     roundup_markers = [
         "top gainers", "top losers", "biggest gainers", "biggest losers", "market movers",
@@ -2575,6 +2870,8 @@ def detect_news_shape(text_lower: str, related_count: int = 0) -> str:
     if text_lower.startswith("why ") and " stock " in text_lower:
         return "opinion"
     if text_lower.startswith("is ") and " stock " in text_lower:
+        return "opinion"
+    if text_lower.endswith("?") and (" stock " in text_lower or " shares " in text_lower):
         return "opinion"
     if text_lower.startswith("prediction") or text_lower.startswith("opinion"):
         return "opinion"
@@ -3140,6 +3437,8 @@ def compute_core_quality_score(
     news_sentiment: str = "neutral",
     news_sessions_since: int = 999,
     market_sector_score: float = 0.0,
+    historical_behavior_score: float = 50.0,
+    historical_context_score: float = 50.0,
 ) -> int:
     quality = 50
 
@@ -3213,6 +3512,9 @@ def compute_core_quality_score(
         quality -= 10
     elif risk_pct > 5:
         quality -= 4
+
+    quality += int(round((float(historical_behavior_score or 50) - 50.0) * 0.14))
+    quality += int(round((float(historical_context_score or 50) - 50.0) * 0.10))
 
     return max(1, min(99, int(round(quality))))
 
@@ -3299,6 +3601,8 @@ def apply_decision_layers(stock: dict) -> dict:
         news_scope = str(stock.get("news_scope", "neutral") or "neutral")
         news_sentiment = str(stock.get("news_sentiment", stock.get("news_category", "neutral")) or "neutral")
         news_sessions_since = int(float(stock.get("news_sessions_since", 999) or 999))
+        historical_behavior_score = float(stock.get("historical_behavior_score", 50) or 50)
+        historical_context_score = float(stock.get("historical_context_score", 50) or 50)
 
         core_quality = compute_core_quality_score(
             trend,
@@ -3314,6 +3618,8 @@ def apply_decision_layers(stock: dict) -> dict:
             news_sentiment,
             news_sessions_since,
             float(stock.get("market_sector_score", 0) or 0),
+            historical_behavior_score,
+            historical_context_score,
         )
         execution_layer_score, execution_layer_label, execution_adjustment = compute_execution_layer_score(stock)
         blended_quality = max(1, min(99, int(round(core_quality + execution_adjustment))))
@@ -3409,11 +3715,43 @@ def apply_decision_layers(stock: dict) -> dict:
             str(stock.get("sector_support_label", "") or ""),
         )
 
+        if decision == "دخول قوي" and historical_behavior_score < 42 and historical_context_score < 44 and str(stock.get("historical_confidence_label", "") or "") in {"متوسطة", "عالية"}:
+            decision = "دخول بحذر"
+        elif decision == "دخول بحذر" and historical_behavior_score < 36 and historical_context_score < 38 and str(stock.get("historical_confidence_label", "") or "") == "عالية":
+            decision = "مراقبة"
+
         stock["decision"] = decision
         stock["decision_layer_note"] = f"Core: {core_band} | Execution: {execution_band}"
         stock["execution_status"] = compute_execution_status(
             trade_type, decision, trend, effective_volume_ratio, catalyst_score, breakout_quality
         )
+
+        signal_strength_score = float(blended_quality or 0)
+        signal_strength_score += max(-8.0, min(8.0, (historical_behavior_score - 50.0) * 0.18))
+        signal_strength_score += max(-6.0, min(6.0, (historical_context_score - 50.0) * 0.14))
+        signal_strength_score += max(-6.0, min(6.0, (float(stock.get("market_sector_score", 0) or 0)) * 0.35))
+        signal_strength_score += max(-6.0, min(6.0, (execution_layer_score - 50.0) * 0.10))
+        signal_strength_score = max(1.0, min(99.0, round(signal_strength_score, 2)))
+        if decision == "دخول قوي":
+            if signal_strength_score >= 84:
+                signal_strength_label = "قوي جدًا"
+                signal_strength_bucket = 3
+            elif signal_strength_score >= 72:
+                signal_strength_label = "قوي"
+                signal_strength_bucket = 2
+            else:
+                signal_strength_label = "قوي مبكر"
+                signal_strength_bucket = 1
+        elif decision == "دخول بحذر":
+            signal_strength_label = "بحذر" if signal_strength_score < 70 else "بحذر مرتفع"
+            signal_strength_bucket = 0
+        else:
+            signal_strength_label = "مراقبة"
+            signal_strength_bucket = -1
+        stock["signal_strength_score"] = signal_strength_score
+        stock["signal_strength_label"] = signal_strength_label
+        stock["signal_strength_bucket"] = signal_strength_bucket
+
         stock["owner_action"] = owner_decision(decision, trend, breakout_quality, effective_volume_ratio, catalyst_score)
         return stock
     except:
@@ -3736,6 +4074,10 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
             "market_sector_score": 0,
             "market_sector_alignment_label": "محايد",
             "market_sector_alignment_detail": "لا توجد بيانات كافية عن المؤشر والقطاع.",
+            "historical_behavior_score": 50.0,
+            "historical_context_score": 50.0,
+            "historical_context_label": "محايد",
+            "historical_context_detail": "لا توجد بيانات كافية لربط السهم بالمؤشر والقطاع.",
             "price_source_label": "آخر إغلاق",
             "display_entry_label": "—",
             "display_entry_price": 0,
@@ -3768,6 +4110,14 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     pullback_context = compute_pullback_context(current_price, high, low, intraday, trend_data["trend"])
     trade_type = "Pullback" if pullback_context.get("pullback_candidate") else "Breakout"
     historical_behavior = analyze_historical_behavior(daily_bars, trade_type)
+    historical_context = analyze_historical_context_behavior(
+        daily_bars,
+        market_sector_context.get("benchmark_symbol", ""),
+        market_sector_context.get("sector_etf_symbol", ""),
+        trade_type,
+        market_sector_context.get("market_support_score", 0),
+        market_sector_context.get("sector_support_score", 0),
+    )
 
     price_penalty, price_flag = dynamic_price_penalty(current_price, trade_type)
     volume_pace_ratio = compute_volume_pace_ratio(intraday, volume_ratio)
@@ -3814,6 +4164,8 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         news_bundle.get("news_sentiment", news_bundle.get("news_category", "neutral")),
         news_bundle.get("news_sessions_since", 999),
         market_sector_context.get("market_sector_score", 0),
+        historical_behavior.get("historical_behavior_score", 50),
+        historical_context.get("historical_context_score", 50),
     )
     quality = core_quality
     rank_label = make_rank_label(quality)
@@ -3842,6 +4194,8 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         market_sector_context.get("sector_support_label", ""),
         market_sector_context.get("sector_etf_symbol", ""),
     )
+    if decision == "دخول قوي" and historical_behavior.get("historical_behavior_score", 50) < 42 and historical_context.get("historical_context_score", 50) < 44 and str(historical_behavior.get("historical_confidence_label", "") or "") in {"متوسطة", "عالية"}:
+        decision = "دخول بحذر"
 
     execution_status = compute_execution_status(
         trade_type, decision, trend_data["trend"], effective_volume_ratio, catalyst_score, breakout_quality
@@ -4040,17 +4394,21 @@ def scan_all():
             p["ai_summary"] += "السعر اللحظي غير موثوق"
 
         p = enrich_display_meta(p)
-        # تخفيف التشدد: لا نهبط "القوي" إلا إذا كانت الجاهزية ضعيفة فعلاً أو تحولت إلى مطاردة سعرية.
+        # لا نقتل الفرص: ننظم القوي داخليًا، ونهبط فقط إذا كانت الجاهزية ضعيفة جدًا أو مطاردة واضحة.
         try:
             if str(p.get("decision", "") or "") == "دخول قوي":
                 readiness_score = float(p.get("execution_readiness_score", 0) or 0)
                 readiness_label = str(p.get("execution_readiness_label", "") or "")
-                if readiness_score < 50 or readiness_label in {"مطاردة سعرية"}:
+                if readiness_score < 42 or readiness_label in {"مطاردة سعرية"}:
                     p["decision"] = "دخول بحذر"
+                    p["signal_strength_label"] = "بحذر"
+                    p["signal_strength_bucket"] = 0
             if str(p.get("decision", "") or "") == "دخول بحذر":
                 readiness_score = float(p.get("execution_readiness_score", 0) or 0)
-                if readiness_score < 30:
+                if readiness_score < 24:
                     p["decision"] = "مراقبة"
+                    p["signal_strength_label"] = "مراقبة"
+                    p["signal_strength_bucket"] = -1
         except:
             pass
         return p
@@ -4075,6 +4433,8 @@ def scan_all():
     rows.sort(
         key=lambda x: (
             decision_priority(x.get("decision", "")),
+            float(x.get("signal_strength_bucket", -1) or -1),
+            float(x.get("signal_strength_score", 0) or 0),
             float(x.get("display_rank_score", 0) or 0),
             float(x.get("quality_score", 0) or 0),
             float(x.get("execution_readiness_score", 0) or 0),
@@ -4651,7 +5011,9 @@ def enrich_display_meta(stock: dict) -> dict:
             f"{stock.get('execution_readiness_icon', '👀')} الجاهزية: {stock.get('execution_readiness_label', '')}",
         ]
         if stock.get("historical_behavior_label"):
-            summary_bits.append(f"📚 السلوك التاريخي: {stock.get('historical_behavior_label')}")
+            summary_bits.append(f"📚 السلوك التاريخي: {stock.get('historical_behavior_label')} ({safe_round(stock.get('historical_behavior_score', 50), 0)})")
+        if stock.get("historical_context_label"):
+            summary_bits.append(f"🧩 التاريخ مع المؤشر/القطاع: {stock.get('historical_context_label')} ({safe_round(stock.get('historical_context_score', 50), 0)})")
         if stock.get("alignment_label"):
             summary_bits.append(f"🧭 التوافق الزمني: {stock.get('alignment_label')}")
         if stock.get("market_support_label"):
@@ -5006,6 +5368,25 @@ def sharia_exclusions_get():
 
 
 
+def get_performance_live_price(symbol: str) -> dict:
+    symbol = str(symbol or "").upper().strip()
+    if not symbol:
+        return {"current_price": 0.0, "price_source_label": ""}
+    cache_key = f"perf::{symbol}"
+    cached = _cache_get(PERFORMANCE_REFRESH_CACHE, cache_key)
+    if cached is not None:
+        return cached
+    prev = get_prev(symbol)
+    intraday = get_intraday_snapshot(symbol)
+    live_block = build_live_price_block(symbol, prev or {}, intraday)
+    value = {
+        "current_price": float(live_block.get("display_price", 0) or 0),
+        "price_source_label": live_block.get("price_source_label", ""),
+    }
+    ttl = 12 if is_market_open_now() else 90
+    return _cache_set(PERFORMANCE_REFRESH_CACHE, cache_key, value, ttl)
+
+
 def build_performance_dashboard(records: list[dict]) -> dict:
     rows = sorted(list(records or []), key=lambda r: (outcome_sort_rank(r.get("outcome")), r.get("first_seen_at", "")))
     strong = [x for x in rows if str(x.get("signal_type", "") or "") == "دخول قوي"]
@@ -5027,20 +5408,37 @@ def performance_get():
     store = rollover_performance_store_if_needed(load_performance_store())
     records = list(store.get("active_records", []))
     updated = []
+    now_text = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+    final_outcomes = {"above_target", "target_hit", "loss", "expired", "partial_gain"}
+    refresh_rows = []
+    refresh_symbols = []
+    for item in records[:500]:
+        if str(item.get("outcome", "ongoing") or "ongoing") not in final_outcomes:
+            refresh_rows.append(item)
+            refresh_symbols.append(str(item.get("symbol", "") or "").upper().strip())
+
+    refresh_results = {}
+    if refresh_symbols:
+        max_workers = min(12, max(4, len(refresh_symbols)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(get_performance_live_price, symbol): symbol for symbol in refresh_symbols if symbol}
+            for future in as_completed(future_map):
+                symbol = future_map[future]
+                try:
+                    refresh_results[symbol] = future.result() or {}
+                except:
+                    refresh_results[symbol] = {}
 
     for item in records[:500]:
         symbol = str(item.get("symbol", "") or "").upper().strip()
         current_price = float(item.get("current_price", 0) or 0)
         price_source_label = str(item.get("price_source_label", "") or "")
-        if symbol:
-            prev = get_prev(symbol)
-            intraday = get_intraday_snapshot(symbol)
-            live_block = build_live_price_block(symbol, prev or {}, intraday)
-            live_price = float(live_block.get("display_price", 0) or 0)
-            if live_price > 0:
-                current_price = live_price
-                price_source_label = live_block.get("price_source_label", price_source_label)
-        item["last_seen_at"] = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+        live_payload = refresh_results.get(symbol, {}) if symbol else {}
+        live_price = float((live_payload or {}).get("current_price", 0) or 0)
+        if live_price > 0:
+            current_price = live_price
+            price_source_label = str((live_payload or {}).get("price_source_label", price_source_label) or price_source_label)
+        item["last_seen_at"] = now_text
         item["price_source_label"] = price_source_label
         evaluate_performance_record(item, current_price)
         updated.append({
