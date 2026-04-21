@@ -127,6 +127,7 @@ PERFORMANCE_FILE = str(DATA_DIR / "signal_performance.json")
 
 MANUAL_WATCHLIST_FILE = str(DATA_DIR / "manual_watchlist.json")
 PORTFOLIO_FILE = str(DATA_DIR / "portfolio_holdings.json")
+MANUAL_SHARIA_EXCLUSIONS_FILE = str(DATA_DIR / "manual_sharia_exclusions.json")
 
 def ny_now():
     return datetime.now(ZoneInfo("America/New_York"))
@@ -162,6 +163,63 @@ def save_portfolio_items(items):
             json.dump(items, f, ensure_ascii=False, indent=2)
     except:
         pass
+
+
+def normalize_symbol_text(symbol: str) -> str:
+    return str(symbol or "").upper().strip()
+
+
+def load_manual_sharia_exclusions():
+    try:
+        with open(MANUAL_SHARIA_EXCLUSIONS_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except:
+        raw = []
+
+    items = []
+    seen = set()
+    for row in raw if isinstance(raw, list) else []:
+        if isinstance(row, str):
+            symbol = normalize_symbol_text(row)
+            item = {"symbol": symbol, "note": "", "excluded_at": ""}
+        elif isinstance(row, dict):
+            symbol = normalize_symbol_text(row.get("symbol", ""))
+            item = {
+                "symbol": symbol,
+                "note": str(row.get("note", "") or "").strip(),
+                "excluded_at": str(row.get("excluded_at", "") or "").strip(),
+            }
+        else:
+            continue
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        items.append(item)
+    return items
+
+
+def save_manual_sharia_exclusions(items):
+    try:
+        cleaned = []
+        seen = set()
+        for row in items if isinstance(items, list) else []:
+            symbol = normalize_symbol_text((row or {}).get("symbol", ""))
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            cleaned.append({
+                "symbol": symbol,
+                "note": str((row or {}).get("note", "") or "").strip(),
+                "excluded_at": str((row or {}).get("excluded_at", "") or "").strip(),
+            })
+        with open(MANUAL_SHARIA_EXCLUSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cleaned, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+
+def get_manual_sharia_exclusions_map():
+    return {normalize_symbol_text(item.get("symbol", "")): item for item in load_manual_sharia_exclusions() if normalize_symbol_text(item.get("symbol", ""))}
 
 
 def get_performance_week_window(base_dt=None):
@@ -2602,29 +2660,114 @@ def get_news(symbol, company_name="", sector="", industry=""):
     bundle = get_news_bundle(symbol, company_name, sector, industry)
     return (bundle.get("news_title") or bundle.get("news_context_note") or bundle.get("news_note") or "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
 
-def is_halal(sector, industry, total_assets, cash, total_debt):
+def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manual_exclusions=None):
+    symbol = normalize_symbol_text(symbol)
     sector_l = str(sector).lower().strip()
     industry_l = str(industry).lower().strip()
+    exclusions = manual_exclusions if isinstance(manual_exclusions, dict) else get_manual_sharia_exclusions_map()
+    manual_entry = exclusions.get(symbol, {}) if symbol else {}
+
+    if manual_entry:
+        note = str(manual_entry.get("note", "") or "").strip()
+        reason = "مستبعد يدويًا من قائمتك الشرعية"
+        if note:
+            reason = f"{reason} - {note}"
+        return {
+            "status": "manual_excluded",
+            "label": "مستبعد يدويًا",
+            "reason": reason,
+            "manual_excluded": True,
+            "is_gray": False,
+            "is_halal": False,
+            "should_block": True,
+            "note": note,
+        }
 
     if sector_l in HARAM_SECTORS:
-        return False, f"مرفوض شرعيًا: القطاع ({sector}) غير مقبول"
+        return {
+            "status": "non_compliant",
+            "label": "غير متوافق",
+            "reason": f"مرفوض شرعيًا: القطاع ({sector}) غير مقبول",
+            "manual_excluded": False,
+            "is_gray": False,
+            "is_halal": False,
+            "should_block": True,
+            "note": "",
+        }
 
     for kw in HARAM_INDUSTRY_KEYWORDS:
         if kw in industry_l:
-            return False, f"مرفوض شرعيًا: الصناعة تحتوي ({kw})"
+            return {
+                "status": "non_compliant",
+                "label": "غير متوافق",
+                "reason": f"مرفوض شرعيًا: الصناعة تحتوي ({kw})",
+                "manual_excluded": False,
+                "is_gray": False,
+                "is_halal": False,
+                "should_block": True,
+                "note": "",
+            }
 
-    if total_assets <= 0:
-        return True, "مقبول مبدئيًا"
+    missing_research = (not sector_l) or (not industry_l) or total_assets <= 0
+    if missing_research:
+        missing_parts = []
+        if not sector_l or not industry_l:
+            missing_parts.append("القطاع/الصناعة")
+        if total_assets <= 0:
+            missing_parts.append("الأصول")
+        reason_tail = " و ".join(missing_parts) if missing_parts else "البيانات الأساسية"
+        return {
+            "status": "gray",
+            "label": "غير محسوم",
+            "reason": f"الحكم الشرعي غير محسوم بسبب نقص أو قدم بيانات {reason_tail}",
+            "manual_excluded": False,
+            "is_gray": True,
+            "is_halal": True,
+            "should_block": False,
+            "note": "",
+        }
 
     debt_ratio = total_debt / total_assets if total_assets > 0 else 0
     cash_ratio = cash / total_assets if total_assets > 0 else 0
 
     if debt_ratio > 0.33:
-        return False, f"مرفوض شرعيًا: الديون {safe_round(debt_ratio*100)}% من الأصول"
+        return {
+            "status": "non_compliant",
+            "label": "غير متوافق",
+            "reason": f"مرفوض شرعيًا: الديون {safe_round(debt_ratio*100)}% من الأصول",
+            "manual_excluded": False,
+            "is_gray": False,
+            "is_halal": False,
+            "should_block": True,
+            "note": "",
+        }
     if cash_ratio > 0.33:
-        return False, f"مرفوض شرعيًا: النقد {safe_round(cash_ratio*100)}% من الأصول"
+        return {
+            "status": "non_compliant",
+            "label": "غير متوافق",
+            "reason": f"مرفوض شرعيًا: النقد {safe_round(cash_ratio*100)}% من الأصول",
+            "manual_excluded": False,
+            "is_gray": False,
+            "is_halal": False,
+            "should_block": True,
+            "note": "",
+        }
 
-    return True, "مطابق للضوابط الشرعية المبدئية"
+    return {
+        "status": "compliant",
+        "label": "متوافق مبدئيًا",
+        "reason": "مطابق للضوابط الشرعية المبدئية",
+        "manual_excluded": False,
+        "is_gray": False,
+        "is_halal": True,
+        "should_block": False,
+        "note": "",
+    }
+
+
+def is_halal(sector, industry, total_assets, cash, total_debt):
+    assessment = assess_sharia("", sector, industry, total_assets, cash, total_debt, {})
+    return assessment.get("is_halal", True), assessment.get("reason", "")
 
 
 def get_financials(symbol, prev_data=None):
@@ -3198,7 +3341,7 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
     }
 
 
-def trade_plan_pro(symbol):
+def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     daily_bars = get_daily_bars(symbol)
     prev = get_prev_from_daily_bars(daily_bars) or get_prev(symbol)
     if not prev:
@@ -3214,16 +3357,24 @@ def trade_plan_pro(symbol):
     news_note = news_bundle.get("news_note", "لا يوجد خبر حديث")
     catalyst_score = news_bundle.get("catalyst_score", 0)
 
-    halal_ok, halal_reason = is_halal(
+    sharia_assessment = assess_sharia(
+        symbol,
         info["sector"], info["industry"],
-        financials["total_assets"], financials["cash"], financials["total_debt"]
+        financials["total_assets"], financials["cash"], financials["total_debt"],
+        manual_sharia_exclusions,
     )
+    halal_ok = bool(sharia_assessment.get("is_halal", True))
+    halal_reason = str(sharia_assessment.get("reason", "") or "")
 
-    if not halal_ok:
+    if sharia_assessment.get("should_block", False):
+        phase = get_market_phase()
+        current_price = float(prev.get("price", 0) or 0)
+        exclusion_decision = "مستبعد يدويًا" if sharia_assessment.get("manual_excluded") else "مرفوض شرعياً"
+        owner_text = "↩️ يمكنك إعادة السهم يدويًا إذا رغبت" if sharia_assessment.get("manual_excluded") else "تجنب السهم"
         return {
             "symbol": symbol,
             "type": "Excluded",
-            "decision": "مرفوض شرعياً",
+            "decision": exclusion_decision,
             "entry": 0,
             "stop_loss": 0,
             "target_1": 0,
@@ -3238,15 +3389,38 @@ def trade_plan_pro(symbol):
             "data_quality": "high",
             "catalyst_score": catalyst_score,
             "news_note": news_note,
+            "news_title": news_bundle.get("news_title", ""),
+            "news_badge": news_bundle.get("news_badge", ""),
+            "news_category": news_bundle.get("news_category", "neutral"),
+            "news_sentiment": news_bundle.get("news_sentiment", "neutral"),
+            "news_scope": news_bundle.get("news_scope", "neutral"),
+            "news_scope_label": news_bundle.get("news_scope_label", news_scope_label("neutral")),
+            "news_context_note": news_bundle.get("news_context_note", ""),
+            "display_price": safe_round(current_price),
+            "current_price_live": safe_round(current_price),
+            "market_phase": phase,
+            "market_phase_label": market_phase_label(phase),
+            "price_source_label": "آخر إغلاق",
+            "display_entry_label": "—",
+            "display_entry_price": 0,
+            "display_target_label": "—",
+            "display_target_price": 0,
+            "display_stop_label": "—",
+            "display_stop_price": 0,
             "risk_flags": [halal_reason],
             "ai_summary": halal_reason,
             "breakout_quality": "N/A",
             "execution_status": "AVOID",
-            "owner_action": "تجنب السهم",
+            "owner_action": owner_text,
             "company": info["company"],
             "sector": info["sector"],
             "industry": info["industry"],
             "financials": financials,
+            "sharia_status": sharia_assessment.get("status", "non_compliant"),
+            "sharia_label": sharia_assessment.get("label", "غير متوافق"),
+            "sharia_reason": halal_reason,
+            "sharia_manual_excluded": bool(sharia_assessment.get("manual_excluded", False)),
+            "sharia_is_gray": bool(sharia_assessment.get("is_gray", False)),
         }
 
     live_block = build_live_price_block(symbol, prev, intraday)
@@ -3354,6 +3528,8 @@ def trade_plan_pro(symbol):
             risk_flags.append("خبر قطاعي ضاغط")
         elif news_scope == "market":
             risk_flags.append("سياق سوق عام ضاغط")
+    if sharia_assessment.get("is_gray"):
+        risk_flags.append("الحكم الشرعي غير محسوم")
     if info["sector"] == "":
         risk_flags.append("بيانات القطاع/الصناعة ناقصة")
     if financials["total_assets"] <= 0:
@@ -3404,6 +3580,8 @@ def trade_plan_pro(symbol):
     elif breakout_quality == "STRONG":
         ai_summary_parts.append("اختراق قوي")
 
+    if sharia_assessment.get("is_gray"):
+        ai_summary_parts.append("الحكم الشرعي غير محسوم")
     if info["sector"] == "" or financials["total_assets"] <= 0 or financials["shares"] <= 0:
         ai_summary_parts.append("جودة البيانات ضعيفة")
     elif financials["approx_market_cap"] <= 0:
@@ -3467,6 +3645,11 @@ def trade_plan_pro(symbol):
         "sector": info["sector"],
         "industry": info["industry"],
         "financials": financials,
+        "sharia_status": sharia_assessment.get("status", "compliant"),
+        "sharia_label": sharia_assessment.get("label", "متوافق مبدئيًا"),
+        "sharia_reason": halal_reason,
+        "sharia_manual_excluded": bool(sharia_assessment.get("manual_excluded", False)),
+        "sharia_is_gray": bool(sharia_assessment.get("is_gray", False)),
     }
     plan = enrich_strategy_profile(plan)
     plan["rr_1"] = safe_round(rr_1_preview)
@@ -3475,11 +3658,12 @@ def trade_plan_pro(symbol):
 
 
 def scan_all():
-    symbols = get_active_universe(150)
+    manual_sharia_exclusions = get_manual_sharia_exclusions_map()
+    symbols = [s for s in get_active_universe(150) if normalize_symbol_text(s) not in manual_sharia_exclusions]
     rows = []
 
     def process_symbol(s):
-        p = trade_plan_pro(s)
+        p = trade_plan_pro(s, manual_sharia_exclusions)
         if not p or p.get("type") == "Excluded":
             return None
 
@@ -3695,6 +3879,7 @@ def trade_scan():
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
         "watchlist_count": len(watch),
+        "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
         "strong_entries": strong[:25],
         "top_ranked": strong[:25],
         "cautious_entries": cautious[:25],
@@ -3727,7 +3912,10 @@ def single_stock(symbol: str):
             news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
             news_note = news_bundle.get("news_title") or news_bundle.get("news_context_note") or news_bundle.get("news_note", "لا يوجد خبر حديث")
             catalyst_score = news_bundle.get("catalyst_score", 0)
-            halal_ok, halal_reason = is_halal(info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"])
+            sharia_map = get_manual_sharia_exclusions_map()
+            sharia_assessment = assess_sharia(symbol, info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"], sharia_map)
+            halal_ok = bool(sharia_assessment.get("is_halal", True))
+            halal_reason = str(sharia_assessment.get("reason", "") or "")
             live_block = build_live_price_block(symbol, prev, intraday)
             overview = {
                 "symbol": symbol,
@@ -3752,6 +3940,10 @@ def single_stock(symbol: str):
                 "intraday": intraday,
                 "halal": halal_ok,
                 "halal_reason": halal_reason,
+                "sharia_status": sharia_assessment.get("status", "compliant"),
+                "sharia_label": sharia_assessment.get("label", "متوافق مبدئيًا"),
+                "sharia_manual_excluded": bool(sharia_assessment.get("manual_excluded", False)),
+                "sharia_is_gray": bool(sharia_assessment.get("is_gray", False)),
                 **live_block,
             }
     except Exception as e:
@@ -3759,7 +3951,7 @@ def single_stock(symbol: str):
         overview = {"symbol": symbol, "available": False}
 
     try:
-        trade_plan = trade_plan_pro(symbol)
+        trade_plan = trade_plan_pro(symbol, get_manual_sharia_exclusions_map())
         if trade_plan:
             trade_plan = apply_late_move_filter(trade_plan)
             trade_plan = assign_execution_mode(trade_plan)
@@ -4379,6 +4571,63 @@ def simulate_equal_weight(records: list[dict], per_trade: float = 1000.0) -> dic
         "final_capital": safe_round(final_capital),
         "roi_pct": roi_pct,
     }
+
+
+@app.post("/sharia-exclusions/add")
+def sharia_exclusions_add(payload: dict = Body(...)):
+    symbol = normalize_symbol_text(payload.get("symbol", ""))
+    if not symbol:
+        return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
+    note = str(payload.get("note", "") or "").strip()
+    items = load_manual_sharia_exclusions()
+    now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    found = False
+    for item in items:
+        if normalize_symbol_text(item.get("symbol", "")) == symbol:
+            item["note"] = note
+            item["excluded_at"] = now_str
+            found = True
+            break
+    if not found:
+        items.insert(0, {"symbol": symbol, "note": note, "excluded_at": now_str})
+    save_manual_sharia_exclusions(items)
+    return {"ok": True, "count": len(items), "symbol": symbol}
+
+
+@app.post("/sharia-exclusions/remove")
+def sharia_exclusions_remove(payload: dict = Body(...)):
+    symbol = normalize_symbol_text(payload.get("symbol", ""))
+    items = [item for item in load_manual_sharia_exclusions() if normalize_symbol_text(item.get("symbol", "")) != symbol]
+    save_manual_sharia_exclusions(items)
+    return {"ok": True, "count": len(items), "symbol": symbol}
+
+
+@app.get("/sharia-exclusions")
+def sharia_exclusions_get():
+    items = load_manual_sharia_exclusions()
+    enriched = []
+    for item in items:
+        symbol = normalize_symbol_text(item.get("symbol", ""))
+        if not symbol:
+            continue
+        info = get_info(symbol)
+        prev = get_prev(symbol)
+        financials = get_financials(symbol, prev)
+        assessment = assess_sharia(symbol, info.get("sector", ""), info.get("industry", ""), financials["total_assets"], financials["cash"], financials["total_debt"], {symbol: item})
+        enriched.append({
+            "symbol": symbol,
+            "company": info.get("company", ""),
+            "sector": info.get("sector", ""),
+            "industry": info.get("industry", ""),
+            "excluded_at": str(item.get("excluded_at", "") or ""),
+            "note": str(item.get("note", "") or ""),
+            "current_price": float((prev or {}).get("price", 0) or 0),
+            "sharia_status": assessment.get("status", "manual_excluded"),
+            "sharia_label": assessment.get("label", "مستبعد يدويًا"),
+            "sharia_reason": assessment.get("reason", "مستبعد يدويًا من قائمتك الشرعية"),
+        })
+    return {"items": enriched, "count": len(enriched)}
+
 
 
 def build_performance_dashboard(records: list[dict]) -> dict:
