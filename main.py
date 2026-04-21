@@ -129,6 +129,30 @@ MANUAL_WATCHLIST_FILE = str(DATA_DIR / "manual_watchlist.json")
 PORTFOLIO_FILE = str(DATA_DIR / "portfolio_holdings.json")
 MANUAL_SHARIA_EXCLUSIONS_FILE = str(DATA_DIR / "manual_sharia_exclusions.json")
 
+CONTEXT_CACHE = {}
+
+SECTOR_ETF_MAP = {
+    "technology": "XLK",
+    "information technology": "XLK",
+    "semiconductors": "XLK",
+    "communication services": "XLC",
+    "consumer cyclical": "XLY",
+    "consumer discretionary": "XLY",
+    "consumer defensive": "XLP",
+    "consumer staples": "XLP",
+    "healthcare": "XLV",
+    "health care": "XLV",
+    "industrials": "XLI",
+    "industrial": "XLI",
+    "energy": "XLE",
+    "utilities": "XLU",
+    "real estate": "XLRE",
+    "materials": "XLB",
+    "basic materials": "XLB",
+    "financial services": "XLF",
+    "financial": "XLF",
+}
+
 def ny_now():
     return datetime.now(ZoneInfo("America/New_York"))
 
@@ -976,6 +1000,25 @@ def apply_news_decision_guard(decision: str, news_scope: str, news_sentiment: st
     return decision
 
 
+def apply_market_sector_decision_guard(decision: str, market_sector_score: float, market_support_label: str = "", sector_support_label: str = "") -> str:
+    try:
+        decision = str(decision or "")
+        score = float(market_sector_score or 0)
+        market_label = str(market_support_label or "")
+        sector_label = str(sector_support_label or "")
+        if decision == "دخول قوي" and score <= -12:
+            return "مراقبة"
+        if decision == "دخول قوي" and score <= -7:
+            return "دخول بحذر"
+        if decision == "دخول بحذر" and score <= -14:
+            return "مراقبة"
+        if decision == "دخول قوي" and ("ضاغط قوي" in market_label and "ضاغط" in sector_label):
+            return "دخول بحذر"
+        return decision
+    except:
+        return decision
+
+
 def breakout_quality_label(trade_type: str, momentum: str, body_strength: float, close_strength: float, volume_ratio: float) -> str:
     if trade_type != "Breakout":
         return "N/A"
@@ -1628,6 +1671,192 @@ def get_info(symbol):
     }
 
 
+def _context_closes_from_bars(bars: list[dict]) -> list[float]:
+    closes = []
+    for row in bars or []:
+        c = to_float((row or {}).get("c", 0))
+        if c > 0:
+            closes.append(c)
+    return closes
+
+
+def _context_return_pct(bars: list[dict], lookback: int = 20) -> float:
+    closes = _context_closes_from_bars(bars)
+    if len(closes) < lookback + 1:
+        return 0.0
+    start = float(closes[-(lookback + 1)] or 0)
+    end = float(closes[-1] or 0)
+    if start <= 0 or end <= 0:
+        return 0.0
+    return ((end - start) / start) * 100.0
+
+
+def _context_benchmark_for_sector(sector: str, industry: str = "") -> str:
+    s = str(sector or "").lower().strip()
+    i = str(industry or "").lower().strip()
+    techish = ["technology", "information technology", "communication services", "software", "internet", "semiconductor", "chip", "ai", "cloud"]
+    if any(x in s for x in techish) or any(x in i for x in techish):
+        return "QQQ"
+    return "SPY"
+
+
+def _context_sector_etf(sector: str) -> str:
+    s = str(sector or "").lower().strip()
+    if not s:
+        return ""
+    for key, value in SECTOR_ETF_MAP.items():
+        if key in s or s in key:
+            return value
+    return ""
+
+
+def _context_trend_points(trend: str) -> int:
+    trend = str(trend or "")
+    if trend == "صاعد قوي":
+        return 8
+    if trend == "صاعد":
+        return 4
+    if trend == "متذبذب":
+        return 0
+    if trend == "هابط":
+        return -6
+    return 0
+
+
+def _context_relative_points(relative_pct: float) -> int:
+    rel = float(relative_pct or 0)
+    if rel >= 8:
+        return 4
+    if rel >= 3:
+        return 2
+    if rel <= -8:
+        return -4
+    if rel <= -3:
+        return -2
+    return 0
+
+
+def _context_support_label(score: float) -> str:
+    score = float(score or 0)
+    if score >= 8:
+        return "داعم قوي"
+    if score >= 3:
+        return "داعم"
+    if score <= -8:
+        return "ضاغط قوي"
+    if score <= -3:
+        return "ضاغط"
+    return "محايد"
+
+
+def _context_alignment_label(total_score: float) -> str:
+    score = float(total_score or 0)
+    if score >= 12:
+        return "يدعم بقوة"
+    if score >= 5:
+        return "يدعم"
+    if score <= -12:
+        return "معاكس بقوة"
+    if score <= -5:
+        return "معاكس"
+    return "متوازن"
+
+
+def _context_alignment_detail(market_label: str, sector_label: str, benchmark_symbol: str, sector_symbol: str, rel_market: float, rel_sector: float) -> str:
+    parts = [f"المؤشر المرجعي {benchmark_symbol}: {market_label}"]
+    if sector_symbol:
+        parts.append(f"ETF القطاع {sector_symbol}: {sector_label}")
+    if abs(float(rel_market or 0)) >= 0.1:
+        parts.append(f"أداء السهم مقابل المؤشر: {safe_round(rel_market, 1)}%")
+    if sector_symbol and abs(float(rel_sector or 0)) >= 0.1:
+        parts.append(f"أداء السهم مقابل القطاع: {safe_round(rel_sector, 1)}%")
+    return " - ".join(parts)
+
+
+def get_market_sector_context(symbol: str, sector: str, industry: str = "", daily_bars=None) -> dict:
+    try:
+        stock_bars = daily_bars if daily_bars is not None else get_daily_bars(symbol)
+        stock_return_20 = _context_return_pct(stock_bars, 20)
+        benchmark_symbol = _context_benchmark_for_sector(sector, industry)
+        sector_symbol = _context_sector_etf(sector)
+
+        bench_key = f"ctx::{benchmark_symbol}"
+        bench_cached = CONTEXT_CACHE.get(bench_key)
+        if bench_cached is None:
+            bench_bars = get_daily_bars(benchmark_symbol)
+            bench_cached = {
+                "trend": get_trend(benchmark_symbol, bench_bars).get("trend", "unknown"),
+                "return_20": _context_return_pct(bench_bars, 20),
+            }
+            CONTEXT_CACHE[bench_key] = bench_cached
+
+        sector_cached = None
+        if sector_symbol:
+            sec_key = f"ctx::{sector_symbol}"
+            sector_cached = CONTEXT_CACHE.get(sec_key)
+            if sector_cached is None:
+                sec_bars = get_daily_bars(sector_symbol)
+                sector_cached = {
+                    "trend": get_trend(sector_symbol, sec_bars).get("trend", "unknown"),
+                    "return_20": _context_return_pct(sec_bars, 20),
+                }
+                CONTEXT_CACHE[sec_key] = sector_cached
+
+        benchmark_trend = str((bench_cached or {}).get("trend", "unknown") or "unknown")
+        benchmark_return_20 = float((bench_cached or {}).get("return_20", 0) or 0)
+        rel_vs_market = float(stock_return_20 or 0) - benchmark_return_20
+        market_support_score = _context_trend_points(benchmark_trend) + _context_relative_points(rel_vs_market)
+        market_support_label = _context_support_label(market_support_score)
+
+        sector_trend = str((sector_cached or {}).get("trend", "unknown") or "unknown") if sector_cached else "unknown"
+        sector_return_20 = float((sector_cached or {}).get("return_20", 0) or 0) if sector_cached else 0.0
+        rel_vs_sector = float(stock_return_20 or 0) - sector_return_20 if sector_cached else 0.0
+        sector_support_score = (_context_trend_points(sector_trend) + _context_relative_points(rel_vs_sector)) if sector_cached else 0
+        sector_support_label = _context_support_label(sector_support_score) if sector_cached else "غير متوفر"
+
+        total_score = max(-18, min(18, int(round((market_support_score * 0.8) + (sector_support_score * 1.2)))))
+        alignment_label = _context_alignment_label(total_score)
+        alignment_detail = _context_alignment_detail(market_support_label, sector_support_label, benchmark_symbol, sector_symbol, rel_vs_market, rel_vs_sector)
+
+        return {
+            "benchmark_symbol": benchmark_symbol,
+            "benchmark_trend": benchmark_trend,
+            "benchmark_return_20_pct": safe_round(benchmark_return_20, 2),
+            "stock_return_20_pct": safe_round(stock_return_20, 2),
+            "relative_to_market_pct": safe_round(rel_vs_market, 2),
+            "market_support_score": market_support_score,
+            "market_support_label": market_support_label,
+            "sector_etf_symbol": sector_symbol,
+            "sector_trend": sector_trend,
+            "sector_return_20_pct": safe_round(sector_return_20, 2),
+            "relative_to_sector_pct": safe_round(rel_vs_sector, 2),
+            "sector_support_score": sector_support_score,
+            "sector_support_label": sector_support_label,
+            "market_sector_score": total_score,
+            "market_sector_alignment_label": alignment_label,
+            "market_sector_alignment_detail": alignment_detail,
+        }
+    except:
+        return {
+            "benchmark_symbol": "SPY",
+            "benchmark_trend": "unknown",
+            "benchmark_return_20_pct": 0.0,
+            "stock_return_20_pct": 0.0,
+            "relative_to_market_pct": 0.0,
+            "market_support_score": 0,
+            "market_support_label": "غير واضح",
+            "sector_etf_symbol": "",
+            "sector_trend": "unknown",
+            "sector_return_20_pct": 0.0,
+            "relative_to_sector_pct": 0.0,
+            "sector_support_score": 0,
+            "sector_support_label": "غير متوفر",
+            "market_sector_score": 0,
+            "market_sector_alignment_label": "محايد",
+            "market_sector_alignment_detail": "لا توجد بيانات كافية عن المؤشر والقطاع.",
+        }
+
+
 def get_history_levels(symbol, prev_data=None, daily_bars=None):
     if symbol in HISTORY_CACHE:
         return HISTORY_CACHE[symbol]
@@ -2238,7 +2467,7 @@ def detect_news_shape(text_lower: str, related_count: int = 0) -> str:
         "here s why", "here's why", "here s what this means", "here's what this means",
         "prediction", "predictions", "predicts", "pick and shovel", "pick-and-shovel",
         "could follow suit", "could jump", "another incredibly", "best pick", "best ai stock",
-        "wall street expects", "wall street forecast", "wall street projects", "top idea"
+        "wall street expects", "wall street forecast", "wall street projects", "top idea", "if you buy", "here s where it could be", "here's where it could be", "in 5 years", "in five years", "could be in 5 years"
     ]
     roundup_markers = [
         "top gainers", "top losers", "biggest gainers", "biggest losers", "market movers",
@@ -2819,6 +3048,7 @@ def compute_core_quality_score(
     news_scope: str = "neutral",
     news_sentiment: str = "neutral",
     news_sessions_since: int = 999,
+    market_sector_score: float = 0.0,
 ) -> int:
     quality = 50
 
@@ -2992,6 +3222,7 @@ def apply_decision_layers(stock: dict) -> dict:
             news_scope,
             news_sentiment,
             news_sessions_since,
+            float(stock.get("market_sector_score", 0) or 0),
         )
         execution_layer_score, execution_layer_label, execution_adjustment = compute_execution_layer_score(stock)
         blended_quality = max(1, min(99, int(round(core_quality + execution_adjustment))))
@@ -3080,6 +3311,12 @@ def apply_decision_layers(stock: dict) -> dict:
             decision = "دخول بحذر"
 
         decision = apply_news_decision_guard(decision, news_scope, news_sentiment, news_sessions_since, core_quality)
+        decision = apply_market_sector_decision_guard(
+            decision,
+            float(stock.get("market_sector_score", 0) or 0),
+            str(stock.get("market_support_label", "") or ""),
+            str(stock.get("sector_support_label", "") or ""),
+        )
 
         stock["decision"] = decision
         stock["decision_layer_note"] = f"Core: {core_band} | Execution: {execution_band}"
@@ -3351,6 +3588,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     financials = get_financials(symbol, prev)
     hist = get_history_levels(symbol, prev, daily_bars)
     trend_data = get_trend(symbol, daily_bars)
+    market_sector_context = get_market_sector_context(symbol, info.get("sector", ""), info.get("industry", ""), daily_bars)
     intraday = get_intraday_snapshot(symbol)
     volume_ratio = get_volume_ratio(symbol, intraday, daily_bars)
     news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
@@ -3400,6 +3638,13 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
             "current_price_live": safe_round(current_price),
             "market_phase": phase,
             "market_phase_label": market_phase_label(phase),
+            "benchmark_symbol": "SPY",
+            "market_support_label": "غير واضح",
+            "sector_etf_symbol": "",
+            "sector_support_label": "غير متوفر",
+            "market_sector_score": 0,
+            "market_sector_alignment_label": "محايد",
+            "market_sector_alignment_detail": "لا توجد بيانات كافية عن المؤشر والقطاع.",
             "price_source_label": "آخر إغلاق",
             "display_entry_label": "—",
             "display_entry_price": 0,
@@ -3477,6 +3722,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         news_bundle.get("news_scope", "neutral"),
         news_bundle.get("news_sentiment", news_bundle.get("news_category", "neutral")),
         news_bundle.get("news_sessions_since", 999),
+        market_sector_context.get("market_sector_score", 0),
     )
     quality = core_quality
     rank_label = make_rank_label(quality)
@@ -3497,6 +3743,12 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         news_bundle.get("news_sentiment", news_bundle.get("news_category", "neutral")),
         news_bundle.get("news_sessions_since", 999),
         quality,
+    )
+    decision = apply_market_sector_decision_guard(
+        decision,
+        market_sector_context.get("market_sector_score", 0),
+        market_sector_context.get("market_support_label", ""),
+        market_sector_context.get("sector_support_label", ""),
     )
 
     execution_status = compute_execution_status(
@@ -3528,6 +3780,10 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
             risk_flags.append("خبر قطاعي ضاغط")
         elif news_scope == "market":
             risk_flags.append("سياق سوق عام ضاغط")
+    if str(market_sector_context.get("market_support_label", "") or "") in {"ضاغط", "ضاغط قوي"}:
+        risk_flags.append(f"المؤشر {market_sector_context.get('benchmark_symbol', 'SPY')} {market_sector_context.get('market_support_label', '')}")
+    if str(market_sector_context.get("sector_support_label", "") or "") in {"ضاغط", "ضاغط قوي"}:
+        risk_flags.append(f"القطاع {market_sector_context.get('sector_support_label', '')}")
     if sharia_assessment.get("is_gray"):
         risk_flags.append("الحكم الشرعي غير محسوم")
     if info["sector"] == "":
@@ -3555,6 +3811,10 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
             ai_summary_parts.append("فوق VWAP اللحظي")
         if intraday.get("intraday_volume_ratio", 0) >= 1.2:
             ai_summary_parts.append("السيولة اللحظية داعمة")
+    if market_sector_context.get("market_support_label"):
+        ai_summary_parts.append(f"المؤشر {market_sector_context.get('benchmark_symbol', 'SPY')}: {market_sector_context.get('market_support_label')}")
+    if market_sector_context.get("sector_etf_symbol"):
+        ai_summary_parts.append(f"القطاع {market_sector_context.get('sector_etf_symbol')}: {market_sector_context.get('sector_support_label')}")
     if trade_type == "Pullback" and pullback_context.get("pullback_pattern_label"):
         ai_summary_parts.append(str(pullback_context.get("pullback_pattern_label")))
     if catalyst_score > 0:
@@ -3641,6 +3901,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         **live_block,
         **atr_overlay,
         **historical_behavior,
+        **market_sector_context,
         "company": info["company"],
         "sector": info["sector"],
         "industry": info["industry"],
@@ -4246,6 +4507,17 @@ def explain_metric_ar(name: str, value, stock: dict) -> dict:
             if scope == "opinion" or category == "opinion":
                 return {"icon": "🚫", "label": "رأي غير معتمد", "detail": context_note or "هذا رأي أو مقال عام وليس محفز تداول معتمد."}
             return {"icon": "⚪", "label": scope_label_ar if scope_label_ar else (freshness or "محايد"), "detail": context_note or "لا يوجد خبر محفز حديث."}
+        if name == "index_context":
+            score = float(stock.get("market_support_score", 0) or 0)
+            label = str(stock.get("market_support_label", "محايد") or "محايد")
+            detail = str(stock.get("market_sector_alignment_detail", "") or "")
+            icon = "📈" if score > 0 else "📉" if score < 0 else "🟰"
+            return {"icon": icon, "label": label, "detail": detail or "المؤشر المرجعي يوضح هل السوق العام داعم أو ضاغط على الفكرة."}
+        if name == "sector_context":
+            score = float(stock.get("sector_support_score", 0) or 0)
+            label = str(stock.get("sector_support_label", "محايد") or "محايد")
+            detail = str(stock.get("market_sector_alignment_detail", "") or "")
+            return {"icon": "🏭", "label": label, "detail": detail or "القطاع يوضح هل البيئة القطاعية تساعد السهم أو تضغط عليه."}
     except:
         pass
     return {"icon": "❓", "label": "لا توجد بيانات كافية", "detail": "لا توجد بيانات كافية."}
@@ -4268,6 +4540,8 @@ def enrich_display_meta(stock: dict) -> dict:
         stock["metric_runner_score"] = explain_metric_ar("runner_score", stock.get("runner_score", 0), stock)
         stock["metric_continuation_score"] = explain_metric_ar("continuation_score", stock.get("continuation_score", 0), stock)
         stock["metric_news"] = explain_metric_ar("news", stock.get("news_badge"), stock)
+        stock["metric_market_context"] = explain_metric_ar("index_context", stock.get("market_support_score", 0), stock)
+        stock["metric_sector_context"] = explain_metric_ar("sector_context", stock.get("sector_support_score", 0), stock)
         stock["trade_type_label_ar"] = (
             "اختراق مقاومة" if str(stock.get("type", "")) == "Breakout"
             else "ارتداد من دعم" if str(stock.get("type", "")) == "Pullback"
@@ -4284,6 +4558,10 @@ def enrich_display_meta(stock: dict) -> dict:
             summary_bits.append(f"📚 السلوك التاريخي: {stock.get('historical_behavior_label')}")
         if stock.get("alignment_label"):
             summary_bits.append(f"🧭 التوافق الزمني: {stock.get('alignment_label')}")
+        if stock.get("market_support_label"):
+            summary_bits.append(f"📈 المؤشر: {stock.get('market_support_label')}")
+        if stock.get("sector_support_label"):
+            summary_bits.append(f"🏭 القطاع: {stock.get('sector_support_label')}")
         stock["quick_explainer"] = " | ".join([x for x in summary_bits if x])
         return stock
     except:
