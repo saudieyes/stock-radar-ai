@@ -906,16 +906,16 @@ def apply_news_decision_guard(decision: str, news_scope: str, news_sentiment: st
     quality = float(core_quality or 0)
 
     if scope == "company" and sentiment == "legal":
-        if sessions <= 5:
+        if sessions <= 7:
             return "مراقبة"
-        if decision == "دخول قوي":
+        if sessions <= 15 and decision == "دخول قوي":
             return "دخول بحذر"
     if scope == "company" and sentiment == "negative":
-        if sessions <= 2 and decision == "دخول قوي":
+        if sessions <= 3 and decision == "دخول قوي":
             return "دخول بحذر"
-        if sessions <= 1 and decision == "دخول بحذر" and quality < 76:
+        if sessions <= 1 and decision == "دخول بحذر" and quality < 80:
             return "مراقبة"
-    if scope == "sector" and sentiment in {"negative", "legal"} and sessions <= 1 and decision == "دخول قوي":
+    if scope == "sector" and sentiment in {"negative", "legal"} and sessions <= 2 and decision == "دخول قوي":
         return "دخول بحذر"
     return decision
 
@@ -2083,12 +2083,14 @@ def classify_news_freshness_label(sessions_since: int) -> tuple[str, int]:
     if sessions_since <= 0:
         return "حديث جدًا", 100
     if sessions_since == 1:
-        return "حديث", 85
-    if sessions_since <= 3:
-        return "حديث نسبيًا", 65
+        return "حديث", 78
+    if sessions_since == 2:
+        return "حديث نسبيًا", 52
+    if sessions_since == 3:
+        return "أقدم قليلًا", 28
     if sessions_since <= 5:
-        return "أقدم قليلًا", 40
-    return "قديم", 15
+        return "قديم", 12
+    return "قديم جدًا", 4
 
 
 NEWS_SCOPE_LABELS = {
@@ -2153,13 +2155,17 @@ def detect_news_shape(text_lower: str, related_count: int = 0) -> str:
         "cheap stock", "cheap cloud stock", "best stock", "best stocks", "top stock", "top stocks",
         "stock to buy", "stocks to buy", "stock to watch", "stocks to watch", "watch these stocks",
         "could make you", "millionaire", "millionaires", "top picks", "editorial", "motley fool",
-        "here s why", "here's why", "here s what this means", "here's what this means"
+        "here s why", "here's why", "here s what this means", "here's what this means",
+        "prediction", "predictions", "predicts", "pick and shovel", "pick-and-shovel",
+        "could follow suit", "could jump", "another incredibly", "best pick", "best ai stock",
+        "wall street expects", "wall street forecast", "wall street projects", "top idea"
     ]
     roundup_markers = [
         "top gainers", "top losers", "biggest gainers", "biggest losers", "market movers",
         "top movers", "trending stocks", "stocks in focus", "stocks to watch", "winners and losers",
         "stocks making moves", "stocks moving", "top performers", "led gains", "led losses",
-        "rallied among", "among top", "weekly recap", "last week"
+        "rallied among", "among top", "weekly recap", "last week", "top 10", "top 5",
+        "are among the top", "in your portfolio", "best performers", "top large cap gainers"
     ]
 
     if any(k in text_lower for k in opinion_markers):
@@ -2168,7 +2174,11 @@ def detect_news_shape(text_lower: str, related_count: int = 0) -> str:
         return "roundup"
     if text_lower.startswith("why ") and " stock " in text_lower:
         return "opinion"
+    if text_lower.startswith("prediction") or text_lower.startswith("opinion"):
+        return "opinion"
     if " why " in f" {text_lower} " and (" stock is " in text_lower or " shares are " in text_lower):
+        return "opinion"
+    if related_count >= 2 and any(k in text_lower for k in ["according to wall street", "prediction", "top", "best", "cheap stock"]):
         return "opinion"
     if related_count >= 3 and any(k in text_lower for k in ["top", "gainers", "losers", "rally", "rallies", "soared", "soaring"]):
         return "roundup"
@@ -2286,23 +2296,38 @@ def classify_news_effect(scope: str, sentiment: str, sessions_since: int) -> int
     if base == 0:
         return 0
 
-    if sessions_since <= 0:
-        factor = 1.0
-    elif sessions_since == 1:
-        factor = 0.85
-    elif sessions_since == 2:
-        factor = 0.60
-    elif sessions_since <= 5:
-        factor = 0.35
+    is_positive = base > 0
+    if is_positive:
+        if sessions_since <= 0:
+            factor = 1.0
+        elif sessions_since == 1:
+            factor = 0.70
+        elif sessions_since == 2:
+            factor = 0.35
+        elif sessions_since == 3:
+            factor = 0.15
+        else:
+            factor = 0.0
     else:
-        factor = 0.0
-
-    if base < 0 and sentiment == "legal" and sessions_since <= 10 and factor == 0.0:
-        factor = 0.20
+        if sessions_since <= 0:
+            factor = 1.0
+        elif sessions_since == 1:
+            factor = 0.85
+        elif sessions_since == 2:
+            factor = 0.60
+        elif sessions_since <= 5:
+            factor = 0.35
+        elif sentiment == "legal" and scope == "company" and sessions_since <= 10:
+            factor = 0.20
+        else:
+            factor = 0.0
 
     effect = int(round(base * factor))
-    if effect == 0 and sessions_since <= 2:
-        return 1 if base > 0 else -1
+    if effect == 0:
+        if not is_positive and sessions_since <= 2:
+            return -1
+        if is_positive and sessions_since <= 1:
+            return 1
     return effect
 
 
@@ -2332,8 +2357,14 @@ def build_news_badge(scope: str, sentiment: str, related_count: int = 0) -> str:
 
 def build_news_context_note(scope: str, sentiment: str, freshness_label: str, effect_score: int, related_count: int = 0) -> str:
     freshness = f" ({freshness_label})" if freshness_label else ""
+    oldish = freshness_label in {"أقدم قليلًا", "قديم", "قديم جدًا"}
+    stale = freshness_label in {"قديم", "قديم جدًا"}
     if scope == "company":
         if sentiment == "positive":
+            if stale or effect_score <= 0:
+                return f"هذا خبر يخص الشركة فعلًا لكنه لم يعد حديثًا بما يكفي ليكون محفزًا قويًا الآن{freshness}."
+            if oldish:
+                return f"خبر حقيقي خاص بالشركة لكنه أقدم قليلًا، لذلك يُستخدم كدعم خفيف لا كمحفز ساخن{freshness}."
             return f"خبر حقيقي خاص بالشركة وذو أثر مباشر داعم للفكرة{freshness}."
         if sentiment == "legal":
             return f"خبر قانوني مباشر على الشركة ويجب اعتباره عامل ضغط واضح على السهم{freshness}."
@@ -2342,6 +2373,10 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
         return f"خبر يخص الشركة لكنه لا يقدم محفزًا واضحًا الآن{freshness}."
     if scope == "sector":
         if sentiment == "positive":
+            if stale or effect_score <= 0:
+                return f"هذا خبر قطاعي قديم أو ضعيف الأثر، لذلك لا يُعامل كمحفز مباشر للفرصة الآن{freshness}."
+            if oldish:
+                return f"خبر قطاعي داعم لكنه أقدم قليلًا، لذلك وزنه أخف من المعتاد{freshness}."
             return f"خبر قطاعي داعم يفيد السهم بصورة غير مباشرة وبوزن أخف من خبر الشركة{freshness}."
         if sentiment in {"negative", "legal"}:
             return f"خبر قطاعي ضاغط يؤثر على السهم كجزء من القطاع وليس كمحفز خاص بالشركة{freshness}."
@@ -2350,7 +2385,7 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
         if effect_score < 0:
             return f"هذا خبر سوق عام ضاغط يصف المؤشرات أو النفط أو الفيدرالي، ويُعرض كسياق فقط وليس محفزًا مباشرًا للسهم{freshness}."
         if effect_score > 0:
-            return f"هذا خبر سوق عام داعم بصورة خفيفة، ويُعرض كسياق عام لا كمحفز خاص بالشركة{freshness}."
+            return f"هذا خبر سوق عام داعم بصورة خفيفة جدًا، ويُعرض كسياق عام لا كمحفز خاص بالشركة{freshness}."
         return f"هذا خبر سوق عام محايد يُعرض كسياق ولا يضيف نقاطًا مباشرة للسهم{freshness}."
     if scope == "opinion":
         if related_count >= 2:
@@ -2423,30 +2458,38 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             if direct_event and scope == "company":
                 relevance += 2
             if related_count >= 2 and scope == "company" and not direct_event:
-                relevance -= 6
-            if news_shape == "roundup":
                 relevance -= 8
+            if news_shape == "roundup":
+                relevance -= 12
             elif news_shape == "opinion":
-                relevance -= 6
+                relevance -= 14
 
             scope_priority = {
                 "company": 64,
-                "sector": 40,
-                "market": 18,
-                "neutral": 6,
-                "opinion": -18,
-                "unrelated": -20,
+                "sector": 32,
+                "market": 14,
+                "neutral": 4,
+                "opinion": -24,
+                "unrelated": -26,
             }.get(scope, 0)
             sentiment_bonus = {
-                "positive": 4,
+                "positive": 3,
                 "negative": 5,
                 "legal": 10,
                 "neutral": 0,
-                "opinion": -8,
+                "opinion": -10,
             }.get(sentiment, 0)
             candidate_score = scope_priority + relevance + freshness_score + (abs(effect) * 5) + sentiment_bonus
             if scope == "market" and sentiment == "neutral":
-                candidate_score -= 6
+                candidate_score -= 8
+            if scope in {"company", "sector"} and sentiment == "positive" and sessions_since >= 3:
+                candidate_score -= 12
+            if scope == "sector" and news_shape != "direct":
+                candidate_score -= 10
+            if scope == "company" and related_count >= 2 and not direct_event:
+                candidate_score -= 8
+            if effect == 0 and sentiment == "positive":
+                candidate_score -= 8
 
             candidate = {
                 "title": title,
@@ -2614,18 +2657,18 @@ def compute_core_quality_score(
     news_sessions_since = int(news_sessions_since or 999)
     if news_scope == "company" and news_sentiment == "legal":
         if news_sessions_since <= 2:
-            quality -= 10
+            quality -= 14
         elif news_sessions_since <= 5:
-            quality -= 7
+            quality -= 10
         else:
-            quality -= 4
+            quality -= 6
     elif news_scope == "company" and news_sentiment == "negative":
         if news_sessions_since <= 1:
-            quality -= 5
+            quality -= 7
         elif news_sessions_since <= 3:
-            quality -= 3
+            quality -= 4
     elif news_scope == "sector" and news_sentiment in {"negative", "legal"} and news_sessions_since <= 2:
-        quality -= 2
+        quality -= 3
 
     if bool((hist or {}).get("ath_breakout_zone", False)):
         quality -= 6
