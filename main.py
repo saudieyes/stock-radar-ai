@@ -4482,6 +4482,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         **live_block,
         **atr_overlay,
         **historical_behavior,
+        **historical_context,
         **market_sector_context,
         "company": info["company"],
         "sector": info["sector"],
