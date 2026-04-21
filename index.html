@@ -494,6 +494,8 @@
         <div class="glossary-item">🚫 / ⛔ <b>غير معتمد</b>: خبر رأي أو سلبي قانوني لا يعتبر محفزًا إيجابيًا.</div>
         <div class="glossary-item">جاهزية التنفيذ: هل السهم صالح <b>الآن</b> للتنفيذ أم فقط للمراقبة.</div>
         <div class="glossary-item">حداثة السعر: هل السعر <b>حديث</b> أم قديم أم آخر إغلاق فقط.</div>
+        <div class="glossary-item">SPY / QQQ: مؤشرات مرجعية عامة. و XLK / XLE / XLV أمثلة على ETFs لقطاعات مختلفة.</div>
+        <div class="glossary-item">الأرقام بين القوسين في الجاهزية أو دعم المؤشر/القطاع هي <b>درجات داخلية</b> للمفاضلة وليست نسب نجاح مضمونة.</div>
       </div>
     </div>
 
@@ -762,11 +764,41 @@
       return parts.join(' | ');
     }
 
+    const ETF_LABELS = {
+      SPY: 'S&P 500',
+      QQQ: 'Nasdaq-100',
+      XLK: 'قطاع التقنية',
+      XLC: 'قطاع الاتصالات',
+      XLY: 'القطاع الاستهلاكي الدوري',
+      XLP: 'القطاع الاستهلاكي الدفاعي',
+      XLV: 'قطاع الرعاية الصحية',
+      XLI: 'القطاع الصناعي',
+      XLE: 'قطاع الطاقة',
+      XLU: 'قطاع المرافق',
+      XLRE: 'قطاع العقار',
+      XLB: 'قطاع المواد الأساسية',
+      XLF: 'القطاع المالي'
+    };
+
+    function describeEtfSymbol(symbol) {
+      const raw = String(symbol || '').trim().toUpperCase();
+      if (!raw) return 'غير متوفر — ثقة أقل';
+      const label = ETF_LABELS[raw];
+      return label ? `${raw} — ${label}` : raw;
+    }
+
+    function formatScoreLabel(label, score) {
+      const cleanLabel = safeText(label || '—');
+      const n = Number(score || 0);
+      if (!Number.isFinite(n)) return cleanLabel;
+      return `${cleanLabel} (${formatNumber(n)})`;
+    }
+
     const INFO_TEXTS = {
       '🔥 دخول قوي': { title: 'دخول قوي', body: 'أفضل فرص القائمة حاليًا. الترتيب داخل القسم من الأعلى جودة ثم الأفضل تنفيذًا ثم الأنسب عائدًا.' },
       '🟠 دخول بحذر': { title: 'دخول بحذر', body: 'فرصة جيدة لكنها تحتاج تأكيدًا أكبر أو تنفيذًا أدق أو أن عائدها/مخاطرتها ليست مثالية بعد.' },
       '👀 المراقبة': { title: 'المراقبة', body: 'سهم تحت المتابعة وليس جاهزًا للتنفيذ الآن. استخدمه للترقب لا للدخول السريع.' },
-      'جاهزية التنفيذ': { title: 'جاهزية التنفيذ', body: 'هل الخطة صالحة للتنفيذ الآن أم ما زالت تحتاج اختراقًا أو تأكيدًا أو صبرًا أكثر.' },
+      'جاهزية التنفيذ': { title: 'جاهزية التنفيذ', body: 'هل الخطة صالحة للتنفيذ الآن أم ما زالت تحتاج اختراقًا أو تأكيدًا أو صبرًا أكثر. الرقم بين القوسين درجة داخلية من 0 إلى 99: كلما ارتفع كانت الخطة أقرب للتنفيذ الآن.' },
       'وضع التنفيذ': { title: 'وضع التنفيذ', body: 'الخلاصة العملية الآن: دخول مباشر أو انتظار اختراق أو مراقبة فقط.' },
       'العائد/المخاطرة': { title: 'العائد/المخاطرة', body: 'تقارن الهدف المتوقع بالخسارة المحتملة. كلما ارتفعت كانت الصفقة أكثر جاذبية.' },
       'الجودة': { title: 'الجودة', body: 'الدرجة الأساسية لجوهر الفرصة: اتجاه وسيولة وخطة ومخاطرة وجودة الكسر أو الارتداد.' },
@@ -778,6 +810,13 @@
       'Runner Score': { title: 'Runner Score', body: 'يقيس صفات السهم القادر على تمديد الحركة. كلما ارتفع زادت قابلية السهم أن يصبح runner.' },
       'Continuation Score': { title: 'Continuation Score', body: 'يقيس احتمال استمرار المسار الحالي بعد الاختراق أو الحركة. الأعلى يعني دعمًا أفضل للاستمرار.' },
       'التوافق الزمني': { title: 'التوافق الزمني', body: 'هل الاتجاه اليومي والحركة الأقرب يدعمان بعضهما. التوافق الأعلى يزيد ثقة القرار.' },
+      'المؤشر المرجعي': { title: 'المؤشر المرجعي', body: 'الرمز الظاهر هنا مثل SPY أو QQQ هو ETF نستخدمه كمرجع لحركة السوق المناسبة لهذا السهم. SPY يمثل S&P 500 وQQQ يمثل Nasdaq-100.' },
+      'دعم المؤشر': { title: 'دعم المؤشر', body: 'هل السوق المرجعي داعم أو ضاغط على الفكرة. الرقم بين القوسين درجة داخلية تقريبية: الموجب أفضل، والسالب أضعف.' },
+      'ETF القطاع': { title: 'ETF القطاع', body: 'هذا هو ETF القطاع الذي نستخدمه كمرجع لبيئة القطاع. مثل XLK للتقنية وXLE للطاقة وXLV للرعاية الصحية. إذا ظهر غير متوفر فهذا يعني أن قراءة القطاع أقل ثقة.' },
+      'دعم القطاع': { title: 'دعم القطاع', body: 'هل القطاع نفسه يدعم السهم أو يضغط عليه. الرقم بين القوسين درجة داخلية تقريبية، وغياب ETF القطاع يعني ثقة أقل قليلًا في القرار.' },
+      'شرح المؤشر والقطاع': { title: 'شرح المؤشر والقطاع', body: 'ملخص يشرح هل المؤشر المرجعي والقطاع داعمان أو ضاغطان، وهل السهم يتفوق عليهما أو يتأخر عنهما.' },
+      'المؤشر': { title: 'المؤشر', body: 'خلاصة سريعة لدعم السوق المرجعي للسهم. افتح التفاصيل لرؤية الرمز والشرح الكامل.' },
+      'القطاع': { title: 'القطاع', body: 'خلاصة سريعة لدعم القطاع. إذا ظهر غير متوفر فهذا لا يلغي الفرصة لكنه يخفض الثقة قليلًا.' },
       'ATR 14': { title: 'ATR 14', body: 'متوسط التذبذب الطبيعي خلال آخر 14 يومًا. اخترناه لأنه متوازن: أسرع من 20 وأثبت من 10.' },
       'ATR %': { title: 'ATR %', body: 'نفس ATR لكن كنسبة من السعر، لتسهيل مقارنة تذبذب الأسهم المختلفة.' },
       'وصف التذبذب': { title: 'وصف التذبذب', body: 'يلخص هل السهم هادئ أو متوازن أو نشط. يفيدك في اختيار وقف يناسب طبيعة الحركة.' },
@@ -1134,7 +1173,7 @@
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
-      details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`));
+      details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
       details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
       details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
       details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
@@ -1151,11 +1190,11 @@
       details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
       details.push(detailBox('Continuation Score', joinMetric(formatNumber(stock.continuation_score), stock.metric_continuation_score)));
       details.push(detailBox('التوافق الزمني', `${safeText(stock.alignment_label || 'لا توجد بيانات كافية')} (${formatNumber(stock.alignment_score || 0)})`));
-      details.push(detailBox('المؤشر المرجعي', safeText(stock.benchmark_symbol || '—')));
-      details.push(detailBox('دعم المؤشر', `${safeText(stock.market_support_label || '—')} (${formatNumber(stock.market_support_score || 0)})`));
-      details.push(detailBox('ETF القطاع', safeText(stock.sector_etf_symbol || '—')));
-      details.push(detailBox('دعم القطاع', `${safeText(stock.sector_support_label || '—')} (${formatNumber(stock.sector_support_score || 0)})`));
-      details.push(detailBox('شرح المؤشر والقطاع', safeText(stock.market_sector_alignment_detail || ''), true));
+      details.push(detailBox('المؤشر المرجعي', safeText(describeEtfSymbol(stock.benchmark_symbol || '')) , false, 'المؤشر المرجعي'));
+      details.push(detailBox('دعم المؤشر', formatScoreLabel(stock.market_support_label || '—', stock.market_support_score || 0), false, 'دعم المؤشر'));
+      details.push(detailBox('ETF القطاع', safeText(describeEtfSymbol(stock.sector_etf_symbol || '')) , false, 'ETF القطاع'));
+      details.push(detailBox('دعم القطاع', formatScoreLabel(stock.sector_support_label || '—', stock.sector_support_score || 0), false, 'دعم القطاع'));
+      details.push(detailBox('شرح المؤشر والقطاع', safeText(stock.market_sector_alignment_detail || ''), true, 'شرح المؤشر والقطاع'));
       details.push(detailBox('شرح التوافق الزمني', safeText(stock.alignment_detail || ''), true));
       details.push(detailBox('ATR 14', formatNumber(stock.atr_14)));
       details.push(detailBox('ATR %', formatNumber(stock.atr_pct)));
@@ -1234,9 +1273,9 @@
             ${compactItem('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || ''))}
             ${compactItem('مدة الصلاحية', safeText(stock.valid_for))}
             ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
-            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`)}
-            ${compactItem('المؤشر', safeText(stock.market_support_label || '—'))}
-            ${compactItem('القطاع', safeText(stock.sector_support_label || '—'))}
+            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`, 'جاهزية التنفيذ')}
+            ${compactItem('المؤشر', safeText(stock.market_support_label || '—'), 'المؤشر')}
+            ${compactItem('القطاع', safeText(stock.sector_etf_symbol ? (stock.sector_support_label || '—') : 'غير متوفر — ثقة أقل'), 'القطاع')}
             ${compactItem('المخاطرة', safeText(stock.risk_profile_label || '—'))}
             ${compactItem('الشرعية', safeText(stock.sharia_label || '—'))}
             ${compactItem('التذبذب', safeText(stock.volatility_label || '—'))}
