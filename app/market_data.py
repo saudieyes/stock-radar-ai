@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timedelta
 
-from scanner import get_scan_universe, get_dynamic_universe_target
+from scanner import get_scan_universe, get_dynamic_universe_target, record_active_universe_diagnostics
 
 from .settings import (
     HISTORY_CACHE, HTTP_SESSION, INTRADAY_CACHE, INTRADAY_CACHE_TTL_CLOSED, INTRADAY_CACHE_TTL_OPEN,
@@ -73,7 +73,9 @@ def get_active_universe(max_symbols: int = 60):
             pass
 
     manual = _manual_priority_symbols(limit=min(40, max_symbols))
-    base = get_scan_universe(max_symbols=min(300, max_symbols + 90)) or []
+    # Ask the source for a slightly wider pool so manual watchlist/portfolio symbols
+    # do not accidentally push out high-quality source candidates.
+    base = get_scan_universe(max_symbols=min(300, max_symbols + 70)) or []
     final = []
     for s in manual + list(base):
         try:
@@ -84,6 +86,10 @@ def get_active_universe(max_symbols: int = 60):
             final.append(t)
         if len(final) >= max_symbols:
             break
+    try:
+        record_active_universe_diagnostics(final, manual, max_symbols)
+    except Exception:
+        pass
     return final
 
 
