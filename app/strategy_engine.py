@@ -8,6 +8,13 @@ from app.market_sector_engine import *
 from app.news_engine import *
 from app.sharia_filter import *
 from app.scoring_engine import *
+from app.scoring_engine import breakout_quality_label
+
+try:
+    from scanner import enrich_strategy_profile
+except Exception:
+    def enrich_strategy_profile(stock: dict) -> dict:
+        return stock
 
 def get_prev_from_daily_bars(daily_bars):
     if not daily_bars:
