@@ -9,6 +9,7 @@ from app.news_engine import get_news_bundle, news_scope_label
 from app.display_contract import enrich_display_meta, display_rank_score
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
+from scanner import get_last_source_diagnostics
 from app.market_data import get_active_universe
 
 LAST_SCAN_DEBUG = {}
@@ -20,6 +21,8 @@ def scan_all(debug: bool = False):
     global LAST_SCAN_DEBUG
     manual_sharia_exclusions = get_manual_sharia_exclusions_map()
     raw_symbols = list(get_active_universe(150) or [])
+    source_diag = get_last_source_diagnostics()
+    source_reasons = (source_diag or {}).get("reasons", {}) if isinstance(source_diag, dict) else {}
     symbols = [s for s in raw_symbols if normalize_symbol_text(s) not in manual_sharia_exclusions]
     rows = []
     diag = {
@@ -31,6 +34,11 @@ def scan_all(debug: bool = False):
         "errors": 0,
         "manual_exclusions": len(manual_sharia_exclusions or {}),
         "sample_symbols": raw_symbols[:20],
+        "source_target": len(raw_symbols),
+        "source_engine_pool": int((source_diag or {}).get("target", len(raw_symbols)) or len(raw_symbols)),
+        "source_mode": str((source_diag or {}).get("source_mode", "") or ""),
+        "source_market_mode": str((source_diag or {}).get("market_activity_mode", "") or ""),
+        "sample_source_reasons": [source_reasons.get(str(x).upper(), []) for x in raw_symbols[:10]],
         "sample_excluded": [],
         "sample_no_plan": [],
         "sample_errors": [],
@@ -61,6 +69,14 @@ def scan_all(debug: bool = False):
                 if p["ai_summary"]:
                     p["ai_summary"] += " - "
                 p["ai_summary"] += "السعر اللحظي غير موثوق"
+
+            try:
+                src_reason = source_reasons.get(str(s).upper().strip(), [])
+                if src_reason:
+                    p["source_reason_tags"] = src_reason
+                    p["source_reason"] = " + ".join(src_reason[:5])
+            except Exception:
+                pass
 
             p = enrich_display_meta(p)
             try:
@@ -165,7 +181,7 @@ def build_single_stock_response(symbol: str):
             overview = {"symbol": symbol, "available": False, "reason": "No daily data"}
         else:
             info = get_info(symbol)
-            financials = get_financials(symbol)
+            financials = get_financials(symbol, prev)
             hist = get_history_levels(symbol)
             trend_data = get_trend(symbol)
             intraday = get_intraday_snapshot(symbol)
