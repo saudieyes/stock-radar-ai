@@ -1,10 +1,36 @@
 import csv
 import os
+from pathlib import Path
 
 from .settings import DATA_DIR
 from .utils import clean_key, clean_row, latest_key
 
+
+def _resolve_path(path):
+    p = Path(path)
+    if p.exists():
+        return str(p)
+    alt = DATA_DIR / p.name
+    if alt.exists():
+        return str(alt)
+    return str(path)
+
+
+def _first(row, names, default=""):
+    for name in names:
+        if name in row and row.get(name) not in (None, ""):
+            return row.get(name)
+    # fallback normalized compare
+    norm = {str(k).lower().replace(" ", "").replace("_", ""): k for k in row.keys()}
+    for name in names:
+        key = str(name).lower().replace(" ", "").replace("_", "")
+        if key in norm and row.get(norm[key]) not in (None, ""):
+            return row.get(norm[key])
+    return default
+
+
 def read_csv(path):
+    path = _resolve_path(path)
     if not os.path.exists(path):
         return []
 
@@ -15,9 +41,9 @@ def read_csv(path):
             dialect = csv.Sniffer().sniff(sample, delimiters=";,")
             reader = csv.DictReader(f, dialect=dialect)
             rows = [clean_row(r) for r in reader]
-            if rows:
+            if rows and len(rows[0].keys()) > 1:
                 return rows
-        except:
+        except Exception:
             pass
 
     for d in [";", ","]:
@@ -32,20 +58,19 @@ def read_csv(path):
 
 def load_sector():
     data = {}
-    for r in read_csv("data/sector_industry.csv"):
-        industry_id = str(r.get("IndustryId", "")).strip()
+    for r in read_csv(DATA_DIR / "sector_industry.csv"):
+        industry_id = str(_first(r, ["IndustryId", "Industry ID", "IndustryID", "industry_id", "Industry_Id"]) or "").strip()
+        industry = str(_first(r, ["Industry", "industry", "IndustryName", "Industry Name"]) or "").strip()
+        sector = str(_first(r, ["Sector", "sector", "SectorName", "Sector Name"]) or "").strip()
         if industry_id:
-            data[industry_id] = {
-                "industry": str(r.get("Industry", "")).strip(),
-                "sector": str(r.get("Sector", "")).strip()
-            }
+            data[industry_id] = {"industry": industry, "sector": sector}
     return data
 
 
 def load_companies():
     data = {}
-    for r in read_csv("data/companies.csv"):
-        t = str(r.get("Ticker", "")).upper().strip()
+    for r in read_csv(DATA_DIR / "companies.csv"):
+        t = str(_first(r, ["Ticker", "Symbol", "ticker", "symbol"]) or "").upper().strip()
         if t:
             data[t] = r
     return data
@@ -54,7 +79,7 @@ def load_companies():
 def load_latest(path):
     data = {}
     for r in read_csv(path):
-        t = str(r.get("Ticker", "")).upper().strip()
+        t = str(_first(r, ["Ticker", "Symbol", "ticker", "symbol"]) or "").upper().strip()
         if not t:
             continue
         k = latest_key(r)
@@ -68,12 +93,13 @@ def load_latest(path):
 
 SECTOR_DATA = load_sector()
 COMPANIES_DATA = load_companies()
-BALANCE_DATA = load_latest("data/balance_sheet.csv")
-INCOME_DATA = load_latest("data/income_statement.csv")
+BALANCE_DATA = load_latest(DATA_DIR / "balance_sheet.csv")
+INCOME_DATA = load_latest(DATA_DIR / "income_statement.csv")
+
 
 def initialize_reference_data():
     sector_data = load_sector()
     companies_data = load_companies()
-    balance_data = load_latest(str(DATA_DIR / "balance_sheet.csv"))
-    income_data = load_latest(str(DATA_DIR / "income_statement.csv"))
+    balance_data = load_latest(DATA_DIR / "balance_sheet.csv")
+    income_data = load_latest(DATA_DIR / "income_statement.csv")
     return sector_data, companies_data, balance_data, income_data
