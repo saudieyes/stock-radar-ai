@@ -1,3 +1,5 @@
+from app.settings import REF_INFO_CACHE
+import time
 from app.utils import *
 from app.utils import _cache_get, _cache_set
 from app.market_data import *
@@ -619,3 +621,4 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     plan["rr_1"] = safe_round(rr_1_preview)
     plan = apply_decision_layers(plan)
     return plan
+
