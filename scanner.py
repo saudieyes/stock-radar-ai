@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -42,9 +43,40 @@ BIG_CAPS = [
 
 LAST_SOURCE_DIAGNOSTICS = {}
 _SOURCE_TARGET_CACHE = {"ts": 0.0, "target": TOTAL_UNIVERSE, "mode": "normal", "source_mode": ""}
+_REFERENCE_TICKERS_CACHE = {"ts": 0.0, "items": []}
+_GROUPED_DAILY_CACHE = {}
+_REFERENCE_DETAILS_CACHE = {}
+REFERENCE_TICKERS_TTL_SEC = 6 * 60 * 60
+GROUPED_DAILY_TTL_SEC = 4 * 60
+REFERENCE_DETAILS_TTL_SEC = 12 * 60 * 60
+
 
 def get_last_source_diagnostics() -> dict:
     return dict(LAST_SOURCE_DIAGNOSTICS or {})
+
+
+def record_active_universe_diagnostics(final_symbols: list[str], manual_symbols=None, requested_target=None):
+    """Attach final active-universe diagnostics after watchlist/portfolio symbols are merged."""
+    global LAST_SOURCE_DIAGNOSTICS
+    try:
+        final_symbols = [str(x).upper().strip() for x in (final_symbols or []) if str(x or "").strip()]
+        manual_symbols = [str(x).upper().strip() for x in (manual_symbols or []) if str(x or "").strip()]
+        diag = dict(LAST_SOURCE_DIAGNOSTICS or {})
+        reasons = dict(diag.get("reasons", {}) or {})
+        for sym in manual_symbols:
+            bucket = list(reasons.get(sym, []) or [])
+            if "أولوية المستخدم" not in bucket:
+                bucket.insert(0, "أولوية المستخدم")
+            reasons[sym] = bucket[:7]
+        diag["active_target"] = int(requested_target or len(final_symbols) or 0)
+        diag["active_count"] = len(final_symbols)
+        diag["manual_priority_count"] = len(manual_symbols)
+        diag["manual_priority_symbols"] = manual_symbols[:80]
+        diag["final_sample"] = final_symbols[:40]
+        diag["reasons"] = {sym: reasons.get(sym, []) for sym in final_symbols}
+        LAST_SOURCE_DIAGNOSTICS = diag
+    except Exception as e:
+        print(f"SOURCE_DIAGNOSTICS_ERROR: {type(e).__name__}: {str(e)[:180]}", flush=True)
 
 
 def _classify_source_market_activity(grouped_map: dict) -> tuple[str, int, dict]:
@@ -106,7 +138,9 @@ def safe_get_json(url: str, timeout: int = 20):
         r = HTTP_SESSION.get(url, timeout=timeout)
         r.raise_for_status()
         return r.json()
-    except:
+    except Exception as e:
+        # Keep scanner resilient, but do not hide the failure completely in logs.
+        print(f"HTTP_JSON_ERROR: {type(e).__name__}: {str(e)[:160]}", flush=True)
         return {}
 
 
@@ -151,8 +185,18 @@ def is_clean_common_stock(item: dict) -> bool:
 
 
 def get_reference_tickers(limit_pages: int = 8, page_limit: int = 1000) -> list[str]:
+    """
+    Cached universe reference list.
+    Polygon reference pagination is relatively heavy; caching it keeps refreshes fast
+    while still allowing the symbol base to refresh a few times per day.
+    """
     if not POLYGON_API_KEY:
         return []
+
+    now_ts = time.time()
+    cached_items = _REFERENCE_TICKERS_CACHE.get("items") or []
+    if cached_items and now_ts - float(_REFERENCE_TICKERS_CACHE.get("ts", 0) or 0) < REFERENCE_TICKERS_TTL_SEC:
+        return list(cached_items)
 
     base_url = "https://api.polygon.io/v3/reference/tickers"
     params = {
@@ -195,12 +239,22 @@ def get_reference_tickers(limit_pages: int = 8, page_limit: int = 1000) -> list[
             seen.add(t)
             cleaned.append(t)
 
-    return cleaned
+    if cleaned:
+        _REFERENCE_TICKERS_CACHE.update({"ts": now_ts, "items": cleaned})
+    elif cached_items:
+        return list(cached_items)
 
+    return cleaned
 
 def get_grouped_daily_map(date_str: str) -> dict:
     if not POLYGON_API_KEY:
         return {}
+
+    now_ts = time.time()
+    cache_key = str(date_str or "")
+    cached = _GROUPED_DAILY_CACHE.get(cache_key) or {}
+    if cached and now_ts - float(cached.get("ts", 0) or 0) < GROUPED_DAILY_TTL_SEC:
+        return dict(cached.get("items", {}) or {})
 
     url = (
         f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/"
@@ -221,17 +275,34 @@ def get_grouped_daily_map(date_str: str) -> dict:
             "low": float(item.get("l", 0) or 0),
             "volume": float(item.get("v", 0) or 0),
         }
-    return out
 
+    if out:
+        _GROUPED_DAILY_CACHE[cache_key] = {"ts": now_ts, "items": out}
+    elif cached:
+        return dict(cached.get("items", {}) or {})
+
+    return out
 
 def get_reference_details(ticker: str) -> dict:
     if not POLYGON_API_KEY:
         return {}
+    ticker = str(ticker or "").upper().strip()
+    if not ticker:
+        return {}
+
+    now_ts = time.time()
+    cached = _REFERENCE_DETAILS_CACHE.get(ticker) or {}
+    if cached and now_ts - float(cached.get("ts", 0) or 0) < REFERENCE_DETAILS_TTL_SEC:
+        return dict(cached.get("item", {}) or {})
 
     url = f"https://api.polygon.io/v3/reference/tickers/{ticker}?apiKey={POLYGON_API_KEY}"
     data = safe_get_json(url, timeout=10)
-    return data.get("results", {}) or {}
-
+    item = data.get("results", {}) or {}
+    if item:
+        _REFERENCE_DETAILS_CACHE[ticker] = {"ts": now_ts, "item": item}
+    elif cached:
+        return dict(cached.get("item", {}) or {})
+    return item
 
 def get_small_cap_score(item: tuple[str, dict]) -> tuple[str, float]:
     ticker, daily = item
@@ -1778,17 +1849,17 @@ def _source_reason_tags(ticker: str, m: dict, source_score: float) -> list[str]:
 
 def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
     """
-    Dynamic clean source engine v2.
-    Builds a broader candidate pool, scores by liquidity + momentum quality + close strength,
-    then balances buckets so the final radar is not hostage to one narrow filter.
-    V2 records why a ticker entered the source and exposes diagnostics for debug/UI.
+    Dynamic clean source engine v3.
+    Builds a broad candidate pool, scores by liquidity + momentum quality + close strength,
+    balances buckets, caches heavy source calls, and records why each ticker entered.
     """
     global LAST_SOURCE_DIAGNOSTICS
     try:
-        max_symbols = int(max_symbols or TOTAL_UNIVERSE)
+        requested_max_symbols = int(max_symbols or TOTAL_UNIVERSE)
     except Exception:
-        max_symbols = TOTAL_UNIVERSE
-    max_symbols = max(40, min(max_symbols, 300))
+        requested_max_symbols = TOTAL_UNIVERSE
+    requested_max_symbols = max(40, min(requested_max_symbols, 300))
+    max_symbols = requested_max_symbols
 
     reference_tickers = get_reference_tickers(limit_pages=10, page_limit=1000)
     if not reference_tickers:
@@ -1796,10 +1867,12 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
 
     market_date, grouped_map, source_mode = _select_grouped_market_map()
     if not grouped_map:
-        LAST_SOURCE_DIAGNOSTICS = {"target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": "unknown"}
+        LAST_SOURCE_DIAGNOSTICS = {"engine_version": "source_v3_cached_balanced", "requested_target": requested_max_symbols, "target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": "unknown"}
         return get_seed_universe()[:max_symbols]
 
     market_activity_mode, dynamic_target, source_activity_stats = _classify_source_market_activity(grouped_map)
+    if requested_max_symbols == TOTAL_UNIVERSE:
+        max_symbols = max(100, min(200, int(dynamic_target or requested_max_symbols)))
     source_reasons = {}
 
     source_scored = []
@@ -1854,7 +1927,7 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
             _add_source_reason(source_reasons, ticker, "مرشح all-day runner")
 
     fast_pool.sort(key=lambda x: x[1], reverse=True)
-    small_cap_candidates = [t for t, _ in fast_pool[:220]]
+    small_cap_candidates = [t for t, _ in fast_pool[:180]]
     small_cap_scored = []
     small_cap_inputs = [(ticker, grouped_map.get(ticker)) for ticker in small_cap_candidates if grouped_map.get(ticker)]
 
@@ -1894,11 +1967,13 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
     )
 
     if not final_universe:
-        LAST_SOURCE_DIAGNOSTICS = {"target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": market_activity_mode, "activity_stats": source_activity_stats}
+        LAST_SOURCE_DIAGNOSTICS = {"engine_version": "source_v3_cached_balanced", "requested_target": requested_max_symbols, "target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": market_activity_mode, "activity_stats": source_activity_stats}
         return get_seed_universe()[:max_symbols]
 
     selected = final_universe[:max_symbols]
     LAST_SOURCE_DIAGNOSTICS = {
+        "engine_version": "source_v3_cached_balanced",
+        "requested_target": requested_max_symbols,
         "target": max_symbols,
         "market_date": market_date,
         "source_mode": source_mode,
