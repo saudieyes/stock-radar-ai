@@ -581,3 +581,132 @@ def build_performance_dashboard(records: list[dict]) -> dict:
         "simulation": simulate_equal_weight(rows),
     }
 
+# --- Runtime refactor compatibility helpers ---
+# These helpers originally lived in main.py and are used by /trade-scan and scan_all
+# to keep the same display ordering after the refactor.
+def _display_text_label(value) -> str:
+    return str(value or "").strip()
+
+
+def historical_confidence_bonus(label: str) -> float:
+    label = _display_text_label(label)
+    if "عالية" in label:
+        return 6.0
+    if "متوسطة" in label:
+        return 3.0
+    return 0.0
+
+
+def historical_behavior_bonus(label: str) -> float:
+    label = _display_text_label(label)
+    if "يدعم" in label:
+        return 4.0
+    if "محايد" in label:
+        return 0.0
+    if "ضعيف" in label or "لا يدعم" in label:
+        return -2.0
+    return 0.0
+
+
+def display_rank_score(item: dict) -> float:
+    try:
+        quality = float(item.get("quality_score", 0) or 0)
+        readiness = float(item.get("execution_readiness_score", 0) or 0)
+        rr = float(item.get("rr_1", 0) or 0)
+        continuation = float(item.get("continuation_score", 0) or 0)
+        runner = float(item.get("runner_score", 0) or 0)
+        alignment = float(item.get("alignment_score", 0) or 0)
+        risk_pct = float(item.get("display_risk_pct", item.get("risk_pct", 0)) or 0)
+        effective_volume = float(item.get("effective_volume_ratio", 0) or 0)
+        volume_pace = float(item.get("volume_pace_ratio", 0) or 0)
+        news_effect = float(item.get("news_effect_score", item.get("catalyst_score", 0)) or 0)
+        news_scope = _display_text_label(item.get("news_scope"))
+
+        phase = _display_text_label(item.get("market_phase"))
+        readiness_label = _display_text_label(item.get("execution_readiness_label"))
+        freshness_label = _display_text_label(item.get("price_freshness_label"))
+        execution_status = _display_text_label(item.get("execution_status"))
+        signal_stage = _display_text_label(item.get("signal_stage"))
+        hist_conf = _display_text_label(item.get("historical_confidence_label"))
+        hist_behavior = _display_text_label(item.get("historical_behavior_label"))
+        historical_behavior_score = float(item.get("historical_behavior_score", 50) or 50)
+        historical_context_score = float(item.get("historical_context_score", 50) or 50)
+
+        score = quality
+        score += readiness * 0.45
+        score += max(-4.0, min(rr, 3.0)) * 7.0
+        score += continuation * 0.10
+        score += runner * 0.08
+        score += alignment * 0.08
+        score += min(effective_volume, 2.5) * 4.0
+
+        if phase == "open":
+            if volume_pace >= 1.2:
+                score += 3.0
+            elif volume_pace >= 1.0:
+                score += 1.5
+            elif volume_pace < 0.9:
+                score -= 2.0
+
+        score += historical_confidence_bonus(hist_conf)
+        score += historical_behavior_bonus(hist_behavior)
+        score += (historical_behavior_score - 50.0) * 0.18
+        score += (historical_context_score - 50.0) * 0.14
+
+        if readiness_label in {"جاهز", "اختراق مؤكد", "ارتداد مؤكد"}:
+            score += 5.0
+        elif "انتظار" in readiness_label:
+            score += 1.5
+        elif "مطاردة" in readiness_label:
+            score -= 8.0
+
+        if execution_status == "READY":
+            score += 4.0
+        elif execution_status == "WAIT_CONFIRM":
+            score += 1.0
+        elif execution_status == "AVOID":
+            score -= 10.0
+
+        if news_effect != 0:
+            if news_scope == "company":
+                score += news_effect * 0.45
+            elif news_scope == "sector":
+                score += news_effect * 0.30
+            elif news_scope == "market":
+                score += news_effect * 0.15
+
+        if phase == "open" and "آخر إغلاق" in freshness_label:
+            score -= 4.0
+
+        if signal_stage == "إنذار مبكر":
+            score -= 1.5
+
+        if risk_pct > 8:
+            score -= 5.0
+        elif risk_pct > 6:
+            score -= 2.0
+
+        return round(score, 2)
+    except Exception:
+        try:
+            return float(item.get("quality_score", 0) or 0)
+        except Exception:
+            return 0.0
+
+
+def sort_display_bucket(items):
+    return sorted(
+        list(items or []),
+        key=lambda x: (
+            float(x.get("display_rank_score", display_rank_score(x)) or 0),
+            float(x.get("quality_score", 0) or 0),
+            float(x.get("execution_readiness_score", 0) or 0),
+            float(x.get("rr_1", 0) or 0),
+            float(x.get("continuation_score", 0) or 0),
+            float(x.get("runner_score", 0) or 0),
+            float(x.get("historical_behavior_score", 50) or 50),
+            float(x.get("historical_context_score", 50) or 50),
+        ),
+        reverse=True,
+    )
+
