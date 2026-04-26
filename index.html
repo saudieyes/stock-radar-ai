@@ -228,6 +228,8 @@
     .badge-news-neu { background:var(--ghost-bg); color:var(--text-strong); }
     .badge-news-op { background:#3f2a00; color:#fde68a; }
     .badge-news-legal { background:#4c1d1d; color:#fecaca; }
+    .badge-news-market { background:#1e3a8a; color:#dbeafe; }
+    .badge-news-sector { background:#134e4a; color:#ccfbf1; }
 
     .compact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
     .compact-item { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:11px; }
@@ -294,7 +296,7 @@
     .muted { color:var(--text-muted); }
     .hidden-section { display:none; }
     .quick-nav {
-      display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px 0;
+      display:none; flex-wrap:wrap; gap:10px; margin:0 0 16px 0;
       position: sticky; top: 8px; z-index: 15;
       background: var(--quick-bg); backdrop-filter: blur(8px);
       padding: 8px 10px; border-radius: 16px; border:1px solid var(--border-main);
@@ -325,6 +327,52 @@
       display:flex; align-items:center; justify-content:space-between; gap:8px;
     }
     .section-title-row { width:100%; }
+
+    .floating-nav-wrap {
+      position: fixed;
+      left: 14px;
+      bottom: 18px;
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .floating-nav-toggle {
+      border: none;
+      border-radius: 999px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 900;
+      background: #2563eb;
+      color: #fff;
+      box-shadow: 0 12px 30px rgba(37,99,235,.28);
+    }
+    .floating-nav-menu {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-main);
+      border-radius: 18px;
+      padding: 10px;
+      min-width: 190px;
+      box-shadow: var(--shadow-main);
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .floating-nav-menu.open { display: flex; }
+    .floating-nav-link {
+      border: 1px solid var(--border-soft);
+      background: var(--panel-bg-soft);
+      color: var(--text-strong);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: right;
+      width: 100%;
+    }
     .info-btn {
       display:inline-flex; align-items:center; justify-content:center;
       width:26px; height:26px; min-width:26px; border-radius:999px;
@@ -377,6 +425,23 @@
 
     <div id="infoPopover" class="info-popover" role="dialog" aria-live="polite"></div>
 
+    <div id="floatingNavWrap" class="floating-nav-wrap">
+      <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ الوصول</button>
+      <div id="floatingNavMenu" class="floating-nav-menu">
+        <button class="floating-nav-link" type="button" onclick="openByNav('openingSection', 'openingContent')">🚀 الافتتاح</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('strong-section', 'strong-section-content')">🔥 دخول قوي</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('cautious-section', 'cautious-section-content')">🟠 دخول بحذر</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('watch-section', 'watch-section-content')">👀 المراقبة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('riskPanelSection')">⚖️ المخاطرة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('portfolioSection', 'portfolioContentWrap')">💼 المحفظة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('watchlistSection', 'manualWatchlistContent')">📌 المتابعة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('shariaExcludedSection', 'shariaExcludedContent')">🚫 المستبعدة شرعيًا</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('performanceSection', 'performanceContent')">📊 الأداء</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('singleScanSection')">🔎 فحص سهم</button>
+      </div>
+    </div>
+
+
     <div class="hero">
       <div class="hero-left">
         <div class="hero-line">
@@ -402,6 +467,7 @@
       <a class="quick-link" href="#riskPanelSection">⚖️ المخاطرة</a>
       <a class="quick-link" href="#portfolioSection">💼 المحفظة</a>
       <a class="quick-link" href="#watchlistSection">📌 المتابعة</a>
+      <a class="quick-link" href="#shariaExcludedSection">🚫 المستبعدة شرعيًا</a>
       <a class="quick-link" href="#performanceSection">📊 الأداء</a>
       <a class="quick-link" href="#singleScanSection">🔎 فحص سهم</a>
     </div>
@@ -428,6 +494,8 @@
         <div class="glossary-item">🚫 / ⛔ <b>غير معتمد</b>: خبر رأي أو سلبي قانوني لا يعتبر محفزًا إيجابيًا.</div>
         <div class="glossary-item">جاهزية التنفيذ: هل السهم صالح <b>الآن</b> للتنفيذ أم فقط للمراقبة.</div>
         <div class="glossary-item">حداثة السعر: هل السعر <b>حديث</b> أم قديم أم آخر إغلاق فقط.</div>
+        <div class="glossary-item">SPY / QQQ: مؤشرات مرجعية عامة. و XLK / XLE / XLV أمثلة على ETFs لقطاعات مختلفة.</div>
+        <div class="glossary-item">الأرقام بين القوسين في الجاهزية أو دعم المؤشر/القطاع هي <b>درجات داخلية</b> للمفاضلة وليست نسب نجاح مضمونة.</div>
       </div>
     </div>
 
@@ -459,7 +527,7 @@
           <div class="section-count" id="portfolioCount">0 سهم</div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('portfolioContentWrap', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="portfolioContentWrap" onclick="toggleSection('portfolioContentWrap', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div id="portfolioContentWrap" class="panel hidden-section">
@@ -480,7 +548,7 @@
           <div class="section-count" id="openingCount">أولوية المتابعة عند الافتتاح</div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('openingContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="openingContent" onclick="toggleSection('openingContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div id="openingContent" class="opening-box hidden-section">جاري تحميل وضع الافتتاح...</div>
@@ -495,10 +563,23 @@
           <div class="section-count" id="watchlistCount"></div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('manualWatchlistContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="manualWatchlistContent" onclick="toggleSection('manualWatchlistContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div class="panel hidden-section" id="manualWatchlistContent">جاري تحميل القائمة...</div>
+    </div>
+
+    <div class="section scroll-anchor" id="shariaExcludedSection">
+      <div class="section-header">
+        <div class="section-heading">
+          <div class="section-title">🚫 المستبعدة شرعيًا يدويًا</div>
+          <div class="section-count" id="shariaExcludedCount"></div>
+        </div>
+        <div class="section-tools">
+          <button class="ghost" data-section-toggle="shariaExcludedContent" onclick="toggleSection('shariaExcludedContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+        </div>
+      </div>
+      <div class="panel hidden-section" id="shariaExcludedContent">جاري تحميل القائمة...</div>
     </div>
 
     <div class="section scroll-anchor" id="performanceSection">
@@ -508,7 +589,7 @@
           <div class="section-count" id="performanceSummary"></div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="toggleSection('performanceContent', this, 'إظهار', 'إخفاء')">إظهار</button>
+          <button class="ghost" data-section-toggle="performanceContent" onclick="toggleSection('performanceContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
       <div class="panel hidden-section" id="performanceContent">اضغط إظهار لتحميل تتبع الأداء...</div>
@@ -660,6 +741,27 @@
       };
     }
 
+
+    function renderHistoricalContextBreakdown(stock){
+      const score = formatNumber(stock.historical_context_score || 0);
+      const marketCases = Number(stock.historical_market_context_cases || 0);
+      const sectorCases = Number(stock.historical_sector_context_cases || 0);
+
+      const marketText = marketCases > 0
+        ? `المؤشر ${formatNumber(stock.historical_market_context_success_pct || 0)}% من ${formatNumber(marketCases)} حالة`
+        : (stock.benchmark_symbol
+            ? `المؤشر ${safeText(stock.market_support_label || 'محايد')}`
+            : 'المؤشر غير متوفر');
+
+      const sectorText = sectorCases > 0
+        ? `القطاع ${formatNumber(stock.historical_sector_context_success_pct || 0)}% من ${formatNumber(sectorCases)} حالة`
+        : (stock.sector_etf_symbol
+            ? `القطاع ${safeText(stock.sector_support_label || 'محايد')}`
+            : 'القطاع غير متوفر');
+
+      return `${score} | ${marketText} | ${sectorText}`;
+    }
+
     function renderPositionSizingBlock(stock) {
       const calc = calculatePositionSize(stock);
       if (!calc.shares || !calc.perShareRisk) {
@@ -683,11 +785,41 @@
       return parts.join(' | ');
     }
 
+    const ETF_LABELS = {
+      SPY: 'S&P 500',
+      QQQ: 'Nasdaq-100',
+      XLK: 'قطاع التقنية',
+      XLC: 'قطاع الاتصالات',
+      XLY: 'القطاع الاستهلاكي الدوري',
+      XLP: 'القطاع الاستهلاكي الدفاعي',
+      XLV: 'قطاع الرعاية الصحية',
+      XLI: 'القطاع الصناعي',
+      XLE: 'قطاع الطاقة',
+      XLU: 'قطاع المرافق',
+      XLRE: 'قطاع العقار',
+      XLB: 'قطاع المواد الأساسية',
+      XLF: 'القطاع المالي'
+    };
+
+    function describeEtfSymbol(symbol) {
+      const raw = String(symbol || '').trim().toUpperCase();
+      if (!raw) return 'غير متوفر — ثقة أقل';
+      const label = ETF_LABELS[raw];
+      return label ? `${raw} — ${label}` : raw;
+    }
+
+    function formatScoreLabel(label, score) {
+      const cleanLabel = safeText(label || '—');
+      const n = Number(score || 0);
+      if (!Number.isFinite(n)) return cleanLabel;
+      return `${cleanLabel} (${formatNumber(n)})`;
+    }
+
     const INFO_TEXTS = {
       '🔥 دخول قوي': { title: 'دخول قوي', body: 'أفضل فرص القائمة حاليًا. الترتيب داخل القسم من الأعلى جودة ثم الأفضل تنفيذًا ثم الأنسب عائدًا.' },
       '🟠 دخول بحذر': { title: 'دخول بحذر', body: 'فرصة جيدة لكنها تحتاج تأكيدًا أكبر أو تنفيذًا أدق أو أن عائدها/مخاطرتها ليست مثالية بعد.' },
       '👀 المراقبة': { title: 'المراقبة', body: 'سهم تحت المتابعة وليس جاهزًا للتنفيذ الآن. استخدمه للترقب لا للدخول السريع.' },
-      'جاهزية التنفيذ': { title: 'جاهزية التنفيذ', body: 'هل الخطة صالحة للتنفيذ الآن أم ما زالت تحتاج اختراقًا أو تأكيدًا أو صبرًا أكثر.' },
+      'جاهزية التنفيذ': { title: 'جاهزية التنفيذ', body: 'هل الخطة صالحة للتنفيذ الآن أم ما زالت تحتاج اختراقًا أو تأكيدًا أو صبرًا أكثر. الرقم بين القوسين درجة داخلية من 0 إلى 99: كلما ارتفع كانت الخطة أقرب للتنفيذ الآن.' },
       'وضع التنفيذ': { title: 'وضع التنفيذ', body: 'الخلاصة العملية الآن: دخول مباشر أو انتظار اختراق أو مراقبة فقط.' },
       'العائد/المخاطرة': { title: 'العائد/المخاطرة', body: 'تقارن الهدف المتوقع بالخسارة المحتملة. كلما ارتفعت كانت الصفقة أكثر جاذبية.' },
       'الجودة': { title: 'الجودة', body: 'الدرجة الأساسية لجوهر الفرصة: اتجاه وسيولة وخطة ومخاطرة وجودة الكسر أو الارتداد.' },
@@ -699,6 +831,13 @@
       'Runner Score': { title: 'Runner Score', body: 'يقيس صفات السهم القادر على تمديد الحركة. كلما ارتفع زادت قابلية السهم أن يصبح runner.' },
       'Continuation Score': { title: 'Continuation Score', body: 'يقيس احتمال استمرار المسار الحالي بعد الاختراق أو الحركة. الأعلى يعني دعمًا أفضل للاستمرار.' },
       'التوافق الزمني': { title: 'التوافق الزمني', body: 'هل الاتجاه اليومي والحركة الأقرب يدعمان بعضهما. التوافق الأعلى يزيد ثقة القرار.' },
+      'المؤشر المرجعي': { title: 'المؤشر المرجعي', body: 'الرمز الظاهر هنا مثل SPY أو QQQ هو ETF نستخدمه كمرجع لحركة السوق المناسبة لهذا السهم. SPY يمثل S&P 500 وQQQ يمثل Nasdaq-100.' },
+      'دعم المؤشر': { title: 'دعم المؤشر', body: 'هل السوق المرجعي داعم أو ضاغط على الفكرة. الرقم بين القوسين درجة داخلية تقريبية: الموجب أفضل، والسالب أضعف.' },
+      'ETF القطاع': { title: 'ETF القطاع', body: 'هذا هو ETF القطاع الذي نستخدمه كمرجع لبيئة القطاع. مثل XLK للتقنية وXLE للطاقة وXLV للرعاية الصحية. إذا ظهر غير متوفر فهذا يعني أن قراءة القطاع أقل ثقة.' },
+      'دعم القطاع': { title: 'دعم القطاع', body: 'هل القطاع نفسه يدعم السهم أو يضغط عليه. الرقم بين القوسين درجة داخلية تقريبية، وغياب ETF القطاع يعني ثقة أقل قليلًا في القرار.' },
+      'شرح المؤشر والقطاع': { title: 'شرح المؤشر والقطاع', body: 'ملخص يشرح هل المؤشر المرجعي والقطاع داعمان أو ضاغطان، وهل السهم يتفوق عليهما أو يتأخر عنهما.' },
+      'المؤشر': { title: 'المؤشر', body: 'خلاصة سريعة لدعم السوق المرجعي للسهم. افتح التفاصيل لرؤية الرمز والشرح الكامل.' },
+      'القطاع': { title: 'القطاع', body: 'خلاصة سريعة لدعم القطاع. إذا ظهر غير متوفر فهذا لا يلغي الفرصة لكنه يخفض الثقة قليلًا.' },
       'ATR 14': { title: 'ATR 14', body: 'متوسط التذبذب الطبيعي خلال آخر 14 يومًا. اخترناه لأنه متوازن: أسرع من 20 وأثبت من 10.' },
       'ATR %': { title: 'ATR %', body: 'نفس ATR لكن كنسبة من السعر، لتسهيل مقارنة تذبذب الأسهم المختلفة.' },
       'وصف التذبذب': { title: 'وصف التذبذب', body: 'يلخص هل السهم هادئ أو متوازن أو نشط. يفيدك في اختيار وقف يناسب طبيعة الحركة.' },
@@ -706,6 +845,10 @@
       'هدف ATR 1': { title: 'هدف ATR 1', body: 'هدف أول تقريبي مبني على ATR. يعطيك قياسًا واقعيًا للحركة المتوقعة.' },
       'هدف ATR 2': { title: 'هدف ATR 2', body: 'هدف ممتد أبعد من الهدف الأول، مناسب إذا استمر الزخم بشكل جيد.' },
       'السلوك التاريخي': { title: 'السلوك التاريخي', body: 'القراءة التاريخية الأقرب لهذه الحالة: هل مثل هذه الفرص نجحت سابقًا أم كانت محايدة أو أضعف.' },
+      'درجة السلوك التاريخي': { title: 'درجة السلوك التاريخي', body: 'رقم داخلي من 0 إلى 99 يلخص جودة السلوك التاريخي للسهم في حالات مشابهة. الأعلى أفضل لكنه ليس وعدًا بالنجاح.' },
+      'التاريخ مع المؤشر والقطاع': { title: 'التاريخ مع المؤشر والقطاع', body: 'هل كان السهم ينجح تاريخيًا عندما يكون المؤشر والقطاع في وضع مشابه للوضع الحالي. هذه قراءة تربط التاريخ بالسياق الحالي.' },
+      'درجة التاريخ مع المؤشر والقطاع': { title: 'درجة التاريخ مع المؤشر والقطاع', body: 'رقم داخلي من 0 إلى 99 يوضح مدى دعم السجل التاريخي للسهم مع المؤشر والقطاع الحاليين.' },
+      'قوة الإشارة': { title: 'قوة الإشارة', body: 'ترتيب داخلي داخل نفس القسم. قوي جدًا أعلى أولوية، ثم قوي، ثم قوي مبكر. لا يعني ذلك أن الفرص الأخرى سيئة، بل أقل نضجًا أو ثقة.' },
       'ثقة السلوك التاريخي': { title: 'ثقة السلوك التاريخي', body: 'قوة الثقة مبنية على حجم العينة ومدى اتساق النتائج السابقة، لا على الانطباع فقط.' },
       'نجاح الاختراقات تاريخيًا': { title: 'نجاح الاختراقات تاريخيًا', body: 'كم مرة نجح الاختراق في حالات مشابهة، وما سرعة الحركة المعتادة بعدها.' },
       'نجاح الارتدادات تاريخيًا': { title: 'نجاح الارتدادات تاريخيًا', body: 'كم مرة نجحت الارتدادات المشابهة سابقًا. يفيدك حتى في أسهم الاختراق لمعرفة سلوكها العام.' },
@@ -716,8 +859,8 @@
       'إجراء المالك': { title: 'إجراء المالك', body: 'أوضح خطوة عملية للمستخدم الآن: ادخل أو انتظر كسرًا أو تأكيدًا أو اكتفِ بالمراقبة.' },
       'ملخص عربي سريع': { title: 'ملخص عربي سريع', body: 'خلاصة سريعة جدًا لسبب التوصية وفائدة الخانة للمستخدم دون الحاجة لقراءة كل التفاصيل.' },
       'ملخص فني': { title: 'ملخص فني', body: 'وصف فني مختصر يجمع أهم العوامل المؤثرة في هذه الفرصة.' },
-      'المحفز/الخبر': { title: 'المحفز/الخبر', body: 'وجود خبر أو محفز حديث قد يدعم الحركة. الخبر الإيجابي الحقيقي أقوى من المقالات والرأي.' },
-      'شرح الخبر': { title: 'شرح الخبر', body: 'يوضح لماذا عُدّ الخبر إيجابيًا أو سلبيًا أو محايدًا، وهل يعتمد عليه أم لا.' },
+      'المحفز/الخبر': { title: 'المحفز/الخبر', body: 'خبر الشركة أو القطاع فقط قد يعمل كمحفز مباشر. أما خبر السوق العام فيظهر كسياق، ومقال الرأي لا يعامل كخبر محفز.' },
+      'شرح الخبر': { title: 'شرح الخبر', body: 'يوضح هل الخبر خاص بالشركة أو القطاع أو السوق العام، وهل هو داعم أو ضاغط أو مجرد رأي غير معتمد.' },
       'تعويض التأخير': { title: 'تعويض التأخير', body: 'تقدير داخلي يساعد على التعامل مع تأخر بعض البيانات حتى لا يبدو القرار مضللًا.' },
       'مصدر السعر': { title: 'مصدر السعر', body: 'من أين جاءت قراءة السعر الحالية: لحظي أو ممتد أو آخر إغلاق. هذا مهم قبل التنفيذ.' },
       'حداثة السعر': { title: 'حداثة السعر', body: 'هل السعر حديث وقابل للاعتماد الآن أم أنه آخر إغلاق فقط. في السوق المفتوح هذه الخانة مهمة جدًا.' },
@@ -807,6 +950,14 @@
 
     window.addEventListener('resize', closeInfoPopover);
     window.addEventListener('scroll', closeInfoPopover, true);
+    document.addEventListener('click', function(event) {
+      const menu = document.getElementById('floatingNavMenu');
+      const wrap = document.getElementById('floatingNavWrap');
+      if (!menu || !wrap) return;
+      if (!menu.classList.contains('open')) return;
+      if (wrap.contains(event.target)) return;
+      setFloatingQuickNavOpen(false);
+    });
 
     function compactItem(label, value, infoKey='') {
       return `
@@ -827,6 +978,7 @@
     function badgeDecision(decision) {
       if (decision === "دخول قوي") return '<span class="badge badge-strong">🔥 دخول قوي</span>';
       if (decision === "دخول بحذر") return '<span class="badge badge-cautious">🟠 دخول بحذر</span>';
+      if (decision === "مرفوض شرعياً" || decision === "مستبعد يدويًا") return '<span class="badge badge-news-neg">🚫 ' + safeText(decision) + '</span>';
       return '<span class="badge badge-watch">👀 مراقبة</span>';
     }
 
@@ -844,6 +996,13 @@
       const label = safeText(stock.display_plan_family_label || stock.strategy_label || stock.trade_type_label_ar || "");
       if (!label) return '';
       return `<span class="badge badge-plan">${label}</span>`;
+    }
+
+    function strengthBadge(stock) {
+      const label = String(stock.signal_strength_label || '').trim();
+      if (!label || String(stock.decision || '') === 'مراقبة') return '';
+      const icon = label === 'قوي جدًا' ? '⭐' : label === 'قوي مبكر' ? '⚡' : label.includes('بحذر') ? '🟠' : '✅';
+      return `<span class="badge badge-stage">${icon} ${safeText(label)}</span>`;
     }
 
     function applyThemeMode(mode) {
@@ -873,26 +1032,37 @@
 
     function classifyNewsVisual(stock) {
       const baseCategory = String(stock.news_category || '').toLowerCase();
-      const title = String(stock.news_title || stock.news_note || '').toLowerCase();
+      const scope = String(stock.news_scope || '').toLowerCase();
       const badge = String(stock.news_badge || '').trim();
-      const text = `${title} ${badge.toLowerCase()}`;
 
-      const insiderNegative = [
-        'ceo sold','chief executive officer sold','insider sold','insider selling','director sold','officer sold',
-        'board member sold','sold shares','disposed shares','sale of shares','share sale','unloaded shares'
-      ].some(k => text.includes(k));
-      const legalNegative = ['lawsuit','investigation','investigates','class action','investor alert','law firm'].some(k => text.includes(k));
-      const clearNegative = ['downgrade','guidance cut','missed estimates','weak earnings','offering','crashed','plunged','fell'].some(k => text.includes(k));
-      const opinionOnly = ['is it time to buy','why this stock','opinion','analysis','article','i finally pulled the trigger',"here's what this means"].some(k => text.includes(k));
-      const positive = ['upgrade','approval','partnership','contract','buyback','beats','beat estimates','record revenue'].some(k => text.includes(k));
+      if (scope === 'opinion' || baseCategory === 'opinion') {
+        return { category: 'opinion', badge };
+      }
+      if (baseCategory === 'legal') {
+        return { category: 'legal', badge };
+      }
+      if (scope === 'market') {
+        return { category: 'market', badge };
+      }
+      if (scope === 'sector') {
+        return { category: 'sector', badge };
+      }
+      if (baseCategory === 'negative') {
+        return { category: 'negative', badge };
+      }
+      if (baseCategory === 'positive') {
+        return { category: 'positive', badge };
+      }
+      return { category: baseCategory || scope || 'neutral', badge };
+    }
 
-      if (insiderNegative) return { category: 'negative', badge: '🔴 بيع داخلي سلبي' };
-      if (legalNegative || baseCategory === 'legal') return { category: 'legal', badge: '⛔ خبر قانوني سلبي' };
-      if (clearNegative || baseCategory === 'negative') return { category: 'negative', badge: '🔴 خبر سلبي' };
-      if (positive || baseCategory === 'positive') return { category: 'positive', badge: '🟢 محفز إيجابي' };
-      if (opinionOnly || baseCategory === 'opinion') return { category: 'opinion', badge: '🚫 مقال رأي' };
-      if (!badge) return { category: 'neutral', badge: '' };
-      return { category: baseCategory || 'neutral', badge };
+    function newsHeadlineText(stock) {
+      const scope = String(stock.news_scope || '').toLowerCase();
+      const title = String(stock.news_title || '').trim();
+      const context = String(stock.news_context_note || stock.news_note || '').trim();
+      if (scope === 'opinion') return context || 'لا يوجد خبر محفز معتمد؛ الموجود مجرد مقال رأي أو قائمة تجميعية.';
+      if (scope === 'neutral' || scope === 'unrelated') return context || title || 'لا يوجد خبر محفز معتمد';
+      return title || context || 'لا يوجد خبر بارز';
     }
 
     function newsBadge(stock) {
@@ -903,6 +1073,8 @@
       else if (visual.category === "negative") cls = "badge-news-neg";
       else if (visual.category === "legal") cls = "badge-news-legal";
       else if (visual.category === "opinion") cls = "badge-news-op";
+      else if (visual.category === "market") cls = "badge-news-market";
+      else if (visual.category === "sector") cls = "badge-news-sector";
       return `<span class="badge ${cls}">${safeText(visual.badge)}</span>`;
     }
 
@@ -939,6 +1111,10 @@
           loadPerformance();
           el.dataset.loaded = '1';
         }
+        if (contentId === 'shariaExcludedContent' && el.dataset.loaded !== '1') {
+          loadShariaExcluded();
+          el.dataset.loaded = '1';
+        }
         if (el.dataset && el.dataset.rendered !== '1' && window.__sectionItems && window.__sectionItems[contentId]) {
           const items = window.__sectionItems[contentId] || [];
           el.innerHTML = `<div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
@@ -951,6 +1127,41 @@
         el.style.display = 'none';
       }
       if (buttonEl) buttonEl.textContent = hidden ? hideLabel : showLabel;
+    }
+
+
+    function isSectionHidden(contentId) {
+      const el = document.getElementById(contentId);
+      if (!el) return false;
+      return el.classList.contains('hidden-section') || el.style.display === 'none';
+    }
+
+    function ensureSectionOpen(contentId) {
+      const el = document.getElementById(contentId);
+      if (!el || !isSectionHidden(contentId)) return;
+      const toggleBtn = document.querySelector(`[data-section-toggle="${contentId}"]`);
+      toggleSection(contentId, toggleBtn || null, 'إظهار', 'إخفاء');
+    }
+
+    function setFloatingQuickNavOpen(isOpen) {
+      const menu = document.getElementById('floatingNavMenu');
+      const btn = document.getElementById('floatingNavToggle');
+      if (!menu || !btn) return;
+      menu.classList.toggle('open', !!isOpen);
+      btn.textContent = isOpen ? '✖ إخفاء' : '⚡ الوصول';
+    }
+
+    function toggleFloatingQuickNav() {
+      const menu = document.getElementById('floatingNavMenu');
+      if (!menu) return;
+      setFloatingQuickNavOpen(!menu.classList.contains('open'));
+    }
+
+    function openByNav(sectionId, contentId='') {
+      if (contentId) ensureSectionOpen(contentId);
+      const el = document.getElementById(sectionId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setFloatingQuickNavOpen(false);
     }
 
     async function addToWatchlist(symbol, price) {
@@ -994,7 +1205,7 @@
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
-      details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`));
+      details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
       details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
       details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
       details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
@@ -1011,6 +1222,11 @@
       details.push(detailBox('Runner Score', formatNumber(stock.runner_score)));
       details.push(detailBox('Continuation Score', joinMetric(formatNumber(stock.continuation_score), stock.metric_continuation_score)));
       details.push(detailBox('التوافق الزمني', `${safeText(stock.alignment_label || 'لا توجد بيانات كافية')} (${formatNumber(stock.alignment_score || 0)})`));
+      details.push(detailBox('المؤشر المرجعي', safeText(describeEtfSymbol(stock.benchmark_symbol || '')) , false, 'المؤشر المرجعي'));
+      details.push(detailBox('دعم المؤشر', formatScoreLabel(stock.market_support_label || '—', stock.market_support_score || 0), false, 'دعم المؤشر'));
+      details.push(detailBox('ETF القطاع', safeText(describeEtfSymbol(stock.sector_etf_symbol || '')) , false, 'ETF القطاع'));
+      details.push(detailBox('دعم القطاع', formatScoreLabel(stock.sector_support_label || '—', stock.sector_support_score || 0), false, 'دعم القطاع'));
+      details.push(detailBox('شرح المؤشر والقطاع', safeText(stock.market_sector_alignment_detail || ''), true, 'شرح المؤشر والقطاع'));
       details.push(detailBox('شرح التوافق الزمني', safeText(stock.alignment_detail || ''), true));
       details.push(detailBox('ATR 14', formatNumber(stock.atr_14)));
       details.push(detailBox('ATR %', formatNumber(stock.atr_pct)));
@@ -1020,14 +1236,20 @@
       details.push(detailBox('هدف ATR 1', formatNumber(stock.atr_target_1_suggestion)));
       details.push(detailBox('هدف ATR 2', formatNumber(stock.atr_target_2_suggestion)));
       details.push(detailBox('السلوك التاريخي', safeText(stock.historical_behavior_label || 'لا توجد بيانات كافية')));
+      details.push(detailBox('درجة السلوك التاريخي', formatNumber(stock.historical_behavior_score || 0), false, 'درجة السلوك التاريخي'));
       details.push(detailBox('شرح السلوك التاريخي', safeText(stock.historical_behavior_detail || ''), true));
       details.push(detailBox('ثقة السلوك التاريخي', safeText(stock.historical_confidence_label || 'لا توجد بيانات كافية')));
+      details.push(detailBox('التاريخ مع المؤشر والقطاع', `${safeText(stock.historical_context_label || 'لا توجد بيانات كافية')} (${formatNumber(stock.historical_context_score || 0)})`, false, 'التاريخ مع المؤشر والقطاع'));
+      details.push(detailBox('شرح التاريخ مع المؤشر والقطاع', safeText(stock.historical_context_detail || ''), true, 'التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('نجاح الاختراقات تاريخيًا', `${formatNumber(stock.historical_breakout_success_pct)}% من ${formatNumber(stock.historical_breakout_cases || 0)} حالة${stock.historical_breakout_speed_label ? ' | ' + safeText(stock.historical_breakout_speed_label) : ''}`));
       details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% من ${formatNumber(stock.historical_pullback_cases || 0)} حالة${stock.historical_pullback_speed_label ? ' | ' + safeText(stock.historical_pullback_speed_label) : ''}`));
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
+      details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', renderHistoricalContextBreakdown(stock), true, 'درجة التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
-      details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(stock.news_title || stock.news_note || '')}</div>`, true));
+      details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
+      details.push(detailBox('الحالة الشرعية', safeText(stock.sharia_label || 'غير متوفر')));
+      details.push(detailBox('شرح الشرعية', safeText(stock.sharia_reason || ''), true));
       details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
       details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
       details.push(detailBox('إجراء المالك', safeText(stock.owner_action), true));
@@ -1072,6 +1294,7 @@
             <div class="badges">
               ${badgeDecision(stock.decision)}
               ${phaseBadge(stock.market_phase_label)}
+              ${strengthBadge(stock)}
               ${planBadge(stock)}
               ${stageBadge(stock)}
             </div>
@@ -1080,6 +1303,7 @@
           <div class="compact-grid">
             ${compactItem('السوق', safeText(stock.market_phase_label))}
             ${compactItem('النوع', safeText(stock.decision))}
+            ${compactItem('قوة الإشارة', `${safeText(stock.signal_strength_label || '—')} (${formatNumber(stock.signal_strength_score || 0)})`, 'قوة الإشارة')}
             ${compactItem('سعر السهم', formatNumber(displayPrice))}
             ${compactItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
             ${compactItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
@@ -1087,8 +1311,11 @@
             ${compactItem('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || ''))}
             ${compactItem('مدة الصلاحية', safeText(stock.valid_for))}
             ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
-            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`)}
+            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`, 'جاهزية التنفيذ')}
+            ${compactItem('المؤشر', safeText(stock.market_support_label || '—'), 'المؤشر')}
+            ${compactItem('القطاع', safeText(stock.sector_etf_symbol ? (stock.sector_support_label || '—') : 'غير متوفر — ثقة أقل'), 'القطاع')}
             ${compactItem('المخاطرة', safeText(stock.risk_profile_label || '—'))}
+            ${compactItem('الشرعية', safeText(stock.sharia_label || '—'))}
             ${compactItem('التذبذب', safeText(stock.volatility_label || '—'))}
           </div>
 
@@ -1096,7 +1323,7 @@
 
           <div class="news-line">
             ${newsBadge(stock)}
-            <span>${safeText(stock.news_title || stock.news_note || 'لا يوجد خبر بارز')}</span>
+            <span>${safeText(newsHeadlineText(stock))}</span>
           </div>
 
           <div class="summary-line">
@@ -1105,6 +1332,7 @@
           </div>
 
           <div class="card-actions">
+            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="delete" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
@@ -1130,7 +1358,7 @@
               <div class="section-count">${count} سهم</div>
             </div>
             <div class="section-tools">
-              <button class="ghost detail-toggle" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
+              <button class="ghost detail-toggle" data-section-toggle="${key}" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
             </div>
           </div>
           <div id="${key}" class="hidden-section" data-rendered="0">
@@ -1148,12 +1376,17 @@
       const continuation = Number(item?.continuation_score || 0);
       const runner = Number(item?.runner_score || 0);
       const alignment = Number(item?.alignment_score || 0);
-      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08);
+      const hist = Number(item?.historical_behavior_score || 50);
+      const histCtx = Number(item?.historical_context_score || 50);
+      const strength = Number(item?.signal_strength_score || 0);
+      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08) + ((hist - 50) * 0.16) + ((histCtx - 50) * 0.14) + (strength * 0.12);
     }
 
     function sortDisplayItems(items) {
       return [...(items || [])].sort((a, b) => {
         return (
+          Number(b?.signal_strength_bucket || -1) - Number(a?.signal_strength_bucket || -1) ||
+          Number(b?.signal_strength_score || 0) - Number(a?.signal_strength_score || 0) ||
           displaySortScore(b) - displaySortScore(a) ||
           Number(b?.quality_score || 0) - Number(a?.quality_score || 0) ||
           Number(b?.execution_readiness_score || 0) - Number(a?.execution_readiness_score || 0) ||
@@ -1209,6 +1442,44 @@
       `;
     }
 
+
+
+    function setScanData(data) {
+      window.__scanData = { ...(data || {}) };
+      window.__scanData.strong_entries = [...(data?.strong_entries || [])];
+      window.__scanData.cautious_entries = [...(data?.cautious_entries || [])];
+      window.__scanData.watchlist = [...(data?.watchlist || [])];
+      window.__scanData.opening_focus = [...(data?.opening_focus || [])];
+      window.__scanData.top_ranked = [...(data?.top_ranked || [])];
+      window.__scanData.all_results = [...(data?.all_results || [])];
+    }
+
+    function renderScanData() {
+      if (!window.__scanData) return;
+      renderStatusbar(window.__scanData);
+      renderSections(window.__scanData);
+      renderOpeningFocus(window.__scanData);
+    }
+
+    function removeSymbolFromVisibleScan(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean || !window.__scanData) return false;
+      let changed = false;
+      const removeFrom = (key) => {
+        const before = Array.isArray(window.__scanData[key]) ? window.__scanData[key].length : 0;
+        window.__scanData[key] = (window.__scanData[key] || []).filter(item => String(item?.symbol || '').toUpperCase() !== clean);
+        if ((window.__scanData[key] || []).length !== before) changed = true;
+      };
+      ['strong_entries','cautious_entries','watchlist','top_ranked','all_results','opening_focus'].forEach(removeFrom);
+      if (!changed) return false;
+      window.__scanData.strong_entries_count = (window.__scanData.strong_entries || []).length;
+      window.__scanData.cautious_entries_count = (window.__scanData.cautious_entries || []).length;
+      window.__scanData.watchlist_count = (window.__scanData.watchlist || []).length;
+      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.watchlist_count;
+      renderScanData();
+      return true;
+    }
+
     function renderOpeningFocus(data) {
       const box = document.getElementById('openingContent');
       const items = data?.opening_focus || [];
@@ -1235,9 +1506,8 @@
       try {
         const res = await apiFetch('/trade-scan');
         const data = await res.json();
-        renderStatusbar(data);
-        renderSections(data);
-        renderOpeningFocus(data);
+        setScanData(data);
+        renderScanData();
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
         document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
@@ -1297,6 +1567,94 @@
         });
         loadPortfolio();
       } catch (e) {}
+    }
+
+    async function excludeShariaSymbol(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean) return;
+      if (!confirm(`استبعاد ${clean} يدويًا من الفرص الشرعية؟`)) return;
+      try {
+        await apiFetch('/sharia-exclusions/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: clean })
+        });
+        removeSymbolFromVisibleScan(clean);
+        const section = document.getElementById('shariaExcludedContent');
+        if (section && !section.classList.contains('hidden-section')) {
+          loadShariaExcluded();
+          section.dataset.loaded = '1';
+        } else {
+          const countEl = document.getElementById('shariaExcludedCount');
+          if (countEl) {
+            const current = Number(String(countEl.textContent || '0').replace(/[^0-9]/g, '') || 0);
+            countEl.textContent = `${current + 1} سهم`;
+          }
+        }
+        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
+        if (singleSymbol === clean) {
+          scanSingleStock();
+        }
+      } catch (e) {
+        alert('تعذر استبعاد السهم يدويًا');
+      }
+    }
+
+    async function restoreShariaSymbol(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean) return;
+      try {
+        await apiFetch('/sharia-exclusions/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: clean })
+        });
+        loadShariaExcluded();
+        await loadScan();
+        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
+        if (singleSymbol === clean) {
+          scanSingleStock();
+        }
+      } catch (e) {
+        alert('تعذر إعادة السهم');
+      }
+    }
+
+    async function loadShariaExcluded() {
+      try {
+        const res = await apiFetch('/sharia-exclusions');
+        const data = await res.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        document.getElementById('shariaExcludedCount').innerHTML = `${items.length} سهم`;
+        if (!items.length) {
+          document.getElementById('shariaExcludedContent').innerHTML = '<div class="empty">لا توجد أسهم مستبعدة يدويًا بعد</div>';
+          return;
+        }
+        const rows = items.map(item => `
+          <tr>
+            <td>${safeText(item.symbol)}</td>
+            <td>${safeText(item.company || '—')}</td>
+            <td>${safeText(item.sharia_label || '—')}</td>
+            <td>${safeText(item.sharia_reason || '—')}</td>
+            <td>${safeText(item.note || '—')}</td>
+            <td>${formatNumber(item.current_price)}</td>
+            <td>${safeText(item.excluded_at || '—')}</td>
+            <td><button class="ghost" onclick="restoreShariaSymbol('${safeText(item.symbol)}')">↩️ إعادة</button></td>
+          </tr>`).join('');
+        document.getElementById('shariaExcludedContent').innerHTML = `
+          <div class="table-wrap">
+            <table class="list-table">
+              <thead>
+                <tr>
+                  <th>السهم</th><th>الشركة</th><th>الحالة</th><th>السبب</th><th>ملاحظة</th><th>السعر</th><th>وقت الاستبعاد</th><th></th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      } catch (e) {
+        document.getElementById('shariaExcludedContent').innerHTML = '<div class="error">تعذر تحميل القائمة الشرعية المستبعدة</div>';
+      }
     }
 
     async function loadPortfolio() {
@@ -1435,7 +1793,7 @@
         const globalSim = data.simulation || {};
         document.getElementById('performanceSummary').innerHTML = `${weekText} | محاكاة إجمالية: $${formatNumber(globalSim.pnl || 0)} (${formatNumber(globalSim.roi_pct || 0)}%)`;
         document.getElementById('performanceContent').innerHTML = `
-          <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة حقيقية. إذا كان العدد هنا أقل من القوائم الحالية، فالمعنى أن بعض الأسهم المعروضة ليست إشارة جديدة هذا الأسبوع أو أن الخطة نفسها تكررت.</div>
+          <div class="summary-line" style="margin-bottom:14px;">هذا القسم يقيس <b>أداء الأداة نفسها</b> على الإشارات الفريدة من دخول قوي ودخول بحذر. لا يتم احتساب التكرار إلا إذا ظهرت خطة جديدة جوهرية. التغييرات الصغيرة جدًا في الدخول أو الهدف أو الوقف لا تنشئ سجلًا جديدًا وحدها.</div>
           <div class="summary-row">
             ${renderPerformanceGroupCard('🔥 دخول قوي', groups.strong || {})}
             ${renderPerformanceGroupCard('🟠 دخول بحذر', groups.cautious || {})}
