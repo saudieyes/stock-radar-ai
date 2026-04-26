@@ -3,6 +3,104 @@ from .utils import *
 from .data_loader import COMPANIES_DATA, SECTOR_DATA
 from .market_data import get_daily_bars, get_trend
 
+SYMBOL_CONTEXT_FALLBACKS = {
+    "AAPL": ("Technology", "Consumer Electronics / Electronic Computers"),
+    "MSFT": ("Technology", "Software / Cloud"),
+    "NVDA": ("Technology", "Semiconductors"),
+    "AMD": ("Technology", "Semiconductors"),
+    "AVGO": ("Technology", "Semiconductors"),
+    "META": ("Communication Services", "Internet / Social Media"),
+    "GOOGL": ("Communication Services", "Internet / Search / Cloud"),
+    "GOOG": ("Communication Services", "Internet / Search / Cloud"),
+    "AMZN": ("Consumer Discretionary", "Internet Retail / Cloud"),
+    "TSLA": ("Consumer Discretionary", "Automobiles / EV"),
+    "NFLX": ("Communication Services", "Streaming / Entertainment"),
+    "DIS": ("Communication Services", "Media / Entertainment"),
+    "IHRT": ("Communication Services", "Broadcasting / Radio / Media"),
+}
+
+
+def _context_closes_from_bars(bars: list[dict]) -> list[float]:
+    closes = []
+    for row in bars or []:
+        try:
+            c = to_float((row or {}).get("c", 0))
+            if c > 0:
+                closes.append(float(c))
+        except Exception:
+            continue
+    return closes
+
+
+def _context_return_pct(bars: list[dict], lookback: int = 20) -> float:
+    closes = _context_closes_from_bars(bars)
+    if len(closes) < lookback + 1:
+        return 0.0
+    start = float(closes[-(lookback + 1)] or 0)
+    end = float(closes[-1] or 0)
+    if start <= 0 or end <= 0:
+        return 0.0
+    return ((end - start) / start) * 100.0
+
+
+def _infer_context_from_text(sector: str = "", industry: str = "") -> tuple[str, str]:
+    raw = " ".join([str(sector or ""), str(industry or "")]).strip()
+    t = raw.lower()
+    if not t:
+        return "", ""
+    if any(x in t for x in [
+        "technology", "information technology", "electronic computer", "electronic computers",
+        "computer", "consumer electronics", "software", "semiconductor", "semiconductors",
+        "chip", "data processing", "cloud", "computer programming", "hardware",
+        "communications equipment", "cyber", "artificial intelligence"
+    ]):
+        return "Technology", raw
+    if any(x in t for x in [
+        "communication services", "media", "broadcast", "broadcasting", "radio", "internet",
+        "social media", "search", "streaming", "telecommunications", "telecom", "wireless", "entertainment"
+    ]):
+        return "Communication Services", raw
+    if any(x in t for x in ["retail", "restaurant", "automobile", "auto", "apparel", "travel", "hotel", "leisure", "ev"]):
+        return "Consumer Discretionary", raw
+    if any(x in t for x in ["food", "beverage", "grocery", "household", "tobacco", "personal care"]):
+        return "Consumer Staples", raw
+    if any(x in t for x in ["pharmaceutical", "biotech", "medical", "health", "drug", "diagnostic", "hospital"]):
+        return "Healthcare", raw
+    if any(x in t for x in ["bank", "insurance", "financial", "capital markets", "credit", "asset management"]):
+        return "Financials", raw
+    if any(x in t for x in ["oil", "gas", "energy", "drilling", "exploration", "petroleum"]):
+        return "Energy", raw
+    if any(x in t for x in ["aerospace", "defense", "machinery", "industrial", "transport", "airline", "logistics"]):
+        return "Industrials", raw
+    if any(x in t for x in ["chemical", "mining", "metals", "steel", "materials", "paper", "packaging"]):
+        return "Materials", raw
+    if any(x in t for x in ["utility", "electric", "water", "natural gas distribution"]):
+        return "Utilities", raw
+    if any(x in t for x in ["reit", "real estate", "property"]):
+        return "Real Estate", raw
+    return "", raw
+
+
+def _normalize_context_inputs(symbol: str, sector: str, industry: str) -> tuple[str, str]:
+    symbol = str(symbol or "").upper().strip()
+    sector = str(sector or "").strip()
+    industry = str(industry or "").strip()
+
+    fb = SYMBOL_CONTEXT_FALLBACKS.get(symbol)
+    if fb:
+        if not sector or sector.lower() in {"unknown", "none", "n/a", "غير متوفر", "غير واضح"}:
+            sector = fb[0]
+        if not industry or industry.lower() in {"unknown", "none", "n/a", "غير متوفر", "غير واضح"}:
+            industry = fb[1]
+
+    inferred_sector, inferred_industry = _infer_context_from_text(sector, industry)
+    if inferred_sector and (not sector or sector.lower() in {"unknown", "none", "n/a", "غير متوفر", "غير واضح"}):
+        sector = inferred_sector
+    if inferred_industry and not industry:
+        industry = inferred_industry
+    return sector, industry
+
+
 def _context_benchmark_for_sector(sector: str, industry: str = "") -> str:
     s = str(sector or "").lower().strip()
     i = str(industry or "").lower().strip()
@@ -23,7 +121,6 @@ def _context_sector_etf(sector: str, industry: str = "") -> str:
     if not combined:
         return ""
 
-    # direct map from settings first
     for key, value in SECTOR_ETF_MAP.items():
         if str(key).lower() in combined:
             return value
@@ -34,7 +131,7 @@ def _context_sector_etf(sector: str, industry: str = "") -> str:
         "communications equipment"
     ]):
         return "XLK"
-    if any(x in combined for x in ["communication services", "internet", "streaming", "social media", "telecom", "wireless", "search"]):
+    if any(x in combined for x in ["communication services", "internet", "streaming", "social media", "telecom", "wireless", "search", "media", "broadcast", "radio", "entertainment"]):
         return "XLC"
     if any(x in combined for x in ["consumer discretionary", "retail", "apparel", "restaurant", "travel", "auto", "automobile", "ev"]):
         return "XLY"
@@ -124,6 +221,8 @@ def _context_alignment_detail(market_label: str, sector_label: str, benchmark_sy
 
 def get_market_sector_context(symbol: str, sector: str, industry: str = "", daily_bars=None) -> dict:
     try:
+        symbol = str(symbol or "").upper().strip()
+        sector, industry = _normalize_context_inputs(symbol, sector, industry)
         stock_bars = daily_bars if daily_bars is not None else get_daily_bars(symbol)
         stock_return_20 = _context_return_pct(stock_bars, 20)
         benchmark_symbol = _context_benchmark_for_sector(sector, industry)
@@ -161,7 +260,7 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
         sector_return_20 = float((sector_cached or {}).get("return_20", 0) or 0) if sector_cached else 0.0
         rel_vs_sector = float(stock_return_20 or 0) - sector_return_20 if sector_cached else 0.0
         sector_support_score = (_context_trend_points(sector_trend) + _context_relative_points(rel_vs_sector)) if sector_cached else 0
-        sector_support_label = _context_support_label(sector_support_score) if sector_cached else "غير متوفر"
+        sector_support_label = _context_support_label(sector_support_score) if sector_cached else ("محايد" if sector_symbol else "غير متوفر")
 
         total_score = max(-18, min(18, int(round((market_support_score * 0.8) + (sector_support_score * 1.2)))))
         if not sector_symbol:
@@ -187,26 +286,39 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "market_sector_alignment_label": alignment_label,
             "market_sector_alignment_detail": alignment_detail,
         }
-    except:
+    except Exception as exc:
+        try:
+            symbol = str(symbol or "").upper().strip()
+            sector, industry = _normalize_context_inputs(symbol, sector, industry)
+            fallback_benchmark = _context_benchmark_for_sector(sector, industry)
+            fallback_sector = _context_sector_etf(sector, industry)
+        except Exception:
+            fallback_benchmark = "SPY"
+            fallback_sector = ""
+        try:
+            print(f"MARKET_SECTOR_CONTEXT_ERROR: {symbol} | {type(exc).__name__}: {exc}")
+        except Exception:
+            pass
         return {
-            "benchmark_symbol": "SPY",
+            "benchmark_symbol": fallback_benchmark or "SPY",
             "benchmark_trend": "unknown",
             "benchmark_return_20_pct": 0.0,
             "stock_return_20_pct": 0.0,
             "relative_to_market_pct": 0.0,
             "market_support_score": 0,
             "market_support_label": "غير واضح",
-            "sector_etf_symbol": "",
+            "sector_etf_symbol": fallback_sector or "",
             "sector_trend": "unknown",
             "sector_return_20_pct": 0.0,
             "relative_to_sector_pct": 0.0,
             "sector_support_score": 0,
-            "sector_support_label": "غير متوفر",
+            "sector_support_label": "محايد" if fallback_sector else "غير متوفر",
             "market_sector_score": 0,
             "market_sector_alignment_label": "محايد",
-            "market_sector_alignment_detail": "لا توجد بيانات كافية عن المؤشر والقطاع.",
+            "market_sector_alignment_detail": _context_alignment_detail("غير واضح", "محايد" if fallback_sector else "غير متوفر", fallback_benchmark or "SPY", fallback_sector or "", 0, 0),
             "historical_behavior_score": 50.0,
             "historical_context_score": 50.0,
             "historical_context_label": "محايد",
             "historical_context_detail": "لا توجد بيانات كافية لربط السهم بالمؤشر والقطاع.",
         }
+
