@@ -11,68 +11,104 @@ from scanner import apply_late_move_filter, assign_execution_mode, normalize_exe
 from scanner import get_scan_universe as _unused_get_scan_universe
 from app.market_data import get_active_universe
 
-def scan_all():
+LAST_SCAN_DEBUG = {}
+
+def get_last_scan_debug():
+    return dict(LAST_SCAN_DEBUG or {})
+
+def scan_all(debug: bool = False):
+    global LAST_SCAN_DEBUG
     manual_sharia_exclusions = get_manual_sharia_exclusions_map()
-    symbols = [s for s in get_active_universe(150) if normalize_symbol_text(s) not in manual_sharia_exclusions]
+    raw_symbols = list(get_active_universe(150) or [])
+    symbols = [s for s in raw_symbols if normalize_symbol_text(s) not in manual_sharia_exclusions]
     rows = []
+    diag = {
+        "raw_count": len(raw_symbols),
+        "after_manual_exclusion": len(symbols),
+        "rows": 0,
+        "excluded": 0,
+        "no_plan": 0,
+        "errors": 0,
+        "manual_exclusions": len(manual_sharia_exclusions or {}),
+        "sample_symbols": raw_symbols[:20],
+        "sample_excluded": [],
+        "sample_no_plan": [],
+        "sample_errors": [],
+    }
+    print(f"SCAN_START raw={diag['raw_count']} after_manual={diag['after_manual_exclusion']} manual_exclusions={diag['manual_exclusions']}", flush=True)
 
     def process_symbol(s):
-        p = trade_plan_pro(s, manual_sharia_exclusions)
-        if not p or p.get("type") == "Excluded":
-            return None
-
-        p = apply_late_move_filter(p)
-        p = assign_execution_mode(p)
-        p = normalize_execution_labels(p)
-        p = enrich_signal_stage(p)
-        p = finalize_display_contract(p)
-
-        if not p.get("price_reliable_for_execution", True) and p.get("market_phase") in {"open", "pre_market", "after_hours"}:
-            p["decision"] = "مراقبة"
-            p["execution_mode"] = "مراقبة 👀"
-            p["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
-            p["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
-            p.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
-            p.setdefault("ai_summary", "")
-            if p["ai_summary"]:
-                p["ai_summary"] += " - "
-            p["ai_summary"] += "السعر اللحظي غير موثوق"
-
-        p = enrich_display_meta(p)
-        # لا نقتل الفرص: ننظم القوي داخليًا، ونهبط فقط إذا كانت الجاهزية ضعيفة جدًا أو مطاردة واضحة.
         try:
-            if str(p.get("decision", "") or "") == "دخول قوي":
-                readiness_score = float(p.get("execution_readiness_score", 0) or 0)
-                readiness_label = str(p.get("execution_readiness_label", "") or "")
-                if readiness_score < 42 or readiness_label in {"مطاردة سعرية"}:
-                    p["decision"] = "دخول بحذر"
-                    p["signal_strength_label"] = "بحذر"
-                    p["signal_strength_bucket"] = 0
-            if str(p.get("decision", "") or "") == "دخول بحذر":
-                readiness_score = float(p.get("execution_readiness_score", 0) or 0)
-                if readiness_score < 24:
-                    p["decision"] = "مراقبة"
-                    p["signal_strength_label"] = "مراقبة"
-                    p["signal_strength_bucket"] = -1
-        except:
-            pass
-        return p
+            p = trade_plan_pro(s, manual_sharia_exclusions)
+            if not p:
+                return {"kind": "no_plan", "symbol": s, "reason": "trade_plan_empty"}
+            if p.get("type") == "Excluded":
+                return {"kind": "excluded", "symbol": s, "reason": str(p.get("reason") or p.get("note") or "excluded")[:180]}
 
-    max_workers = min(12, max(4, len(symbols)))
+            p = apply_late_move_filter(p)
+            p = assign_execution_mode(p)
+            p = normalize_execution_labels(p)
+            p = enrich_signal_stage(p)
+            p = finalize_display_contract(p)
+
+            if not p.get("price_reliable_for_execution", True) and p.get("market_phase") in {"open", "pre_market", "after_hours"}:
+                p["decision"] = "مراقبة"
+                p["execution_mode"] = "مراقبة 👀"
+                p["execution_note"] = "السعر اللحظي غير موثوق - لا تعتمد عليه للتنفيذ"
+                p["owner_action"] = "👀 راقب فقط حتى تتوفر بيانات سعر لحظية موثوقة"
+                p.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
+                p.setdefault("ai_summary", "")
+                if p["ai_summary"]:
+                    p["ai_summary"] += " - "
+                p["ai_summary"] += "السعر اللحظي غير موثوق"
+
+            p = enrich_display_meta(p)
+            try:
+                if str(p.get("decision", "") or "") == "دخول قوي":
+                    readiness_score = float(p.get("execution_readiness_score", 0) or 0)
+                    readiness_label = str(p.get("execution_readiness_label", "") or "")
+                    if readiness_score < 42 or readiness_label in {"مطاردة سعرية"}:
+                        p["decision"] = "دخول بحذر"
+                        p["signal_strength_label"] = "بحذر"
+                        p["signal_strength_bucket"] = 0
+                if str(p.get("decision", "") or "") == "دخول بحذر":
+                    readiness_score = float(p.get("execution_readiness_score", 0) or 0)
+                    if readiness_score < 24:
+                        p["decision"] = "مراقبة"
+                        p["signal_strength_label"] = "مراقبة"
+                        p["signal_strength_bucket"] = -1
+            except Exception:
+                pass
+            return {"kind": "row", "symbol": s, "row": p}
+        except Exception as e:
+            return {"kind": "error", "symbol": s, "error": f"{type(e).__name__}: {str(e)[:260]}"}
+
+    max_workers = min(12, max(4, len(symbols))) if symbols else 4
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(process_symbol, s) for s in symbols]
         for future in as_completed(futures):
-            try:
-                result = future.result()
-                if result:
-                    rows.append(result)
-            except:
-                continue
+            result = future.result()
+            kind = result.get("kind")
+            if kind == "row":
+                rows.append(result.get("row"))
+            elif kind == "excluded":
+                diag["excluded"] += 1
+                if len(diag["sample_excluded"]) < 15:
+                    diag["sample_excluded"].append({"symbol": result.get("symbol"), "reason": result.get("reason")})
+            elif kind == "no_plan":
+                diag["no_plan"] += 1
+                if len(diag["sample_no_plan"]) < 15:
+                    diag["sample_no_plan"].append({"symbol": result.get("symbol"), "reason": result.get("reason")})
+            elif kind == "error":
+                diag["errors"] += 1
+                if len(diag["sample_errors"]) < 25:
+                    diag["sample_errors"].append({"symbol": result.get("symbol"), "error": result.get("error")})
+                print(f"SCAN_SYMBOL_ERROR: {result.get('symbol')} | {result.get('error')}", flush=True)
 
     for item in rows:
         try:
             item["display_rank_score"] = display_rank_score(item)
-        except:
+        except Exception:
             item["display_rank_score"] = float(item.get("quality_score", 0) or 0)
 
     rows.sort(
@@ -88,14 +124,31 @@ def scan_all():
         reverse=True,
     )
 
-    # تسجيل التتبع الأسبوعي بشكل تسلسلي بعد انتهاء الفحص كله لتجنب ضياع بعض الإشارات.
     for item in rows:
         try:
             if str(item.get("decision", "") or "") in {"دخول قوي", "دخول بحذر"}:
                 upsert_performance_signal(item)
-        except:
+        except Exception:
             continue
 
+    diag["rows"] = len(rows)
+    diag["strong"] = len([x for x in rows if str(x.get("decision", "")) == "دخول قوي"])
+    diag["cautious"] = len([x for x in rows if str(x.get("decision", "")) == "دخول بحذر"])
+    diag["watch"] = len([x for x in rows if str(x.get("decision", "")) == "مراقبة"])
+    diag["sample_rows"] = [
+        {
+            "symbol": x.get("symbol"),
+            "decision": x.get("decision"),
+            "quality_score": x.get("quality_score"),
+            "execution_readiness_score": x.get("execution_readiness_score"),
+            "display_rank_score": x.get("display_rank_score"),
+        }
+        for x in rows[:15]
+    ]
+    LAST_SCAN_DEBUG = diag
+    print(f"SCAN_DONE raw={diag['raw_count']} after_manual={diag['after_manual_exclusion']} rows={diag['rows']} strong={diag['strong']} cautious={diag['cautious']} watch={diag['watch']} no_plan={diag['no_plan']} excluded={diag['excluded']} errors={diag['errors']}", flush=True)
+    if debug:
+        return rows, diag
     return rows
 
 
@@ -184,5 +237,3 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
-
-
