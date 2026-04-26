@@ -1,12 +1,29 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 import json
 from zoneinfo import ZoneInfo
 
 from .settings import PERFORMANCE_FILE
 from .utils import ny_now, safe_round
 def get_performance_week_window(base_dt=None):
+    """
+    Return the active performance week in New York trading terms.
+
+    Weekend behavior:
+    once the US week is finished, Saturday and Sunday are treated as the
+    upcoming Monday-Friday performance week. This archives last week before
+    the user prepares for Monday trading, instead of keeping stale signals
+    as the active week until the first new signal appears.
+    """
     dt = base_dt.astimezone(ZoneInfo("America/New_York")) if base_dt else ny_now()
-    monday = dt.date() - timedelta(days=dt.weekday())
+    day = dt.date()
+    weekday = day.weekday()
+
+    if weekday >= 5:
+        # Saturday/Sunday: prepare the upcoming Monday-Friday week.
+        monday = day + timedelta(days=(7 - weekday))
+    else:
+        monday = day - timedelta(days=weekday)
+
     friday = monday + timedelta(days=4)
     return monday.isoformat(), friday.isoformat()
 
@@ -42,8 +59,26 @@ def make_performance_summary(records):
     }
 
 
+def _count_outcomes(records):
+    counts = {
+        "above_target": 0,
+        "target_hit": 0,
+        "partial_gain": 0,
+        "ongoing": 0,
+        "loss": 0,
+        "expired": 0,
+    }
+    for row in records or []:
+        outcome = str(row.get("outcome", "ongoing") or "ongoing")
+        if outcome not in counts:
+            outcome = "ongoing"
+        counts[outcome] += 1
+    return counts
+
+
 def build_archive_summary_for_week(week_start, week_end, records):
     summary = make_performance_summary(records)
+    outcome_counts = _count_outcomes(records or [])
     return {
         "week_key": f"{week_start}_{week_end}",
         "week_start": week_start,
@@ -53,6 +88,13 @@ def build_archive_summary_for_week(week_start, week_end, records):
         "losses": summary["losses"],
         "pending": summary["pending"],
         "win_rate_pct": summary["win_rate_pct"],
+        "above_target": outcome_counts.get("above_target", 0),
+        "target_hit": outcome_counts.get("target_hit", 0),
+        "partial_gain": outcome_counts.get("partial_gain", 0),
+        "ongoing": outcome_counts.get("ongoing", 0),
+        "loss": outcome_counts.get("loss", 0),
+        "expired": outcome_counts.get("expired", 0),
+        "archived_at": ny_now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
@@ -163,10 +205,33 @@ def load_performance_store():
 
 def save_performance_store(store):
     try:
-        with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
-            json.dump(normalize_performance_store(store), f, ensure_ascii=False, indent=2)
-    except:
-        pass
+        payload = normalize_performance_store(store)
+        tmp_path = f"{PERFORMANCE_FILE}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        try:
+            import os
+            os.replace(tmp_path, PERFORMANCE_FILE)
+        except Exception:
+            with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"PERFORMANCE_SAVE_ERROR: {type(e).__name__}: {str(e)[:240]}", flush=True)
+
+
+def _archive_week_records(store, old_records, old_week_start, old_week_end):
+    if not old_records or not old_week_start or not old_week_end:
+        return store
+    archive_entry = build_archive_summary_for_week(old_week_start, old_week_end, old_records)
+    archive = list(store.get("weekly_archive", []) or [])
+    existing_index = next((i for i, row in enumerate(archive) if row.get("week_key") == archive_entry["week_key"]), None)
+    if existing_index is None:
+        archive.insert(0, archive_entry)
+    else:
+        archive[existing_index] = archive_entry
+    archive.sort(key=lambda row: str(row.get("week_start", "") or ""), reverse=True)
+    store["weekly_archive"] = archive[:26]
+    return store
 
 
 def rollover_performance_store_if_needed(store, base_dt=None):
@@ -178,13 +243,7 @@ def rollover_performance_store_if_needed(store, base_dt=None):
     old_records = list(store.get("active_records", []))
     old_week_start = str(store.get("active_week_start", "") or "")
     old_week_end = str(store.get("active_week_end", "") or "")
-    if old_records and old_week_start and old_week_end:
-        archive_entry = build_archive_summary_for_week(old_week_start, old_week_end, old_records)
-        existing_index = next((i for i, row in enumerate(store.get("weekly_archive", [])) if row.get("week_key") == archive_entry["week_key"]), None)
-        if existing_index is None:
-            store.setdefault("weekly_archive", []).insert(0, archive_entry)
-        else:
-            store["weekly_archive"][existing_index] = archive_entry
+    store = _archive_week_records(store, old_records, old_week_start, old_week_end)
 
     new_store = make_blank_performance_store(base_dt)
     new_store["weekly_archive"] = store.get("weekly_archive", [])[:26]
