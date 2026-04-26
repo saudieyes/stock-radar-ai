@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timedelta
 
-from scanner import get_scan_universe
+from scanner import get_scan_universe, get_dynamic_universe_target
 
 from .settings import (
     HISTORY_CACHE, HTTP_SESSION, INTRADAY_CACHE, INTRADAY_CACHE_TTL_CLOSED, INTRADAY_CACHE_TTL_OPEN,
@@ -63,6 +63,14 @@ def get_active_universe(max_symbols: int = 60):
     except Exception:
         max_symbols = 60
     max_symbols = max(40, min(max_symbols, 300))
+
+    # Source V2: allow the normal scan size to contract/expand with market activity.
+    # quiet ≈120, normal ≈150, active/rotation ≈190. Explicit very small/large calls remain capped.
+    if 120 <= max_symbols <= 180:
+        try:
+            max_symbols = max(100, min(200, int(get_dynamic_universe_target(default=max_symbols) or max_symbols)))
+        except Exception:
+            pass
 
     manual = _manual_priority_symbols(limit=min(40, max_symbols))
     base = get_scan_universe(max_symbols=min(300, max_symbols + 90)) or []
