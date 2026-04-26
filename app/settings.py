@@ -151,3 +151,4 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
+
