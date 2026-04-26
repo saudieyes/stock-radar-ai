@@ -6,7 +6,7 @@ from app.strategy_engine import trade_plan_pro, get_prev, get_info
 from app.sharia_filter import get_financials, assess_sharia
 from app.market_data import get_history_levels, get_trend, get_intraday_snapshot, get_volume_ratio, build_live_price_block
 from app.news_engine import get_news_bundle, news_scope_label
-from app.display_contract import enrich_display_meta
+from app.display_contract import enrich_display_meta, display_rank_score
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
 from app.market_data import get_active_universe
@@ -184,3 +184,5 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
+
+
