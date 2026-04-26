@@ -19,8 +19,64 @@ def http_get_json(url, timeout=12):
         return {}
 
 
+def _extract_symbol_from_item(item):
+    try:
+        if isinstance(item, str):
+            return item.upper().strip()
+        if isinstance(item, dict):
+            return str(item.get("symbol") or item.get("ticker") or "").upper().strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def _manual_priority_symbols(limit: int = 60):
+    """Keep user's watched/owned symbols in the source without letting them dominate it."""
+    out = []
+    try:
+        from app.portfolio_store import load_portfolio_items
+        for item in load_portfolio_items() or []:
+            s = _extract_symbol_from_item(item)
+            if s and s not in out:
+                out.append(s)
+    except Exception:
+        pass
+    try:
+        from app.watchlist_store import load_manual_watchlist
+        for item in load_manual_watchlist() or []:
+            s = _extract_symbol_from_item(item)
+            if s and s not in out:
+                out.append(s)
+    except Exception:
+        pass
+    return out[:limit]
+
+
 def get_active_universe(max_symbols: int = 60):
-    return get_scan_universe(max_symbols=max_symbols)
+    """
+    Source/universe gateway.
+    Uses the improved scanner source, then safely merges portfolio/watchlist symbols.
+    The final size stays capped so deep analysis speed remains controlled.
+    """
+    try:
+        max_symbols = int(max_symbols or 60)
+    except Exception:
+        max_symbols = 60
+    max_symbols = max(40, min(max_symbols, 300))
+
+    manual = _manual_priority_symbols(limit=min(40, max_symbols))
+    base = get_scan_universe(max_symbols=min(300, max_symbols + 90)) or []
+    final = []
+    for s in manual + list(base):
+        try:
+            t = str(s).upper().strip()
+        except Exception:
+            t = ""
+        if t and t not in final:
+            final.append(t)
+        if len(final) >= max_symbols:
+            break
+    return final
 
 
 def get_daily_bars(symbol):
@@ -724,6 +780,3 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
-
-
-
