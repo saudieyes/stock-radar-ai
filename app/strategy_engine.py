@@ -8,7 +8,41 @@ from app.market_sector_engine import *
 from app.news_engine import *
 from app.sharia_filter import *
 from app.scoring_engine import *
-from app.scoring_engine import breakout_quality_label
+
+print("FIX11_STRATEGY_ENGINE_LOCAL_BREAKOUT loaded")
+
+# Local guard to prevent scan-wide failure if breakout_quality_label is missing from imports.
+def breakout_quality_label(trade_type: str, momentum: str, body_strength: float, close_strength: float, volume_ratio: float) -> str:
+    try:
+        vr = float(volume_ratio or 0)
+        bs = float(body_strength or 0)
+        cs = float(close_strength or 0)
+        t = str(trade_type or "")
+        m = str(momentum or "")
+        score = 0
+        if "اختراق" in t:
+            score += 2
+        if "ارتداد" in t:
+            score += 1
+        if "صاعد" in m or "قوي" in m:
+            score += 2
+        if bs >= 0.65:
+            score += 1
+        if cs >= 0.65:
+            score += 1
+        if vr >= 2.0:
+            score += 2
+        elif vr >= 1.3:
+            score += 1
+        if score >= 7:
+            return "اختراق قوي جدًا" if "اختراق" in t else "ارتداد قوي جدًا"
+        if score >= 5:
+            return "اختراق قوي" if "اختراق" in t else "ارتداد قوي"
+        if score >= 3:
+            return "جيد"
+        return "متوسط"
+    except Exception:
+        return "جيد"
 
 try:
     from scanner import enrich_strategy_profile
