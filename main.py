@@ -224,6 +224,7 @@ def health():
 @app.get("/trade-scan")
 def trade_scan():
     results = scan_all()
+    scan_debug = get_last_scan_debug()
 
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي"])
     cautious = sort_display_bucket([x for x in results if x.get("decision") == "دخول بحذر"])
@@ -233,7 +234,10 @@ def trade_scan():
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase()),
         "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
-        "universe_count": 150,
+        "universe_count": int(scan_debug.get("after_manual_exclusion", scan_debug.get("raw_count", 150)) or 150),
+        "source_target": int(scan_debug.get("source_target", scan_debug.get("raw_count", 150)) or 150),
+        "source_mode": scan_debug.get("source_mode", ""),
+        "source_market_mode": scan_debug.get("source_market_mode", ""),
         "count": len(results),
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
