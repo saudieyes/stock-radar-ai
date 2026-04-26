@@ -6,8 +6,12 @@ from .market_data import get_daily_bars, get_trend
 def _context_benchmark_for_sector(sector: str, industry: str = "") -> str:
     s = str(sector or "").lower().strip()
     i = str(industry or "").lower().strip()
-    techish = ["technology", "information technology", "communication services", "software", "internet", "semiconductor", "chip", "ai", "cloud"]
-    if any(x in s for x in techish) or any(x in i for x in techish):
+    combined = f"{s} {i}"
+    techish = [
+        "technology", "information technology", "software", "semiconductor", "chip", "ai", "cloud",
+        "computer", "electronic", "hardware", "data processing", "cyber", "internet", "search", "social media"
+    ]
+    if any(x in combined for x in techish):
         return "QQQ"
     return "SPY"
 
@@ -19,31 +23,36 @@ def _context_sector_etf(sector: str, industry: str = "") -> str:
     if not combined:
         return ""
 
+    # direct map from settings first
     for key, value in SECTOR_ETF_MAP.items():
-        if key in combined:
+        if str(key).lower() in combined:
             return value
 
-    if any(x in combined for x in ["semiconductor", "chip", "software", "cloud", "cyber", "computer", "electronics"]):
+    if any(x in combined for x in [
+        "technology", "information technology", "semiconductor", "chip", "software", "cloud", "cyber",
+        "computer", "electronic computer", "consumer electronics", "hardware", "data processing",
+        "communications equipment"
+    ]):
         return "XLK"
-    if any(x in combined for x in ["internet", "streaming", "social media", "telecom", "wireless"]):
+    if any(x in combined for x in ["communication services", "internet", "streaming", "social media", "telecom", "wireless", "search"]):
         return "XLC"
-    if any(x in combined for x in ["retail", "apparel", "restaurant", "travel", "auto"]):
+    if any(x in combined for x in ["consumer discretionary", "retail", "apparel", "restaurant", "travel", "auto", "automobile", "ev"]):
         return "XLY"
-    if any(x in combined for x in ["food", "beverage", "grocery", "household"]):
+    if any(x in combined for x in ["consumer staples", "food", "beverage", "grocery", "household"]):
         return "XLP"
-    if any(x in combined for x in ["biotech", "pharma", "drug", "medical", "diagnostic", "hospital"]):
+    if any(x in combined for x in ["healthcare", "health care", "biotech", "pharma", "drug", "medical", "diagnostic", "hospital"]):
         return "XLV"
-    if any(x in combined for x in ["aerospace", "defense", "transport", "airline", "machinery"]):
+    if any(x in combined for x in ["industrials", "aerospace", "defense", "transport", "airline", "machinery", "logistics"]):
         return "XLI"
-    if any(x in combined for x in ["oil", "gas", "drilling", "exploration", "energy"]):
+    if any(x in combined for x in ["energy", "oil", "gas", "drilling", "exploration"]):
         return "XLE"
-    if any(x in combined for x in ["chemical", "mining", "metals", "steel", "materials"]):
+    if any(x in combined for x in ["materials", "chemical", "mining", "metals", "steel", "paper", "packaging"]):
         return "XLB"
-    if any(x in combined for x in ["utility", "water"]):
+    if any(x in combined for x in ["utilities", "utility", "water", "electric"]):
         return "XLU"
-    if any(x in combined for x in ["reit", "real estate", "property"]):
+    if any(x in combined for x in ["real estate", "reit", "property"]):
         return "XLRE"
-    if any(x in combined for x in ["bank", "insurance", "capital markets", "financial"]):
+    if any(x in combined for x in ["financials", "bank", "insurance", "capital markets", "financial"]):
         return "XLF"
     return ""
 
@@ -201,5 +210,3 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "historical_context_label": "محايد",
             "historical_context_detail": "لا توجد بيانات كافية لربط السهم بالمؤشر والقطاع.",
         }
-
-
