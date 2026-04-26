@@ -227,13 +227,85 @@ def get_snapshot_quote(symbol):
             "source": "error",
         }
 
+STATIC_REFERENCE_INFO = {
+    "AAPL": {"company": "Apple Inc", "sector": "Technology", "industry": "Consumer Electronics / Electronic Computers", "industry_id": ""},
+    "MSFT": {"company": "Microsoft Corp", "sector": "Technology", "industry": "Software / Cloud", "industry_id": ""},
+    "NVDA": {"company": "NVIDIA Corp", "sector": "Technology", "industry": "Semiconductors", "industry_id": ""},
+    "AMD": {"company": "Advanced Micro Devices", "sector": "Technology", "industry": "Semiconductors", "industry_id": ""},
+    "AVGO": {"company": "Broadcom Inc", "sector": "Technology", "industry": "Semiconductors", "industry_id": ""},
+    "META": {"company": "Meta Platforms", "sector": "Communication Services", "industry": "Internet / Social Media", "industry_id": ""},
+    "GOOGL": {"company": "Alphabet Inc", "sector": "Communication Services", "industry": "Internet / Search / Cloud", "industry_id": ""},
+    "GOOG": {"company": "Alphabet Inc", "sector": "Communication Services", "industry": "Internet / Search / Cloud", "industry_id": ""},
+    "AMZN": {"company": "Amazon.com Inc", "sector": "Consumer Discretionary", "industry": "Internet Retail / Cloud", "industry_id": ""},
+    "TSLA": {"company": "Tesla Inc", "sector": "Consumer Discretionary", "industry": "Automobiles / EV", "industry_id": ""},
+}
+
+
+def _infer_sector_industry_from_text(text: str) -> tuple[str, str]:
+    raw = str(text or "").strip()
+    t = raw.lower()
+    if not t:
+        return "", ""
+
+    # Technology / electronics / software / semis
+    if any(x in t for x in [
+        "electronic computer", "electronic computers", "computer", "consumer electronics",
+        "software", "semiconductor", "semiconductors", "chip", "data processing", "cloud",
+        "computer programming", "information technology", "hardware", "communications equipment"
+    ]):
+        return "Technology", raw
+
+    if any(x in t for x in ["internet", "social media", "search", "streaming", "telecommunications", "telecom", "wireless"]):
+        return "Communication Services", raw
+
+    if any(x in t for x in ["retail", "restaurant", "automobile", "auto", "apparel", "travel", "hotel", "leisure"]):
+        return "Consumer Discretionary", raw
+
+    if any(x in t for x in ["food", "beverage", "grocery", "household", "tobacco", "personal care"]):
+        return "Consumer Staples", raw
+
+    if any(x in t for x in ["pharmaceutical", "biotech", "medical", "health", "drug", "diagnostic", "hospital"]):
+        return "Healthcare", raw
+
+    if any(x in t for x in ["bank", "insurance", "financial", "capital markets", "credit", "asset management"]):
+        return "Financials", raw
+
+    if any(x in t for x in ["oil", "gas", "energy", "drilling", "exploration", "petroleum"]):
+        return "Energy", raw
+
+    if any(x in t for x in ["aerospace", "defense", "machinery", "industrial", "transport", "airline", "logistics"]):
+        return "Industrials", raw
+
+    if any(x in t for x in ["chemical", "mining", "metals", "steel", "materials", "paper", "packaging"]):
+        return "Materials", raw
+
+    if any(x in t for x in ["utility", "electric", "water", "natural gas distribution"]):
+        return "Utilities", raw
+
+    if any(x in t for x in ["reit", "real estate", "property"]):
+        return "Real Estate", raw
+
+    return "", raw
+
+
+def _merge_reference_info(primary: dict, fallback: dict) -> dict:
+    return {
+        "company": str(primary.get("company") or fallback.get("company") or "").strip(),
+        "sector": str(primary.get("sector") or fallback.get("sector") or "").strip(),
+        "industry": str(primary.get("industry") or fallback.get("industry") or "").strip(),
+        "industry_id": str(primary.get("industry_id") or fallback.get("industry_id") or "").strip(),
+    }
+
+
 def get_reference_info(symbol):
     symbol = str(symbol).upper().strip()
     if not symbol:
         return {"company": "", "sector": "", "industry": "", "industry_id": ""}
 
     if symbol in REF_INFO_CACHE:
-        return REF_INFO_CACHE[symbol]
+        cached = REF_INFO_CACHE[symbol]
+        if cached.get("sector") or cached.get("industry"):
+            return cached
 
     out = {"company": "", "sector": "", "industry": "", "industry_id": ""}
     try:
@@ -241,50 +313,66 @@ def get_reference_info(symbol):
         r = http_get_json(url, timeout=12)
         res = r.get("results", {}) or {}
         sic_description = str(res.get("sic_description", "")).strip()
-        sector = ""
-        industry = sic_description
+        name = str(res.get("name", "")).strip()
+        inferred_sector, inferred_industry = _infer_sector_industry_from_text(sic_description)
+
+        sector = inferred_sector
+        industry = inferred_industry or sic_description
         if " - " in sic_description:
             parts = [p.strip() for p in sic_description.split(" - ") if p.strip()]
             if len(parts) >= 2:
-                sector = parts[0]
-                industry = parts[-1]
+                maybe_sector, maybe_industry = parts[0], parts[-1]
+                inferred_sector2, inferred_industry2 = _infer_sector_industry_from_text(" ".join(parts))
+                sector = inferred_sector2 or maybe_sector or sector
+                industry = inferred_industry2 or maybe_industry or industry
 
-        out = {
-            "company": str(res.get("name", "")).strip(),
-            "sector": sector,
-            "industry": industry,
-            "industry_id": ""
-        }
-    except:
+        out = {"company": name, "sector": sector, "industry": industry, "industry_id": ""}
+    except Exception:
         pass
 
+    out = _merge_reference_info(out, STATIC_REFERENCE_INFO.get(symbol, {}))
     REF_INFO_CACHE[symbol] = out
     return out
 
+
 def get_info(symbol):
+    symbol = str(symbol).upper().strip()
     c = COMPANIES_DATA.get(symbol, {})
-    industry_id = str(c.get("IndustryId", "")).strip()
+
+    def _row_first(row, names):
+        norm = {str(k).lower().replace(" ", "").replace("_", ""): k for k in row.keys()}
+        for name in names:
+            if name in row and row.get(name) not in (None, ""):
+                return row.get(name)
+            key = str(name).lower().replace(" ", "").replace("_", "")
+            if key in norm and row.get(norm[key]) not in (None, ""):
+                return row.get(norm[key])
+        return ""
+
+    industry_id = str(_row_first(c, ["IndustryId", "Industry ID", "IndustryID", "industry_id"]) or "").strip()
     s = SECTOR_DATA.get(industry_id, {})
 
-    company = str(c.get("Company Name", "")).strip()
+    company = str(_row_first(c, ["Company Name", "Company", "Name", "company_name"]) or "").strip()
     sector = str(s.get("sector", "")).strip()
     industry = str(s.get("industry", "")).strip()
 
-    if company and sector and industry:
-        return {
-            "company": company,
-            "sector": sector,
-            "industry": industry,
-            "industry_id": industry_id
-        }
+    # Some company files contain sector/industry directly.
+    sector = sector or str(_row_first(c, ["Sector", "sector", "SectorName"]) or "").strip()
+    industry = industry or str(_row_first(c, ["Industry", "industry", "IndustryName", "SIC Description"]) or "").strip()
+
+    inferred_sector, inferred_industry = _infer_sector_industry_from_text(" ".join([sector, industry]))
+    if inferred_sector and (not sector or sector.lower() in {"unknown", "n/a", "none"}):
+        sector = inferred_sector
+    if inferred_industry and not industry:
+        industry = inferred_industry
 
     ref = get_reference_info(symbol)
-    return {
-        "company": company or ref["company"],
-        "sector": sector or ref["sector"],
-        "industry": industry or ref["industry"],
-        "industry_id": industry_id
-    }
+    merged = _merge_reference_info(
+        {"company": company, "sector": sector, "industry": industry, "industry_id": industry_id},
+        ref,
+    )
+    merged = _merge_reference_info(merged, STATIC_REFERENCE_INFO.get(symbol, {}))
+    return merged
 
 def _context_closes_from_bars(bars: list[dict]) -> list[float]:
     closes = []
@@ -662,3 +750,4 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     plan["rr_1"] = safe_round(rr_1_preview)
     plan = apply_decision_layers(plan)
     return plan
+
