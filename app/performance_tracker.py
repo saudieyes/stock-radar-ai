@@ -334,6 +334,7 @@ def build_signal_record_base_id(week_key: str, symbol: str, signal_type: str, pl
 
 def upsert_performance_signal(stock: dict):
     try:
+        now_str = ny_now().strftime("%Y-%m-%d %H:%M:%S")
         signal_type = str(stock.get("decision", "") or "")
         if signal_type not in {"دخول قوي", "دخول بحذر"}:
             return
@@ -425,5 +426,10 @@ def upsert_performance_signal(stock: dict):
         evaluate_performance_record(existing, current_price)
         store["active_records"] = records[:500]
         save_performance_store(store)
-    except:
-        pass
+    except Exception as e:
+        try:
+            symbol = str((stock or {}).get("symbol", "") or "")
+        except Exception:
+            symbol = ""
+        print(f"PERFORMANCE_TRACKER_ERROR: {symbol} | {type(e).__name__}: {str(e)[:240]}", flush=True)
+
