@@ -7,6 +7,7 @@ from .settings import (
     POLYGON_API_KEY, SNAPSHOT_CACHE, SNAPSHOT_CACHE_TTL_CLOSED, SNAPSHOT_CACHE_TTL_EXTENDED, SNAPSHOT_CACHE_TTL_OPEN,
 )
 from .utils import *
+from .utils import _cache_get, _cache_set
 
 def http_get_json(url, timeout=12):
     try:
