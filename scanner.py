@@ -2,6 +2,7 @@ import os
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
@@ -1539,26 +1540,188 @@ def get_seed_universe() -> list[str]:
     ]
 
 
+def _ny_today_iso() -> str:
+    """Return today's date in New York. Used only to try current grouped market data."""
+    try:
+        return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    except Exception:
+        return datetime.utcnow().date().isoformat()
+
+
+def _select_grouped_market_map() -> tuple[str, dict, str]:
+    """
+    Source-date selector for the universe engine.
+    Tries today's grouped data first during weekdays; if Polygon does not have it yet,
+    falls back to the last completed business day. This keeps the source dynamic during
+    open/after-hours without breaking pre-market/weekend scans.
+    """
+    try:
+        today_ny = datetime.now(ZoneInfo("America/New_York")).date()
+        if today_ny.weekday() < 5:
+            today_str = today_ny.isoformat()
+            today_map = get_grouped_daily_map(today_str)
+            if len(today_map or {}) >= 500:
+                return today_str, today_map, "today_grouped"
+    except Exception:
+        pass
+
+    fallback_date = previous_business_day()
+    fallback_map = get_grouped_daily_map(fallback_date)
+    return fallback_date, fallback_map, "previous_grouped"
+
+
+def _source_liquidity_score(m: dict) -> float:
+    """Reward tradable liquidity without letting mega-cap volume dominate everything."""
+    dollar_volume = float(m.get("dollar_volume", 0) or 0)
+    volume = float(m.get("volume", 0) or 0)
+    score = 0.0
+    if dollar_volume >= 1_000_000_000:
+        score += 24
+    elif dollar_volume >= 300_000_000:
+        score += 20
+    elif dollar_volume >= 100_000_000:
+        score += 16
+    elif dollar_volume >= 30_000_000:
+        score += 11
+    elif dollar_volume >= 10_000_000:
+        score += 7
+    elif dollar_volume >= 3_000_000:
+        score += 3
+
+    if volume >= 50_000_000:
+        score += 12
+    elif volume >= 15_000_000:
+        score += 10
+    elif volume >= 5_000_000:
+        score += 7
+    elif volume >= 1_000_000:
+        score += 4
+    return score
+
+
+def score_source_candidate(ticker: str, d: dict) -> float:
+    """
+    Clean-source score: first-stage selection before deep analysis.
+    Goal: feed the radar with liquid, active, near-trigger names while avoiding late/chasing junk.
+    Uses only grouped daily data so it is fast and works with the current Polygon plan.
+    """
+    if not base_filters(d):
+        return -9999
+
+    m = calc_metrics(d)
+    score = 0.0
+    price = float(m.get("price", 0) or 0)
+    day_change = float(m.get("day_change_pct", 0) or 0)
+    range_pct = float(m.get("range_pct", 0) or 0)
+    close_strength = float(m.get("close_strength", 0) or 0)
+    body_strength = float(m.get("body_strength", 0) or 0)
+
+    score += _source_liquidity_score(m)
+
+    if 0.015 <= day_change <= 0.055:
+        score += 18
+    elif 0.055 < day_change <= 0.10:
+        score += 22
+    elif 0.10 < day_change <= 0.18:
+        score += 16
+    elif day_change > 0.18:
+        score += 6
+        if close_strength < 0.70:
+            score -= 18
+    elif -0.025 <= day_change < 0.015:
+        score += 8 if close_strength >= 0.58 else 0
+    elif day_change < -0.055:
+        score -= 18
+
+    if close_strength >= 0.88:
+        score += 18
+    elif close_strength >= 0.75:
+        score += 14
+    elif close_strength >= 0.62:
+        score += 9
+    elif close_strength < 0.35:
+        score -= 12
+
+    if m.get("near_high"):
+        score += 12
+
+    if 0.025 <= range_pct <= 0.085:
+        score += 12
+    elif 0.085 < range_pct <= 0.16:
+        score += 8
+    elif 0.016 <= range_pct < 0.025:
+        score += 4
+    elif range_pct > 0.24:
+        score -= 12
+
+    if body_strength >= 0.60:
+        score += 7
+    elif body_strength <= 0.18 and close_strength < 0.60:
+        score -= 5
+
+    if 5 <= price <= 250:
+        score += 7
+    elif 2 <= price < 5:
+        score += 2
+    elif price > 400:
+        score -= 3
+
+    if ticker in BIG_CAPS:
+        score += 10
+
+    if day_change > 0.14 and close_strength < 0.55:
+        score -= 22
+
+    return score
+
+
+def _take_ranked(scored: list[tuple[str, float]], limit: int) -> list[str]:
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [t for t, _ in scored[:max(0, int(limit or 0))]]
+
+
 def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
-    reference_tickers = get_reference_tickers(limit_pages=8, page_limit=1000)
+    """
+    Dynamic clean source engine v1.
+    Builds a broader candidate pool, scores by liquidity + momentum quality + close strength,
+    then balances buckets so the final radar is not hostage to one narrow filter.
+    """
+    try:
+        max_symbols = int(max_symbols or TOTAL_UNIVERSE)
+    except Exception:
+        max_symbols = TOTAL_UNIVERSE
+    max_symbols = max(40, min(max_symbols, 300))
+
+    reference_tickers = get_reference_tickers(limit_pages=10, page_limit=1000)
     if not reference_tickers:
         return get_seed_universe()[:max_symbols]
 
-    market_date = previous_business_day()
-    grouped_map = get_grouped_daily_map(market_date)
+    market_date, grouped_map, source_mode = _select_grouped_market_map()
     if not grouped_map:
         return get_seed_universe()[:max_symbols]
 
+    source_scored = []
     big_caps_scored = []
     momentum_scored = []
     emerging_scored = []
     runner_scored = []
+    liquidity_scored = []
+    constructive_scored = []
     fast_pool = []
 
     for ticker in reference_tickers:
         daily = grouped_map.get(ticker)
         if not daily:
             continue
+
+        m = calc_metrics(daily)
+        source_score = score_source_candidate(ticker, daily)
+        if source_score != -9999:
+            source_scored.append((ticker, source_score))
+            if m.get("dollar_volume", 0) >= 100_000_000 or ticker in BIG_CAPS:
+                liquidity_scored.append((ticker, source_score + min(m.get("dollar_volume", 0) / 120_000_000, 14)))
+            if -0.025 <= m.get("day_change_pct", 0) <= 0.045 and m.get("close_strength", 0) >= 0.60:
+                constructive_scored.append((ticker, source_score + 8))
 
         quick = quick_score_candidate(ticker, daily)
         if quick != -9999:
@@ -1580,13 +1743,8 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         if s_runner != -9999:
             runner_scored.append((ticker, s_runner))
 
-    big_caps_scored.sort(key=lambda x: x[1], reverse=True)
-    momentum_scored.sort(key=lambda x: x[1], reverse=True)
-    emerging_scored.sort(key=lambda x: x[1], reverse=True)
-    runner_scored.sort(key=lambda x: x[1], reverse=True)
     fast_pool.sort(key=lambda x: x[1], reverse=True)
-
-    small_cap_candidates = [t for t, _ in fast_pool[:180]]
+    small_cap_candidates = [t for t, _ in fast_pool[:220]]
     small_cap_scored = []
     small_cap_inputs = [(ticker, grouped_map.get(ticker)) for ticker in small_cap_candidates if grouped_map.get(ticker)]
 
@@ -1599,22 +1757,33 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
                     ticker, s_small = future.result()
                     if s_small != -9999:
                         small_cap_scored.append((ticker, s_small))
-                except:
+                except Exception:
                     continue
 
-    small_cap_scored.sort(key=lambda x: x[1], reverse=True)
-
-    big_caps_final = [t for t, _ in big_caps_scored[:BIG_CAP_LIMIT]]
-    momentum_final = [t for t, _ in momentum_scored[:MOMENTUM_LIMIT]]
-    emerging_final = [t for t, _ in emerging_scored[:EMERGING_LIMIT]]
-    runner_final = [t for t, _ in runner_scored[:RUNNER_LIMIT]]
-    small_cap_final = [t for t, _ in small_cap_scored[:SMALL_CAP_LIMIT]]
+    target = max_symbols
+    big_n = max(12, int(target * 0.12))
+    liquidity_n = max(18, int(target * 0.16))
+    momentum_n = max(38, int(target * 0.30))
+    runner_n = max(24, int(target * 0.18))
+    emerging_n = max(28, int(target * 0.22))
+    constructive_n = max(18, int(target * 0.14))
+    small_n = max(14, int(target * 0.12))
+    broad_n = max(45, int(target * 0.45))
 
     final_universe = unique_keep_order(
-        big_caps_final + momentum_final + runner_final + emerging_final + small_cap_final
+        _take_ranked(big_caps_scored, big_n)
+        + _take_ranked(liquidity_scored, liquidity_n)
+        + _take_ranked(momentum_scored, momentum_n)
+        + _take_ranked(runner_scored, runner_n)
+        + _take_ranked(emerging_scored, emerging_n)
+        + _take_ranked(constructive_scored, constructive_n)
+        + _take_ranked(small_cap_scored, small_n)
+        + _take_ranked(source_scored, broad_n)
+        + get_seed_universe()
     )
 
     if not final_universe:
         return get_seed_universe()[:max_symbols]
 
     return final_universe[:max_symbols]
+
