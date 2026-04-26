@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 
 from scanner import get_scan_universe
@@ -563,5 +564,4 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
-
 
