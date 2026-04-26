@@ -1,6 +1,7 @@
 import time
 from app.utils import *
-from app.performance_tracker import evaluate_performance_record
+from app.utils import _cache_get, _cache_set
+from app.performance_tracker import evaluate_performance_record, outcome_sort_rank
 from app.strategy_engine import get_latest_minute_price
 
 def get_alignment_meta(stock: dict) -> dict:
@@ -579,3 +580,4 @@ def build_performance_dashboard(records: list[dict]) -> dict:
         },
         "simulation": simulate_equal_weight(rows),
     }
+
