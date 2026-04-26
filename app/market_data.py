@@ -38,6 +38,166 @@ def get_daily_bars(symbol):
         return []
 
 
+
+# Runtime helper functions moved here so market_data can use them directly after refactor.
+def get_prev_from_daily_bars(daily_bars):
+    if not daily_bars:
+        return None
+    try:
+        ny = ZoneInfo("America/New_York")
+        today_ny = datetime.now(ny).date()
+        market_open = is_market_open_now()
+        candidates = []
+        for row in daily_bars:
+            close_price = to_float(row.get("c"))
+            if close_price <= 0:
+                continue
+            row_date = None
+            ts = row.get("t")
+            try:
+                if ts:
+                    row_date = datetime.fromtimestamp(float(ts) / 1000.0, ny).date()
+            except Exception:
+                row_date = None
+            if market_open and row_date == today_ny:
+                continue
+            candidates.append(row)
+        source = candidates[-1] if candidates else daily_bars[-1]
+        return {
+            "price": to_float(source.get("c")),
+            "high": to_float(source.get("h")),
+            "low": to_float(source.get("l")),
+            "volume": to_float(source.get("v")),
+            "open": to_float(source.get("o")),
+        }
+    except Exception:
+        return None
+
+
+def get_prev(symbol):
+    try:
+        r = http_get_json(
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={POLYGON_API_KEY}",
+            timeout=12,
+        )
+        results = r.get("results", [])
+        if not results:
+            return None
+        d = results[0]
+        return {
+            "price": to_float(d.get("c")),
+            "high": to_float(d.get("h")),
+            "low": to_float(d.get("l")),
+            "volume": to_float(d.get("v")),
+            "open": to_float(d.get("o")),
+        }
+    except Exception:
+        return None
+
+
+def get_latest_minute_price(symbol):
+    try:
+        today_ny = latest_market_date_str()
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/"
+            f"{today_ny}/{today_ny}?adjusted=true&sort=desc&limit=5&apiKey={POLYGON_API_KEY}"
+        )
+        r = http_get_json(url, timeout=12)
+        bars = r.get("results", []) or []
+        if not bars:
+            return {
+                "available": False,
+                "current_price": 0.0,
+                "open": 0.0,
+                "high": 0.0,
+                "low": 0.0,
+                "volume": 0.0,
+                "updated": 0,
+            }
+        bar = bars[0]
+        return {
+            "available": True,
+            "current_price": to_float(bar.get("c")),
+            "open": to_float(bar.get("o")),
+            "high": to_float(bar.get("h")),
+            "low": to_float(bar.get("l")),
+            "volume": to_float(bar.get("v")),
+            "updated": int(to_float(bar.get("t"))),
+        }
+    except Exception:
+        return {
+            "available": False,
+            "current_price": 0.0,
+            "open": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "volume": 0.0,
+            "updated": 0,
+        }
+
+
+def get_snapshot_quote(symbol):
+    try:
+        symbol = str(symbol).upper().strip()
+        phase = get_market_phase()
+        cache_key = f"{symbol}:{phase}"
+        cached = _cache_get(SNAPSHOT_CACHE, cache_key)
+        if cached:
+            return cached
+
+        url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}?apiKey={POLYGON_API_KEY}"
+        r = http_get_json(url, timeout=12)
+        t = (r.get("ticker") or {})
+        day = (t.get("day") or {})
+        prev_day = (t.get("prevDay") or {})
+        last_trade = (t.get("lastTrade") or {})
+        min_data = (t.get("min") or {})
+
+        last_price = to_float(last_trade.get("p"))
+        prev_close = to_float(prev_day.get("c")) or 0.0
+        day_open = to_float(day.get("o")) or 0.0
+        day_high = to_float(day.get("h")) or 0.0
+        day_low = to_float(day.get("l")) or 0.0
+        day_volume = to_float(day.get("v")) or 0.0
+
+        minute = get_latest_minute_price(symbol)
+
+        current_price = last_price or to_float(min_data.get("c")) or to_float(day.get("c")) or 0.0
+        if minute.get("available") and minute.get("current_price", 0) > 0:
+            minute_price = to_float(minute.get("current_price", 0))
+            if phase in {"open", "after_hours", "pre_market"}:
+                current_price = minute_price or current_price
+                if minute.get("high", 0) > 0:
+                    day_high = max(day_high, to_float(minute.get("high", 0)))
+                if minute.get("low", 0) > 0:
+                    minute_low = to_float(minute.get("low", 0))
+                    day_low = min(day_low, minute_low) if day_low > 0 else minute_low
+                if minute.get("volume", 0) > 0:
+                    day_volume = max(day_volume, to_float(minute.get("volume", 0)))
+
+        if phase == "open":
+            ttl = SNAPSHOT_CACHE_TTL_OPEN
+        elif phase in {"after_hours", "pre_market"}:
+            ttl = SNAPSHOT_CACHE_TTL_EXTENDED
+        else:
+            ttl = SNAPSHOT_CACHE_TTL_CLOSED
+
+        out = {
+            "available": current_price > 0,
+            "current_price": safe_round(current_price, 4),
+            "open": safe_round(day_open, 4),
+            "high": safe_round(day_high, 4),
+            "low": safe_round(day_low, 4),
+            "volume": safe_round(day_volume),
+            "previous_close": safe_round(prev_close, 4),
+            "change_vs_prev_close_pct": safe_round(((current_price - prev_close) / prev_close) * 100, 2) if prev_close > 0 and current_price > 0 else 0.0,
+            "change_from_open_pct": safe_round(((current_price - day_open) / day_open) * 100, 2) if day_open > 0 and current_price > 0 else 0.0,
+            "phase": phase,
+            "source": "snapshot",
+        }
+        return _cache_set(SNAPSHOT_CACHE, cache_key, out, ttl)
+    except Exception:
+        return {"available": False, "current_price": 0.0, "source": "snapshot_error"}
 def calculate_atr(daily_bars, period: int = 14) -> float:
     try:
         if not daily_bars or len(daily_bars) < period + 1:
@@ -564,4 +724,6 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
+
+
 
