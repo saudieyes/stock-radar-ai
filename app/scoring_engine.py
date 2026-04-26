@@ -28,6 +28,24 @@ def owner_decision(decision: str, trend: str, breakout_quality: str, volume_rati
     return "احتفاظ ومراقبة - لا توجد زيادة واضحة الآن"
 
 
+
+def breakout_quality_label(trade_type: str, momentum: str, body_strength: float, close_strength: float, volume_ratio: float) -> str:
+    """تصنيف جودة الاختراق.
+
+    أعيدت هنا لأنها كانت موجودة في main.py قبل التفريغ،
+    وتحتاجها strategy_engine عند بناء خطة الاختراق.
+    """
+    try:
+        if trade_type != "Breakout":
+            return "N/A"
+        if momentum == "صاعد" and body_strength >= 0.6 and close_strength >= 0.75 and volume_ratio >= 1.2:
+            return "STRONG"
+        if body_strength < 0.35 or close_strength < 0.5 or volume_ratio < 0.8:
+            return "FAILED"
+        return "WEAK"
+    except Exception:
+        return "WEAK"
+
 def apply_news_decision_guard(decision: str, news_scope: str, news_sentiment: str, news_sessions_since: int, core_quality: float = 0.0) -> str:
     decision = str(decision or "مراقبة")
     scope = str(news_scope or "neutral")
@@ -652,5 +670,6 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
         "smart_stop_price": safe_round(smart_stop_price),
         "smart_target_1": safe_round(smart_target_1),
     }
+
 
 
