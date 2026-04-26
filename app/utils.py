@@ -1,3 +1,4 @@
+import time
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -333,3 +334,4 @@ NEWS_SCOPE_LABELS = {
 
 def news_scope_label(scope: str) -> str:
     return NEWS_SCOPE_LABELS.get(str(scope or "neutral"), "محايد")
+
