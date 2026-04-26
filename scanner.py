@@ -40,6 +40,66 @@ BIG_CAPS = [
     "GOOGL", "TSLA", "AMD", "AVGO", "NFLX"
 ]
 
+LAST_SOURCE_DIAGNOSTICS = {}
+_SOURCE_TARGET_CACHE = {"ts": 0.0, "target": TOTAL_UNIVERSE, "mode": "normal", "source_mode": ""}
+
+def get_last_source_diagnostics() -> dict:
+    return dict(LAST_SOURCE_DIAGNOSTICS or {})
+
+
+def _classify_source_market_activity(grouped_map: dict) -> tuple[str, int, dict]:
+    """Estimate how broad/active the opportunity set is using grouped daily data only."""
+    stats = {
+        "tradable": 0,
+        "liquid": 0,
+        "momentum": 0,
+        "runner": 0,
+        "constructive": 0,
+        "danger_late": 0,
+    }
+    try:
+        for daily in (grouped_map or {}).values():
+            if not base_filters(daily):
+                continue
+            m = calc_metrics(daily)
+            stats["tradable"] += 1
+            if m.get("dollar_volume", 0) >= 30_000_000:
+                stats["liquid"] += 1
+            chg = float(m.get("day_change_pct", 0) or 0)
+            close_strength = float(m.get("close_strength", 0) or 0)
+            range_pct = float(m.get("range_pct", 0) or 0)
+            if chg >= 0.035 and close_strength >= 0.62:
+                stats["momentum"] += 1
+            if chg >= 0.065 and close_strength >= 0.72 and range_pct <= 0.18:
+                stats["runner"] += 1
+            if -0.025 <= chg <= 0.045 and close_strength >= 0.58:
+                stats["constructive"] += 1
+            if chg > 0.18 and close_strength < 0.55:
+                stats["danger_late"] += 1
+
+        active_score = (stats["momentum"] * 1.0) + (stats["runner"] * 1.8) + (stats["liquid"] * 0.12) + (stats["constructive"] * 0.35) - (stats["danger_late"] * 0.35)
+        if active_score >= 230 or stats["runner"] >= 45 or stats["momentum"] >= 120:
+            return "active", 190, stats
+        if active_score >= 135 or stats["runner"] >= 25 or stats["momentum"] >= 70:
+            return "normal", 150, stats
+        return "quiet", 120, stats
+    except Exception:
+        return "normal", TOTAL_UNIVERSE, stats
+
+
+def get_dynamic_universe_target(default: int = TOTAL_UNIVERSE) -> int:
+    """Return quiet/normal/active target. Cached briefly to avoid duplicate grouped calls."""
+    try:
+        now_ts = datetime.utcnow().timestamp()
+        if now_ts - float(_SOURCE_TARGET_CACHE.get("ts", 0) or 0) < 90:
+            return int(_SOURCE_TARGET_CACHE.get("target", default) or default)
+        market_date, grouped_map, source_mode = _select_grouped_market_map()
+        mode, target, stats = _classify_source_market_activity(grouped_map)
+        _SOURCE_TARGET_CACHE.update({"ts": now_ts, "target": target, "mode": mode, "source_mode": source_mode, "stats": stats, "market_date": market_date})
+        return int(target)
+    except Exception:
+        return int(default or TOTAL_UNIVERSE)
+
 
 def safe_get_json(url: str, timeout: int = 20):
     try:
@@ -1680,12 +1740,50 @@ def _take_ranked(scored: list[tuple[str, float]], limit: int) -> list[str]:
     return [t for t, _ in scored[:max(0, int(limit or 0))]]
 
 
+def _add_source_reason(reasons: dict, ticker: str, label: str):
+    try:
+        t = str(ticker or "").upper().strip()
+        if not t or not label:
+            return
+        bucket = reasons.setdefault(t, [])
+        if label not in bucket:
+            bucket.append(label)
+    except Exception:
+        return
+
+
+def _source_reason_tags(ticker: str, m: dict, source_score: float) -> list[str]:
+    tags = []
+    try:
+        if ticker in BIG_CAPS:
+            tags.append("سهم قيادي")
+        if float(m.get("dollar_volume", 0) or 0) >= 100_000_000:
+            tags.append("سيولة قوية")
+        chg = float(m.get("day_change_pct", 0) or 0)
+        close_strength = float(m.get("close_strength", 0) or 0)
+        if 0.025 <= chg <= 0.12 and close_strength >= 0.62:
+            tags.append("زخم بنّاء")
+        if bool(m.get("near_high")) and close_strength >= 0.70:
+            tags.append("قريب من اختراق")
+        if -0.025 <= chg <= 0.045 and close_strength >= 0.58:
+            tags.append("تجميع/تهيئة")
+        if chg >= 0.065 and close_strength >= 0.72:
+            tags.append("مرشح استمرار")
+        if source_score >= 75:
+            tags.append("أولوية مصدر عالية")
+    except Exception:
+        pass
+    return tags[:6]
+
+
 def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
     """
-    Dynamic clean source engine v1.
+    Dynamic clean source engine v2.
     Builds a broader candidate pool, scores by liquidity + momentum quality + close strength,
     then balances buckets so the final radar is not hostage to one narrow filter.
+    V2 records why a ticker entered the source and exposes diagnostics for debug/UI.
     """
+    global LAST_SOURCE_DIAGNOSTICS
     try:
         max_symbols = int(max_symbols or TOTAL_UNIVERSE)
     except Exception:
@@ -1698,7 +1796,11 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
 
     market_date, grouped_map, source_mode = _select_grouped_market_map()
     if not grouped_map:
+        LAST_SOURCE_DIAGNOSTICS = {"target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": "unknown"}
         return get_seed_universe()[:max_symbols]
+
+    market_activity_mode, dynamic_target, source_activity_stats = _classify_source_market_activity(grouped_map)
+    source_reasons = {}
 
     source_scored = []
     big_caps_scored = []
@@ -1718,10 +1820,14 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         source_score = score_source_candidate(ticker, daily)
         if source_score != -9999:
             source_scored.append((ticker, source_score))
+            for tag in _source_reason_tags(ticker, m, source_score):
+                _add_source_reason(source_reasons, ticker, tag)
             if m.get("dollar_volume", 0) >= 100_000_000 or ticker in BIG_CAPS:
                 liquidity_scored.append((ticker, source_score + min(m.get("dollar_volume", 0) / 120_000_000, 14)))
+                _add_source_reason(source_reasons, ticker, "سيولة/قيادي")
             if -0.025 <= m.get("day_change_pct", 0) <= 0.045 and m.get("close_strength", 0) >= 0.60:
                 constructive_scored.append((ticker, source_score + 8))
+                _add_source_reason(source_reasons, ticker, "تهيئة مبكرة")
 
         quick = quick_score_candidate(ticker, daily)
         if quick != -9999:
@@ -1730,18 +1836,22 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         s_big = score_big_cap(ticker, daily)
         if s_big != -9999:
             big_caps_scored.append((ticker, s_big))
+            _add_source_reason(source_reasons, ticker, "قيادي/كبير")
 
         s_momo = score_momentum_candidate(ticker, daily)
         if s_momo != -9999:
             momentum_scored.append((ticker, s_momo))
+            _add_source_reason(source_reasons, ticker, "زخم")
 
         s_emg = score_emerging_candidate(ticker, daily)
         if s_emg != -9999:
             emerging_scored.append((ticker, s_emg))
+            _add_source_reason(source_reasons, ticker, "فرصة ناشئة")
 
         s_runner = score_all_day_runner(ticker, daily)
         if s_runner != -9999:
             runner_scored.append((ticker, s_runner))
+            _add_source_reason(source_reasons, ticker, "مرشح all-day runner")
 
     fast_pool.sort(key=lambda x: x[1], reverse=True)
     small_cap_candidates = [t for t, _ in fast_pool[:220]]
@@ -1757,6 +1867,7 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
                     ticker, s_small = future.result()
                     if s_small != -9999:
                         small_cap_scored.append((ticker, s_small))
+                        _add_source_reason(source_reasons, ticker, "Small-cap منتقى")
                 except Exception:
                     continue
 
@@ -1783,7 +1894,28 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
     )
 
     if not final_universe:
+        LAST_SOURCE_DIAGNOSTICS = {"target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": market_activity_mode, "activity_stats": source_activity_stats}
         return get_seed_universe()[:max_symbols]
 
-    return final_universe[:max_symbols]
+    selected = final_universe[:max_symbols]
+    LAST_SOURCE_DIAGNOSTICS = {
+        "target": max_symbols,
+        "market_date": market_date,
+        "source_mode": source_mode,
+        "market_activity_mode": market_activity_mode,
+        "suggested_dynamic_target": dynamic_target,
+        "activity_stats": source_activity_stats,
+        "bucket_counts": {
+            "source": len(source_scored),
+            "big_caps": len(big_caps_scored),
+            "liquidity": len(liquidity_scored),
+            "momentum": len(momentum_scored),
+            "runner": len(runner_scored),
+            "emerging": len(emerging_scored),
+            "constructive": len(constructive_scored),
+            "small_cap": len(small_cap_scored),
+        },
+        "reasons": {t: source_reasons.get(t, []) for t in selected},
+    }
+    return selected
 
