@@ -64,7 +64,7 @@ from app.sharia_filter import *
 from app.scoring_engine import *
 from app.strategy_engine import *
 from app.display_contract import *
-from app.single_stock_engine import scan_all, build_single_stock_response
+from app.single_stock_engine import scan_all, build_single_stock_response, get_last_scan_debug
 
 app = FastAPI()
 
@@ -252,6 +252,23 @@ def trade_scan():
 @app.get("/single-stock")
 def single_stock(symbol: str):
     return build_single_stock_response(symbol)
+
+
+@app.get("/debug-scan")
+def debug_scan():
+    rows, diag = scan_all(debug=True)
+    return {
+        "ok": True,
+        "diagnostics": diag,
+        "count": len(rows),
+        "sample_rows": rows[:5],
+    }
+
+
+@app.get("/debug-last-scan")
+def debug_last_scan():
+    return {"ok": True, "diagnostics": get_last_scan_debug()}
+
 
 
 @app.post("/portfolio/add")
