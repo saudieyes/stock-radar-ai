@@ -619,4 +619,3 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     plan["rr_1"] = safe_round(rr_1_preview)
     plan = apply_decision_layers(plan)
     return plan
-

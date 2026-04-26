@@ -652,3 +652,5 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
         "smart_stop_price": safe_round(smart_stop_price),
         "smart_target_1": safe_round(smart_target_1),
     }
+
+

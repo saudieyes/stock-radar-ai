@@ -185,4 +185,3 @@ def build_single_stock_response(symbol: str):
         "trade_error": trade_error,
     }
 
-

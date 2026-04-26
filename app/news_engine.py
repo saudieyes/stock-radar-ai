@@ -546,4 +546,3 @@ def get_news(symbol, company_name="", sector="", industry=""):
     return (bundle.get("news_title") or bundle.get("news_context_note") or bundle.get("news_note") or "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
 
 
-

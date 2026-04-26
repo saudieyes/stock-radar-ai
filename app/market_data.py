@@ -565,4 +565,3 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return float(volume_ratio or 0)
 
 
-

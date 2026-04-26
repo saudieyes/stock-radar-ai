@@ -711,4 +711,3 @@ def sort_display_bucket(items):
         ),
         reverse=True,
     )
-

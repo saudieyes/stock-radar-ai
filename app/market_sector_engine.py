@@ -201,3 +201,5 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "historical_context_label": "محايد",
             "historical_context_detail": "لا توجد بيانات كافية لربط السهم بالمؤشر والقطاع.",
         }
+
+

@@ -147,3 +147,4 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
         return -15, "سهم اختراق منخفض السعر (أقل من 3$)"
     return 0, ""
 
+
