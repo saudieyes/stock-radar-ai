@@ -1,8 +1,10 @@
 import time
 from app.utils import *
 from app.utils import _cache_get, _cache_set
+from app.settings import PERFORMANCE_REFRESH_CACHE
 from app.performance_tracker import evaluate_performance_record, outcome_sort_rank
 from app.strategy_engine import get_latest_minute_price
+from app.market_data import get_prev, get_intraday_snapshot, build_live_price_block
 from app.portfolio_store import load_portfolio_items
 from app.watchlist_store import load_manual_watchlist
 
@@ -711,3 +713,4 @@ def sort_display_bucket(items):
         ),
         reverse=True,
     )
+
