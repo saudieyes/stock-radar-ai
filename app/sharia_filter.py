@@ -146,3 +146,4 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
     if trade_type == "Breakout" and current_price < LOW_PRICE_WARNING:
         return -15, "سهم اختراق منخفض السعر (أقل من 3$)"
     return 0, ""
+
