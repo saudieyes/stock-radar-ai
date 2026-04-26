@@ -6,7 +6,14 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
     symbol = normalize_symbol_text(symbol)
     sector_l = str(sector).lower().strip()
     industry_l = str(industry).lower().strip()
-    exclusions = manual_exclusions if isinstance(manual_exclusions, dict) else get_manual_sharia_exclusions_map()
+    if isinstance(manual_exclusions, dict):
+        exclusions = manual_exclusions
+    else:
+        try:
+            from .data_store import get_manual_sharia_exclusions_map
+            exclusions = get_manual_sharia_exclusions_map()
+        except Exception:
+            exclusions = {}
     manual_entry = exclusions.get(symbol, {}) if symbol else {}
 
     if manual_entry:
@@ -120,7 +127,14 @@ def get_financials(symbol, prev_data=None):
     cash = to_float(b.get("Cash And Cash Equivalents", 0))
     total_debt = to_float(b.get("Total Debt", 0))
     shares = to_float(i.get("Shares (Diluted)", 0)) or to_float(i.get("Shares (Basic)", 0))
-    prev = prev_data if prev_data is not None else get_prev(symbol)
+    if prev_data is not None:
+        prev = prev_data
+    else:
+        try:
+            from .market_data import get_prev
+            prev = get_prev(symbol)
+        except Exception:
+            prev = None
     current_price = prev["price"] if prev else 0.0
     approx_market_cap = current_price * shares if shares > 0 and current_price > 0 else 0.0
     debt_to_market_cap = (total_debt / approx_market_cap) if approx_market_cap > 0 else None
@@ -146,5 +160,3 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
     if trade_type == "Breakout" and current_price < LOW_PRICE_WARNING:
         return -15, "سهم اختراق منخفض السعر (أقل من 3$)"
     return 0, ""
-
-
