@@ -2,7 +2,7 @@ import time
 from app.utils import *
 from app.utils import _cache_get, _cache_set
 from app.performance_tracker import evaluate_performance_record, outcome_sort_rank
-from app.strategyngine import get_latest_minute_price
+from app.strategy_engine import get_latest_minute_price
 from app.portfolio_store import load_portfolio_items
 from app.watchlist_store import load_manual_watchlist
 
