@@ -1858,7 +1858,7 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         requested_max_symbols = int(max_symbols or TOTAL_UNIVERSE)
     except Exception:
         requested_max_symbols = TOTAL_UNIVERSE
-    requested_max_symbols = max(40, min(requested_max_symbols, 300))
+    requested_max_symbols = max(40, min(requested_max_symbols, 700))
     max_symbols = requested_max_symbols
 
     reference_tickers = get_reference_tickers(limit_pages=10, page_limit=1000)
@@ -1993,4 +1993,5 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         "reasons": {t: source_reasons.get(t, []) for t in selected},
     }
     return selected
+
 
