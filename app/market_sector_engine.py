@@ -1,7 +1,7 @@
 from .settings import CONTEXT_CACHE, SECTOR_ETF_MAP
 from .utils import *
 from .data_loader import COMPANIES_DATA, SECTOR_DATA
-from .market_data import get_daily_bars, get_trend
+from .market_data import get_daily_bars, get_trend, get_prev, get_intraday_snapshot
 
 SYMBOL_CONTEXT_FALLBACKS = {
     "AAPL": ("Technology", "Consumer Electronics / Electronic Computers"),
@@ -219,6 +219,75 @@ def _context_alignment_detail(market_label: str, sector_label: str, benchmark_sy
     return " - ".join(parts)
 
 
+def _intraday_context(symbol: str) -> dict:
+    """Current-session state for benchmark/sector ETF.
+
+    This is intentionally short-lived and uses the same intraday path as stocks,
+    so it does not introduce stale multi-minute quote caching.
+    """
+    symbol = str(symbol or "").upper().strip()
+    if not symbol:
+        return {
+            "symbol": "",
+            "change_pct": 0.0,
+            "label": "غير متوفر",
+            "score": 0,
+            "price": 0.0,
+            "prev_close": 0.0,
+        }
+    try:
+        intraday = get_intraday_snapshot(symbol) or {}
+        prev = get_prev(symbol) or {}
+        price = float(intraday.get("current_price", 0) or prev.get("price", 0) or 0)
+        prev_close = float(prev.get("price", 0) or 0)
+        change_pct = ((price - prev_close) / prev_close) * 100.0 if price > 0 and prev_close > 0 else 0.0
+        if change_pct >= 0.75:
+            label = "أخضر قوي"
+            score = 4
+        elif change_pct >= 0.20:
+            label = "أخضر"
+            score = 2
+        elif change_pct <= -0.75:
+            label = "أحمر قوي"
+            score = -4
+        elif change_pct <= -0.20:
+            label = "أحمر"
+            score = -2
+        else:
+            label = "محايد"
+            score = 0
+        return {
+            "symbol": symbol,
+            "change_pct": safe_round(change_pct, 2),
+            "label": label,
+            "score": score,
+            "price": safe_round(price),
+            "prev_close": safe_round(prev_close),
+        }
+    except Exception:
+        return {
+            "symbol": symbol,
+            "change_pct": 0.0,
+            "label": "غير واضح",
+            "score": 0,
+            "price": 0.0,
+            "prev_close": 0.0,
+        }
+
+
+def _live_alignment_label(score: float) -> str:
+    score = float(score or 0)
+    if score >= 5:
+        return "اليوم داعم قوي"
+    if score >= 2:
+        return "اليوم داعم"
+    if score <= -5:
+        return "اليوم ضاغط قوي"
+    if score <= -2:
+        return "اليوم ضاغط"
+    return "اليوم محايد"
+
+
 def get_market_sector_context(symbol: str, sector: str, industry: str = "", daily_bars=None) -> dict:
     try:
         symbol = str(symbol or "").upper().strip()
@@ -262,11 +331,36 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
         sector_support_score = (_context_trend_points(sector_trend) + _context_relative_points(rel_vs_sector)) if sector_cached else 0
         sector_support_label = _context_support_label(sector_support_score) if sector_cached else ("محايد" if sector_symbol else "غير متوفر")
 
-        total_score = max(-18, min(18, int(round((market_support_score * 0.8) + (sector_support_score * 1.2)))))
+        base_total_score = max(-18, min(18, int(round((market_support_score * 0.8) + (sector_support_score * 1.2)))))
         if not sector_symbol:
-            total_score = max(-18, min(18, total_score - 3))
+            base_total_score = max(-18, min(18, base_total_score - 3))
+
+        benchmark_live = _intraday_context(benchmark_symbol)
+        sector_live = _intraday_context(sector_symbol) if sector_symbol else {
+            "symbol": "",
+            "change_pct": 0.0,
+            "label": "غير متوفر",
+            "score": 0,
+            "price": 0.0,
+            "prev_close": 0.0,
+        }
+        live_score = int(benchmark_live.get("score", 0) or 0)
+        if sector_symbol:
+            live_score += int(sector_live.get("score", 0) or 0)
+        live_score = max(-8, min(8, live_score))
+        total_score = max(-18, min(18, int(round(base_total_score + (live_score * 0.55)))))
         alignment_label = _context_alignment_label(total_score)
+        live_label = _live_alignment_label(live_score)
         alignment_detail = _context_alignment_detail(market_support_label, sector_support_label, benchmark_symbol, sector_symbol, rel_vs_market, rel_vs_sector)
+        live_detail_parts = [
+            f"{benchmark_symbol} الآن: {benchmark_live.get('label')} ({safe_round(benchmark_live.get('change_pct', 0), 2)}%)"
+        ]
+        if sector_symbol:
+            live_detail_parts.append(f"{sector_symbol} الآن: {sector_live.get('label')} ({safe_round(sector_live.get('change_pct', 0), 2)}%)")
+        else:
+            live_detail_parts.append("ETF القطاع اللحظي غير متوفر")
+        live_detail_parts.append(f"الأثر اللحظي: {live_label}")
+        live_detail = " - ".join(live_detail_parts)
 
         return {
             "benchmark_symbol": benchmark_symbol,
@@ -283,8 +377,18 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "sector_support_score": sector_support_score,
             "sector_support_label": sector_support_label,
             "market_sector_score": total_score,
+            "market_sector_base_score": base_total_score,
+            "market_sector_live_score": live_score,
+            "market_sector_live_label": live_label,
+            "market_sector_live_detail": live_detail,
+            "benchmark_intraday_change_pct": benchmark_live.get("change_pct", 0.0),
+            "benchmark_intraday_label": benchmark_live.get("label", "غير واضح"),
+            "benchmark_intraday_price": benchmark_live.get("price", 0.0),
+            "sector_intraday_change_pct": sector_live.get("change_pct", 0.0),
+            "sector_intraday_label": sector_live.get("label", "غير متوفر"),
+            "sector_intraday_price": sector_live.get("price", 0.0),
             "market_sector_alignment_label": alignment_label,
-            "market_sector_alignment_detail": alignment_detail,
+            "market_sector_alignment_detail": alignment_detail + " - " + live_detail,
         }
     except Exception as exc:
         try:
@@ -314,6 +418,16 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "sector_support_score": 0,
             "sector_support_label": "محايد" if fallback_sector else "غير متوفر",
             "market_sector_score": 0,
+            "market_sector_base_score": 0,
+            "market_sector_live_score": 0,
+            "market_sector_live_label": "اليوم غير واضح",
+            "market_sector_live_detail": "لا توجد بيانات لحظية كافية للمؤشر/القطاع.",
+            "benchmark_intraday_change_pct": 0.0,
+            "benchmark_intraday_label": "غير واضح",
+            "benchmark_intraday_price": 0.0,
+            "sector_intraday_change_pct": 0.0,
+            "sector_intraday_label": "غير متوفر",
+            "sector_intraday_price": 0.0,
             "market_sector_alignment_label": "محايد",
             "market_sector_alignment_detail": _context_alignment_detail("غير واضح", "محايد" if fallback_sector else "غير متوفر", fallback_benchmark or "SPY", fallback_sector or "", 0, 0),
             "historical_behavior_score": 50.0,
@@ -321,4 +435,5 @@ def get_market_sector_context(symbol: str, sector: str, industry: str = "", dail
             "historical_context_label": "محايد",
             "historical_context_detail": "لا توجد بيانات كافية لربط السهم بالمؤشر والقطاع.",
         }
+
 
