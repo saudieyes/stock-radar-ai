@@ -2,7 +2,7 @@ import csv
 import os
 from pathlib import Path
 
-from .settings import DATA_DIR
+from .settings import DATA_DIR, BASE_DIR
 from .utils import clean_key, clean_row, latest_key
 
 
@@ -13,6 +13,11 @@ def _resolve_path(path):
     alt = DATA_DIR / p.name
     if alt.exists():
         return str(alt)
+    # Repository data fallback. In Railway DATA_DIR may point to /data or app_data,
+    # while the bundled reference CSV files live under ./data in GitHub.
+    repo_alt = BASE_DIR / "data" / p.name
+    if repo_alt.exists():
+        return str(repo_alt)
     return str(path)
 
 
@@ -56,6 +61,26 @@ def read_csv(path):
     return []
 
 
+
+def iter_csv_rows(path):
+    path = _resolve_path(path)
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        sample = f.read(4096)
+        f.seek(0)
+        delimiter = ";"
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+            delimiter = dialect.delimiter
+        except Exception:
+            if "," in sample and sample.count(",") > sample.count(";"):
+                delimiter = ","
+        reader = csv.DictReader(f, delimiter=delimiter)
+        for row in reader:
+            yield clean_row(row)
+
+
 def load_sector():
     data = {}
     for r in read_csv(DATA_DIR / "sector_industry.csv"):
@@ -77,8 +102,10 @@ def load_companies():
 
 
 def load_latest(path):
+    # Stream rows instead of materializing the whole CSV first. This keeps
+    # startup fast even when financial statement files grow.
     data = {}
-    for r in read_csv(path):
+    for r in iter_csv_rows(path) or []:
         t = str(_first(r, ["Ticker", "Symbol", "ticker", "symbol"]) or "").upper().strip()
         if not t:
             continue
@@ -103,3 +130,4 @@ def initialize_reference_data():
     balance_data = load_latest(DATA_DIR / "balance_sheet.csv")
     income_data = load_latest(DATA_DIR / "income_statement.csv")
     return sector_data, companies_data, balance_data, income_data
+
