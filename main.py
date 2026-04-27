@@ -52,9 +52,15 @@ from app.watchlist_store import load_manual_watchlist, save_manual_watchlist
 from app.portfolio_store import load_portfolio_items, save_portfolio_items
 from app.data_store import (
     get_manual_sharia_exclusions_map,
+    get_manual_sharia_sync_diagnostics,
     load_manual_sharia_exclusions,
     save_manual_sharia_exclusions,
 )
+from app.github_sync import (
+    github_sync_status,
+    push_json_file,
+)
+from app.settings import GITHUB_SYNC_MANUAL_SHARIA_PATH
 from app.performance_tracker import *
 from app.market_data import *
 from app.historical_engine import *
@@ -248,6 +254,12 @@ def trade_scan():
         "sharia_prefilter_gray_used": int(scan_debug.get("sharia_prefilter_gray_used", 0) or 0),
         "sharia_prefilter_gray_total": int(scan_debug.get("sharia_prefilter_gray_total", 0) or 0),
         "sharia_prefilter_refill_count": int(scan_debug.get("sharia_prefilter_refill_count", 0) or 0),
+        "sharia_refill_reserve_size": int(scan_debug.get("sharia_refill_reserve_size", 0) or 0),
+        "sharia_prefilter_clean_total": int(scan_debug.get("sharia_prefilter_clean_total", 0) or 0),
+        "sharia_prefilter_clean_used": int(scan_debug.get("sharia_prefilter_clean_used", 0) or 0),
+        "sharia_prefilter_gray_cap": int(scan_debug.get("sharia_prefilter_gray_cap", 0) or 0),
+        "sharia_prefilter_clean_shortage": int(scan_debug.get("sharia_prefilter_clean_shortage", 0) or 0),
+        "sharia_prefilter_final_shortage": int(scan_debug.get("sharia_prefilter_final_shortage", 0) or 0),
         "count": len(results),
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
@@ -438,18 +450,22 @@ def sharia_exclusions_add(payload: dict = Body(...)):
     symbol = normalize_symbol_text(payload.get("symbol", ""))
     if not symbol:
         return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
-    note = str(payload.get("note", "") or "").strip()
+    note = str(payload.get("note", "") or payload.get("reason", "") or "استبعاد يدوي شرعي").strip()
     items = load_manual_sharia_exclusions()
     now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
     found = False
     for item in items:
         if normalize_symbol_text(item.get("symbol", "")) == symbol:
             item["note"] = note
-            item["excluded_at"] = now_str
+            item["reason"] = note
+            item["updated_at"] = now_str
+            if not item.get("excluded_at"):
+                item["excluded_at"] = now_str
+            item["source"] = "manual"
             found = True
             break
     if not found:
-        items.insert(0, {"symbol": symbol, "note": note, "excluded_at": now_str})
+        items.insert(0, {"symbol": symbol, "note": note, "reason": note, "excluded_at": now_str, "updated_at": now_str, "source": "manual"})
     save_manual_sharia_exclusions(items)
     return {"ok": True, "count": len(items), "symbol": symbol}
 
@@ -486,7 +502,28 @@ def sharia_exclusions_get():
             "sharia_label": assessment.get("label", "مستبعد يدويًا"),
             "sharia_reason": assessment.get("reason", "مستبعد يدويًا من قائمتك الشرعية"),
         })
+
     return {"items": enriched, "count": len(enriched)}
+
+
+@app.get("/data-sync/status")
+def data_sync_status():
+    status = github_sync_status()
+    status["manual_sharia_local_count"] = len(load_manual_sharia_exclusions())
+    status["manual_sharia_last_pull"] = get_manual_sharia_sync_diagnostics()
+    return {"ok": True, **status}
+
+
+@app.post("/data-sync/manual-sharia")
+def data_sync_manual_sharia():
+    items = load_manual_sharia_exclusions(force_github_pull=True)
+    payload = {normalize_symbol_text(item.get("symbol", "")): item for item in items if normalize_symbol_text(item.get("symbol", ""))}
+    result = push_json_file(
+        GITHUB_SYNC_MANUAL_SHARIA_PATH,
+        payload,
+        message=f"Sync manual Sharia exclusions ({len(payload)} symbols)",
+    )
+    return {"ok": bool(result.get("ok")), "count": len(payload), "result": result}
 
 
 @app.get("/performance")
@@ -556,4 +593,3 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
