@@ -47,6 +47,12 @@ def scan_all(debug: bool = False):
         "sharia_prefilter_gray_used": int((source_diag or {}).get("sharia_prefilter_gray_used", 0) or 0),
         "sharia_prefilter_gray_total": int((source_diag or {}).get("sharia_prefilter_gray_total", 0) or 0),
         "sharia_prefilter_refill_count": int((source_diag or {}).get("sharia_prefilter_refill_count", 0) or 0),
+        "sharia_refill_reserve_size": int((source_diag or {}).get("sharia_refill_reserve_size", 0) or 0),
+        "sharia_prefilter_clean_total": int((source_diag or {}).get("sharia_prefilter_clean_total", 0) or 0),
+        "sharia_prefilter_clean_used": int((source_diag or {}).get("sharia_prefilter_clean_used", 0) or 0),
+        "sharia_prefilter_gray_cap": int((source_diag or {}).get("sharia_prefilter_gray_cap", 0) or 0),
+        "sharia_prefilter_clean_shortage": int((source_diag or {}).get("sharia_prefilter_clean_shortage", 0) or 0),
+        "sharia_prefilter_final_shortage": int((source_diag or {}).get("sharia_prefilter_final_shortage", 0) or 0),
         "sample_sharia_prefilter_blocked": (source_diag or {}).get("sharia_prefilter_sample_blocked", [])[:15] if isinstance(source_diag, dict) else [],
         "sample_source_reasons": [source_reasons.get(str(x).upper(), []) for x in raw_symbols[:10]],
         "sample_excluded": [],
@@ -263,4 +269,5 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
+
 
