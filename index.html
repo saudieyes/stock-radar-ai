@@ -576,6 +576,7 @@
           <div class="section-count" id="shariaExcludedCount"></div>
         </div>
         <div class="section-tools">
+          <button class="ghost" onclick="syncManualShariaToGithub()">☁️ مزامنة GitHub</button>
           <button class="ghost" data-section-toggle="shariaExcludedContent" onclick="toggleSection('shariaExcludedContent', this, 'إظهار', 'إخفاء')">إظهار</button>
         </div>
       </div>
@@ -1630,6 +1631,26 @@
       }
     }
 
+    async function syncManualShariaToGithub() {
+      try {
+        const statusRes = await apiFetch('/data-sync/status');
+        const status = await statusRes.json();
+        if (!status.enabled) {
+          alert('مزامنة GitHub غير مفعلة. أضف GITHUB_SYNC_TOKEN و GITHUB_SYNC_REPO في Railway Variables.');
+          return;
+        }
+        const res = await apiFetch('/data-sync/manual-sharia', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          alert(`تمت مزامنة قائمة المستبعدة يدويًا مع GitHub (${data.count || 0} سهم).`);
+        } else {
+          alert('فشلت المزامنة: ' + safeText(data?.result?.error || data.error || 'خطأ غير معروف'));
+        }
+      } catch (e) {
+        alert('تعذر تنفيذ مزامنة GitHub');
+      }
+    }
+
     async function loadShariaExcluded() {
       try {
         const res = await apiFetch('/sharia-exclusions');
@@ -1832,4 +1853,5 @@
   </script>
 </body>
 </html>
+
 
