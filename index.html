@@ -1227,6 +1227,12 @@
       details.push(detailBox('ETF القطاع', safeText(describeEtfSymbol(stock.sector_etf_symbol || '')) , false, 'ETF القطاع'));
       details.push(detailBox('دعم القطاع', formatScoreLabel(stock.sector_support_label || '—', stock.sector_support_score || 0), false, 'دعم القطاع'));
       details.push(detailBox('شرح المؤشر والقطاع', safeText(stock.market_sector_alignment_detail || ''), true, 'شرح المؤشر والقطاع'));
+      details.push(detailBox('وضع المؤشر/القطاع الآن', safeText(stock.market_sector_live_detail || ''), true, 'وضع المؤشر/القطاع الآن'));
+      details.push(detailBox('الدعم الأقرب', stock.nearest_support ? `${formatNumber(stock.nearest_support)} | ${safeText(stock.nearest_support_label || '')}` : '—', false, 'الدعم الأقرب'));
+      details.push(detailBox('المقاومة الأقرب', stock.nearest_resistance ? `${formatNumber(stock.nearest_resistance)} | ${safeText(stock.nearest_resistance_label || '')}` : '—', false, 'المقاومة الأقرب'));
+      details.push(detailBox('المقاومة الأكبر / 52 أسبوع / تاريخي', stock.major_resistance ? `${formatNumber(stock.major_resistance)} | ${safeText(stock.major_resistance_label || '')}` : safeText(stock.major_resistance_label || '—'), false, 'المقاومة الأكبر'));
+      details.push(detailBox('ملخص مستويات الدعم/المقاومة', safeText(stock.levels_summary || ''), true));
+      details.push(detailBox('ملاحظات تحسين الخطة', Array.isArray(stock.level_refinement_notes) && stock.level_refinement_notes.length ? `<ul class="flags">${stock.level_refinement_notes.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>` : '—', true));
       details.push(detailBox('شرح التوافق الزمني', safeText(stock.alignment_detail || ''), true));
       details.push(detailBox('ATR 14', formatNumber(stock.atr_14)));
       details.push(detailBox('ATR %', formatNumber(stock.atr_pct)));
@@ -1314,6 +1320,9 @@
             ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`, 'جاهزية التنفيذ')}
             ${compactItem('المؤشر', safeText(stock.market_support_label || '—'), 'المؤشر')}
             ${compactItem('القطاع', safeText(stock.sector_etf_symbol ? (stock.sector_support_label || '—') : 'غير متوفر — ثقة أقل'), 'القطاع')}
+            ${compactItem('السوق/القطاع الآن', safeText(stock.market_sector_live_label || '—'), 'السوق/القطاع الآن')}
+            ${compactItem('الدعم الأقرب', stock.nearest_support ? `${formatNumber(stock.nearest_support)} | ${safeText(stock.nearest_support_strength || '')}` : '—', 'الدعم الأقرب')}
+            ${compactItem('المقاومة الأقرب', stock.nearest_resistance ? `${formatNumber(stock.nearest_resistance)} | ${safeText(stock.nearest_resistance_strength || '')}` : '—', 'المقاومة الأقرب')}
             ${compactItem('المخاطرة', safeText(stock.risk_profile_label || '—'))}
             ${compactItem('الشرعية', safeText(stock.sharia_label || '—'))}
             ${compactItem('التذبذب', safeText(stock.volatility_label || '—'))}
@@ -1416,6 +1425,7 @@
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
         <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value green">${formatNumber(data.strong_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value yellow">${formatNumber(data.cautious_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">استبعاد شرعي مبكر</div><div class="stat-value">${formatNumber(data.sharia_prefilter_blocked || 0)}</div></div>
       `;
 
       document.getElementById('statusbar').innerHTML = `
@@ -1822,3 +1832,4 @@
   </script>
 </body>
 </html>
+
