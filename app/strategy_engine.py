@@ -384,6 +384,200 @@ def _context_return_pct(bars: list[dict], lookback: int = 20) -> float:
         return 0.0
     return ((end - start) / start) * 100.0
 
+
+
+def _sr_strength_label(touches: int, distance_pct: float = 999.0) -> str:
+    try:
+        touches = int(touches or 0)
+        distance_pct = float(distance_pct or 999.0)
+        if touches >= 5 and distance_pct <= 2.0:
+            return "قوي جدًا"
+        if touches >= 4:
+            return "قوي"
+        if touches >= 2:
+            return "متوسط"
+        return "ضعيف"
+    except Exception:
+        return "غير واضح"
+
+
+def _count_level_touches(level: float, values: list[float], tolerance_pct: float) -> int:
+    try:
+        level = float(level or 0)
+        if level <= 0:
+            return 0
+        tol = max(level * float(tolerance_pct or 0.01), 0.01)
+        return sum(1 for v in values if v > 0 and abs(float(v) - level) <= tol)
+    except Exception:
+        return 0
+
+
+def build_support_resistance_context(current_price: float, daily_bars: list[dict], intraday: dict, hist: dict | None = None) -> dict:
+    """Build practical support/resistance references.
+
+    This avoids random-looking entries/targets by linking the plan to nearby
+    levels, level strength, and 52-week/ATH context.
+    """
+    hist = hist or {}
+    try:
+        price = float(current_price or 0)
+        bars = list(daily_bars or [])[-260:]
+        highs = [to_float(x.get("h")) for x in bars if to_float(x.get("h")) > 0]
+        lows = [to_float(x.get("l")) for x in bars if to_float(x.get("l")) > 0]
+        closes = [to_float(x.get("c")) for x in bars if to_float(x.get("c")) > 0]
+        if price <= 0 or len(highs) < 10 or len(lows) < 10:
+            return {
+                "nearest_support": 0.0,
+                "nearest_support_label": "غير متوفر",
+                "nearest_support_strength": "غير واضح",
+                "nearest_support_distance_pct": 0.0,
+                "nearest_resistance": 0.0,
+                "nearest_resistance_label": "غير متوفر",
+                "nearest_resistance_strength": "غير واضح",
+                "nearest_resistance_distance_pct": 0.0,
+                "major_resistance": safe_round(hist.get("year_high", 0) or hist.get("ath_high", 0) or 0),
+                "major_resistance_label": "غير متوفر",
+                "levels_summary": "لا توجد بيانات كافية لبناء مستويات دعم/مقاومة موثوقة.",
+            }
+
+        # Add current session high/low because intraday levels matter for execution.
+        session_high = float((intraday or {}).get("session_high", 0) or 0)
+        session_low = float((intraday or {}).get("session_low", 0) or 0)
+        if session_high > 0:
+            highs.append(session_high)
+        if session_low > 0:
+            lows.append(session_low)
+
+        all_level_values = highs + lows + closes
+        tolerance = 0.012
+        support_candidates = [x for x in lows + closes[-60:] if 0 < x < price * 0.999]
+        resistance_candidates = [x for x in highs + closes[-60:] if x > price * 1.001]
+
+        nearest_support = max(support_candidates) if support_candidates else 0.0
+        nearest_resistance = min(resistance_candidates) if resistance_candidates else 0.0
+
+        # Major resistance: next 52w/ATH level above price if available.
+        year_high = float(hist.get("year_high", 0) or 0)
+        ath_high = float(hist.get("ath_high", 0) or 0)
+        major_res_candidates = [x for x in [year_high, ath_high, max(highs[-120:]) if highs else 0] if x > price * 1.003]
+        major_resistance = min(major_res_candidates) if major_res_candidates else (max(highs) if highs else 0)
+
+        support_dist = ((price - nearest_support) / price) * 100 if nearest_support > 0 and price > 0 else 0.0
+        resistance_dist = ((nearest_resistance - price) / price) * 100 if nearest_resistance > 0 and price > 0 else 0.0
+        support_touches = _count_level_touches(nearest_support, all_level_values[-180:], tolerance)
+        resistance_touches = _count_level_touches(nearest_resistance, all_level_values[-180:], tolerance)
+        support_strength = _sr_strength_label(support_touches, support_dist)
+        resistance_strength = _sr_strength_label(resistance_touches, resistance_dist)
+
+        if nearest_support > 0:
+            support_label = f"{support_strength} - يبعد {safe_round(support_dist, 2)}% أسفل السعر"
+        else:
+            support_label = "غير متوفر"
+        if nearest_resistance > 0:
+            resistance_label = f"{resistance_strength} - يبعد {safe_round(resistance_dist, 2)}% فوق السعر"
+        else:
+            resistance_label = "لا توجد مقاومة قريبة واضحة"
+
+        major_label = ""
+        if ath_high > 0 and price >= ath_high * 0.995:
+            major_label = "قرب/اختراق قمة تاريخية"
+        elif year_high > 0 and price >= year_high * 0.97:
+            major_label = "قريب من هاي 52 أسبوع"
+        elif major_resistance > 0:
+            major_label = f"المقاومة الأكبر التالية قرب {safe_round(major_resistance)}"
+        else:
+            major_label = "غير متوفر"
+
+        summary_parts = []
+        if nearest_support > 0:
+            summary_parts.append(f"الدعم الأقرب {safe_round(nearest_support)} ({support_strength})")
+        if nearest_resistance > 0:
+            summary_parts.append(f"المقاومة الأقرب {safe_round(nearest_resistance)} ({resistance_strength})")
+        if major_label:
+            summary_parts.append(major_label)
+
+        return {
+            "nearest_support": safe_round(nearest_support),
+            "nearest_support_label": support_label,
+            "nearest_support_strength": support_strength,
+            "nearest_support_touches": support_touches,
+            "nearest_support_distance_pct": safe_round(support_dist, 2),
+            "nearest_resistance": safe_round(nearest_resistance),
+            "nearest_resistance_label": resistance_label,
+            "nearest_resistance_strength": resistance_strength,
+            "nearest_resistance_touches": resistance_touches,
+            "nearest_resistance_distance_pct": safe_round(resistance_dist, 2),
+            "major_resistance": safe_round(major_resistance),
+            "major_resistance_label": major_label,
+            "year_high": safe_round(year_high),
+            "ath_high": safe_round(ath_high),
+            "near_strong_support": bool(nearest_support > 0 and support_dist <= 2.0 and support_strength in {"قوي", "قوي جدًا"}),
+            "near_strong_resistance": bool(nearest_resistance > 0 and resistance_dist <= 2.0 and resistance_strength in {"قوي", "قوي جدًا"}),
+            "levels_summary": " | ".join(summary_parts) if summary_parts else "لا توجد مستويات واضحة.",
+        }
+    except Exception:
+        return {
+            "nearest_support": 0.0,
+            "nearest_support_label": "غير متوفر",
+            "nearest_support_strength": "غير واضح",
+            "nearest_support_distance_pct": 0.0,
+            "nearest_resistance": 0.0,
+            "nearest_resistance_label": "غير متوفر",
+            "nearest_resistance_strength": "غير واضح",
+            "nearest_resistance_distance_pct": 0.0,
+            "major_resistance": 0.0,
+            "major_resistance_label": "غير متوفر",
+            "levels_summary": "تعذر بناء مستويات الدعم والمقاومة.",
+        }
+
+
+def refine_plan_with_key_levels(trade_type: str, entry: float, stop: float, target1: float, target2: float, sr: dict, daily_bars: list[dict]) -> tuple[float, float, float, float, list[str]]:
+    notes = []
+    try:
+        entry = float(entry or 0)
+        stop = float(stop or 0)
+        target1 = float(target1 or 0)
+        target2 = float(target2 or 0)
+        if entry <= 0:
+            return entry, stop, target1, target2, notes
+
+        atr = float(calculate_atr(daily_bars, 14) or 0)
+        support = float(sr.get("nearest_support", 0) or 0)
+        resistance = float(sr.get("nearest_resistance", 0) or 0)
+        major_resistance = float(sr.get("major_resistance", 0) or 0)
+
+        # Stop should ideally sit below a nearby support, not at an arbitrary
+        # percentage. Only tighten if it remains below entry and reasonable.
+        if support > 0 and support < entry:
+            support_stop = support * 0.985
+            if stop <= 0 or (support_stop > stop and support_stop < entry):
+                stop = support_stop
+                notes.append(f"الوقف حُسّن ليكون أسفل الدعم {safe_round(support)}")
+
+        risk_unit = max(entry - stop, 0)
+        min_target = entry + max(risk_unit * 1.35, atr * 1.2, entry * 0.018)
+
+        # Target 1 should respect nearby resistance if it is above entry and
+        # before the old optimistic target.
+        if resistance > entry * 1.012 and resistance < target1:
+            refined = resistance * 0.995
+            if refined > entry:
+                target1 = max(refined, min_target)
+                notes.append(f"الهدف الأول رُبط بالمقاومة القريبة {safe_round(resistance)}")
+        elif target1 <= entry and min_target > entry:
+            target1 = min_target
+
+        # Target 2 can reference a major 52w/ATH resistance if available.
+        if major_resistance > target1 * 1.01 and major_resistance > entry:
+            target2 = max(target2, major_resistance * 0.995)
+            notes.append(f"الهدف الثاني يراعي المقاومة الأكبر {safe_round(major_resistance)}")
+        elif target2 <= target1:
+            target2 = target1 + max(risk_unit * 0.85, atr * 1.3, entry * 0.025)
+
+        return entry, stop, target1, target2, notes[:4]
+    except Exception:
+        return entry, stop, target1, target2, notes
+
 def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     daily_bars = get_daily_bars(symbol)
     prev = get_prev_from_daily_bars(daily_bars) or get_prev(symbol)
@@ -483,6 +677,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     current_price = live_block["current_price_live"] if live_block["current_price_live"] > 0 else prev["price"]
     high = max(prev["high"], live_block["high_live"] if live_block["high_live"] > 0 else prev["high"])
     low = min(prev["low"], live_block["low_live"] if live_block["low_live"] > 0 else prev["low"])
+    sr_context = build_support_resistance_context(current_price, daily_bars, intraday, hist)
 
     pullback_context = compute_pullback_context(current_price, high, low, intraday, trend_data["trend"])
     trade_type = "Pullback" if pullback_context.get("pullback_candidate") else "Breakout"
@@ -516,6 +711,9 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         target1 = max(high * 0.995, entry * 1.04)
         target2 = max(high * 1.02, entry * 1.08)
 
+    entry, stop, target1, target2, level_refinement_notes = refine_plan_with_key_levels(
+        trade_type, entry, stop, target1, target2, sr_context, daily_bars
+    )
     risk_pct = ((entry - stop) / entry) * 100 if entry > 0 else 0
 
     breakout_quality = breakout_quality_label(
@@ -625,6 +823,15 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         risk_flags.append("سلوك اختراق فاشل")
     if trade_type == "Pullback" and not pullback_context.get("in_pullback_zone"):
         risk_flags.append("الارتداد خارج المنطقة المثالية")
+    try:
+        if sr_context.get("near_strong_resistance"):
+            risk_flags.append(f"قريب من مقاومة {sr_context.get('nearest_resistance_strength', '')}: {sr_context.get('nearest_resistance')}")
+        if sr_context.get("near_strong_support"):
+            risk_flags.append(f"قريب من دعم {sr_context.get('nearest_support_strength', '')}: {sr_context.get('nearest_support')}")
+        for note in level_refinement_notes:
+            risk_flags.append(note)
+    except Exception:
+        pass
 
     ai_summary_parts = [
         f"الاتجاه {trend_data['trend']}",
@@ -660,6 +867,11 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         ai_summary_parts.append("سياق سوق عام فقط")
     if hist["ath_breakout_zone"]:
         ai_summary_parts.append("في منطقة قمة تاريخية")
+    try:
+        if sr_context.get("levels_summary"):
+            ai_summary_parts.append(str(sr_context.get("levels_summary")))
+    except Exception:
+        pass
     if breakout_quality == "FAILED":
         ai_summary_parts.append("شمعة الاختراق فشلت")
     elif breakout_quality == "STRONG":
@@ -721,6 +933,8 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         "owner_action": owner_action_text,
         "intraday": intraday,
         **pullback_context,
+        **sr_context,
+        "level_refinement_notes": level_refinement_notes,
         **levels,
         **timing,
         **live_block,
@@ -742,4 +956,5 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     plan["rr_1"] = safe_round(rr_1_preview)
     plan = apply_decision_layers(plan)
     return plan
+
 
