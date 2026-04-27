@@ -41,6 +41,13 @@ def scan_all(debug: bool = False):
         "source_mode": str((source_diag or {}).get("source_mode", "") or ""),
         "source_market_mode": str((source_diag or {}).get("market_activity_mode", "") or ""),
         "manual_priority_count": int((source_diag or {}).get("manual_priority_count", 0) or 0),
+        "sharia_source_filter_version": str((source_diag or {}).get("sharia_source_filter_version", "") or ""),
+        "sharia_prefilter_candidates": int((source_diag or {}).get("sharia_prefilter_candidates", 0) or 0),
+        "sharia_prefilter_blocked": int((source_diag or {}).get("sharia_prefilter_blocked", 0) or 0),
+        "sharia_prefilter_gray_used": int((source_diag or {}).get("sharia_prefilter_gray_used", 0) or 0),
+        "sharia_prefilter_gray_total": int((source_diag or {}).get("sharia_prefilter_gray_total", 0) or 0),
+        "sharia_prefilter_refill_count": int((source_diag or {}).get("sharia_prefilter_refill_count", 0) or 0),
+        "sample_sharia_prefilter_blocked": (source_diag or {}).get("sharia_prefilter_sample_blocked", [])[:15] if isinstance(source_diag, dict) else [],
         "sample_source_reasons": [source_reasons.get(str(x).upper(), []) for x in raw_symbols[:10]],
         "sample_excluded": [],
         "sample_no_plan": [],
@@ -256,3 +263,4 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
+
