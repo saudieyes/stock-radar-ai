@@ -242,6 +242,12 @@ def trade_scan():
         "source_mode": scan_debug.get("source_mode", ""),
         "source_market_mode": scan_debug.get("source_market_mode", ""),
         "manual_priority_count": int(scan_debug.get("manual_priority_count", 0) or 0),
+        "sharia_source_filter_version": scan_debug.get("sharia_source_filter_version", ""),
+        "sharia_prefilter_candidates": int(scan_debug.get("sharia_prefilter_candidates", 0) or 0),
+        "sharia_prefilter_blocked": int(scan_debug.get("sharia_prefilter_blocked", 0) or 0),
+        "sharia_prefilter_gray_used": int(scan_debug.get("sharia_prefilter_gray_used", 0) or 0),
+        "sharia_prefilter_gray_total": int(scan_debug.get("sharia_prefilter_gray_total", 0) or 0),
+        "sharia_prefilter_refill_count": int(scan_debug.get("sharia_prefilter_refill_count", 0) or 0),
         "count": len(results),
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
@@ -550,3 +556,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
