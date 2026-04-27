@@ -418,6 +418,12 @@ def enrich_display_meta(stock: dict) -> dict:
             summary_bits.append(f"🏭 القطاع: {stock.get('sector_support_label')}")
         else:
             summary_bits.append("🏭 القطاع: غير متوفر (ثقة أقل)")
+        if stock.get("market_sector_live_label"):
+            summary_bits.append(f"⏱️ السوق/القطاع الآن: {stock.get('market_sector_live_label')}")
+        if stock.get("nearest_support"):
+            summary_bits.append(f"🟢 دعم {stock.get('nearest_support_strength', '')}: {safe_round(stock.get('nearest_support'))}")
+        if stock.get("nearest_resistance"):
+            summary_bits.append(f"🔴 مقاومة {stock.get('nearest_resistance_strength', '')}: {safe_round(stock.get('nearest_resistance'))}")
         stock["quick_explainer"] = " | ".join([x for x in summary_bits if x])
         return stock
     except:
@@ -713,4 +719,5 @@ def sort_display_bucket(items):
         ),
         reverse=True,
     )
+
 
