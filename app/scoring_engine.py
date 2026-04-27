@@ -181,6 +181,15 @@ def compute_core_quality_score(
     quality += int(round((float(historical_behavior_score or 50) - 50.0) * 0.14))
     quality += int(round((float(historical_context_score or 50) - 50.0) * 0.10))
 
+    # Market/sector context was previously computed but barely affected the
+    # core score. Keep the impact conservative so it supports good setups
+    # without overpowering price/volume/risk.
+    try:
+        ms_adjustment = max(-6.0, min(6.0, float(market_sector_score or 0) * 0.35))
+        quality += int(round(ms_adjustment))
+    except Exception:
+        pass
+
     return max(1, min(99, int(round(quality))))
 
 
@@ -670,6 +679,7 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
         "smart_stop_price": safe_round(smart_stop_price),
         "smart_target_1": safe_round(smart_target_1),
     }
+
 
 
 
