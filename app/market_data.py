@@ -73,21 +73,79 @@ def get_active_universe(max_symbols: int = 60):
             pass
 
     manual = _manual_priority_symbols(limit=min(40, max_symbols))
-    # Ask the source for a slightly wider pool so manual watchlist/portfolio symbols
-    # do not accidentally push out high-quality source candidates.
-    base = get_scan_universe(max_symbols=min(300, max_symbols + 70)) or []
-    final = []
-    for s in manual + list(base):
+
+    # Sharia-aware Source V2:
+    # ask for a much wider reserve, remove clear non-compliant names early,
+    # then refill from the next-best candidates instead of shrinking the final list.
+    reserve_size = min(300, max_symbols + max(120, int(max_symbols * 0.75)))
+    base = get_scan_universe(max_symbols=reserve_size) or []
+
+    sharia_blocked = []
+    sharia_gray = []
+    sharia_allowed = []
+    sharia_unknown_errors = []
+    seen_candidates = set()
+
+    try:
+        from app.data_store import get_manual_sharia_exclusions_map
+        from app.sharia_filter import assess_sharia_source_fast
+        manual_exclusions = get_manual_sharia_exclusions_map()
+    except Exception:
+        manual_exclusions = {}
+        assess_sharia_source_fast = None
+
+    def _screen_symbol(sym: str):
+        t = str(sym or "").upper().strip()
+        if not t or t in seen_candidates:
+            return
+        seen_candidates.add(t)
+        if assess_sharia_source_fast is None:
+            sharia_allowed.append(t)
+            return
         try:
-            t = str(s).upper().strip()
-        except Exception:
-            t = ""
+            assessment = assess_sharia_source_fast(t, manual_exclusions)
+            if bool(assessment.get("should_block", False)):
+                sharia_blocked.append({
+                    "symbol": t,
+                    "status": assessment.get("status", ""),
+                    "reason": str(assessment.get("reason", "") or "")[:180],
+                })
+                return
+            if bool(assessment.get("is_gray", False)):
+                sharia_gray.append(t)
+                return
+            sharia_allowed.append(t)
+        except Exception as exc:
+            sharia_unknown_errors.append({"symbol": t, "error": f"{type(exc).__name__}: {str(exc)[:120]}"})
+            # Do not lose a candidate only because local sharia data failed.
+            sharia_gray.append(t)
+
+    for s in manual + list(base):
+        _screen_symbol(s)
+
+    final = []
+    # Prefer clean candidates first, then use gray/uncertain candidates only if
+    # needed to preserve opportunity count. Manual exclusions are already blocked.
+    for t in sharia_allowed + sharia_gray:
         if t and t not in final:
             final.append(t)
         if len(final) >= max_symbols:
             break
+
     try:
         record_active_universe_diagnostics(final, manual, max_symbols)
+        # Attach source-level sharia diagnostics without changing the public API.
+        import scanner as _scanner
+        diag = dict(getattr(_scanner, "LAST_SOURCE_DIAGNOSTICS", {}) or {})
+        diag["sharia_source_filter_version"] = "sharia_v2_pre_source_refill"
+        diag["sharia_prefilter_candidates"] = len(seen_candidates)
+        diag["sharia_prefilter_blocked"] = len(sharia_blocked)
+        diag["sharia_prefilter_gray_used"] = len([x for x in final if x in set(sharia_gray)])
+        diag["sharia_prefilter_gray_total"] = len(sharia_gray)
+        diag["sharia_prefilter_refill_count"] = max(0, len(final) - max(0, len(sharia_allowed[:max_symbols])))
+        diag["sharia_prefilter_sample_blocked"] = sharia_blocked[:25]
+        diag["sharia_prefilter_errors"] = sharia_unknown_errors[:15]
+        _scanner.LAST_SOURCE_DIAGNOSTICS = diag
     except Exception:
         pass
     return final
@@ -794,3 +852,4 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
+
