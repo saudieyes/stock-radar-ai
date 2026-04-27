@@ -140,6 +140,21 @@ HARAM_INDUSTRY_KEYWORDS = [
 LOW_PRICE_HARD_BLOCK = 2.0
 LOW_PRICE_WARNING = 3.0
 
+
+# Sharia Filter V2 thresholds (configurable via Railway variables).
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)) or default)
+    except Exception:
+        return float(default)
+
+SHARIA_MAX_DEBT_TO_ASSETS = _env_float("SHARIA_MAX_DEBT_TO_ASSETS", 0.33)
+SHARIA_MAX_INTEREST_EXPENSE_TO_REVENUE = _env_float("SHARIA_MAX_INTEREST_EXPENSE_TO_REVENUE", 0.05)
+SHARIA_MAX_IMPERMISSIBLE_REVENUE_RATIO = _env_float("SHARIA_MAX_IMPERMISSIBLE_REVENUE_RATIO", 0.05)
+SHARIA_GRAY_CASH_TO_ASSETS = _env_float("SHARIA_GRAY_CASH_TO_ASSETS", 0.33)
+SHARIA_BLOCK_GRAY_IN_SOURCE = str(os.getenv("SHARIA_BLOCK_GRAY_IN_SOURCE", "false") or "false").lower() in {"1", "true", "yes", "on"}
+
+
 POSITIVE_NEWS_MAX_SESSIONS = 3
 NEGATIVE_NEWS_MAX_SESSIONS = 5
 
@@ -151,3 +166,4 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
+
