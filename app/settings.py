@@ -154,6 +154,23 @@ SHARIA_MAX_IMPERMISSIBLE_REVENUE_RATIO = _env_float("SHARIA_MAX_IMPERMISSIBLE_RE
 SHARIA_GRAY_CASH_TO_ASSETS = _env_float("SHARIA_GRAY_CASH_TO_ASSETS", 0.33)
 SHARIA_BLOCK_GRAY_IN_SOURCE = str(os.getenv("SHARIA_BLOCK_GRAY_IN_SOURCE", "false") or "false").lower() in {"1", "true", "yes", "on"}
 
+# GitHub sync for durable app-generated data (manual Sharia exclusions, later archives).
+GITHUB_SYNC_TOKEN = str(os.getenv("GITHUB_SYNC_TOKEN", "") or "").strip()
+GITHUB_SYNC_REPO = str(os.getenv("GITHUB_SYNC_REPO", "") or "").strip()  # owner/repo
+GITHUB_SYNC_BRANCH = str(os.getenv("GITHUB_SYNC_BRANCH", "main") or "main").strip()
+GITHUB_SYNC_ENABLED = bool(GITHUB_SYNC_TOKEN and GITHUB_SYNC_REPO)
+GITHUB_SYNC_MANUAL_SHARIA_PATH = str(os.getenv("GITHUB_SYNC_MANUAL_SHARIA_PATH", "app_data/manual_sharia_exclusions.json") or "app_data/manual_sharia_exclusions.json").strip()
+GITHUB_SYNC_TIMEOUT_SEC = _env_float("GITHUB_SYNC_TIMEOUT_SEC", 12.0)
+GITHUB_SYNC_PULL_TTL_SEC = int(_env_float("GITHUB_SYNC_PULL_TTL_SEC", 900.0))
+
+# Source refill controls. These do not cache live price data; they only control how wide
+# the source looks before the Sharia prefilter removes/replaces symbols.
+SHARIA_SOURCE_REFILL_MULTIPLIER = _env_float("SHARIA_SOURCE_REFILL_MULTIPLIER", 3.2)
+SHARIA_SOURCE_REFILL_MIN_RESERVE = int(_env_float("SHARIA_SOURCE_REFILL_MIN_RESERVE", 620.0))
+SHARIA_SOURCE_REFILL_MAX_RESERVE = int(_env_float("SHARIA_SOURCE_REFILL_MAX_RESERVE", 700.0))
+SHARIA_SOURCE_GRAY_MAX_RATIO = _env_float("SHARIA_SOURCE_GRAY_MAX_RATIO", 0.18)
+SHARIA_SOURCE_GRAY_MIN_HARD_CAP = int(_env_float("SHARIA_SOURCE_GRAY_MIN_HARD_CAP", 12.0))
+
 
 POSITIVE_NEWS_MAX_SESSIONS = 3
 NEGATIVE_NEWS_MAX_SESSIONS = 5
@@ -166,4 +183,3 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
-
