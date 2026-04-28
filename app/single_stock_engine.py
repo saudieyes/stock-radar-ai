@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.utils import *
-from app.data_store import get_manual_sharia_exclusions_map
+from app.data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
 from app.performance_tracker import upsert_performance_signal
 from app.strategy_engine import trade_plan_pro, get_prev, get_info
 from app.sharia_filter import get_financials, assess_sharia
@@ -20,6 +20,7 @@ def get_last_scan_debug():
 def scan_all(debug: bool = False):
     global LAST_SCAN_DEBUG
     manual_sharia_exclusions = get_manual_sharia_exclusions_map()
+    manual_sharia_approvals = get_manual_sharia_approvals_map()
     raw_symbols = list(get_active_universe(150) or [])
     source_diag = get_last_source_diagnostics()
     source_reasons = (source_diag or {}).get("reasons", {}) if isinstance(source_diag, dict) else {}
@@ -33,6 +34,7 @@ def scan_all(debug: bool = False):
         "no_plan": 0,
         "errors": 0,
         "manual_exclusions": len(manual_sharia_exclusions or {}),
+        "manual_approvals": len(manual_sharia_approvals or {}),
         "sample_symbols": raw_symbols[:20],
         "source_target": int((source_diag or {}).get("active_target", len(raw_symbols)) or len(raw_symbols)),
         "source_active_count": int((source_diag or {}).get("active_count", len(raw_symbols)) or len(raw_symbols)),
@@ -63,7 +65,7 @@ def scan_all(debug: bool = False):
 
     def process_symbol(s):
         try:
-            p = trade_plan_pro(s, manual_sharia_exclusions)
+            p = trade_plan_pro(s, manual_sharia_exclusions, manual_sharia_approvals)
             if not p:
                 return {"kind": "no_plan", "symbol": s, "reason": "trade_plan_empty"}
             if p.get("type") == "Excluded":
@@ -206,7 +208,8 @@ def build_single_stock_response(symbol: str):
             news_note = news_bundle.get("news_title") or news_bundle.get("news_context_note") or news_bundle.get("news_note", "لا يوجد خبر حديث")
             catalyst_score = news_bundle.get("catalyst_score", 0)
             sharia_map = get_manual_sharia_exclusions_map()
-            sharia_assessment = assess_sharia(symbol, info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"], sharia_map)
+            sharia_approvals = get_manual_sharia_approvals_map()
+            sharia_assessment = assess_sharia(symbol, info["sector"], info["industry"], financials["total_assets"], financials["cash"], financials["total_debt"], sharia_map, sharia_approvals)
             halal_ok = bool(sharia_assessment.get("is_halal", True))
             halal_reason = str(sharia_assessment.get("reason", "") or "")
             live_block = build_live_price_block(symbol, prev, intraday)
@@ -244,7 +247,7 @@ def build_single_stock_response(symbol: str):
         overview = {"symbol": symbol, "available": False}
 
     try:
-        trade_plan = trade_plan_pro(symbol, get_manual_sharia_exclusions_map())
+        trade_plan = trade_plan_pro(symbol, get_manual_sharia_exclusions_map(), get_manual_sharia_approvals_map())
         if trade_plan:
             trade_plan = apply_late_move_filter(trade_plan)
             trade_plan = assign_execution_mode(trade_plan)
