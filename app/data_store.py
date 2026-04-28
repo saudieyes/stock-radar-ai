@@ -162,3 +162,4 @@ def get_manual_sharia_exclusions_map():
 
 def get_manual_sharia_sync_diagnostics() -> dict:
     return dict(_GITHUB_PULL_CACHE or {})
+
