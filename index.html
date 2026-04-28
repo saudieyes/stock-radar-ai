@@ -1011,6 +1011,17 @@
       return `<span class="badge badge-stage">${icon} ${safeText(label)}</span>`;
     }
 
+
+    function grayTechnicalLabel(stock) {
+      const d = String(stock?.decision || '');
+      const orig = String(stock?.original_decision || '').trim();
+      if (!String(stock?.sharia_status || '').toLowerCase().includes('gray') && !stock?.sharia_is_gray && !d.includes('غير محسوم')) return '';
+      if (d === 'دخول قوي غير محسوم شرعيًا' || orig === 'دخول قوي') return 'دخول قوي فنيًا — غير محسوم شرعيًا';
+      if (d === 'دخول بحذر غير محسوم شرعيًا' || orig === 'دخول بحذر') return 'دخول بحذر فنيًا — غير محسوم شرعيًا';
+      if (d === 'تهيئة قوية غير محسومة شرعيًا' || d.includes('تهيئة')) return 'تهيئة قوية فنيًا — غير محسومة شرعيًا';
+      return 'قوي فنيًا — غير محسوم شرعيًا';
+    }
+
     function applyThemeMode(mode) {
       const root = document.documentElement;
       const nextMode = mode === 'dark' ? 'dark' : 'light';
@@ -1201,6 +1212,8 @@
     function createCard(stock) {
       const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
+      const grayLabel = grayTechnicalLabel(stock);
+      const displayDecisionText = grayLabel || safeText(stock.decision);
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
@@ -1261,6 +1274,7 @@
       details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
       details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
       details.push(detailBox('الحالة الشرعية', safeText(stock.sharia_label || 'غير متوفر')));
+      if (grayLabel) details.push(detailBox('التصنيف الفني قبل الشرعية', safeText(grayLabel), false));
       details.push(detailBox('شرح الشرعية', safeText(stock.sharia_reason || ''), true));
       details.push(detailBox('تعويض التأخير', safeText(stock.delayed_compensation_label), true));
       details.push(detailBox('الإنذار المبكر', safeText(stock.early_warning_label), true));
@@ -1314,7 +1328,7 @@
 
           <div class="compact-grid">
             ${compactItem('السوق', safeText(stock.market_phase_label))}
-            ${compactItem('النوع', safeText(stock.decision))}
+            ${compactItem('النوع', displayDecisionText)}
             ${compactItem('قوة الإشارة', `${safeText(stock.signal_strength_label || '—')} (${formatNumber(stock.signal_strength_score || 0)})`, 'قوة الإشارة')}
             ${compactItem('سعر السهم', formatNumber(displayPrice))}
             ${compactItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
@@ -1926,6 +1940,3 @@
   </script>
 </body>
 </html>
-
-
-
