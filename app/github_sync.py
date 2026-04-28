@@ -93,4 +93,3 @@ def push_json_file(path: str, data, message: str = "Sync Stock Radar data") -> d
         }
     except Exception as exc:
         return {"ok": False, "configured": True, "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
-
