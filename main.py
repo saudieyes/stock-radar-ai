@@ -298,10 +298,18 @@ def _build_special_buckets(results: list[dict], market_phase: str) -> tuple[list
             and (breakout in {"STRONG", "WEAK", "N/A"} or readiness >= 58)
         )
         if _is_gray_sharia(stock) and technical_strong:
+            if decision == "دخول قوي":
+                gray_label = "دخول قوي غير محسوم شرعيًا"
+            elif decision == "دخول بحذر":
+                gray_label = "دخول بحذر غير محسوم شرعيًا"
+            elif premarket_like:
+                gray_label = "تهيئة قوية غير محسومة شرعيًا"
+            else:
+                gray_label = "قوي لكن شرعيته غير محسومة"
             gray_bucket.append(_copy_for_bucket(
                 stock,
-                "قوي لكن شرعيته غير محسومة",
-                "كان مؤهلاً فنيًا لفرصة قوية، لكن عدم وضوح الشرعية نقله إلى هذه القائمة المستقلة.",
+                gray_label,
+                "التحليل الفني لم يُخفض بسبب الشرعية الرمادية؛ تم فصله فقط لأن الحكم الشرعي غير محسوم.",
             ))
             used.add(symbol)
             continue
@@ -771,5 +779,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
 
