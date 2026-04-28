@@ -397,13 +397,64 @@
       padding:8px 10px; border-radius:10px; font-size:12px; font-weight:900;
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); color:var(--text-strong);
     }
-    .section-jump-btn:hover, .floating-nav-link:hover { transform: translateY(-1px); opacity:1; }
+    .section-jump-btn:hover, .floating-nav-link:hover, .card-nav-btn:hover { transform: translateY(-1px); opacity:1; }
     .card-actions button, .section-tools button, .actions button { min-height:40px; }
-    .card-actions button { border-radius:14px; padding:10px 12px; }
+    .card-actions {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(136px,1fr));
+      gap:10px;
+      margin-bottom:12px;
+    }
+    .card-actions button { border-radius:16px; padding:11px 12px; font-size:14px; font-weight:900; }
     .soft-primary { background:#1d4ed8 !important; color:#eff6ff !important; }
     .soft-approve { background:#0f766e !important; color:#ecfeff !important; }
     .soft-danger { background:#7f1d1d !important; color:#fee2e2 !important; }
     .refreshing { opacity:.75; pointer-events:none; }
+    .card-local-nav {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+      margin:0 0 12px;
+    }
+    .card-local-nav.bottom { margin:12px 0 10px; }
+    .card-local-nav.details { margin:14px 0 0; }
+    .card-nav-btn {
+      min-height:36px;
+      border:1px solid var(--border-soft);
+      background:var(--panel-bg-soft);
+      color:var(--text-strong);
+      border-radius:13px;
+      padding:8px 6px;
+      font-size:12.5px;
+      font-weight:900;
+      box-shadow:none;
+    }
+    .badges { align-items:center; gap:7px; }
+    .badge {
+      min-height:30px;
+      padding:7px 11px;
+      font-size:12.5px;
+      line-height:1.25;
+      background:var(--panel-bg-soft) !important;
+      color:var(--text-strong) !important;
+      border:1px solid var(--border-soft) !important;
+      box-shadow:none;
+    }
+    .badge-strong { border-color:rgba(34,197,94,.65) !important; }
+    .badge-cautious { border-color:rgba(245,158,11,.70) !important; }
+    .badge-watch { border-color:rgba(59,130,246,.62) !important; }
+    .badge-news-neg, .badge-news-legal { border-color:rgba(239,68,68,.70) !important; }
+    .badge-news-pos { border-color:rgba(34,197,94,.65) !important; }
+    .badge-news-sector, .badge-news-market { border-color:rgba(14,165,233,.62) !important; }
+    .badge-plan, .badge-stage, .badge-phase { border-color:rgba(148,163,184,.55) !important; }
+    .compact-label, .detail-label {
+      font-size:13.5px;
+      font-weight:900;
+      color:var(--text-muted);
+      letter-spacing:0;
+    }
+    .compact-value { font-size:16px; font-weight:900; }
+    .detail-value { font-size:15px; font-weight:700; }
 
     @media (max-width: 860px) {
       .topbar, .hero { grid-template-columns:1fr; display:block; }
@@ -438,8 +489,18 @@
       .summary-line { font-size:13px; }
       .section-header { align-items:flex-start; flex-direction:column; }
       .section-tools { width:100%; justify-content:flex-start; }
-      .section-nav-buttons { width:100%; }
-      .section-jump-btn, .section-tools .detail-toggle { flex:1 1 68px; }
+      .section-tools .detail-toggle { flex:1 1 100%; }
+      .card-local-nav { gap:7px; }
+      .card-nav-btn { min-height:34px; font-size:12px; padding:7px 4px; border-radius:12px; }
+      .card-actions { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+      .card-actions button { min-height:42px; padding:10px 8px; }
+      .compact-label, .detail-label { font-size:14px; }
+      .compact-value { font-size:16px; }
+      .detail-value { font-size:15px; }
+      .symbol { font-size:34px; }
+      .company { font-size:14px; line-height:1.55; }
+      .badges { justify-content:flex-start; }
+      .badge { font-size:13px; padding:8px 10px; }
       .floating-nav-wrap { left:10px; bottom:12px; }
       .floating-nav-toggle { padding:12px 15px; font-size:14px; }
       .floating-nav-menu { min-width:230px; max-height:62vh; }
@@ -1258,6 +1319,25 @@
       cards[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    function jumpSectionCardFrom(contentId, currentIndex, direction) {
+      if (!contentId) return;
+      window.__sectionCursor = window.__sectionCursor || {};
+      window.__sectionCursor[contentId] = Number(currentIndex || 0);
+      jumpSectionCard(contentId, direction);
+    }
+
+    function renderCardNav(contentId, index, extraClass='') {
+      if (!contentId) return '';
+      const safeKey = safeText(contentId);
+      const idx = Number(index || 0);
+      return `<div class="card-local-nav ${safeText(extraClass)}">
+        <button class="card-nav-btn" type="button" onclick="jumpSectionCardFrom('${safeKey}', ${idx}, 'top')">الأول</button>
+        <button class="card-nav-btn" type="button" onclick="jumpSectionCardFrom('${safeKey}', ${idx}, 'prev')">السابق</button>
+        <button class="card-nav-btn" type="button" onclick="jumpSectionCardFrom('${safeKey}', ${idx}, 'next')">التالي</button>
+        <button class="card-nav-btn" type="button" onclick="jumpSectionCardFrom('${safeKey}', ${idx}, 'bottom')">الأخير</button>
+      </div>`;
+    }
+
     async function addToWatchlist(symbol, price) {
       try {
         await apiFetch('/watchlist/add', {
@@ -1291,6 +1371,9 @@
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
+      const cardNavTop = renderCardNav(sectionKey, index, 'top');
+      const cardNavBottom = renderCardNav(sectionKey, index, 'bottom');
+      const cardNavDetails = renderCardNav(sectionKey, index, 'details');
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
@@ -1389,6 +1472,7 @@
 
       return `
         <div class="card" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}">
+          ${cardNavTop}
           <div class="card-top">
             <div>
               <div class="symbol">${safeText(stock.symbol)}</div>
@@ -1445,9 +1529,12 @@
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
 
+          ${cardNavBottom}
+
           <details class="detail-panel">
             <summary>عرض التفاصيل الكاملة</summary>
             <div class="details-grid">${details.join('')}</div>
+            ${cardNavDetails}
           </details>
         </div>`;
     }
@@ -1467,12 +1554,6 @@
             </div>
             <div class="section-tools">
               <button class="ghost detail-toggle" data-section-toggle="${key}" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
-              <div class="section-nav-buttons">
-                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'top')">الأول</button>
-                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'prev')">السابق</button>
-                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'next')">التالي</button>
-                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'bottom')">الأخير</button>
-              </div>
             </div>
           </div>
           <div id="${key}" class="hidden-section" data-rendered="0">
