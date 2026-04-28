@@ -1631,13 +1631,17 @@
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
       try {
-        await apiFetch('/sharia-exclusions/remove', {
+        const res = await apiFetch('/sharia-exclusions/remove', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: clean })
         });
+        const data = await res.json().catch(() => ({}));
+        if (data && data.ok === false) throw new Error(data.error || 'restore_failed');
+
+        // Fast UI action: do not reload the full 190-symbol scan here.
+        // The symbol will be recategorized on the next manual/full scan.
         loadShariaExcluded();
-        await loadScan();
         const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
         if (singleSymbol === clean) {
           scanSingleStock();
@@ -1647,12 +1651,32 @@
       }
     }
 
+    function fastRemoveApprovedGraySymbol(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean || !window.__scanData) return false;
+      let changed = false;
+      const removeFrom = (key) => {
+        const before = Array.isArray(window.__scanData[key]) ? window.__scanData[key].length : 0;
+        window.__scanData[key] = (window.__scanData[key] || []).filter(item => String(item?.symbol || '').toUpperCase() !== clean);
+        if ((window.__scanData[key] || []).length !== before) changed = true;
+      };
+      // Manual approval removes it from the gray bucket immediately without full rescan.
+      ['gray_strong','top_ranked','opening_focus'].forEach(removeFrom);
+      if (!changed) return false;
+      window.__scanData.gray_strong_count = (window.__scanData.gray_strong || []).length;
+      window.__scanData.count = (window.__scanData.strong_entries || []).length
+        + (window.__scanData.cautious_entries || []).length
+        + (window.__scanData.premarket_setups || []).length
+        + (window.__scanData.gray_strong || []).length
+        + (window.__scanData.watchlist || []).length;
+      renderScanData();
+      return true;
+    }
+
     async function approveShariaSymbol(symbol) {
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
-      if (!confirm(`اعتماد ${clean} كمتوافق يدويًا؟
-
-استخدم هذا الزر فقط للأسهم الرمادية/غير المحسومة بعد مراجعتك، وليس للأسهم المرفوضة صراحة بسبب نشاط أو نسب مالية.`)) return;
+      if (!confirm(`اعتماد ${clean} كمتوافق يدويًا؟\n\nاستخدم هذا الزر فقط للأسهم الرمادية/غير المحسومة بعد مراجعتك، وليس للأسهم المرفوضة صراحة بسبب نشاط أو نسب مالية.`)) return;
       try {
         const res = await apiFetch('/sharia-approvals/add', {
           method: 'POST',
@@ -1662,7 +1686,9 @@
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'approval_failed');
 
-        await loadScan();
+        // Do not run a full /trade-scan here; it is too slow during active use.
+        // Remove from gray UI now; next scan will place it in its proper bucket.
+        fastRemoveApprovedGraySymbol(clean);
 
         const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
         if (singleSymbol === clean) {
