@@ -174,6 +174,11 @@ SHARIA_SOURCE_GRAY_MAX_RATIO = _env_float("SHARIA_SOURCE_GRAY_MAX_RATIO", 0.24)
 SHARIA_SOURCE_GRAY_MIN_HARD_CAP = int(_env_float("SHARIA_SOURCE_GRAY_MIN_HARD_CAP", 18.0))
 SHARIA_SOURCE_GRAY_SOFT_CAP = int(_env_float("SHARIA_SOURCE_GRAY_SOFT_CAP", 48.0))
 
+# Fix16 controls: speed up scan execution without caching live price/quote data.
+# Keep universe broad by default, but allow Railway override if needed.
+SCAN_UNIVERSE_TARGET = int(_env_float("SCAN_UNIVERSE_TARGET", 190.0))
+SCAN_MAX_WORKERS = int(_env_float("SCAN_MAX_WORKERS", 16.0))
+
 
 POSITIVE_NEWS_MAX_SESSIONS = 3
 NEGATIVE_NEWS_MAX_SESSIONS = 5
@@ -186,5 +191,3 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
-
-
