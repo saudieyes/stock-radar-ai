@@ -980,6 +980,9 @@
       if (decision === "دخول قوي") return '<span class="badge badge-strong">🔥 دخول قوي</span>';
       if (decision === "دخول بحذر") return '<span class="badge badge-cautious">🟠 دخول بحذر</span>';
       if (decision === "تهيئة قوية قبل الافتتاح") return '<span class="badge badge-stage">🚀 تهيئة قوية قبل الافتتاح</span>';
+      if (decision === "دخول قوي غير محسوم شرعيًا") return '<span class="badge badge-cautious">🔥⚠️ دخول قوي غير محسوم شرعيًا</span>';
+      if (decision === "دخول بحذر غير محسوم شرعيًا") return '<span class="badge badge-cautious">🟠⚠️ دخول بحذر غير محسوم شرعيًا</span>';
+      if (decision === "تهيئة قوية غير محسومة شرعيًا") return '<span class="badge badge-stage">🚀⚠️ تهيئة قوية غير محسومة شرعيًا</span>';
       if (decision === "قوي لكن شرعيته غير محسومة") return '<span class="badge badge-cautious">⚠️ قوي لكن شرعيته غير محسومة</span>';
       if (decision === "مرفوض شرعياً" || decision === "مستبعد يدويًا") return '<span class="badge badge-news-neg">🚫 ' + safeText(decision) + '</span>';
       return '<span class="badge badge-watch">👀 مراقبة</span>';
@@ -1459,7 +1462,7 @@
       document.getElementById('content').innerHTML = `
         ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', 'strong-section')}
         ${renderSection('🚀 تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section')}
-        ${renderSection('⚠️ قوي لكن شرعيته غير محسومة', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section')}
+        ${renderSection('⚠️ فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section')}
         ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section')}
         ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', 'watch-section')}
       `;
@@ -1923,5 +1926,6 @@
   </script>
 </body>
 </html>
+
 
 
