@@ -6,8 +6,8 @@ from scanner import get_scan_universe, get_dynamic_universe_target, record_activ
 from .settings import (
     HISTORY_CACHE, HTTP_SESSION, INTRADAY_CACHE, INTRADAY_CACHE_TTL_CLOSED, INTRADAY_CACHE_TTL_OPEN,
     POLYGON_API_KEY, SNAPSHOT_CACHE, SNAPSHOT_CACHE_TTL_CLOSED, SNAPSHOT_CACHE_TTL_EXTENDED, SNAPSHOT_CACHE_TTL_OPEN,
-    SHARIA_SOURCE_GRAY_MAX_RATIO, SHARIA_SOURCE_GRAY_MIN_HARD_CAP, SHARIA_SOURCE_REFILL_MAX_RESERVE,
-    SHARIA_SOURCE_REFILL_MIN_RESERVE, SHARIA_SOURCE_REFILL_MULTIPLIER,
+    SHARIA_SOURCE_GRAY_MAX_RATIO, SHARIA_SOURCE_GRAY_MIN_HARD_CAP, SHARIA_SOURCE_GRAY_SOFT_CAP,
+    SHARIA_SOURCE_REFILL_MAX_RESERVE, SHARIA_SOURCE_REFILL_MIN_RESERVE, SHARIA_SOURCE_REFILL_MULTIPLIER,
 )
 from .utils import *
 from .utils import _cache_get, _cache_set
@@ -19,6 +19,25 @@ def http_get_json(url, timeout=12):
         return r.json()
     except:
         return {}
+
+
+
+
+# Fix14c: extra clean-refill symbols. These are not auto-approved;
+# every name still passes Sharia Filter V2 before analysis. The goal is to
+# broaden the replacement pool with liquid names that usually have better
+# reference data, so the source is not starved after strict Sharia filtering.
+CLEAN_REFILL_SYMBOLS = [
+    "AAPL","MSFT","NVDA","AMD","META","AMZN","GOOGL","GOOG","TSM","ASML","ADBE","CRM","NOW","SNOW","SHOP","DDOG","NET","MDB","PANW","CRWD","ZS","FTNT","ANET","CDNS","SNPS","KLAC","LRCX","AMAT","TER","QCOM","TXN","ADI","NXPI","ON","MPWR","MU","STX","WDC","DELL","HPQ","NTAP","HPE","IBM","ORCL","INTU","ADSK","TEAM","WDAY","VEEV","PLTR","U","PATH","AI","APPF","ESTC","FSLY","AKAM","TTD","PINS","ROKU","SPOT","UBER","LYFT","DASH","ABNB","BKNG","EXPE",
+    "LLY","NVO","MRK","ABBV","AMGN","GILD","VRTX","REGN","BIIB","ALNY","INCY","TECH","TMO","DHR","A","IDXX","ISRG","SYK","BSX","MDT","EW","DXCM","PODD","HOLX","ALGN","RMD","STE","ZBH","WST","COO","ABT","BAX","BDX","ZTS","HUM","CI","ELV","CNC","GEHC",
+    "CAT","DE","PCAR","CMI","ETN","EMR","ROK","AME","PH","ITW","DOV","XYL","IR","CARR","OTIS","JCI","HON","GE","RTX","LMT","NOC","GD","TXT","HWM","TDG","AXON","FAST","GWW","URI","PWR","FIX","FLS","GNRC","AYI","BLDR","TREX","SWK",
+    "COST","WMT","TGT","DG","DLTR","HD","LOW","TJX","ROST","ULTA","NKE","LULU","DECK","CROX","TPR","RL","SBUX","CMG","YUM","MCD","DRI","TXRH","DPZ","SHAK","DKS","BBY","WING","ELF","CELH","MNST","KO","PEP","KDP","HSY","MDLZ","CL","CLX","PG","CHD","KMB","EL","KVUE","KHC",
+    "LIN","SHW","ECL","APD","NEM","FCX","SCCO","AA","ALB","LTHM","CE","DD","DOW","EMN","PPG","RPM","CF","MOS","NTR","SMG","FMC","CCK","BLL","PKG","IP",
+    "ENPH","FSLR","SEDG","NEE","DUK","SO","AEP","XEL","SRE","PEG","ED","WEC","DTE","EXC","AWK","ATO","CMS","LNT",
+    "TMUS","VZ","T","CHTR","CMCSA","DIS","NFLX","PARA","WBD","NYT","RDDT","SNAP","RBLX","TTWO","EA","MTCH","BMBL",
+    "GM","F","TSLA","RIVN","LCID","NIO","LI","XPEV","MBLY","APTV","BWA","ALV","GNTX","LEA","MGA","ORLY","AZO","AAP",
+    "OKLO","ASTS","RKLB","IONQ","QBTS","RGTI","CRML","MP","NVTS","SOUN","BROS","FIVE","CAVA","RDDT","ARM","SMCI","VRT","CEG","TLN","VST","GTLB","ESTC","DOCN","DUOL","HIMS","HOOD","COIN","MARA","RIOT",
+]
 
 
 def _extract_symbol_from_item(item):
@@ -133,11 +152,13 @@ def get_active_universe(max_symbols: int = 60):
     seen_candidates = set()
 
     try:
-        from app.data_store import get_manual_sharia_exclusions_map
+        from app.data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
         from app.sharia_filter import assess_sharia_source_fast
         manual_exclusions = get_manual_sharia_exclusions_map()
+        manual_approvals = get_manual_sharia_approvals_map()
     except Exception:
         manual_exclusions = {}
+        manual_approvals = {}
         assess_sharia_source_fast = None
 
     def _screen_symbol(sym: str):
@@ -150,7 +171,7 @@ def get_active_universe(max_symbols: int = 60):
             sharia_assessments[t] = {"status": "unknown", "reason": "لم يعمل فحص الشرعية السريع"}
             return
         try:
-            assessment = assess_sharia_source_fast(t, manual_exclusions)
+            assessment = assess_sharia_source_fast(t, manual_exclusions, manual_approvals)
             sharia_assessments[t] = assessment
             if bool(assessment.get("should_block", False)):
                 sharia_blocked.append({
@@ -168,7 +189,7 @@ def get_active_universe(max_symbols: int = 60):
             # Candidate can be used as gray only if there is a clean shortage.
             sharia_gray.append(t)
 
-    for s in manual + list(base):
+    for s in manual + list(base) + CLEAN_REFILL_SYMBOLS:
         _screen_symbol(s)
 
     clean_final = []
@@ -180,9 +201,10 @@ def get_active_universe(max_symbols: int = 60):
 
     # Gray symbols are allowed only as a shortage fallback, and are capped.
     try:
-        gray_cap = max(int(SHARIA_SOURCE_GRAY_MIN_HARD_CAP or 12), int(max_symbols * float(SHARIA_SOURCE_GRAY_MAX_RATIO or 0.18)))
+        gray_cap = max(int(SHARIA_SOURCE_GRAY_MIN_HARD_CAP or 18), int(max_symbols * float(SHARIA_SOURCE_GRAY_MAX_RATIO or 0.24)))
+        gray_cap = min(int(SHARIA_SOURCE_GRAY_SOFT_CAP or 48), gray_cap)
     except Exception:
-        gray_cap = max(12, int(max_symbols * 0.18))
+        gray_cap = 45
     needed_after_clean = max(0, max_symbols - len(clean_final))
     allowed_gray_count = min(needed_after_clean, gray_cap)
 
@@ -214,7 +236,7 @@ def get_active_universe(max_symbols: int = 60):
         diag = dict(getattr(_scanner, "LAST_SOURCE_DIAGNOSTICS", {}) or {})
         gray_set = set(sharia_gray)
         clean_set = set(sharia_allowed)
-        diag["sharia_source_filter_version"] = "sharia_v2_refill14b_unique_hotfix"
+        diag["sharia_source_filter_version"] = "sharia_v2_refill14c_balanced_buckets"
         diag["sharia_refill_reserve_size"] = int(reserve_size)
         diag["sharia_prefilter_candidates"] = len(seen_candidates)
         diag["sharia_prefilter_blocked"] = len(sharia_blocked)
@@ -223,6 +245,8 @@ def get_active_universe(max_symbols: int = 60):
         diag["sharia_prefilter_gray_used"] = len([x for x in final if x in gray_set])
         diag["sharia_prefilter_gray_total"] = len(sharia_gray)
         diag["sharia_prefilter_gray_cap"] = int(gray_cap)
+        diag["sharia_clean_refill_symbols"] = int(len(CLEAN_REFILL_SYMBOLS))
+        diag["sharia_manual_approvals_loaded"] = int(len(manual_approvals or {}))
         diag["sharia_prefilter_clean_shortage"] = max(0, max_symbols - len(clean_final))
         diag["sharia_prefilter_final_shortage"] = max(0, max_symbols - len(final))
         diag["sharia_prefilter_refill_count"] = max(0, len(final) - min(len(sharia_allowed), max_symbols))
