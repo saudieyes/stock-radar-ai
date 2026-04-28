@@ -42,6 +42,7 @@ PERFORMANCE_FILE = str(DATA_DIR / "signal_performance.json")
 MANUAL_WATCHLIST_FILE = str(DATA_DIR / "manual_watchlist.json")
 PORTFOLIO_FILE = str(DATA_DIR / "portfolio_holdings.json")
 MANUAL_SHARIA_EXCLUSIONS_FILE = str(DATA_DIR / "manual_sharia_exclusions.json")
+MANUAL_SHARIA_APPROVALS_FILE = str(DATA_DIR / "manual_sharia_approvals.json")
 
 SECTOR_ETF_MAP =  {
     "technology": "XLK",
@@ -160,6 +161,7 @@ GITHUB_SYNC_REPO = str(os.getenv("GITHUB_SYNC_REPO", "") or "").strip()  # owner
 GITHUB_SYNC_BRANCH = str(os.getenv("GITHUB_SYNC_BRANCH", "main") or "main").strip()
 GITHUB_SYNC_ENABLED = bool(GITHUB_SYNC_TOKEN and GITHUB_SYNC_REPO)
 GITHUB_SYNC_MANUAL_SHARIA_PATH = str(os.getenv("GITHUB_SYNC_MANUAL_SHARIA_PATH", "app_data/manual_sharia_exclusions.json") or "app_data/manual_sharia_exclusions.json").strip()
+GITHUB_SYNC_MANUAL_SHARIA_APPROVALS_PATH = str(os.getenv("GITHUB_SYNC_MANUAL_SHARIA_APPROVALS_PATH", "app_data/manual_sharia_approvals.json") or "app_data/manual_sharia_approvals.json").strip()
 GITHUB_SYNC_TIMEOUT_SEC = _env_float("GITHUB_SYNC_TIMEOUT_SEC", 12.0)
 GITHUB_SYNC_PULL_TTL_SEC = int(_env_float("GITHUB_SYNC_PULL_TTL_SEC", 900.0))
 
@@ -168,8 +170,9 @@ GITHUB_SYNC_PULL_TTL_SEC = int(_env_float("GITHUB_SYNC_PULL_TTL_SEC", 900.0))
 SHARIA_SOURCE_REFILL_MULTIPLIER = _env_float("SHARIA_SOURCE_REFILL_MULTIPLIER", 3.2)
 SHARIA_SOURCE_REFILL_MIN_RESERVE = int(_env_float("SHARIA_SOURCE_REFILL_MIN_RESERVE", 620.0))
 SHARIA_SOURCE_REFILL_MAX_RESERVE = int(_env_float("SHARIA_SOURCE_REFILL_MAX_RESERVE", 700.0))
-SHARIA_SOURCE_GRAY_MAX_RATIO = _env_float("SHARIA_SOURCE_GRAY_MAX_RATIO", 0.18)
-SHARIA_SOURCE_GRAY_MIN_HARD_CAP = int(_env_float("SHARIA_SOURCE_GRAY_MIN_HARD_CAP", 12.0))
+SHARIA_SOURCE_GRAY_MAX_RATIO = _env_float("SHARIA_SOURCE_GRAY_MAX_RATIO", 0.24)
+SHARIA_SOURCE_GRAY_MIN_HARD_CAP = int(_env_float("SHARIA_SOURCE_GRAY_MIN_HARD_CAP", 18.0))
+SHARIA_SOURCE_GRAY_SOFT_CAP = int(_env_float("SHARIA_SOURCE_GRAY_SOFT_CAP", 48.0))
 
 
 POSITIVE_NEWS_MAX_SESSIONS = 3
@@ -183,3 +186,5 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
+
+
