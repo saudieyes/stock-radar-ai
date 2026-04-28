@@ -337,7 +337,7 @@ def _build_special_buckets(results: list[dict], market_phase: str) -> tuple[list
 
 
 @app.get("/trade-scan")
-def trade_scan():
+def trade_scan(include_all: bool = False):
     results = scan_all()
     scan_debug = get_last_scan_debug()
 
@@ -396,7 +396,14 @@ def trade_scan():
         "watchlist": watch[:50],
         "opening_mode_active": is_opening_window(),
         "opening_focus": build_opening_focus(results),
-        "all_results": results,
+        # Fix16 speed: do not send the full 190-row detailed payload to the phone by default.
+        # Sections above already contain the actionable rows; /debug-scan remains available for full inspection.
+        "all_results": results if include_all else [],
+        "all_results_omitted": 0 if include_all else max(0, len(results)),
+        "payload_mode": "full_with_all_results" if include_all else "compact_actionable_sections",
+        "scan_elapsed_sec": scan_debug.get("scan_elapsed_sec", None),
+        "scan_max_workers": scan_debug.get("scan_max_workers", None),
+        "scan_requested_universe": scan_debug.get("scan_requested_universe", None),
     }
 
 
@@ -779,4 +786,3 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
