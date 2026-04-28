@@ -55,12 +55,16 @@ from app.data_store import (
     get_manual_sharia_sync_diagnostics,
     load_manual_sharia_exclusions,
     save_manual_sharia_exclusions,
+    get_manual_sharia_approvals_map,
+    get_manual_sharia_approvals_sync_diagnostics,
+    load_manual_sharia_approvals,
+    save_manual_sharia_approvals,
 )
 from app.github_sync import (
     github_sync_status,
     push_json_file,
 )
-from app.settings import GITHUB_SYNC_MANUAL_SHARIA_PATH
+from app.settings import GITHUB_SYNC_MANUAL_SHARIA_PATH, GITHUB_SYNC_MANUAL_SHARIA_APPROVALS_PATH
 from app.performance_tracker import *
 from app.market_data import *
 from app.historical_engine import *
@@ -227,18 +231,126 @@ def health():
     }
 
 
+
+
+def _stock_score_value(x: dict) -> float:
+    try:
+        return float(x.get("display_rank_score", 0) or 0) or (
+            float(x.get("quality_score", 0) or 0)
+            + float(x.get("execution_readiness_score", 0) or 0) * 0.45
+            + float(x.get("signal_strength_score", 0) or 0) * 0.12
+            + float(x.get("continuation_score", 0) or 0) * 0.10
+        )
+    except Exception:
+        return 0.0
+
+
+def _is_blocked_sharia(stock: dict) -> bool:
+    status = str(stock.get("sharia_status", "") or "").lower()
+    decision = str(stock.get("decision", "") or "")
+    return bool(stock.get("sharia_manual_excluded")) or status in {"non_compliant", "manual_excluded"} or decision in {"مرفوض شرعياً", "مستبعد يدويًا"}
+
+
+def _is_gray_sharia(stock: dict) -> bool:
+    status = str(stock.get("sharia_status", "") or "").lower()
+    return bool(stock.get("sharia_is_gray")) or status == "gray"
+
+
+def _copy_for_bucket(stock: dict, label: str, reason: str = "") -> dict:
+    out = dict(stock or {})
+    out.setdefault("original_decision", stock.get("decision", "") if isinstance(stock, dict) else "")
+    out["decision"] = label
+    if reason:
+        out["special_bucket_reason"] = reason
+        summary = str(out.get("ai_summary", "") or "")
+        if reason not in summary:
+            out["ai_summary"] = (reason + " - " + summary).strip(" -")
+    return out
+
+
+def _build_special_buckets(results: list[dict], market_phase: str) -> tuple[list[dict], list[dict], list[dict]]:
+    """Create Fix14c UX buckets without weakening the clean strong-entry list.
+
+    - Gray strong candidates: technically strong, but Sharia remains unresolved.
+    - Premarket setup: good setups before open that should not be called strong entry yet.
+    - Watch: original watch list minus items promoted to the special buckets.
+    """
+    gray_bucket = []
+    premarket_bucket = []
+    used = set()
+    phase = str(market_phase or "")
+    premarket_like = phase in {"pre_market", "closed", "after_hours"}
+
+    for stock in results or []:
+        symbol = normalize_symbol_text(stock.get("symbol", ""))
+        if not symbol or _is_blocked_sharia(stock):
+            continue
+        quality = float(stock.get("quality_score", 0) or 0)
+        strength = float(stock.get("signal_strength_score", 0) or 0)
+        readiness = float(stock.get("execution_readiness_score", 0) or 0)
+        rr = float(stock.get("rr_1", 0) or 0)
+        breakout = str(stock.get("breakout_quality", "") or "").upper()
+        decision = str(stock.get("decision", "") or "")
+        technical_strong = (
+            quality >= 78
+            and strength >= 82
+            and rr >= 1.05
+            and (breakout in {"STRONG", "WEAK", "N/A"} or readiness >= 58)
+        )
+        if _is_gray_sharia(stock) and technical_strong:
+            gray_bucket.append(_copy_for_bucket(
+                stock,
+                "قوي لكن شرعيته غير محسومة",
+                "كان مؤهلاً فنيًا لفرصة قوية، لكن عدم وضوح الشرعية نقله إلى هذه القائمة المستقلة.",
+            ))
+            used.add(symbol)
+            continue
+        if premarket_like and decision != "دخول قوي" and not _is_gray_sharia(stock):
+            premarket_ready = (
+                quality >= 72
+                and strength >= 72
+                and readiness >= 50
+                and rr >= 0.85
+                and str(stock.get("trend", "") or "") in {"صاعد", "صاعد قوي"}
+            )
+            if premarket_ready:
+                premarket_bucket.append(_copy_for_bucket(
+                    stock,
+                    "تهيئة قوية قبل الافتتاح",
+                    "تهيئة قوية قبل الافتتاح: ليست دخولًا قويًا بعد، وتحتاج تأكيد السعر والحجم بعد الافتتاح.",
+                ))
+                used.add(symbol)
+
+    gray_bucket = sort_display_bucket(gray_bucket)[:18]
+    premarket_bucket = sort_display_bucket(premarket_bucket)[:18]
+    used = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_bucket + premarket_bucket)}
+    watch = [x for x in results or [] if str(x.get("decision", "")) == "مراقبة" and normalize_symbol_text(x.get("symbol", "")) not in used and not _is_blocked_sharia(x)]
+    return gray_bucket, premarket_bucket, sort_display_bucket(watch)
+
+
 @app.get("/trade-scan")
 def trade_scan():
     results = scan_all()
     scan_debug = get_last_scan_debug()
 
-    strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي"])
-    cautious = sort_display_bucket([x for x in results if x.get("decision") == "دخول بحذر"])
-    watch = sort_display_bucket([x for x in results if x.get("decision") == "مراقبة"])
+    phase = get_market_phase()
+    # Clean strong/cautious lists should not include explicit non-compliant or gray names.
+    # Gray technical winners get a separate bucket so the user sees the opportunity without
+    # mistaking it for a clean Sharia entry.
+    strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
+    gray_strong, premarket_setups, watch = _build_special_buckets(results, phase)
+    special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
+    cautious = sort_display_bucket([
+        x for x in results
+        if x.get("decision") == "دخول بحذر"
+        and normalize_symbol_text(x.get("symbol", "")) not in special_symbols
+        and not _is_blocked_sharia(x)
+        and not _is_gray_sharia(x)
+    ])
 
     return {
-        "market_phase": get_market_phase(),
-        "market_phase_label": market_phase_label(get_market_phase()),
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
         "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
         "universe_count": int(scan_debug.get("after_manual_exclusion", scan_debug.get("raw_count", 150)) or 150),
         "source_target": int(scan_debug.get("source_target", scan_debug.get("raw_count", 150)) or 150),
@@ -263,11 +375,16 @@ def trade_scan():
         "count": len(results),
         "strong_entries_count": len(strong),
         "cautious_entries_count": len(cautious),
+        "gray_strong_count": len(gray_strong),
+        "premarket_setups_count": len(premarket_setups),
         "watchlist_count": len(watch),
         "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
+        "manual_sharia_approvals_count": len(load_manual_sharia_approvals()),
         "strong_entries": strong[:25],
         "top_ranked": strong[:25],
         "cautious_entries": cautious[:25],
+        "gray_strong": gray_strong[:25],
+        "premarket_setups": premarket_setups[:25],
         "watchlist": watch[:50],
         "opening_mode_active": is_opening_window(),
         "opening_focus": build_opening_focus(results),
@@ -478,6 +595,51 @@ def sharia_exclusions_remove(payload: dict = Body(...)):
     return {"ok": True, "count": len(items), "symbol": symbol}
 
 
+
+
+@app.post("/sharia-approvals/add")
+def sharia_approvals_add(payload: dict = Body(...)):
+    symbol = normalize_symbol_text(payload.get("symbol", ""))
+    if not symbol:
+        return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
+    note = str(payload.get("note", "") or payload.get("reason", "") or "اعتماد يدوي بعد مراجعة الشرعية").strip()
+    # If user approves a gray symbol, remove it from manual exclusions if present.
+    exclusions = [item for item in load_manual_sharia_exclusions() if normalize_symbol_text(item.get("symbol", "")) != symbol]
+    save_manual_sharia_exclusions(exclusions)
+
+    items = load_manual_sharia_approvals()
+    now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    found = False
+    for item in items:
+        if normalize_symbol_text(item.get("symbol", "")) == symbol:
+            item["note"] = note
+            item["reason"] = note
+            item["updated_at"] = now_str
+            if not item.get("approved_at"):
+                item["approved_at"] = now_str
+            item["source"] = "manual"
+            found = True
+            break
+    if not found:
+        items.insert(0, {"symbol": symbol, "note": note, "reason": note, "approved_at": now_str, "updated_at": now_str, "source": "manual"})
+    save_manual_sharia_approvals(items)
+    return {"ok": True, "count": len(items), "symbol": symbol}
+
+
+@app.post("/sharia-approvals/remove")
+def sharia_approvals_remove(payload: dict = Body(...)):
+    symbol = normalize_symbol_text(payload.get("symbol", ""))
+    items = [item for item in load_manual_sharia_approvals() if normalize_symbol_text(item.get("symbol", "")) != symbol]
+    save_manual_sharia_approvals(items)
+    return {"ok": True, "count": len(items), "symbol": symbol}
+
+
+@app.get("/sharia-approvals")
+def sharia_approvals_get():
+    items = load_manual_sharia_approvals()
+    return {"items": items, "count": len(items)}
+
+
 @app.get("/sharia-exclusions")
 def sharia_exclusions_get():
     items = load_manual_sharia_exclusions()
@@ -510,7 +672,9 @@ def sharia_exclusions_get():
 def data_sync_status():
     status = github_sync_status()
     status["manual_sharia_local_count"] = len(load_manual_sharia_exclusions())
+    status["manual_sharia_approvals_local_count"] = len(load_manual_sharia_approvals())
     status["manual_sharia_last_pull"] = get_manual_sharia_sync_diagnostics()
+    status["manual_sharia_approvals_last_pull"] = get_manual_sharia_approvals_sync_diagnostics()
     return {"ok": True, **status}
 
 
@@ -522,6 +686,20 @@ def data_sync_manual_sharia():
         GITHUB_SYNC_MANUAL_SHARIA_PATH,
         payload,
         message=f"Sync manual Sharia exclusions ({len(payload)} symbols)",
+    )
+    return {"ok": bool(result.get("ok")), "count": len(payload), "result": result}
+
+
+
+
+@app.post("/data-sync/manual-sharia-approvals")
+def data_sync_manual_sharia_approvals():
+    items = load_manual_sharia_approvals(force_github_pull=True)
+    payload = {normalize_symbol_text(item.get("symbol", "")): item for item in items if normalize_symbol_text(item.get("symbol", ""))}
+    result = push_json_file(
+        GITHUB_SYNC_MANUAL_SHARIA_APPROVALS_PATH,
+        payload,
+        message=f"Sync manual Sharia approvals ({len(payload)} symbols)",
     )
     return {"ok": bool(result.get("ok")), "count": len(payload), "result": result}
 
@@ -593,3 +771,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
+
