@@ -50,7 +50,10 @@ def apply_news_decision_guard(decision: str, news_scope: str, news_sentiment: st
     decision = str(decision or "مراقبة")
     scope = str(news_scope or "neutral")
     sentiment = str(news_sentiment or "neutral")
-    sessions = int(news_sessions_since or 999)
+    try:
+        sessions = int(float(news_sessions_since))
+    except Exception:
+        sessions = 999
     quality = float(core_quality or 0)
 
     if scope == "company" and sentiment == "legal":
@@ -86,6 +89,80 @@ def apply_market_sector_decision_guard(decision: str, market_sector_score: float
         return decision
     except:
         return decision
+
+
+def apply_safety_decision_guard(stock: dict, decision: str) -> tuple[str, list[str]]:
+    """Final safety gate for strong entries.
+
+    This gate should not change the technical score. It only prevents a clean
+    "دخول قوي" label when execution risk is not clean enough. Gray Sharia is
+    intentionally not penalized here; it is handled as a separate display bucket.
+    """
+    reasons: list[str] = []
+    try:
+        decision = str(decision or "مراقبة")
+        if decision not in {"دخول قوي", "دخول بحذر"}:
+            return decision, reasons
+
+        news_scope = str(stock.get("news_scope", "neutral") or "neutral")
+        news_sentiment = str(stock.get("news_sentiment", stock.get("news_category", "neutral")) or "neutral")
+        try:
+            news_sessions = int(float(stock.get("news_sessions_since", 999)))
+        except Exception:
+            news_sessions = 999
+        rr_1 = float(stock.get("rr_1", 0) or 0)
+        risk_pct = float(stock.get("risk_pct", 0) or 0)
+        data_quality = str(stock.get("data_quality", "") or "")
+        late_flag = str(stock.get("late_move_flag", "") or "")
+        breakout_status = str(stock.get("breakout_status", "") or "")
+        near_res = bool(stock.get("near_strong_resistance", False))
+        res_dist = float(stock.get("nearest_resistance_distance_pct", 999) or 999)
+        res_strength = str(stock.get("nearest_resistance_strength", "") or "")
+        support_strength = str(stock.get("nearest_support_strength", "") or "")
+        support_dist = float(stock.get("nearest_support_distance_pct", 999) or 999)
+        target_1 = float(stock.get("target_1", 0) or 0)
+        entry = float(stock.get("entry", 0) or 0)
+
+        if news_scope == "company" and news_sentiment in {"negative", "legal"} and news_sessions <= NEGATIVE_NEWS_MAX_SESSIONS:
+            reasons.append("خبر شركة تحذيري/سلبي حديث")
+            if decision == "دخول قوي":
+                decision = "دخول بحذر"
+            elif news_sessions <= 1:
+                decision = "مراقبة"
+
+        if near_res and res_dist <= 0.45 and res_strength in {"قوي", "قوي جدًا"}:
+            reasons.append(f"قريب جدًا من مقاومة {res_strength} ({safe_round(res_dist)}%)")
+            if decision == "دخول قوي":
+                decision = "دخول بحذر"
+
+        if entry > 0 and target_1 > 0:
+            target_room_pct = ((target_1 - entry) / entry) * 100
+            if decision == "دخول قوي" and target_room_pct < 1.15:
+                reasons.append(f"مساحة الهدف الأول ضيقة ({safe_round(target_room_pct)}%)")
+                decision = "دخول بحذر"
+
+        if decision == "دخول قوي" and rr_1 < 0.95:
+            reasons.append(f"العائد/المخاطرة غير مريح للدخول القوي ({safe_round(rr_1)})")
+            decision = "دخول بحذر"
+        elif decision == "دخول بحذر" and rr_1 < 0.55:
+            reasons.append(f"العائد/المخاطرة ضعيف ({safe_round(rr_1)})")
+            decision = "مراقبة"
+
+        if decision == "دخول قوي" and risk_pct > 7.5:
+            reasons.append(f"المخاطرة مرتفعة نسبيًا للدخول القوي ({safe_round(risk_pct)}%)")
+            decision = "دخول بحذر"
+
+        if decision == "دخول قوي" and ("متأخر" in breakout_status or late_flag in {"LATE", "TOO_LATE"}):
+            reasons.append("الدخول متأخر بعد الحركة")
+            decision = "دخول بحذر"
+
+        if decision == "دخول قوي" and data_quality == "low" and not (support_strength in {"قوي", "قوي جدًا"} and support_dist <= 1.0):
+            reasons.append("جودة البيانات ضعيفة ولا يوجد دعم قوي قريب يؤكد الخطة")
+            decision = "دخول بحذر"
+
+        return decision, reasons[:5]
+    except Exception as exc:
+        return decision, [f"تعذر تطبيق بوابة الأمان: {type(exc).__name__}"]
 
 
 def compute_core_quality_score(
@@ -274,7 +351,10 @@ def apply_decision_layers(stock: dict) -> dict:
         rr_1 = float(stock.get("rr_1", 0) or 0)
         news_scope = str(stock.get("news_scope", "neutral") or "neutral")
         news_sentiment = str(stock.get("news_sentiment", stock.get("news_category", "neutral")) or "neutral")
-        news_sessions_since = int(float(stock.get("news_sessions_since", 999) or 999))
+        try:
+            news_sessions_since = int(float(stock.get("news_sessions_since", 999)))
+        except Exception:
+            news_sessions_since = 999
         historical_behavior_score = float(stock.get("historical_behavior_score", 50) or 50)
         historical_context_score = float(stock.get("historical_context_score", 50) or 50)
 
@@ -388,6 +468,9 @@ def apply_decision_layers(stock: dict) -> dict:
             str(stock.get("market_support_label", "") or ""),
             str(stock.get("sector_support_label", "") or ""),
         )
+
+        decision, safety_gate_reasons = apply_safety_decision_guard(stock, decision)
+        stock["safety_gate_reasons"] = safety_gate_reasons
 
         if decision == "دخول قوي" and historical_behavior_score < 42 and historical_context_score < 44 and str(stock.get("historical_confidence_label", "") or "") in {"متوسطة", "عالية"}:
             decision = "دخول بحذر"
@@ -679,7 +762,3 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
         "smart_stop_price": safe_round(smart_stop_price),
         "smart_target_1": safe_round(smart_target_1),
     }
-
-
-
-
