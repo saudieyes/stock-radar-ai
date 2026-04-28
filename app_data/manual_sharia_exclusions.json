@@ -103,6 +103,14 @@
     "symbol": "BMBL",
     "updated_at": "2026-04-21 10:28:48"
   },
+  "BP": {
+    "excluded_at": "2026-04-28 12:26:25",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "BP",
+    "updated_at": "2026-04-28 12:26:25"
+  },
   "BULL": {
     "excluded_at": "2026-04-20 21:47:53",
     "note": "",
@@ -175,6 +183,14 @@
     "symbol": "CMRC",
     "updated_at": "2026-04-20 21:48:31"
   },
+  "CRWV": {
+    "excluded_at": "2026-04-28 12:26:51",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CRWV",
+    "updated_at": "2026-04-28 12:26:51"
+  },
   "CTOS": {
     "excluded_at": "2026-04-24 11:44:16",
     "note": "",
@@ -214,6 +230,14 @@
     "source": "manual",
     "symbol": "DX",
     "updated_at": "2026-04-20 21:44:52"
+  },
+  "ELV": {
+    "excluded_at": "2026-04-28 12:28:56",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ELV",
+    "updated_at": "2026-04-28 12:28:56"
   },
   "ENVX": {
     "excluded_at": "2026-04-21 10:03:53",
@@ -294,6 +318,14 @@
     "source": "manual",
     "symbol": "GLUE",
     "updated_at": "2026-04-22 10:31:09"
+  },
+  "GM": {
+    "excluded_at": "2026-04-27 21:22:43",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "GM",
+    "updated_at": "2026-04-27 21:22:43"
   },
   "GSIT": {
     "excluded_at": "2026-04-26 19:06:02",
