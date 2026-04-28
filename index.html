@@ -392,6 +392,19 @@
     .info-popover-body { color:var(--text-main); font-size:13px; line-height:1.8; }
     .section-count-hint { color:var(--text-muted); font-size:12px; }
 
+    .section-nav-buttons { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .section-jump-btn {
+      padding:8px 10px; border-radius:10px; font-size:12px; font-weight:900;
+      background:var(--panel-bg-soft); border:1px solid var(--border-soft); color:var(--text-strong);
+    }
+    .section-jump-btn:hover, .floating-nav-link:hover { transform: translateY(-1px); opacity:1; }
+    .card-actions button, .section-tools button, .actions button { min-height:40px; }
+    .card-actions button { border-radius:14px; padding:10px 12px; }
+    .soft-primary { background:#1d4ed8 !important; color:#eff6ff !important; }
+    .soft-approve { background:#0f766e !important; color:#ecfeff !important; }
+    .soft-danger { background:#7f1d1d !important; color:#fee2e2 !important; }
+    .refreshing { opacity:.75; pointer-events:none; }
+
     @media (max-width: 860px) {
       .topbar, .hero { grid-template-columns:1fr; display:block; }
       .hero-right, .compact-grid, .details-grid, .form-grid { grid-template-columns:1fr; }
@@ -404,6 +417,32 @@
       .quick-nav { top: 6px; gap:8px; padding:8px; }
       .quick-link { padding:8px 11px; font-size:12px; }
       .scroll-anchor { scroll-margin-top: 82px; }
+    }
+
+    @media (max-width: 760px) {
+      .container { padding: 12px; }
+      .topbar { padding:14px; }
+      .actions { gap:8px; }
+      .actions button { flex:1 1 135px; }
+      .cards { grid-template-columns:1fr; }
+      .card { padding:14px; border-radius:20px; }
+      .card-top { align-items:flex-start; }
+      .symbol { font-size:30px; letter-spacing:.2px; }
+      .company { font-size:13px; line-height:1.5; }
+      .badges { justify-content:flex-start; }
+      .compact-grid { gap:8px; }
+      .compact-item { padding:10px; }
+      .compact-label { font-size:12px; }
+      .compact-value { font-size:15px; line-height:1.5; }
+      .detail-value { font-size:13px; line-height:1.75; }
+      .summary-line { font-size:13px; }
+      .section-header { align-items:flex-start; flex-direction:column; }
+      .section-tools { width:100%; justify-content:flex-start; }
+      .section-nav-buttons { width:100%; }
+      .section-jump-btn, .section-tools .detail-toggle { flex:1 1 68px; }
+      .floating-nav-wrap { left:10px; bottom:12px; }
+      .floating-nav-toggle { padding:12px 15px; font-size:14px; }
+      .floating-nav-menu { min-width:230px; max-height:62vh; }
     }
 
 </style>
@@ -428,8 +467,11 @@
     <div id="floatingNavWrap" class="floating-nav-wrap">
       <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ الوصول</button>
       <div id="floatingNavMenu" class="floating-nav-menu">
+        <button class="floating-nav-link" type="button" onclick="scrollToPageTop()">⬆️ أعلى الصفحة</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('openingSection', 'openingContent')">🚀 الافتتاح</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('strong-section', 'strong-section-content')">🔥 دخول قوي</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('premarket-section', 'premarket-section-content')">🚀 تهيئة قوية</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('gray-strong-section', 'gray-strong-section-content')">⚠️ غير محسومة شرعيًا</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('cautious-section', 'cautious-section-content')">🟠 دخول بحذر</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('watch-section', 'watch-section-content')">👀 المراقبة</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('riskPanelSection')">⚖️ المخاطرة</button>
@@ -438,6 +480,7 @@
         <button class="floating-nav-link" type="button" onclick="openByNav('shariaExcludedSection', 'shariaExcludedContent')">🚫 المستبعدة شرعيًا</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('performanceSection', 'performanceContent')">📊 الأداء</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('singleScanSection')">🔎 فحص سهم</button>
+        <button class="floating-nav-link" type="button" onclick="scrollToPageBottom()">⬇️ أسفل الصفحة</button>
       </div>
     </div>
 
@@ -462,6 +505,8 @@
     <div class="quick-nav">
       <a class="quick-link" href="#openingSection">🚀 الافتتاح</a>
       <a class="quick-link" href="#strong-section">🔥 دخول قوي</a>
+      <a class="quick-link" href="#premarket-section">🚀 تهيئة قوية</a>
+      <a class="quick-link" href="#gray-strong-section">⚠️ غير محسومة</a>
       <a class="quick-link" href="#cautious-section">🟠 دخول بحذر</a>
       <a class="quick-link" href="#watch-section">👀 المراقبة</a>
       <a class="quick-link" href="#riskPanelSection">⚖️ المخاطرة</a>
@@ -651,7 +696,7 @@
 
 
     async function apiFetch(url, options = {}) {
-      const response = await fetch(url, { credentials: 'same-origin', ...options });
+      const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...options });
       if (response.status === 401) {
         window.location.href = '/login';
         throw new Error('auth_required');
@@ -705,7 +750,7 @@
         for (const key of Object.keys(window.__sectionItems)) {
           const el = document.getElementById(key);
           if (el && el.dataset.rendered === '1') {
-            el.innerHTML = `<div class="cards">${(window.__sectionItems[key] || []).map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
+            el.innerHTML = `<div class="cards">${(window.__sectionItems[key] || []).map((item, idx) => createCard(item, key, idx)).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
           }
         }
       }
@@ -819,6 +864,8 @@
     const INFO_TEXTS = {
       '🔥 دخول قوي': { title: 'دخول قوي', body: 'أفضل فرص القائمة حاليًا. الترتيب داخل القسم من الأعلى جودة ثم الأفضل تنفيذًا ثم الأنسب عائدًا.' },
       '🟠 دخول بحذر': { title: 'دخول بحذر', body: 'فرصة جيدة لكنها تحتاج تأكيدًا أكبر أو تنفيذًا أدق أو أن عائدها/مخاطرتها ليست مثالية بعد.' },
+      '🚀 تهيئة قوية قبل الافتتاح': { title: 'تهيئة قوية قبل الافتتاح', body: 'أسهم قوية فنيًا لكنها تحتاج تأكيد السعر والحجم عند الافتتاح قبل أن تتحول إلى دخول قوي أو دخول بحذر.' },
+      '⚠️ فرص قوية غير محسومة شرعيًا': { title: 'فرص قوية غير محسومة شرعيًا', body: 'التحليل الفني قوي، لكن الحكم الشرعي غير محسوم بسبب نقص بيانات أو حاجة لمراجعة يدوية. لا تُخصم نقاط السهم فنيًا بسبب الرمادي، لكنه يُفصل عن الدخول القوي النظيف.' },
       '👀 المراقبة': { title: 'المراقبة', body: 'سهم تحت المتابعة وليس جاهزًا للتنفيذ الآن. استخدمه للترقب لا للدخول السريع.' },
       'جاهزية التنفيذ': { title: 'جاهزية التنفيذ', body: 'هل الخطة صالحة للتنفيذ الآن أم ما زالت تحتاج اختراقًا أو تأكيدًا أو صبرًا أكثر. الرقم بين القوسين درجة داخلية من 0 إلى 99: كلما ارتفع كانت الخطة أقرب للتنفيذ الآن.' },
       'وضع التنفيذ': { title: 'وضع التنفيذ', body: 'الخلاصة العملية الآن: دخول مباشر أو انتظار اختراق أو مراقبة فقط.' },
@@ -1134,7 +1181,7 @@
         }
         if (el.dataset && el.dataset.rendered !== '1' && window.__sectionItems && window.__sectionItems[contentId]) {
           const items = window.__sectionItems[contentId] || [];
-          el.innerHTML = `<div class="cards">${items.map(createCard).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
+          el.innerHTML = `<div class="cards">${items.map((item, idx) => createCard(item, contentId, idx)).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
           el.dataset.rendered = '1';
         }
         el.classList.remove('hidden-section');
@@ -1181,6 +1228,36 @@
       setFloatingQuickNavOpen(false);
     }
 
+
+    function scrollToPageTop() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setFloatingQuickNavOpen(false);
+    }
+
+    function scrollToPageBottom() {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+      setFloatingQuickNavOpen(false);
+    }
+
+    window.__sectionCursor = window.__sectionCursor || {};
+    function jumpSectionCard(contentId, direction) {
+      ensureSectionOpen(contentId);
+      const container = document.getElementById(contentId);
+      if (!container) return;
+      const cards = Array.from(container.querySelectorAll('.card'));
+      if (!cards.length) {
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      let idx = Number(window.__sectionCursor[contentId] || 0);
+      if (direction === 'top') idx = 0;
+      else if (direction === 'bottom') idx = cards.length - 1;
+      else if (direction === 'next') idx = Math.min(cards.length - 1, idx + 1);
+      else if (direction === 'prev') idx = Math.max(0, idx - 1);
+      window.__sectionCursor[contentId] = idx;
+      cards[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     async function addToWatchlist(symbol, price) {
       try {
         await apiFetch('/watchlist/add', {
@@ -1209,7 +1286,7 @@
       } catch (e) {}
     }
 
-    function createCard(stock) {
+    function createCard(stock, sectionKey='', index=0) {
       const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
@@ -1311,7 +1388,7 @@
       }
 
       return `
-        <div class="card">
+        <div class="card" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}">
           <div class="card-top">
             <div>
               <div class="symbol">${safeText(stock.symbol)}</div>
@@ -1362,10 +1439,10 @@
           </div>
 
           <div class="card-actions">
-            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="delete" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
-            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="watch" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا يدويًا</button>` : ''}
-            <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
-            <button onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
+            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
+            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا يدويًا</button>` : ''}
+            <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
+            <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
 
           <details class="detail-panel">
@@ -1390,6 +1467,12 @@
             </div>
             <div class="section-tools">
               <button class="ghost detail-toggle" data-section-toggle="${key}" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
+              <div class="section-nav-buttons">
+                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'top')">الأول</button>
+                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'prev')">السابق</button>
+                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'next')">التالي</button>
+                <button class="section-jump-btn" type="button" onclick="jumpSectionCard('${key}', 'bottom')">الأخير</button>
+              </div>
             </div>
           </div>
           <div id="${key}" class="hidden-section" data-rendered="0">
@@ -1466,6 +1549,7 @@
       const premarket = sortDisplayItems(data.premarket_setups || []);
       const grayStrong = sortDisplayItems(data.gray_strong || []);
       const watch = sortDisplayItems(data.watchlist || []);
+      window.__sectionCursor = {};
       window.__sectionItems = {
         'strong-section-content': strong,
         'cautious-section-content': cautious,
@@ -1547,14 +1631,19 @@
 
     async function loadScan() {
       document.getElementById('content').innerHTML = '<div class="loading">جاري تحميل البيانات...</div>';
+      const btn = document.getElementById('refreshScanBtn');
+      const oldText = btn ? btn.textContent : '';
+      if (btn) { btn.textContent = '⏳ جاري التحديث...'; btn.classList.add('refreshing'); btn.disabled = true; }
       try {
-        const res = await apiFetch('/trade-scan');
+        const res = await apiFetch(`/trade-scan?_=${Date.now()}`);
         const data = await res.json();
         setScanData(data);
         renderScanData();
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
         document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
+      } finally {
+        if (btn) { btn.textContent = oldText || '🔄 تحديث النتائج'; btn.classList.remove('refreshing'); btn.disabled = false; }
       }
     }
 
@@ -1566,7 +1655,7 @@
       try {
         const res = await apiFetch(`/single-stock?symbol=${encodeURIComponent(symbol)}`);
         const data = await res.json();
-        if (data.trade_plan) { holder.dataset.stockJson = JSON.stringify(data.trade_plan); holder.innerHTML = createCard(data.trade_plan); }
+        if (data.trade_plan) { holder.dataset.stockJson = JSON.stringify(data.trade_plan); holder.innerHTML = createCard(data.trade_plan, 'single-stock', 0); }
         else holder.innerHTML = '<div class="error">تعذر استخراج خطة السهم</div>';
       } catch (e) {
         holder.innerHTML = '<div class="error">تعذر فحص السهم</div>';
@@ -1929,8 +2018,7 @@
       }
     }
 
-    async function loadAll() {
-
+    async function loadAll(manual=false) {
       await loadScan();
     }
 
