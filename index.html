@@ -1495,12 +1495,14 @@
         window.__scanData[key] = (window.__scanData[key] || []).filter(item => String(item?.symbol || '').toUpperCase() !== clean);
         if ((window.__scanData[key] || []).length !== before) changed = true;
       };
-      ['strong_entries','cautious_entries','watchlist','top_ranked','all_results','opening_focus'].forEach(removeFrom);
+      ['strong_entries','cautious_entries','premarket_setups','gray_strong','watchlist','top_ranked','all_results','opening_focus'].forEach(removeFrom);
       if (!changed) return false;
       window.__scanData.strong_entries_count = (window.__scanData.strong_entries || []).length;
       window.__scanData.cautious_entries_count = (window.__scanData.cautious_entries || []).length;
+      window.__scanData.premarket_setups_count = (window.__scanData.premarket_setups || []).length;
+      window.__scanData.gray_strong_count = (window.__scanData.gray_strong || []).length;
       window.__scanData.watchlist_count = (window.__scanData.watchlist || []).length;
-      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.watchlist_count;
+      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.premarket_setups_count + window.__scanData.gray_strong_count + window.__scanData.watchlist_count;
       renderScanData();
       return true;
     }
@@ -1642,6 +1644,32 @@
         }
       } catch (e) {
         alert('تعذر إعادة السهم');
+      }
+    }
+
+    async function approveShariaSymbol(symbol) {
+      const clean = (symbol || '').trim().toUpperCase();
+      if (!clean) return;
+      if (!confirm(`اعتماد ${clean} كمتوافق يدويًا؟
+
+استخدم هذا الزر فقط للأسهم الرمادية/غير المحسومة بعد مراجعتك، وليس للأسهم المرفوضة صراحة بسبب نشاط أو نسب مالية.`)) return;
+      try {
+        const res = await apiFetch('/sharia-approvals/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: clean, note: 'اعتماد يدوي من قائمة غير محسومة شرعيًا' })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'approval_failed');
+
+        await loadScan();
+
+        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
+        if (singleSymbol === clean) {
+          scanSingleStock();
+        }
+      } catch (e) {
+        alert('تعذر اعتماد السهم شرعيًا يدويًا');
       }
     }
 
