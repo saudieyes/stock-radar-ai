@@ -103,7 +103,44 @@ def _manual_exclusion_entry(symbol: str, manual_exclusions=None) -> dict:
     return (exclusions or {}).get(symbol, {}) if symbol else {}
 
 
-def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manual_exclusions=None):
+def _manual_approval_entry(symbol: str, manual_approvals=None) -> dict:
+    symbol = normalize_symbol_text(symbol)
+    if isinstance(manual_approvals, dict):
+        approvals = manual_approvals
+    else:
+        try:
+            from .data_store import get_manual_sharia_approvals_map
+            approvals = get_manual_sharia_approvals_map()
+        except Exception:
+            approvals = {}
+    return (approvals or {}).get(symbol, {}) if symbol else {}
+
+
+def _manual_approved_response(symbol: str, approval: dict, base_reason: str = "") -> dict:
+    note = str((approval or {}).get("note", "") or (approval or {}).get("reason", "") or "").strip()
+    reason = "متوافق يدويًا بعد مراجعتك"
+    if base_reason:
+        reason += f"؛ السبب الأصلي: {base_reason}"
+    if note:
+        reason += f" - {note}"
+    return {
+        "status": "manual_approved",
+        "label": "متوافق يدويًا",
+        "reason": reason,
+        "manual_excluded": False,
+        "manual_approved": True,
+        "is_gray": False,
+        "is_halal": True,
+        "should_block": False,
+        "note": note,
+        "debt_to_assets": None,
+        "interest_expense_to_revenue": None,
+        "cash_to_assets": None,
+        "source_filter_action": "allow",
+    }
+
+
+def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manual_exclusions=None, manual_approvals=None):
     """Sharia Filter V2.
 
     The old filter was too late and too blunt. This version:
@@ -120,6 +157,7 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
     industry_l = str(industry).lower().strip()
 
     manual_entry = _manual_exclusion_entry(symbol, manual_exclusions)
+    approval_entry = _manual_approval_entry(symbol, manual_approvals)
     if manual_entry:
         note = str(manual_entry.get("note", "") or manual_entry.get("reason", "") or "").strip()
         reason = "مستبعد يدويًا من قائمتك الشرعية"
@@ -176,11 +214,15 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
         if total_assets <= 0:
             missing_parts.append("الأصول")
         reason_tail = " و ".join(missing_parts) if missing_parts else "البيانات الأساسية"
+        gray_reason = f"الحكم الشرعي غير محسوم بسبب نقص أو قدم بيانات {reason_tail}"
+        if approval_entry:
+            return _manual_approved_response(symbol, approval_entry, gray_reason)
         return {
             "status": "gray",
             "label": "رمادي",
-            "reason": f"الحكم الشرعي غير محسوم بسبب نقص أو قدم بيانات {reason_tail}",
+            "reason": gray_reason,
             "manual_excluded": False,
+            "manual_approved": False,
             "is_gray": True,
             "is_halal": True,
             "should_block": bool(SHARIA_BLOCK_GRAY_IN_SOURCE),
@@ -232,10 +274,15 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
     # We therefore avoid a hard block unless a later data source gives a direct
     # impermissible revenue ratio. For now it becomes gray if it is unusually high.
     if non_operating_income_ratio > max(float(SHARIA_MAX_IMPERMISSIBLE_REVENUE_RATIO or 0.05), 0.10):
+        gray_reason = f"رمادي: دخل غير تشغيلي مرتفع { _ratio_label(non_operating_income_ratio) } ويحتاج تحققًا من مصدره"
+        if approval_entry:
+            resp = _manual_approved_response(symbol, approval_entry, gray_reason)
+            resp.update({"debt_to_assets": safe_round(debt_ratio, 4), "interest_expense_to_revenue": safe_round(interest_expense_ratio, 4), "cash_to_assets": safe_round(cash_ratio, 4)})
+            return resp
         return {
             "status": "gray",
             "label": "رمادي",
-            "reason": f"رمادي: دخل غير تشغيلي مرتفع { _ratio_label(non_operating_income_ratio) } ويحتاج تحققًا من مصدره",
+            "reason": gray_reason,
             "manual_excluded": False,
             "is_gray": True,
             "is_halal": True,
@@ -248,10 +295,15 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
         }
 
     if cash_ratio > float(SHARIA_GRAY_CASH_TO_ASSETS or 0.33):
+        gray_reason = f"رمادي: النقد/الاستثمارات السائلة { _ratio_label(cash_ratio) } من الأصول؛ لا يُستبعد تلقائيًا لكنه يحتاج مراجعة"
+        if approval_entry:
+            resp = _manual_approved_response(symbol, approval_entry, gray_reason)
+            resp.update({"debt_to_assets": safe_round(debt_ratio, 4), "interest_expense_to_revenue": safe_round(interest_expense_ratio, 4), "cash_to_assets": safe_round(cash_ratio, 4)})
+            return resp
         return {
             "status": "gray",
             "label": "رمادي",
-            "reason": f"رمادي: النقد/الاستثمارات السائلة { _ratio_label(cash_ratio) } من الأصول؛ لا يُستبعد تلقائيًا لكنه يحتاج مراجعة",
+            "reason": gray_reason,
             "manual_excluded": False,
             "is_gray": True,
             "is_halal": True,
@@ -268,6 +320,7 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
         "label": "متوافق مبدئيًا",
         "reason": f"مطابق للضوابط المبدئية: الديون { _ratio_label(debt_ratio) }، عبء الفوائد { _ratio_label(interest_expense_ratio) }",
         "manual_excluded": False,
+        "manual_approved": False,
         "is_gray": False,
         "is_halal": True,
         "should_block": False,
@@ -279,7 +332,7 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
     }
 
 
-def assess_sharia_source_fast(symbol: str, manual_exclusions=None) -> dict:
+def assess_sharia_source_fast(symbol: str, manual_exclusions=None, manual_approvals=None) -> dict:
     """Fast pre-source Sharia screen using local datasets only.
 
     It intentionally avoids live quote/news calls so it can run before expensive
@@ -296,6 +349,7 @@ def assess_sharia_source_fast(symbol: str, manual_exclusions=None) -> dict:
         financials.get("cash", 0),
         financials.get("total_debt", 0),
         manual_exclusions,
+        manual_approvals,
     )
 
 
@@ -374,4 +428,5 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
     if trade_type == "Breakout" and current_price < LOW_PRICE_WARNING:
         return -15, "سهم اختراق منخفض السعر (أقل من 3$)"
     return 0, ""
+
 
