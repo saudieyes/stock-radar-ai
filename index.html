@@ -979,6 +979,8 @@
     function badgeDecision(decision) {
       if (decision === "دخول قوي") return '<span class="badge badge-strong">🔥 دخول قوي</span>';
       if (decision === "دخول بحذر") return '<span class="badge badge-cautious">🟠 دخول بحذر</span>';
+      if (decision === "تهيئة قوية قبل الافتتاح") return '<span class="badge badge-stage">🚀 تهيئة قوية قبل الافتتاح</span>';
+      if (decision === "قوي لكن شرعيته غير محسومة") return '<span class="badge badge-cautious">⚠️ قوي لكن شرعيته غير محسومة</span>';
       if (decision === "مرفوض شرعياً" || decision === "مستبعد يدويًا") return '<span class="badge badge-news-neg">🚫 ' + safeText(decision) + '</span>';
       return '<span class="badge badge-watch">👀 مراقبة</span>';
     }
@@ -1338,11 +1340,13 @@
 
           <div class="summary-line">
             <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
+            ${stock.special_bucket_reason ? `<div style="font-weight:900; color:var(--yellow); margin-bottom:6px;">${safeText(stock.special_bucket_reason)}</div>` : ''}
             <div>${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
           </div>
 
           <div class="card-actions">
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="delete" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
+            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="watch" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا يدويًا</button>` : ''}
             <button class="watch" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
@@ -1426,6 +1430,8 @@
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
         <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value green">${formatNumber(data.strong_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value yellow">${formatNumber(data.cautious_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">تهيئة قوية</div><div class="stat-value yellow">${formatNumber(data.premarket_setups_count || 0)}</div></div>
+        <div class="stat"><div class="stat-label">قوي رمادي</div><div class="stat-value yellow">${formatNumber(data.gray_strong_count || 0)}</div></div>
         <div class="stat"><div class="stat-label">استبعاد شرعي مبكر</div><div class="stat-value">${formatNumber(data.sharia_prefilter_blocked || 0)}</div></div>
       `;
 
@@ -1440,14 +1446,20 @@
     function renderSections(data) {
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
+      const premarket = sortDisplayItems(data.premarket_setups || []);
+      const grayStrong = sortDisplayItems(data.gray_strong || []);
       const watch = sortDisplayItems(data.watchlist || []);
       window.__sectionItems = {
         'strong-section-content': strong,
         'cautious-section-content': cautious,
+        'premarket-section-content': premarket,
+        'gray-strong-section-content': grayStrong,
         'watch-section-content': watch,
       };
       document.getElementById('content').innerHTML = `
         ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', 'strong-section')}
+        ${renderSection('🚀 تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section')}
+        ${renderSection('⚠️ قوي لكن شرعيته غير محسومة', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section')}
         ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section')}
         ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', 'watch-section')}
       `;
@@ -1459,6 +1471,8 @@
       window.__scanData = { ...(data || {}) };
       window.__scanData.strong_entries = [...(data?.strong_entries || [])];
       window.__scanData.cautious_entries = [...(data?.cautious_entries || [])];
+      window.__scanData.premarket_setups = [...(data?.premarket_setups || [])];
+      window.__scanData.gray_strong = [...(data?.gray_strong || [])];
       window.__scanData.watchlist = [...(data?.watchlist || [])];
       window.__scanData.opening_focus = [...(data?.opening_focus || [])];
       window.__scanData.top_ranked = [...(data?.top_ranked || [])];
@@ -1641,10 +1655,12 @@
         }
         const res = await apiFetch('/data-sync/manual-sharia', { method: 'POST' });
         const data = await res.json();
-        if (data.ok) {
-          alert(`تمت مزامنة قائمة المستبعدة يدويًا مع GitHub (${data.count || 0} سهم).`);
+        const res2 = await apiFetch('/data-sync/manual-sharia-approvals', { method: 'POST' });
+        const data2 = await res2.json();
+        if (data.ok && data2.ok) {
+          alert(`تمت مزامنة قرارات الشرعية مع GitHub: المستبعدة (${data.count || 0})، المعتمدة يدويًا (${data2.count || 0}).`);
         } else {
-          alert('فشلت المزامنة: ' + safeText(data?.result?.error || data.error || 'خطأ غير معروف'));
+          alert('فشلت المزامنة: ' + safeText(data?.result?.error || data2?.result?.error || data.error || data2.error || 'خطأ غير معروف'));
         }
       } catch (e) {
         alert('تعذر تنفيذ مزامنة GitHub');
