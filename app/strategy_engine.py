@@ -591,9 +591,12 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
     market_sector_context = get_market_sector_context(symbol, info.get("sector", ""), info.get("industry", ""), daily_bars)
     intraday = get_intraday_snapshot(symbol)
     volume_ratio = get_volume_ratio(symbol, intraday, daily_bars)
-    news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
+    # Speed: do not fetch news before the stock proves it is technically worth deeper analysis.
+    # This does not cache live price/quote/intraday data; it only avoids expensive news calls for weak watch names.
+    news_bundle = empty_news_bundle()
+    news_fetch_skipped = True
     news_note = news_bundle.get("news_note", "لا يوجد خبر حديث")
-    catalyst_score = news_bundle.get("catalyst_score", 0)
+    catalyst_score = 0
 
     sharia_assessment = assess_sharia(
         symbol,
@@ -726,6 +729,36 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
     )
 
     pullback_score = int(pullback_context.get("pullback_score", 0) or 0)
+
+    preliminary_core_quality = compute_core_quality_score(
+        trend_data["trend"],
+        effective_volume_ratio,
+        0,
+        hist,
+        breakout_quality,
+        pullback_score,
+        trade_type,
+        price_penalty,
+        risk_pct,
+        "neutral",
+        "neutral",
+        999,
+        market_sector_context.get("market_sector_score", 0),
+        historical_behavior.get("historical_behavior_score", 50),
+        historical_context.get("historical_context_score", 50),
+    )
+
+    should_fetch_news = (
+        preliminary_core_quality >= 58
+        or effective_volume_ratio >= 1.25
+        or (trend_data["trend"] in {"صاعد", "صاعد قوي"} and breakout_quality in {"STRONG", "WEAK"})
+    )
+    if should_fetch_news:
+        news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
+        news_fetch_skipped = False
+        news_note = news_bundle.get("news_note", "لا يوجد خبر حديث")
+        catalyst_score = news_bundle.get("catalyst_score", 0)
+
     core_quality = compute_core_quality_score(
         trend_data["trend"],
         effective_volume_ratio,
@@ -927,6 +960,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
         "news_freshness_label": news_bundle.get("news_freshness_label", ""),
         "news_published_utc": news_bundle.get("news_published_utc", ""),
         "news_sessions_since": news_bundle.get("news_sessions_since", 999),
+        "news_fetch_skipped": bool(news_fetch_skipped),
         "risk_flags": risk_flags,
         "ai_summary": " - ".join(ai_summary_parts),
         "breakout_quality": breakout_quality,
@@ -956,4 +990,20 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
     plan = enrich_strategy_profile(plan)
     plan["rr_1"] = safe_round(rr_1_preview)
     plan = apply_decision_layers(plan)
+    try:
+        safety_reasons = [str(x) for x in (plan.get("safety_gate_reasons") or []) if str(x).strip()]
+        if safety_reasons:
+            existing_flags = list(plan.get("risk_flags") or [])
+            for r in safety_reasons:
+                flag = f"بوابة أمان: {r}"
+                if flag not in existing_flags:
+                    existing_flags.append(flag)
+            plan["risk_flags"] = existing_flags
+            current_summary = str(plan.get("ai_summary", "") or "")
+            safety_summary = " | ".join(safety_reasons[:3])
+            if safety_summary and safety_summary not in current_summary:
+                plan["ai_summary"] = (current_summary + " - " if current_summary else "") + "بوابة الأمان: " + safety_summary
+    except Exception:
+        pass
     return plan
+
