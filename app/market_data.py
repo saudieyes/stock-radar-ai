@@ -32,6 +32,39 @@ def _extract_symbol_from_item(item):
     return ""
 
 
+
+
+def unique_keep_order(items):
+    """Return unique symbols/items while preserving order.
+
+    Fix14b hotfix: market_data.get_active_universe uses this helper locally
+    after moving source filtering into app/market_data.py. Keeping it local
+    avoids depending on scanner.unique_keep_order and prevents /debug-scan
+    from crashing when building the active universe.
+    """
+    out = []
+    seen = set()
+    try:
+        iterable = items or []
+    except Exception:
+        iterable = []
+    for item in iterable:
+        try:
+            if isinstance(item, dict):
+                key = str(item.get("symbol") or item.get("ticker") or "").upper().strip()
+                val = key or item
+            else:
+                key = str(item or "").upper().strip()
+                val = key
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(val)
+        except Exception:
+            continue
+    return out
+
+
 def _manual_priority_symbols(limit: int = 60):
     """Keep user's watched/owned symbols in the source without letting them dominate it."""
     out = []
@@ -181,7 +214,7 @@ def get_active_universe(max_symbols: int = 60):
         diag = dict(getattr(_scanner, "LAST_SOURCE_DIAGNOSTICS", {}) or {})
         gray_set = set(sharia_gray)
         clean_set = set(sharia_allowed)
-        diag["sharia_source_filter_version"] = "sharia_v2_refill14a_wide_clean_first"
+        diag["sharia_source_filter_version"] = "sharia_v2_refill14b_unique_hotfix"
         diag["sharia_refill_reserve_size"] = int(reserve_size)
         diag["sharia_prefilter_candidates"] = len(seen_candidates)
         diag["sharia_prefilter_blocked"] = len(sharia_blocked)
