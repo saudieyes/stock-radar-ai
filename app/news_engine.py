@@ -2,6 +2,47 @@ from .settings import NEWS_SCOPE_LABELS, POLYGON_API_KEY
 from .utils import *
 from .market_data import http_get_json
 
+NEWS_CACHE = {}
+NEWS_CACHE_TTL_SECONDS = 900
+
+def empty_news_bundle() -> dict:
+    return {
+        "news_note": "لا يوجد خبر أو محفز حديث",
+        "news_title": "",
+        "news_badge": "",
+        "news_category": "neutral",
+        "news_sentiment": "neutral",
+        "news_scope": "neutral",
+        "news_scope_label": "خبر محايد",
+        "news_freshness_label": "",
+        "news_published_utc": "",
+        "news_sessions_since": 999,
+        "news_effect_score": 0,
+        "news_is_catalyst": False,
+        "news_context_note": "لا يوجد خبر أو محفز حديث يمكن الاعتماد عليه الآن.",
+        "news_related_tickers_count": 0,
+        "catalyst_score": 0,
+    }
+
+def is_company_warning_news(text_lower: str) -> bool:
+    txt = f" {normalize_text(text_lower)} "
+    warning_phrases = [
+        " founder sold ", " co founder sold ", " co-founder sold ", " insider sold ",
+        " insiders sold ", " insider selling ", " insider sale ", " insider sells ",
+        " ceo sold ", " cfo sold ", " director sold ", " executive sold ",
+        " sold shares worth ", " sold stock worth ", " sells shares worth ",
+        " should investors avoid ", " should you avoid ", " avoid the stock ",
+        " avoid this stock ", " avoid shares ", " stock to avoid ",
+        " shares tumble ", " shares plunge ", " shares sink ", " shares fall ",
+        " cuts price target ", " price target cut ", " lowers price target ",
+        " downgrades ", " downgraded ", " downgrade ",
+        " weak guidance ", " cuts guidance ", " missed estimates ", " misses estimates ",
+        " public offering ", " secondary offering ", " registered direct offering ",
+        " dilution ", " going concern ", " delisting ", " bankruptcy ",
+    ]
+    return any(p in txt for p in warning_phrases)
+
+
 def trading_sessions_since_news(published_utc: str) -> int:
     try:
         ny = ZoneInfo("America/New_York")
@@ -111,6 +152,10 @@ def get_sector_name_variants(sector: str, industry: str) -> list[str]:
 
 
 def detect_news_shape(text_lower: str, related_count: int = 0) -> str:
+    # Warning/company-risk headlines must not be treated as positive opinion pieces.
+    # Example: "Founder sold shares... Should investors avoid?" is a cautionary company event.
+    if is_company_warning_news(text_lower):
+        return "direct"
     opinion_markers = [
         "opinion", "analysis", "article", "my take", "why i like", "why i love",
         "earnings transcript", "conference call transcript", "transcript", "prepared remarks",
@@ -163,12 +208,16 @@ def has_direct_company_event_signal(text_lower: str) -> bool:
         "partnership", "acquires", "acquisition", "merger", "merges", "investigation", "investigates",
         "lawsuit", "class action", "investor alert", "subpoena", "recall", "offering", "buyback",
         "announces", "announced", "reports", "reported", "secures", "expands", "expansion",
-        "opens", "opening of", "opening", "participate in", "participates in", "conference", "summit", "presents at", "presentation"
+        "opens", "opening of", "opening", "participate in", "participates in", "conference", "summit", "presents at", "presentation",
+        "insider sold", "insider selling", "founder sold", "ceo sold", "cfo sold", "director sold", "sold shares",
+        "should investors avoid", "avoid the stock", "downgrade", "downgrades", "price target cut", "cuts price target"
     ]
     return any(k in text_lower for k in event_markers)
 
 
 def detect_news_sentiment(text_lower: str, related_count: int = 0) -> str:
+    if is_company_warning_news(text_lower):
+        return "negative"
     shape = detect_news_shape(text_lower, related_count)
     if shape in {"opinion", "roundup"}:
         return "opinion"
@@ -182,7 +231,11 @@ def detect_news_sentiment(text_lower: str, related_count: int = 0) -> str:
         "declines", "falls", "plunges", "recall", "delay", "bankruptcy", "default", "selloff",
         "pulls back", "pullback", "tension", "tensions", "tariff", "tariffs", "conflict", "war",
         "pressure", "risk off", "slump", "slumps", "crash", "crashed", "fraud", "short report",
-        "weak earnings", "missed estimates", "insider sold", "shareholder alert", "steps down", "step down"
+        "weak earnings", "missed estimates", "insider sold", "shareholder alert", "steps down", "step down",
+        "founder sold", "co founder sold", "co-founder sold", "insider selling", "insider sale",
+        "ceo sold", "cfo sold", "director sold", "executive sold", "sold shares worth",
+        "should investors avoid", "should you avoid", "avoid the stock", "stock to avoid",
+        "cuts price target", "price target cut", "lowers price target", "downgraded"
     ]
     offering_negative = [
         "public offering", "pricing of public offering", "registered direct offering", "secondary offering",
@@ -375,29 +428,18 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
 
 
 def get_news_bundle(symbol, company_name="", sector="", industry=""):
-    bundle = {
-        "news_note": "لا يوجد خبر أو محفز حديث",
-        "news_title": "",
-        "news_badge": "",
-        "news_category": "neutral",
-        "news_sentiment": "neutral",
-        "news_scope": "neutral",
-        "news_scope_label": news_scope_label("neutral"),
-        "news_freshness_label": "",
-        "news_published_utc": "",
-        "news_sessions_since": 999,
-        "news_effect_score": 0,
-        "news_is_catalyst": False,
-        "news_context_note": "لا يوجد خبر أو محفز حديث يمكن الاعتماد عليه الآن.",
-        "news_related_tickers_count": 0,
-        "catalyst_score": 0,
-    }
+    symbol = normalize_symbol_text(symbol)
+    bundle = empty_news_bundle()
     try:
+        cache_key = f"{symbol}|{str(company_name or '')[:60]}|{str(sector or '')[:40]}|{str(industry or '')[:40]}"
+        cached = _cache_get(NEWS_CACHE, cache_key)
+        if cached is not None:
+            return dict(cached)
         url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&order=desc&sort=published_utc&apiKey={POLYGON_API_KEY}"
         r = http_get_json(url, timeout=12)
         results = r.get("results", [])
         if not results:
-            return bundle
+            return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
 
         company_variants = get_company_name_variants(company_name)
         sector_variants = get_sector_name_variants(sector, industry)
@@ -509,7 +551,7 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
 
         chosen = best
         if not chosen:
-            return bundle
+            return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
 
         title_to_show = chosen["title"]
         note_to_show = title_to_show or chosen.get("context_note", "")
@@ -536,6 +578,7 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             "news_related_tickers_count": int(chosen.get("related_count", 0) or 0),
             "catalyst_score": int(chosen.get("impact", 0) or 0),
         })
+        return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
     except:
         pass
     return bundle
@@ -544,5 +587,3 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
 def get_news(symbol, company_name="", sector="", industry=""):
     bundle = get_news_bundle(symbol, company_name, sector, industry)
     return (bundle.get("news_title") or bundle.get("news_context_note") or bundle.get("news_note") or "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
-
-
