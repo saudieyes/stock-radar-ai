@@ -578,7 +578,7 @@ def refine_plan_with_key_levels(trade_type: str, entry: float, stop: float, targ
     except Exception:
         return entry, stop, target1, target2, notes
 
-def trade_plan_pro(symbol, manual_sharia_exclusions=None):
+def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approvals=None):
     daily_bars = get_daily_bars(symbol)
     prev = get_prev_from_daily_bars(daily_bars) or get_prev(symbol)
     if not prev:
@@ -600,6 +600,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
         info["sector"], info["industry"],
         financials["total_assets"], financials["cash"], financials["total_debt"],
         manual_sharia_exclusions,
+        manual_sharia_approvals,
     )
     halal_ok = bool(sharia_assessment.get("is_halal", True))
     halal_reason = str(sharia_assessment.get("reason", "") or "")
@@ -956,5 +957,3 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None):
     plan["rr_1"] = safe_round(rr_1_preview)
     plan = apply_decision_layers(plan)
     return plan
-
-
