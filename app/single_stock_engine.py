@@ -1,3 +1,4 @@
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.utils import *
 from app.data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
@@ -11,6 +12,7 @@ from scanner import apply_late_move_filter, assign_execution_mode, normalize_exe
 from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
 from app.market_data import get_active_universe
+from app.settings import SCAN_UNIVERSE_TARGET, SCAN_MAX_WORKERS
 
 LAST_SCAN_DEBUG = {}
 
@@ -21,7 +23,9 @@ def scan_all(debug: bool = False):
     global LAST_SCAN_DEBUG
     manual_sharia_exclusions = get_manual_sharia_exclusions_map()
     manual_sharia_approvals = get_manual_sharia_approvals_map()
-    raw_symbols = list(get_active_universe(150) or [])
+    scan_started_at = time.time()
+    requested_universe = int(SCAN_UNIVERSE_TARGET or 190)
+    raw_symbols = list(get_active_universe(requested_universe) or [])
     source_diag = get_last_source_diagnostics()
     source_reasons = (source_diag or {}).get("reasons", {}) if isinstance(source_diag, dict) else {}
     symbols = [s for s in raw_symbols if normalize_symbol_text(s) not in manual_sharia_exclusions]
@@ -42,6 +46,7 @@ def scan_all(debug: bool = False):
         "source_engine_version": str((source_diag or {}).get("engine_version", "") or ""),
         "source_mode": str((source_diag or {}).get("source_mode", "") or ""),
         "source_market_mode": str((source_diag or {}).get("market_activity_mode", "") or ""),
+        "scan_requested_universe": int(requested_universe),
         "manual_priority_count": int((source_diag or {}).get("manual_priority_count", 0) or 0),
         "sharia_source_filter_version": str((source_diag or {}).get("sharia_source_filter_version", "") or ""),
         "sharia_prefilter_candidates": int((source_diag or {}).get("sharia_prefilter_candidates", 0) or 0),
@@ -117,7 +122,8 @@ def scan_all(debug: bool = False):
         except Exception as e:
             return {"kind": "error", "symbol": s, "error": f"{type(e).__name__}: {str(e)[:260]}"}
 
-    max_workers = min(12, max(4, len(symbols))) if symbols else 4
+    max_workers = min(int(SCAN_MAX_WORKERS or 16), max(4, len(symbols))) if symbols else 4
+    diag["scan_max_workers"] = int(max_workers)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(process_symbol, s) for s in symbols]
         for future in as_completed(futures):
@@ -169,6 +175,7 @@ def scan_all(debug: bool = False):
     diag["strong"] = len([x for x in rows if str(x.get("decision", "")) == "دخول قوي"])
     diag["cautious"] = len([x for x in rows if str(x.get("decision", "")) == "دخول بحذر"])
     diag["watch"] = len([x for x in rows if str(x.get("decision", "")) == "مراقبة"])
+    diag["scan_elapsed_sec"] = round(time.time() - scan_started_at, 2)
     diag["sample_rows"] = [
         {
             "symbol": x.get("symbol"),
@@ -272,5 +279,3 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
-
-
