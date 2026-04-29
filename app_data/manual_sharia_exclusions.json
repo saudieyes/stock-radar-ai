@@ -119,6 +119,14 @@
     "symbol": "BULL",
     "updated_at": "2026-04-20 21:47:53"
   },
+  "CAVA": {
+    "excluded_at": "2026-04-28 20:07:47",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CAVA",
+    "updated_at": "2026-04-28 20:07:47"
+  },
   "CBIO": {
     "excluded_at": "2026-04-22 10:23:59",
     "note": "",
@@ -183,6 +191,14 @@
     "symbol": "CMRC",
     "updated_at": "2026-04-20 21:48:31"
   },
+  "CNC": {
+    "excluded_at": "2026-04-28 20:16:59",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CNC",
+    "updated_at": "2026-04-28 20:16:59"
+  },
   "CRWV": {
     "excluded_at": "2026-04-28 12:26:51",
     "note": "استبعاد يدوي شرعي",
@@ -222,6 +238,14 @@
     "source": "manual",
     "symbol": "DNUT",
     "updated_at": "2026-04-20 21:37:24"
+  },
+  "DOUG": {
+    "excluded_at": "2026-04-28 20:13:44",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DOUG",
+    "updated_at": "2026-04-28 20:13:44"
   },
   "DX": {
     "excluded_at": "2026-04-20 21:44:52",
@@ -606,6 +630,14 @@
     "source": "manual",
     "symbol": "RUM",
     "updated_at": "2026-04-27 10:03:13"
+  },
+  "SANM": {
+    "excluded_at": "2026-04-28 20:15:44",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "SANM",
+    "updated_at": "2026-04-28 20:15:44"
   },
   "SHIM": {
     "excluded_at": "2026-04-27 17:54:55",
