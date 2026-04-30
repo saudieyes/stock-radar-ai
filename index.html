@@ -1175,6 +1175,9 @@
       if (baseCategory === 'negative') {
         return { category: 'negative', badge };
       }
+      if (baseCategory === 'mixed') {
+        return { category: 'mixed', badge };
+      }
       if (baseCategory === 'positive') {
         return { category: 'positive', badge };
       }
@@ -1198,6 +1201,7 @@
       else if (visual.category === "negative") cls = "badge-news-neg";
       else if (visual.category === "legal") cls = "badge-news-legal";
       else if (visual.category === "opinion") cls = "badge-news-op";
+      else if (visual.category === "mixed") cls = "badge-news-neu";
       else if (visual.category === "market") cls = "badge-news-market";
       else if (visual.category === "sector") cls = "badge-news-sector";
       return `<span class="badge ${cls}">${safeText(visual.badge)}</span>`;
@@ -2109,3 +2113,4 @@
   </script>
 </body>
 </html>
+
