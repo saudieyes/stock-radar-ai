@@ -1,9 +1,37 @@
+from collections import Counter
+
 from .settings import NEWS_SCOPE_LABELS, POLYGON_API_KEY
 from .utils import *
 from .market_data import http_get_json
 
 NEWS_CACHE = {}
 NEWS_CACHE_TTL_SECONDS = 900
+NEWS_DIAGNOSTICS = {}
+
+def _record_news_diag(symbol: str, diag: dict) -> None:
+    try:
+        NEWS_DIAGNOSTICS[normalize_symbol_text(symbol)] = dict(diag or {})
+        if len(NEWS_DIAGNOSTICS) > 500:
+            for k in list(NEWS_DIAGNOSTICS.keys())[:100]:
+                NEWS_DIAGNOSTICS.pop(k, None)
+    except Exception:
+        pass
+
+def get_news_diagnostics(symbol: str | None = None) -> dict:
+    try:
+        if symbol:
+            key = normalize_symbol_text(symbol)
+            return dict(NEWS_DIAGNOSTICS.get(key, {}) or {})
+        return {k: dict(v or {}) for k, v in list(NEWS_DIAGNOSTICS.items())[-80:]}
+    except Exception:
+        return {}
+
+def _diag_reject(counter: Counter, reason: str) -> None:
+    try:
+        counter[str(reason or "unknown")] += 1
+    except Exception:
+        pass
+
 
 def empty_news_bundle() -> dict:
     return {
@@ -245,6 +273,7 @@ def detect_news_sentiment(text_lower: str, related_count: int = 0) -> str:
         "beat", "beats", "strong guidance", "raises guidance", "buyback", "surge", "jumps", "soars",
         "wins", "upgrade", "partnership", "contract", "record revenue", "secures", "launch",
         "breakthrough", "approval", "expands", "growth", "record", "tops estimates", "award",
+        "awarded", "agreement", "deal", "signs", "signed", "selected", "collaboration", "teams up",
         "rebound", "rally", "gains", "strong demand", "new order", "orders", "opening of", "opens"
     ]
 
@@ -430,26 +459,67 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
 def get_news_bundle(symbol, company_name="", sector="", industry=""):
     symbol = normalize_symbol_text(symbol)
     bundle = empty_news_bundle()
+    diag = {
+        "symbol": symbol,
+        "provider": "polygon",
+        "status": "init",
+        "raw_count": 0,
+        "candidate_count": 0,
+        "actionable_count": 0,
+        "context_count": 0,
+        "rejected_count": 0,
+        "rejected_reasons": {},
+        "sample_raw_titles": [],
+        "sample_candidates": [],
+        "selected_title": "",
+        "selected_scope": "",
+        "selected_sentiment": "",
+        "selected_effect": 0,
+        "fallback_context_used": False,
+        "error": "",
+    }
     try:
         cache_key = f"{symbol}|{str(company_name or '')[:60]}|{str(sector or '')[:40]}|{str(industry or '')[:40]}"
         cached = _cache_get(NEWS_CACHE, cache_key)
         if cached is not None:
-            return dict(cached)
-        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=10&order=desc&sort=published_utc&apiKey={POLYGON_API_KEY}"
+            cached_bundle = dict(cached)
+            cached_diag = dict(cached_bundle.get("news_debug", {}) or {})
+            if cached_diag:
+                cached_diag["cache_hit"] = True
+                _record_news_diag(symbol, cached_diag)
+            return cached_bundle
+
+        if not POLYGON_API_KEY:
+            diag["status"] = "missing_polygon_api_key"
+            bundle["news_debug"] = diag
+            _record_news_diag(symbol, diag)
+            return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
+
+        url = f"https://api.polygon.io/v2/reference/news?ticker={symbol}&limit=20&order=desc&sort=published_utc&apiKey={POLYGON_API_KEY}"
         r = http_get_json(url, timeout=12)
-        results = r.get("results", [])
+        results = r.get("results", []) if isinstance(r, dict) else []
+        diag["raw_count"] = len(results or [])
+        diag["status"] = "no_raw_news" if not results else "raw_news_received"
         if not results:
+            bundle["news_debug"] = diag
+            _record_news_diag(symbol, diag)
             return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
 
         company_variants = get_company_name_variants(company_name)
         sector_variants = get_sector_name_variants(sector, industry)
-        best = None
-        best_score = -9999
+        best_actionable = None
+        best_actionable_score = -9999
+        best_context = None
+        best_context_score = -9999
+        reject_counts = Counter()
 
         for item in results:
             title = str(item.get("title", "") or "").strip()
             desc = str(item.get("description", "") or item.get("summary", "") or "").strip()
+            if title and len(diag["sample_raw_titles"]) < 8:
+                diag["sample_raw_titles"].append(title[:220])
             if not title:
+                _diag_reject(reject_counts, "empty_title")
                 continue
 
             full_text = normalize_text(f"{title} {desc}")
@@ -482,21 +552,8 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             elif news_shape == "opinion":
                 relevance -= 14
 
-            scope_priority = {
-                "company": 64,
-                "sector": 32,
-                "market": 14,
-                "neutral": 4,
-                "opinion": -24,
-                "unrelated": -26,
-            }.get(scope, 0)
-            sentiment_bonus = {
-                "positive": 3,
-                "negative": 5,
-                "legal": 10,
-                "neutral": 0,
-                "opinion": -10,
-            }.get(sentiment, 0)
+            scope_priority = {"company": 64, "sector": 32, "market": 14, "neutral": 4, "opinion": -24, "unrelated": -26}.get(scope, 0)
+            sentiment_bonus = {"positive": 3, "negative": 5, "legal": 10, "neutral": 0, "opinion": -10}.get(sentiment, 0)
             candidate_score = scope_priority + relevance + freshness_score + (abs(effect) * 5) + sentiment_bonus
             if scope == "market" and sentiment == "neutral":
                 candidate_score -= 8
@@ -522,45 +579,101 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
                 "sessions_since": sessions_since,
                 "context_note": context_note,
                 "related_count": related_count,
+                "shape": news_shape,
+                "score": candidate_score,
             }
+            diag["candidate_count"] += 1
+            if len(diag["sample_candidates"]) < 8:
+                diag["sample_candidates"].append({
+                    "title": title[:180],
+                    "scope": scope,
+                    "sentiment": sentiment,
+                    "shape": news_shape,
+                    "sessions_since": sessions_since,
+                    "effect": effect,
+                    "score": round(candidate_score, 2),
+                    "related_count": related_count,
+                })
 
-            hard_excluded = False
+            context_ok = (
+                scope in {"company", "sector"}
+                and news_shape == "direct"
+                and sessions_since <= 3
+                and candidate_score > 20
+                and sentiment in {"neutral", "positive", "negative", "legal"}
+            )
+            if context_ok:
+                diag["context_count"] += 1
+                context_score = candidate_score + (8 if scope == "company" else 0) - (0 if sentiment != "neutral" else 4)
+                if context_score > best_context_score:
+                    best_context_score = context_score
+                    best_context = dict(candidate)
+
+            hard_reasons = []
             if news_shape in {"opinion", "roundup"}:
-                hard_excluded = True
+                hard_reasons.append(news_shape)
             if "transcript" in full_text or "prepared remarks" in full_text:
-                hard_excluded = True
+                hard_reasons.append("transcript")
             if not is_news_within_session_limit(scope, sentiment, sessions_since):
-                hard_excluded = True
+                hard_reasons.append("outside_session_limit_or_non_actionable")
             if scope not in {"company", "sector"}:
-                hard_excluded = True
+                hard_reasons.append(f"scope_{scope}")
             if sentiment not in {"positive", "negative", "legal"}:
-                hard_excluded = True
+                hard_reasons.append(f"sentiment_{sentiment}")
             if scope == "sector" and news_shape != "direct":
-                hard_excluded = True
+                hard_reasons.append("sector_not_direct")
             if scope == "company" and related_count >= 2 and not direct_event:
-                hard_excluded = True
+                hard_reasons.append("multi_ticker_without_company_event")
             if candidate_score <= 0:
-                hard_excluded = True
+                hard_reasons.append("low_score")
 
-            if hard_excluded:
+            if hard_reasons:
+                diag["rejected_count"] += 1
+                for reason in hard_reasons[:3]:
+                    _diag_reject(reject_counts, reason)
                 continue
 
-            if candidate_score > best_score:
-                best_score = candidate_score
-                best = candidate
+            diag["actionable_count"] += 1
+            if candidate_score > best_actionable_score:
+                best_actionable_score = candidate_score
+                best_actionable = candidate
 
-        chosen = best
+        chosen = best_actionable
+        fallback_context_used = False
+        if not chosen and best_context:
+            chosen = best_context
+            fallback_context_used = True
+
+        diag["rejected_reasons"] = dict(reject_counts.most_common(12))
         if not chosen:
+            diag["status"] = "no_selected_news_after_filter"
+            bundle["news_debug"] = diag
+            _record_news_diag(symbol, diag)
             return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
 
         title_to_show = chosen["title"]
         note_to_show = title_to_show or chosen.get("context_note", "")
         badge_to_show = chosen.get("badge", "")
-        if chosen.get("scope") in {"opinion", "unrelated", "neutral", "market"}:
+        if chosen.get("scope") in {"opinion", "unrelated", "market"}:
             title_to_show = ""
             badge_to_show = ""
             note_to_show = chosen.get("context_note", "") or "لا يوجد خبر أو محفز حديث"
 
+        impact = int(chosen.get("impact", 0) or 0)
+        is_catalyst = (not fallback_context_used) and chosen.get("scope") in {"company", "sector"} and impact != 0
+        catalyst_score = impact if is_catalyst else 0
+        context_note = chosen.get("context_note", "")
+        if fallback_context_used and context_note:
+            context_note += " لا يُحسب كمحفز لأنه خبر سياقي/محايد."
+
+        diag.update({
+            "status": "selected_actionable" if best_actionable else "selected_context_fallback",
+            "selected_title": title_to_show,
+            "selected_scope": chosen.get("scope", ""),
+            "selected_sentiment": chosen.get("sentiment", ""),
+            "selected_effect": catalyst_score,
+            "fallback_context_used": fallback_context_used,
+        })
         bundle.update({
             "news_note": note_to_show,
             "news_title": title_to_show,
@@ -572,15 +685,20 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             "news_freshness_label": chosen.get("freshness_label", ""),
             "news_published_utc": chosen.get("published_utc", ""),
             "news_sessions_since": chosen.get("sessions_since", 999),
-            "news_effect_score": int(chosen.get("impact", 0) or 0),
-            "news_is_catalyst": chosen.get("scope") in {"company", "sector"} and int(chosen.get("impact", 0) or 0) != 0,
-            "news_context_note": chosen.get("context_note", ""),
+            "news_effect_score": impact if not fallback_context_used else 0,
+            "news_is_catalyst": is_catalyst,
+            "news_context_note": context_note,
             "news_related_tickers_count": int(chosen.get("related_count", 0) or 0),
-            "catalyst_score": int(chosen.get("impact", 0) or 0),
+            "catalyst_score": catalyst_score,
+            "news_debug": diag,
         })
+        _record_news_diag(symbol, diag)
         return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
-    except:
-        pass
+    except Exception as exc:
+        diag["status"] = "error"
+        diag["error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
+        bundle["news_debug"] = diag
+        _record_news_diag(symbol, diag)
     return bundle
 
 
