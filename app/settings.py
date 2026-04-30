@@ -180,6 +180,20 @@ SCAN_UNIVERSE_TARGET = int(_env_float("SCAN_UNIVERSE_TARGET", 190.0))
 SCAN_MAX_WORKERS = int(_env_float("SCAN_MAX_WORKERS", 16.0))
 
 
+# AI news classifier (Claude / Anthropic). The model classifies news only;
+# the trading engine still decides whether catalyst points are allowed.
+def _env_bool(name: str, default: bool = False) -> bool:
+    return str(os.getenv(name, "true" if default else "false") or ("true" if default else "false")).strip().lower() in {"1", "true", "yes", "on"}
+
+ANTHROPIC_API_KEY = str(os.getenv("ANTHROPIC_API_KEY", "") or "").strip()
+AI_NEWS_PROVIDER = str(os.getenv("AI_NEWS_PROVIDER", "claude") or "claude").strip().lower()
+AI_NEWS_MODEL = str(os.getenv("AI_NEWS_MODEL", "claude-haiku-4-5-20251001") or "claude-haiku-4-5-20251001").strip()
+AI_NEWS_ENABLED = _env_bool("AI_NEWS_ENABLED", False) and bool(ANTHROPIC_API_KEY)
+AI_NEWS_TIMEOUT_SEC = _env_float("AI_NEWS_TIMEOUT_SEC", 8.0)
+AI_NEWS_CACHE_TTL_SECONDS = int(_env_float("AI_NEWS_CACHE_TTL_SECONDS", 21600.0))
+AI_NEWS_MIN_CONFIDENCE = int(_env_float("AI_NEWS_MIN_CONFIDENCE", 70.0))
+AI_NEWS_MAX_CLASSIFY_PER_SYMBOL = int(_env_float("AI_NEWS_MAX_CLASSIFY_PER_SYMBOL", 1.0))
+
 POSITIVE_NEWS_MAX_SESSIONS = 3
 NEGATIVE_NEWS_MAX_SESSIONS = 5
 
@@ -191,3 +205,4 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
+
