@@ -1207,6 +1207,28 @@
       return `<span class="badge ${cls}">${safeText(visual.badge)}</span>`;
     }
 
+    function renderNewsDetails(stock) {
+      const badge = newsBadge(stock);
+      const title = String(stock.news_title || '').trim();
+      const publicSummary = String(stock.news_public_summary || '').trim();
+      const detail = String(stock.metric_news?.detail || stock.news_context_note || '').trim();
+      const scope = String(stock.news_scope || '').toLowerCase();
+      const parts = [];
+      if (badge) parts.push(`<div style="margin-bottom:8px;">${badge}</div>`);
+      if (title) parts.push(`<div style="font-weight:900; margin-bottom:8px;">${safeText(title)}</div>`);
+      if (publicSummary && publicSummary !== title) {
+        parts.push(`<div style="font-weight:800; margin-bottom:8px;">${safeText(publicSummary)}</div>`);
+      }
+      if (detail && detail !== title && detail !== publicSummary) {
+        parts.push(`<div>${safeText(detail)}</div>`);
+      }
+      if (!parts.length) return 'لا يوجد خبر شركة مباشر مؤثر الآن.';
+      if (scope !== 'company') {
+        parts.push(`<div style="margin-top:8px; font-weight:800;">لا يضيف نقاط Catalyst ولا يرفع ترتيب السهم.</div>`);
+      }
+      return parts.join('');
+    }
+
     function hasPrimaryNews(stock) {
       const scope = String(stock.news_scope || '').toLowerCase();
       const title = String(stock.news_title || '').trim();
@@ -1442,8 +1464,7 @@
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
       details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', renderHistoricalContextBreakdown(stock), true, 'درجة التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
-      details.push(detailBox('المحفز/الخبر', `${newsBadge(stock)} <div style="margin-top:8px;">${safeText(newsHeadlineText(stock))}</div>`, true));
-      details.push(detailBox('شرح الخبر', safeText(stock.metric_news?.detail || ''), true));
+      details.push(detailBox('الأخبار', renderNewsDetails(stock), true));
       details.push(detailBox('الحالة الشرعية', safeText(stock.sharia_label || 'غير متوفر')));
       if (grayLabel) details.push(detailBox('التصنيف الفني قبل الشرعية', safeText(grayLabel), false));
       details.push(detailBox('شرح الشرعية', safeText(stock.sharia_reason || ''), true));
