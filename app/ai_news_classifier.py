@@ -151,8 +151,10 @@ def classify_news_with_ai(symbol: str, company_name: str, sector: str, industry:
                 "If the article is about another company and not this stock: scope=unrelated, catalyst_allowed=false.",
                 "If the title directly mentions this symbol/company and describes a real event: prefer scope=company over sector.",
                 "Do not classify as sector if stock sector/industry is unknown or the sector relationship is speculative.",
+                "Sector and market news are context-only: catalyst_allowed=false even when positive.",
                 "Mixed earnings news should be sentiment=mixed and catalyst_allowed=false unless clearly material negative.",
                 "Only direct, recent, material company events can have catalyst_allowed=true.",
+                "The reason must be concise Arabic only, maximum one short sentence.",
             ],
             "required_json_schema": {
                 "scope": "company|sector|market|opinion|unrelated|neutral",
@@ -170,7 +172,7 @@ def classify_news_with_ai(symbol: str, company_name: str, sector: str, industry:
             "model": AI_NEWS_MODEL,
             "max_tokens": 420,
             "temperature": 0,
-            "system": "You are a strict financial-news classifier. Return only valid JSON. No markdown.",
+            "system": "You are a strict financial-news classifier. Return only valid JSON. No markdown. The reason field must be concise Arabic only.",
             "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
         }
         resp = HTTP_SESSION.post(
