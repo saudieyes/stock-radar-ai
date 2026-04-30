@@ -448,6 +448,11 @@ def debug_news_all():
     return {"ok": True, "diagnostics": get_news_diagnostics()}
 
 
+@app.get("/debug-ai-news")
+def debug_ai_news():
+    return get_ai_news_status()
+
+
 
 @app.post("/portfolio/add")
 def portfolio_add(payload: dict = Body(...)):
@@ -806,3 +811,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
