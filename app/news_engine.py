@@ -4,6 +4,12 @@ from .settings import NEWS_SCOPE_LABELS, POLYGON_API_KEY
 from .utils import *
 from .utils import _cache_get, _cache_set
 from .market_data import http_get_json
+from .settings import AI_NEWS_ENABLED, AI_NEWS_MAX_CLASSIFY_PER_SYMBOL, AI_NEWS_MIN_CONFIDENCE
+from .ai_news_classifier import (
+    classify_news_with_ai,
+    format_news_time_labels,
+    get_ai_news_status,
+)
 
 NEWS_CACHE = {}
 NEWS_CACHE_TTL_SECONDS = 900
@@ -50,6 +56,10 @@ def empty_news_bundle() -> dict:
         "news_is_catalyst": False,
         "news_context_note": "لا يوجد خبر أو محفز حديث يمكن الاعتماد عليه الآن.",
         "news_related_tickers_count": 0,
+        "news_published_ksa": "",
+        "news_age_label": "",
+        "news_source_name": "",
+        "news_ai": {},
         "catalyst_score": 0,
     }
 
@@ -237,7 +247,7 @@ def has_direct_company_event_signal(text_lower: str) -> bool:
         "partnership", "acquires", "acquisition", "merger", "merges", "investigation", "investigates",
         "lawsuit", "class action", "investor alert", "subpoena", "recall", "offering", "buyback",
         "announces", "announced", "reports", "reported", "secures", "expands", "expansion",
-        "opens", "opening of", "opening", "participate in", "participates in", "conference", "summit", "presents at", "presentation",
+        "opens", "opening of", "opening", "agreement", "deal", "acquire", "acquires", "acquiring", "to acquire", "participate in", "participates in", "conference", "summit", "presents at", "presentation",
         "insider sold", "insider selling", "founder sold", "ceo sold", "cfo sold", "director sold", "sold shares",
         "should investors avoid", "avoid the stock", "downgrade", "downgrades", "price target cut", "cuts price target"
     ]
@@ -291,7 +301,7 @@ def detect_news_sentiment(text_lower: str, related_count: int = 0) -> str:
     if positive_hits and not negative_hits:
         return "positive"
     if negative_hits and positive_hits:
-        return "negative" if negative_hits >= positive_hits else "positive"
+        return "mixed"
     return "neutral"
 
 
@@ -319,8 +329,12 @@ def detect_news_scope(symbol: str, company_variants: list[str], sector_variants:
     if sentiment == "opinion" or shape in {"opinion", "roundup"}:
         return "opinion"
 
+    # Direct symbol/company mention with a real event is company news first, even if many tickers are attached.
+    if (symbol_hit or company_hit) and direct_event and not market_hit:
+        return "company"
+
     if related_count >= 2 and not direct_event:
-        if sector_hit:
+        if sector_hit and sector_variants:
             return "sector"
         if market_hit:
             return "market"
@@ -333,10 +347,10 @@ def detect_news_scope(symbol: str, company_variants: list[str], sector_variants:
             return "market"
     if company_hit and (direct_event or related_count <= 1 or symbol_hit):
         return "company"
-    if sector_hit:
-        return "sector"
-    if symbol_hit and not market_hit and related_count <= 1:
+    if symbol_hit and not market_hit and (related_count <= 1 or direct_event):
         return "company"
+    if sector_hit and sector_variants:
+        return "sector"
     if market_hit:
         return "market"
     return "neutral"
@@ -402,16 +416,22 @@ def build_news_badge(scope: str, sentiment: str, related_count: int = 0) -> str:
             return "🔴 خبر شركة سلبي"
         if sentiment == "positive":
             return "🟢 خبر شركة إيجابي"
+        if sentiment == "mixed":
+            return "🟡 خبر شركة مختلط"
         return "⚪ خبر شركة محايد"
     if scope == "sector":
         if sentiment == "positive":
             return "🏭 خبر قطاعي داعم"
         if sentiment in {"negative", "legal"}:
             return "🏭 خبر قطاعي ضاغط"
+        if sentiment == "mixed":
+            return "🏭 خبر قطاعي مختلط"
         return "🏭 سياق قطاعي"
     if scope == "market":
         return "📰 سياق سوق عام"
-    if scope in {"opinion", "unrelated", "neutral"}:
+    if scope == "opinion":
+        return "🚫 مقال رأي غير محسوب"
+    if scope in {"unrelated", "neutral"}:
         return ""
     return ""
 
@@ -431,6 +451,8 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
             return f"خبر قانوني مباشر على الشركة ويجب اعتباره عامل ضغط واضح على السهم{freshness}."
         if sentiment == "negative":
             return f"خبر سلبي مباشر على الشركة ويخصم من الفكرة الأساسية{freshness}."
+        if sentiment == "mixed":
+            return f"خبر مباشر يخص الشركة لكنه مختلط؛ يُعرض كسياق ولا يُحسب كمحفز إيجابي{freshness}."
         return f"خبر يخص الشركة لكنه لا يقدم محفزًا واضحًا الآن{freshness}."
     if scope == "sector":
         if sentiment == "positive":
@@ -441,6 +463,8 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
             return f"خبر قطاعي داعم يفيد السهم بصورة غير مباشرة وبوزن أخف من خبر الشركة{freshness}."
         if sentiment in {"negative", "legal"}:
             return f"خبر قطاعي ضاغط يؤثر على السهم كجزء من القطاع وليس كمحفز خاص بالشركة{freshness}."
+        if sentiment == "mixed":
+            return f"خبر قطاعي مختلط يُعرض كسياق فقط ولا يُحسب كمحفز مباشر{freshness}."
         return f"هذا خبر أو سياق قطاعي يفيد الفهم العام لكنه ليس محفزًا مباشرًا للسهم{freshness}."
     if scope == "market":
         if effect_score < 0:
@@ -455,6 +479,78 @@ def build_news_context_note(scope: str, sentiment: str, freshness_label: str, ef
     if scope == "unrelated":
         return "الخبر يذكر السهم ضمن قائمة أو سياق عام، لكنه ليس خبرًا مباشرًا نعتمد عليه كمحفز."
     return "لا يوجد خبر أو محفز حديث يمكن الاعتماد عليه الآن."
+
+
+def apply_ai_news_classification(candidate: dict, ai: dict | None, sector: str = "", industry: str = "") -> dict:
+    """Apply AI classification defensively. AI can remove/restrict catalyst points, not force risky scoring."""
+    try:
+        if not isinstance(ai, dict) or not ai.get("ok"):
+            if isinstance(ai, dict) and ai.get("error"):
+                candidate["ai_news"] = {"ok": False, "error": ai.get("error")}
+            return candidate
+        out = dict(candidate)
+        scope = str(ai.get("scope", "neutral") or "neutral")
+        sentiment = str(ai.get("sentiment", "neutral") or "neutral")
+        materiality = str(ai.get("materiality", "low") or "low")
+        confidence = int(ai.get("confidence", 0) or 0)
+        is_opinion = bool(ai.get("is_opinion"))
+        direct_company = bool(ai.get("is_direct_company_news"))
+        catalyst_allowed = bool(ai.get("catalyst_allowed"))
+        reason = str(ai.get("reason", "") or "").strip()
+
+        # Logical guard: if sector/industry is unknown, the tool must not claim a sector catalyst.
+        if scope == "sector" and not (str(sector or "").strip() or str(industry or "").strip()):
+            scope = "neutral"
+            catalyst_allowed = False
+            reason = (reason + " | لا توجد بيانات قطاع/صناعة كافية، لذلك لا نعامله كخبر قطاعي.").strip(" |")
+
+        if is_opinion or scope == "opinion":
+            scope = "opinion"
+            sentiment = "opinion"
+            materiality = "low"
+            catalyst_allowed = False
+            direct_company = False
+        elif scope == "company" and not direct_company:
+            catalyst_allowed = False
+        elif scope == "unrelated":
+            catalyst_allowed = False
+        elif confidence < int(AI_NEWS_MIN_CONFIDENCE or 70):
+            catalyst_allowed = False
+        elif materiality == "low":
+            catalyst_allowed = False
+
+        if sentiment == "mixed":
+            impact = 0
+        elif catalyst_allowed and scope in {"company", "sector"} and sentiment in {"positive", "negative", "legal"}:
+            impact = classify_news_effect(scope, sentiment, int(out.get("sessions_since", 999) or 999))
+        else:
+            impact = 0
+
+        out["scope"] = scope
+        out["sentiment"] = sentiment
+        out["category"] = "opinion" if scope == "opinion" else sentiment if sentiment in {"positive", "negative", "legal", "mixed"} else "neutral"
+        out["impact"] = impact
+        out["scope_label"] = news_scope_label(scope)
+        out["badge"] = build_news_badge(scope, sentiment, int(out.get("related_count", 0) or 0))
+        out["context_note"] = build_news_context_note(scope, sentiment, out.get("freshness_label", ""), impact, int(out.get("related_count", 0) or 0))
+        if reason:
+            out["context_note"] = f"{out.get('context_note', '')} تصنيف الذكاء: {reason}".strip()
+        out["ai_news"] = {
+            "ok": True,
+            "scope": scope,
+            "sentiment": sentiment,
+            "materiality": materiality,
+            "confidence": confidence,
+            "is_opinion": is_opinion,
+            "is_direct_company_news": direct_company,
+            "catalyst_allowed": catalyst_allowed,
+            "reason": reason,
+            "cache_hit": bool(ai.get("cache_hit")),
+        }
+        return out
+    except Exception as exc:
+        candidate["ai_news"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        return candidate
 
 
 def get_news_bundle(symbol, company_name="", sector="", industry=""):
@@ -477,6 +573,11 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
         "selected_sentiment": "",
         "selected_effect": 0,
         "fallback_context_used": False,
+        "ai_enabled": bool(AI_NEWS_ENABLED),
+        "ai_used": False,
+        "ai_cache_hit": False,
+        "ai_error": "",
+        "ai_result": {},
         "error": "",
     }
     try:
@@ -527,8 +628,11 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             related = [str(x).upper().strip() for x in item.get("tickers", []) if str(x).strip()]
             related_count = len(related)
             published_utc = str(item.get("published_utc", "") or "")
+            published_ksa, age_label = format_news_time_labels(published_utc)
             sessions_since = trading_sessions_since_news(published_utc)
             freshness_label, freshness_score = classify_news_freshness_label(sessions_since)
+            publisher_obj = item.get("publisher", {}) if isinstance(item, dict) else {}
+            publisher_name = str((publisher_obj or {}).get("name", "") or "") if isinstance(publisher_obj, dict) else ""
             sentiment = detect_news_sentiment(full_text, related_count)
             scope = detect_news_scope(symbol, company_variants, sector_variants, related, full_text, sentiment)
             effect = classify_news_effect(scope, sentiment, sessions_since)
@@ -569,6 +673,10 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
 
             candidate = {
                 "title": title,
+                "description": desc,
+                "publisher": publisher_name,
+                "source_url": str(item.get("article_url", "") or item.get("url", "") or ""),
+                "related_tickers": related,
                 "impact": effect,
                 "badge": badge,
                 "scope": scope,
@@ -577,6 +685,8 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
                 "sentiment": sentiment,
                 "freshness_label": freshness_label,
                 "published_utc": published_utc,
+                "published_ksa": published_ksa,
+                "age_label": age_label,
                 "sessions_since": sessions_since,
                 "context_note": context_note,
                 "related_count": related_count,
@@ -601,7 +711,7 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
                 and news_shape == "direct"
                 and sessions_since <= 3
                 and candidate_score > 20
-                and sentiment in {"neutral", "positive", "negative", "legal"}
+                and sentiment in {"neutral", "positive", "negative", "legal", "mixed"}
             )
             if context_ok:
                 diag["context_count"] += 1
@@ -652,6 +762,18 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             _record_news_diag(symbol, diag)
             return _cache_set(NEWS_CACHE, cache_key, bundle, NEWS_CACHE_TTL_SECONDS)
 
+        ai_result = None
+        if AI_NEWS_ENABLED and AI_NEWS_MAX_CLASSIFY_PER_SYMBOL > 0:
+            ai_result = classify_news_with_ai(symbol, company_name, sector, industry, chosen)
+            if isinstance(ai_result, dict):
+                diag["ai_used"] = bool(ai_result.get("ok"))
+                diag["ai_cache_hit"] = bool(ai_result.get("cache_hit"))
+                if ai_result.get("error"):
+                    diag["ai_error"] = str(ai_result.get("error"))[:220]
+                if ai_result.get("ok"):
+                    diag["ai_result"] = {k: ai_result.get(k) for k in ["scope", "sentiment", "materiality", "confidence", "is_opinion", "is_direct_company_news", "catalyst_allowed", "reason", "cache_hit"]}
+            chosen = apply_ai_news_classification(chosen, ai_result, sector, industry)
+
         title_to_show = chosen["title"]
         note_to_show = title_to_show or chosen.get("context_note", "")
         badge_to_show = chosen.get("badge", "")
@@ -664,6 +786,17 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
         is_catalyst = (not fallback_context_used) and chosen.get("scope") in {"company", "sector"} and impact != 0
         catalyst_score = impact if is_catalyst else 0
         context_note = chosen.get("context_note", "")
+        time_bits = []
+        if chosen.get("age_label"):
+            time_bits.append(str(chosen.get("age_label")))
+        if chosen.get("published_ksa"):
+            time_bits.append(str(chosen.get("published_ksa")))
+        if chosen.get("publisher"):
+            time_bits.append("المصدر: " + str(chosen.get("publisher")))
+        if time_bits:
+            context_note = (context_note + " " + " | ".join(time_bits)).strip()
+        elif chosen.get("title"):
+            context_note = (context_note + " وقت الخبر غير متوفر؛ لا نعطيه وزنًا قويًا بدون تاريخ واضح.").strip()
         if fallback_context_used and context_note:
             context_note += " لا يُحسب كمحفز لأنه خبر سياقي/محايد."
 
@@ -690,6 +823,10 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
             "news_is_catalyst": is_catalyst,
             "news_context_note": context_note,
             "news_related_tickers_count": int(chosen.get("related_count", 0) or 0),
+            "news_published_ksa": chosen.get("published_ksa", ""),
+            "news_age_label": chosen.get("age_label", ""),
+            "news_source_name": chosen.get("publisher", ""),
+            "news_ai": chosen.get("ai_news", {}),
             "catalyst_score": catalyst_score,
             "news_debug": diag,
         })
@@ -706,4 +843,5 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
 def get_news(symbol, company_name="", sector="", industry=""):
     bundle = get_news_bundle(symbol, company_name, sector, industry)
     return (bundle.get("news_title") or bundle.get("news_context_note") or bundle.get("news_note") or "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
+
 
