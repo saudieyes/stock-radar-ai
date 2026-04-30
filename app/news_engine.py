@@ -2,6 +2,7 @@ from collections import Counter
 
 from .settings import NEWS_SCOPE_LABELS, POLYGON_API_KEY
 from .utils import *
+from .utils import _cache_get, _cache_set
 from .market_data import http_get_json
 
 NEWS_CACHE = {}
@@ -705,3 +706,4 @@ def get_news_bundle(symbol, company_name="", sector="", industry=""):
 def get_news(symbol, company_name="", sector="", industry=""):
     bundle = get_news_bundle(symbol, company_name, sector, industry)
     return (bundle.get("news_title") or bundle.get("news_context_note") or bundle.get("news_note") or "لا يوجد خبر حديث"), bundle.get("catalyst_score", 0)
+
