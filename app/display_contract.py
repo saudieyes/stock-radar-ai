@@ -132,11 +132,20 @@ def get_price_freshness_meta(stock: dict) -> dict:
                 "price_freshness_score": 96 if age_seconds <= 90 else 88 if age_seconds <= 300 else 70,
                 "price_freshness_detail": f"السعر مباشر أثناء التداول. آخر تحديث تقريبي منذ {age_seconds} ثانية." if age_seconds > 0 else "السعر مباشر أثناء التداول.",
             }
+        display_price = float(stock.get("display_price", stock.get("current_price_live", 0)) or 0)
+        source_label = str(stock.get("price_source_label", "") or "")
+        if display_price > 0 and phase in {"open", "pre_market", "after_hours"}:
+            return {
+                "price_freshness_label": "سعر غير كافٍ للتنفيذ",
+                "price_freshness_icon": "🟡",
+                "price_freshness_score": 38,
+                "price_freshness_detail": f"السعر المعروض متاح من {source_label or source or 'مصدر غير لحظي'}، لكنه غير موثوق كفاية لتنفيذ فوري. يصلح للمتابعة العامة حتى يصل تحديث لحظي أو تأكيد من المنصة.",
+            }
         return {
-            "price_freshness_label": "لا توجد بيانات كافية",
+            "price_freshness_label": "لا توجد بيانات سعر لحظية",
             "price_freshness_icon": "❓",
-            "price_freshness_score": 0,
-            "price_freshness_detail": "لا توجد بيانات كافية لتحديد حداثة السعر بثقة.",
+            "price_freshness_score": 15,
+            "price_freshness_detail": "لم تصل بيانات سعر لحظية كافية. التحليل العام قد يبقى متاحًا، لكن التنفيذ يحتاج تأكيدًا من السعر الحي أو منصة التداول.",
         }
     except:
         return {
@@ -171,10 +180,10 @@ def get_execution_readiness_meta(stock: dict) -> dict:
         detail = "راقب السهم حتى تتضح إشارة التنفيذ."
 
         if not reliable and market_phase in {"open", "pre_market", "after_hours"}:
-            label = "لا توجد بيانات كافية"
-            icon = "❓"
-            score = 12
-            detail = "السعر اللحظي غير موثوق الآن، لذلك لا يُفضَّل اتخاذ قرار تنفيذ مباشر."
+            label = "تنفيذ غير مؤكد"
+            icon = "🟡"
+            score = 22
+            detail = "السعر المعروض غير كافٍ لتأكيد تنفيذ مباشر الآن. راقب السهم أو قارنه بمنصة التداول حتى تصل بيانات لحظية أو يتأكد الاختراق/الارتداد."
         elif trade_type == "Breakout":
             if current_price > 0 and stop_price > 0 and current_price <= stop_price:
                 label = "خطة مكسورة"
@@ -263,9 +272,9 @@ def get_execution_readiness_meta(stock: dict) -> dict:
     except:
         return {
             "execution_readiness_score": 0,
-            "execution_readiness_label": "لا توجد بيانات كافية",
-            "execution_readiness_icon": "❓",
-            "execution_readiness_detail": "لا توجد بيانات كافية لتحديد جاهزية التنفيذ.",
+            "execution_readiness_label": "تنفيذ غير مؤكد",
+            "execution_readiness_icon": "🟡",
+            "execution_readiness_detail": "تعذر حساب جاهزية التنفيذ بدقة. لا تعتمد على هذه الخانة للتنفيذ حتى تتضح بيانات السعر والخطة.",
         }
 
 def explain_metric_ar(name: str, value, stock: dict) -> dict:
@@ -719,5 +728,3 @@ def sort_display_bucket(items):
         ),
         reverse=True,
     )
-
-
