@@ -371,6 +371,29 @@ def get_latest_minute_price(symbol):
         }
 
 
+
+def _normalize_timestamp_to_ms(value) -> int:
+    """Normalize Polygon-style timestamps (seconds/ms/ns) to milliseconds."""
+    try:
+        ts = int(float(value or 0))
+        if ts <= 0:
+            return 0
+        # nanoseconds: 1700000000000000000
+        if ts > 10_000_000_000_000_000:
+            return int(ts / 1_000_000)
+        # microseconds: 1700000000000000
+        if ts > 10_000_000_000_000:
+            return int(ts / 1_000)
+        # already ms: 1700000000000
+        if ts > 10_000_000_000:
+            return ts
+        # seconds
+        if ts > 1_000_000_000:
+            return ts * 1000
+    except Exception:
+        pass
+    return 0
+
 def get_snapshot_quote(symbol):
     try:
         symbol = str(symbol).upper().strip()
@@ -417,6 +440,13 @@ def get_snapshot_quote(symbol):
         else:
             ttl = SNAPSHOT_CACHE_TTL_CLOSED
 
+        updated_ms = (
+            _normalize_timestamp_to_ms(last_trade.get("t"))
+            or _normalize_timestamp_to_ms(min_data.get("t"))
+            or _normalize_timestamp_to_ms(minute.get("updated"))
+            or 0
+        )
+
         out = {
             "available": current_price > 0,
             "current_price": safe_round(current_price, 4),
@@ -429,6 +459,7 @@ def get_snapshot_quote(symbol):
             "change_from_open_pct": safe_round(((current_price - day_open) / day_open) * 100, 2) if day_open > 0 and current_price > 0 else 0.0,
             "phase": phase,
             "source": "snapshot",
+            "updated": updated_ms,
         }
         return _cache_set(SNAPSHOT_CACHE, cache_key, out, ttl)
     except Exception:
@@ -959,5 +990,3 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
-
-
