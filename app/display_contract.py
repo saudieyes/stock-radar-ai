@@ -369,16 +369,18 @@ def explain_metric_ar(name: str, value, stock: dict) -> dict:
                 return {"icon": "⚪", "label": f"شركة محايد {freshness}".strip(), "detail": context_note or "خبر يخص الشركة لكنه غير محفز."}
             if scope == "sector":
                 if category == "positive":
-                    return {"icon": "🏭", "label": f"قطاعي داعم {freshness}".strip(), "detail": context_note or "خبر قطاعي داعم بوزن أخف من خبر الشركة."}
+                    return {"icon": "🏭", "label": f"سياق قطاعي فقط {freshness}".strip(), "detail": context_note or "سياق قطاعي داعم فقط، لا يضيف نقاط Catalyst ولا يُعامل كخبر شركة مباشر."}
                 if category in {"negative", "legal"}:
-                    return {"icon": "🏭", "label": f"قطاعي ضاغط {freshness}".strip(), "detail": context_note or "خبر قطاعي ضاغط."}
+                    return {"icon": "🏭", "label": f"سياق قطاعي ضاغط {freshness}".strip(), "detail": context_note or "سياق قطاعي ضاغط فقط، وليس خبر شركة مباشر."}
                 if category == "mixed":
-                    return {"icon": "🏭", "label": f"قطاعي مختلط {freshness}".strip(), "detail": context_note or "خبر قطاعي مختلط لا يُحسب كمحفز مباشر."}
-                return {"icon": "🏭", "label": f"سياق قطاعي {freshness}".strip(), "detail": context_note or "سياق قطاعي غير مباشر."}
+                    return {"icon": "🏭", "label": f"سياق قطاعي مختلط {freshness}".strip(), "detail": context_note or "سياق قطاعي مختلط لا يُحسب كمحفز مباشر."}
+                return {"icon": "🏭", "label": f"سياق قطاعي فقط {freshness}".strip(), "detail": context_note or "سياق قطاعي غير مباشر ولا يضيف نقاطًا."}
             if scope == "market":
-                return {"icon": "📰", "label": f"سوق عام {freshness}".strip(), "detail": context_note or "سياق سوق عام وليس محفزًا مباشرًا للسهم."}
+                return {"icon": "📰", "label": f"سياق سوق فقط {freshness}".strip(), "detail": context_note or "سياق سوق عام وليس محفزًا مباشرًا للسهم."}
             if scope == "opinion" or category == "opinion":
-                return {"icon": "🚫", "label": "رأي غير معتمد", "detail": context_note or "هذا رأي أو مقال عام وليس محفز تداول معتمد."}
+                return {"icon": "🚫", "label": "رأي غير معتمد", "detail": context_note or "هذا رأي أو مقال عام وليس محفز تداول معتمد ولا يضيف نقاطًا."}
+            if scope == "unrelated":
+                return {"icon": "⚪", "label": "غير ذي صلة", "detail": context_note or "الخبر لا يخص الشركة مباشرة ولا يُستخدم كمحفز."}
             return {"icon": "⚪", "label": scope_label_ar if scope_label_ar else (freshness or "محايد"), "detail": context_note or "لا يوجد خبر محفز حديث."}
         if name == "index_context":
             score = float(stock.get("market_support_score", 0) or 0)
