@@ -348,6 +348,15 @@ def explain_metric_ar(name: str, value, stock: dict) -> dict:
             scope_label_ar = str(stock.get("news_scope_label", news_scope_label(scope)) or news_scope_label(scope))
             freshness = str(stock.get("news_freshness_label", "") or "")
             context_note = str(stock.get("news_context_note", "") or "")
+            time_bits = []
+            if stock.get("news_age_label"):
+                time_bits.append(str(stock.get("news_age_label")))
+            if stock.get("news_published_ksa"):
+                time_bits.append(str(stock.get("news_published_ksa")))
+            if stock.get("news_source_name"):
+                time_bits.append("المصدر: " + str(stock.get("news_source_name")))
+            if time_bits:
+                context_note = (context_note + " " + " | ".join(time_bits)).strip()
             if scope == "company":
                 if category == "positive":
                     return {"icon": "🟢", "label": f"شركة إيجابي {freshness}".strip(), "detail": context_note or "خبر مباشر يخص الشركة ويدعم الفكرة."}
@@ -355,12 +364,16 @@ def explain_metric_ar(name: str, value, stock: dict) -> dict:
                     return {"icon": "⛔", "label": f"شركة قانوني سلبي {freshness}".strip(), "detail": context_note or "خبر قانوني مباشر على الشركة."}
                 if category == "negative":
                     return {"icon": "🔴", "label": f"شركة سلبي {freshness}".strip(), "detail": context_note or "خبر سلبي مباشر على الشركة."}
+                if category == "mixed":
+                    return {"icon": "🟡", "label": f"شركة مختلط {freshness}".strip(), "detail": context_note or "خبر يخص الشركة لكنه مختلط ولا يُحسب كمحفز إيجابي."}
                 return {"icon": "⚪", "label": f"شركة محايد {freshness}".strip(), "detail": context_note or "خبر يخص الشركة لكنه غير محفز."}
             if scope == "sector":
                 if category == "positive":
                     return {"icon": "🏭", "label": f"قطاعي داعم {freshness}".strip(), "detail": context_note or "خبر قطاعي داعم بوزن أخف من خبر الشركة."}
                 if category in {"negative", "legal"}:
                     return {"icon": "🏭", "label": f"قطاعي ضاغط {freshness}".strip(), "detail": context_note or "خبر قطاعي ضاغط."}
+                if category == "mixed":
+                    return {"icon": "🏭", "label": f"قطاعي مختلط {freshness}".strip(), "detail": context_note or "خبر قطاعي مختلط لا يُحسب كمحفز مباشر."}
                 return {"icon": "🏭", "label": f"سياق قطاعي {freshness}".strip(), "detail": context_note or "سياق قطاعي غير مباشر."}
             if scope == "market":
                 return {"icon": "📰", "label": f"سوق عام {freshness}".strip(), "detail": context_note or "سياق سوق عام وليس محفزًا مباشرًا للسهم."}
@@ -728,3 +741,4 @@ def sort_display_bucket(items):
         ),
         reverse=True,
     )
+
