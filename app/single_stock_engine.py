@@ -175,6 +175,10 @@ def scan_all(debug: bool = False):
     diag["strong"] = len([x for x in rows if str(x.get("decision", "")) == "دخول قوي"])
     diag["cautious"] = len([x for x in rows if str(x.get("decision", "")) == "دخول بحذر"])
     diag["watch"] = len([x for x in rows if str(x.get("decision", "")) == "مراقبة"])
+    diag["news_with_title"] = len([x for x in rows if str(x.get("news_title", "") or "").strip()])
+    diag["news_with_catalyst"] = len([x for x in rows if bool(x.get("news_is_catalyst", False))])
+    diag["news_fetch_skipped"] = len([x for x in rows if bool(x.get("news_fetch_skipped", False))])
+    diag["news_negative_or_legal"] = len([x for x in rows if str(x.get("news_sentiment", "") or "") in {"negative", "legal"}])
     diag["scan_elapsed_sec"] = round(time.time() - scan_started_at, 2)
     diag["sample_rows"] = [
         {
