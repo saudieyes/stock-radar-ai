@@ -1207,6 +1207,13 @@
       return `<span class="badge ${cls}">${safeText(visual.badge)}</span>`;
     }
 
+    function hasPrimaryNews(stock) {
+      const scope = String(stock.news_scope || '').toLowerCase();
+      const title = String(stock.news_title || '').trim();
+      const badge = String(stock.news_badge || '').trim();
+      return scope === 'company' && (title || badge);
+    }
+
     function indicatorPill(title, meta) {
       if (!meta || !meta.label) return '';
       return `<span class="indicator-pill">${safeText(meta.icon || '')} ${safeText(title)}: ${safeText(meta.label)}</span>`;
@@ -1515,10 +1522,10 @@
 
           <div class="indicator-strip">${importantIndicators(stock)}</div>
 
-          <div class="news-line">
+          ${hasPrimaryNews(stock) ? `<div class="news-line">
             ${newsBadge(stock)}
             <span>${safeText(newsHeadlineText(stock))}</span>
-          </div>
+          </div>` : ''}
 
           <div class="summary-line">
             <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
