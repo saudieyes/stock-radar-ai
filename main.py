@@ -428,6 +428,26 @@ def debug_last_scan():
     return {"ok": True, "diagnostics": get_last_scan_debug()}
 
 
+@app.get("/debug-news/{symbol}")
+def debug_news_symbol(symbol: str):
+    sym = normalize_symbol_text(symbol)
+    info = get_info(sym) if sym else {"company": "", "sector": "", "industry": ""}
+    bundle = get_news_bundle(sym, info.get("company", ""), info.get("sector", ""), info.get("industry", ""))
+    return {
+        "ok": True,
+        "symbol": sym,
+        "company": info.get("company", ""),
+        "sector": info.get("sector", ""),
+        "industry": info.get("industry", ""),
+        "bundle": bundle,
+        "diagnostics": get_news_diagnostics(sym),
+    }
+
+@app.get("/debug-news")
+def debug_news_all():
+    return {"ok": True, "diagnostics": get_news_diagnostics()}
+
+
 
 @app.post("/portfolio/add")
 def portfolio_add(payload: dict = Body(...)):
