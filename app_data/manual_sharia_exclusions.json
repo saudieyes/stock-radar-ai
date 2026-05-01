@@ -151,6 +151,14 @@
     "symbol": "CALY",
     "updated_at": "2026-05-01 11:27:59"
   },
+  "CAT": {
+    "excluded_at": "2026-05-01 17:09:09",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CAT",
+    "updated_at": "2026-05-01 17:09:09"
+  },
   "CAVA": {
     "excluded_at": "2026-04-28 20:07:47",
     "note": "استبعاد يدوي شرعي",
@@ -567,6 +575,14 @@
     "symbol": "LAC",
     "updated_at": "2026-04-27 10:04:52"
   },
+  "LEA": {
+    "excluded_at": "2026-05-01 17:02:13",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LEA",
+    "updated_at": "2026-05-01 17:02:13"
+  },
   "LIFE": {
     "excluded_at": "2026-04-27 17:54:20",
     "note": "",
@@ -734,6 +750,14 @@
     "source": "manual",
     "symbol": "OSS",
     "updated_at": "2026-05-01 14:01:30"
+  },
+  "PAYS": {
+    "excluded_at": "2026-05-01 15:18:47",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "PAYS",
+    "updated_at": "2026-05-01 15:18:47"
   },
   "PD": {
     "excluded_at": "2026-04-27 05:58:56",
