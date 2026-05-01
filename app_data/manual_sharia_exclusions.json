@@ -63,6 +63,14 @@
     "symbol": "AMWD",
     "updated_at": "2026-04-24 12:29:30"
   },
+  "ARKO": {
+    "excluded_at": "2026-05-01 14:55:34",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ARKO",
+    "updated_at": "2026-05-01 14:55:34"
+  },
   "ASX": {
     "excluded_at": "2026-04-27 05:58:01",
     "note": "",
