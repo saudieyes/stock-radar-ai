@@ -1834,6 +1834,7 @@
       const cardNavBottom = renderCardNav(sectionKey, index, 'bottom');
       const cardNavDetails = renderCardNav(sectionKey, index, 'details');
       const analystId = analystDomId(stock.symbol);
+      const detailKey = `${safeText(sectionKey || 'section')}:${safeText(stock.symbol || '')}`;
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
@@ -1981,7 +1982,7 @@
 
           ${cardNavBottom}
 
-          <details class="detail-panel" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}')}">
+          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}')}">
             <summary>تحليل شامل</summary>
             <div class="details-grid">${details.join('')}</div>
             ${cardNavDetails}
@@ -2236,12 +2237,12 @@
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
-        const openKeys = currentlyOpenSectionKeys();
+        const uiState = preserveScanUiState();
         const res = await apiFetch(`/radar-live-refresh?limit=80&_=${Date.now()}`);
         const data = await res.json();
         if (data.ok && applyRadarLivePayload(data)) {
           renderScanData();
-          openKeys.forEach(key => ensureSectionOpen(key));
+          restoreScanUiState(uiState);
           const updated = document.getElementById('heroUpdated');
           if (updated) updated.textContent = `تحديث حي: ${safeText(data.live_updated_at || 'الآن')} • ${formatNumber(data.quotes_available || 0)} سعر`;
         } else if (!silent) {
@@ -2270,6 +2271,38 @@
     function currentlyOpenSectionKeys() {
       return ['strong-section-content','cautious-section-content','premarket-section-content','gray-strong-section-content','watch-section-content']
         .filter(id => { const el = document.getElementById(id); return el && !isSectionHidden(id); });
+    }
+
+    function currentlyOpenDetailKeys() {
+      return Array.from(document.querySelectorAll('details.detail-panel[data-detail-key][open]'))
+        .map(el => el.dataset.detailKey || '')
+        .filter(Boolean);
+    }
+
+    function restoreOpenDetails(openDetailKeys=[]) {
+      if (!openDetailKeys || !openDetailKeys.length) return;
+      const wanted = new Set(openDetailKeys);
+      document.querySelectorAll('details.detail-panel[data-detail-key]').forEach(el => {
+        if (!wanted.has(el.dataset.detailKey || '')) return;
+        el.open = true;
+        const sym = el.dataset.symbol || '';
+        if (sym) loadAnalystSnapshot(sym).catch(() => {});
+      });
+    }
+
+    function preserveScanUiState() {
+      return {
+        sections: currentlyOpenSectionKeys(),
+        details: currentlyOpenDetailKeys(),
+        showAll: ['strong-section-content','cautious-section-content','premarket-section-content','gray-strong-section-content','watch-section-content']
+          .filter(id => { const el = document.getElementById(id); return el && el.dataset.showAll === '1'; })
+      };
+    }
+
+    function restoreScanUiState(state={}) {
+      (state.sections || []).forEach(key => ensureSectionOpen(key));
+      (state.showAll || []).forEach(key => renderSectionItems(key, true));
+      restoreOpenDetails(state.details || []);
     }
 
     function applyLiveQuotesToScan(quotes) {
@@ -2303,9 +2336,9 @@
         const data = await res.json();
         const changed = applyLiveQuotesToScan(data.quotes || {});
         if (changed && !silent) {
-          const openKeys = currentlyOpenSectionKeys();
+          const uiState = preserveScanUiState();
           renderScanData();
-          openKeys.forEach(key => ensureSectionOpen(key));
+          restoreScanUiState(uiState);
         }
       } catch(e) {}
     }
@@ -2740,4 +2773,5 @@
   </script>
 </body>
 </html>
+
 
