@@ -131,3 +131,4 @@ def initialize_reference_data():
     income_data = load_latest(DATA_DIR / "income_statement.csv")
     return sector_data, companies_data, balance_data, income_data
 
+
