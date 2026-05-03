@@ -430,3 +430,4 @@ def dynamic_price_penalty(current_price: float, trade_type: str) -> tuple[int, s
     return 0, ""
 
 
+
