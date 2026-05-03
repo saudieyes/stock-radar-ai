@@ -553,7 +553,12 @@ def trade_scan(include_all: bool = False):
 
 
 @app.get("/single-stock")
+@app.get("/scan")
+@app.get("/api/single-stock")
 def single_stock(symbol: str):
+    # Fix17a: keep /single-stock as the canonical endpoint,
+    # and add /scan as a backwards-compatible alias because some links/buttons
+    # and earlier handoff notes used /scan?symbol=NVDA.
     return build_single_stock_response(symbol)
 
 
@@ -956,3 +961,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
+
