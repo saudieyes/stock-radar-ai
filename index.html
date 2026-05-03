@@ -1074,6 +1074,183 @@
       }
     }
 
+
+
+    /* Fix28: real mobile alignment reset
+       Root cause: several width:100% elements used padding/borders with default content-box,
+       which made cards wider than the phone viewport. Keep everything inside the viewport. */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      overflow-x: hidden !important;
+    }
+    body { min-width: 0; }
+    .container {
+      width: 100%;
+      max-width: min(520px, 100vw);
+      margin-left: auto;
+      margin-right: auto;
+      padding-left: 12px;
+      padding-right: 12px;
+      overflow-x: hidden;
+    }
+    .topbar, .hero, .market-mood-card, .section, .section-header,
+    .section-box, .opening-box, .panel, .card, .portfolio-card,
+    .watchlist-card, .sharia-card, .bottom-mobile-nav {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+    }
+    .card, .portfolio-card, .watchlist-card, .sharia-card,
+    .section-header, .market-mood-card, .panel, .section-box, .opening-box {
+      overflow: hidden;
+    }
+    .card * , .portfolio-card *, .watchlist-card *, .sharia-card *,
+    .section-header *, .market-mood-card * {
+      min-width: 0;
+      max-width: 100%;
+    }
+    .card-local-nav {
+      width: 100%;
+      max-width: 100%;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .card-nav-btn {
+      width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      text-align: center;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    .badge, .indicator-pill, .hero-chip, .live-status-chip,
+    .price-plan-item, .compact-item, .detail-box,
+    .portfolio-metric, .watchlist-metric, .sharia-metric {
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+    }
+    .symbol, .company, .card-rank-subtitle, .card-why-line,
+    .summary-line, .detail-value, .mood-mini-value,
+    .portfolio-card-symbol, .watchlist-card-symbol, .sharia-card-symbol {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+
+    @media (max-width: 760px) {
+      .container {
+        width: 100%;
+        max-width: 100vw;
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+      .card, .portfolio-card, .watchlist-card, .sharia-card,
+      .section-header, .market-mood-card, .panel, .section-box, .opening-box {
+        width: 100%;
+        max-width: 100%;
+        margin-left: 0;
+        margin-right: 0;
+      }
+      .card-top {
+        display: flex !important;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        width: 100%;
+      }
+      .card-heading-line {
+        display: grid !important;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        width: 100%;
+      }
+      .rank-badge { flex: 0 0 auto; }
+      .symbol {
+        font-size: clamp(28px, 8vw, 36px);
+        line-height: 1.05;
+      }
+      .company { line-height: 1.55; }
+      .badges {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 7px;
+      }
+      .badge {
+        white-space: normal;
+        line-height: 1.35;
+      }
+      .price-plan-grid,
+      .details-grid,
+      .portfolio-metrics,
+      .watchlist-metrics,
+      .sharia-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .indicator-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+      }
+      .indicator-pill {
+        width: 100%;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+      }
+      .card-why-line {
+        text-align: right;
+        line-height: 1.9;
+      }
+      .card-actions {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+      }
+      .card-actions button,
+      .mini-actions button {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
+      }
+      .bottom-mobile-nav {
+        left: 12px;
+        right: 12px;
+        width: auto;
+        max-width: calc(100vw - 24px);
+      }
+      .floating-nav-wrap {
+        left: 12px;
+        max-width: calc(100vw - 24px);
+      }
+    }
+
+    @media (max-width: 390px) {
+      .card-local-nav,
+      .price-plan-grid,
+      .indicator-strip,
+      .card-actions,
+      .details-grid,
+      .portfolio-metrics,
+      .watchlist-metrics,
+      .sharia-metrics {
+        grid-template-columns: 1fr;
+      }
+      .card-nav-btn { white-space: normal; }
+    }
+
 </style>
 </head>
 <body>
