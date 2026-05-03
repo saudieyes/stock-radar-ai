@@ -1,7 +1,7 @@
 import time
 from app.utils import *
 from app.utils import _cache_get, _cache_set
-from app.settings import PERFORMANCE_REFRESH_CACHE
+from app.settings import PERFORMANCE_REFRESH_CACHE, NEWS_SCORE_ENABLED
 from app.performance_tracker import evaluate_performance_record, outcome_sort_rank
 from app.strategy_engine import get_latest_minute_price
 from app.market_data import get_prev, get_intraday_snapshot, build_live_price_block
@@ -644,7 +644,7 @@ def display_rank_score(item: dict) -> float:
         risk_pct = float(item.get("display_risk_pct", item.get("risk_pct", 0)) or 0)
         effective_volume = float(item.get("effective_volume_ratio", 0) or 0)
         volume_pace = float(item.get("volume_pace_ratio", 0) or 0)
-        news_effect = float(item.get("news_effect_score", item.get("catalyst_score", 0)) or 0)
+        news_effect = float(item.get("news_effect_score", item.get("catalyst_score", 0)) or 0) if NEWS_SCORE_ENABLED else 0.0
         news_scope = _display_text_label(item.get("news_scope"))
 
         phase = _display_text_label(item.get("market_phase"))
@@ -734,4 +734,5 @@ def sort_display_bucket(items):
         ),
         reverse=True,
     )
+
 
