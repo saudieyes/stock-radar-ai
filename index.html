@@ -728,6 +728,103 @@
     .mini-actions button { min-height:34px; padding:7px 10px; font-size:12px; border-radius:12px; }
     @media (max-width: 760px) { .price-plan-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .market-mood-grid { grid-template-columns:1fr; } }
 
+
+    /* Fix25: visual separation + mobile render speed */
+    #content .section,
+    #portfolioSection,
+    #watchlistSection,
+    #shariaExcludedSection,
+    #performanceSection,
+    #singleScanSection {
+      border-top: 2px solid var(--border-main);
+      padding-top: 18px;
+      margin-top: 22px;
+    }
+    #content .section:first-child { border-top: 0; }
+    .section-header { position: relative; }
+    .section-header::before {
+      content: "";
+      position: absolute;
+      inset-inline-start: 12px;
+      inset-block-start: 12px;
+      width: 4px;
+      height: calc(100% - 24px);
+      border-radius: 999px;
+      background: rgba(96,165,250,.40);
+    }
+    .section-tone-cautious::before { background: rgba(245,158,11,.45); }
+    .section-tone-gray::before { background: rgba(148,163,184,.45); }
+    .section-tone-watch::before { background: rgba(129,140,248,.45); }
+    .cards { gap: 16px; }
+    .cards > .card,
+    .portfolio-card,
+    .watchlist-card,
+    .sharia-card {
+      position: relative;
+      content-visibility: auto;
+      contain-intrinsic-size: 320px;
+      contain: layout style paint;
+    }
+    .cards > .card:not(:last-child)::after,
+    .portfolio-card:not(:last-child)::after,
+    .watchlist-card:not(:last-child)::after,
+    .sharia-card:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: -9px;
+      height: 1px;
+      background: var(--border-main);
+      opacity: .9;
+    }
+    .cards > .card:nth-child(odd),
+    .portfolio-card-list > .portfolio-card:nth-child(odd),
+    .watchlist-card-list > .watchlist-card:nth-child(odd),
+    .sharia-card-list > .sharia-card:nth-child(odd) {
+      background: rgba(255,255,255,.035);
+    }
+    .cards > .card:nth-child(even),
+    .portfolio-card-list > .portfolio-card:nth-child(even),
+    .watchlist-card-list > .watchlist-card:nth-child(even),
+    .sharia-card-list > .sharia-card:nth-child(even) {
+      background: rgba(15,23,42,.98);
+    }
+    :root[data-theme="light"] .cards > .card:nth-child(odd),
+    :root[data-theme="light"] .portfolio-card-list > .portfolio-card:nth-child(odd),
+    :root[data-theme="light"] .watchlist-card-list > .watchlist-card:nth-child(odd),
+    :root[data-theme="light"] .sharia-card-list > .sharia-card:nth-child(odd) {
+      background: #ffffff;
+    }
+    :root[data-theme="light"] .cards > .card:nth-child(even),
+    :root[data-theme="light"] .portfolio-card-list > .portfolio-card:nth-child(even),
+    :root[data-theme="light"] .watchlist-card-list > .watchlist-card:nth-child(even),
+    :root[data-theme="light"] .sharia-card-list > .sharia-card:nth-child(even) {
+      background: #f3f6fb;
+    }
+    :root[data-theme="light"] .cards > .card:not(:last-child)::after,
+    :root[data-theme="light"] .portfolio-card:not(:last-child)::after,
+    :root[data-theme="light"] .watchlist-card:not(:last-child)::after,
+    :root[data-theme="light"] .sharia-card:not(:last-child)::after {
+      background: #c8d6ea;
+    }
+    @media (max-width: 760px) {
+      #content .section,
+      #portfolioSection,
+      #watchlistSection,
+      #shariaExcludedSection,
+      #performanceSection,
+      #singleScanSection {
+        padding-top: 14px;
+        margin-top: 18px;
+      }
+      .cards { gap: 15px; }
+      .cards > .card,
+      .portfolio-card,
+      .watchlist-card,
+      .sharia-card { contain-intrinsic-size: 380px; }
+    }
+
 </style>
 </head>
 <body>
@@ -741,7 +838,7 @@
         <button class="ghost" onclick="toggleSection('glossaryHelp', this, 'إظهار الرموز', 'إخفاء الرموز')">إظهار الرموز</button>
         <button class="ghost" id="themeToggleBtn" onclick="toggleThemeMode()">الوضع الليلي</button>
         <button class="ghost" id="liveRefreshBtn" onclick="refreshRadarLiveFromSnapshot(false)">تحديث حي</button>
-        <button class="primary" onclick="loadAll()">تحديث الكل</button>
+        <button class="primary" onclick="loadAll(true)">تحديث كامل</button>
         <button class="ghost" onclick="logoutSession()">تسجيل الخروج</button>
       </div>
     </div>
@@ -2065,7 +2162,8 @@
       const isOpen = phase === 'open';
       const opening = data?.opening_mode_active ? '✅ نشط الآن' : '🕘 غير نشط';
       document.getElementById('heroMarketLabel').innerHTML = `${isOpen ? '🟢' : (phase === 'pre_market' ? '🌅' : phase === 'after_hours' ? '🌙' : '⏸️')} ${safeText(phaseLabel)}`;
-      document.getElementById('heroUpdated').innerHTML = `آخر تحديث: ${safeText(data.updated_at || '—')}`;
+      const cacheTxt = data.cache_hit ? ` • لقطة محفوظة ${formatNumber(data.cache_age_sec || 0)}ث` : '';
+      document.getElementById('heroUpdated').innerHTML = `آخر تحديث: ${safeText(data.updated_at || '—')}${cacheTxt}`;
       document.getElementById('heroOpeningMode').innerHTML = `وضع الافتتاح: ${opening}`;
       document.getElementById('heroExplain').innerHTML =
         phase === 'open'
@@ -2233,6 +2331,10 @@
     }
 
     async function refreshRadarLiveFromSnapshot(silent=true) {
+      if (window.__radarLiveBusy) return;
+      if (silent && document.hidden) return;
+      if (silent && currentlyOpenDetailKeys().length) return;
+      window.__radarLiveBusy = true;
       const btn = document.getElementById('liveRefreshBtn');
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
@@ -2251,6 +2353,7 @@
       } catch(e) {
         if (!silent) alert('تعذر التحديث الحي الآن');
       } finally {
+        window.__radarLiveBusy = false;
         if (btn) { btn.textContent = old || 'تحديث حي'; btn.disabled = false; }
       }
     }
@@ -2343,13 +2446,16 @@
       } catch(e) {}
     }
 
-    async function loadScan() {
-      document.getElementById('content').innerHTML = '<div class="loading">جاري تحميل البيانات...</div>';
+    async function loadScan(force=false) {
+      document.getElementById('content').innerHTML = force
+        ? '<div class="loading">جاري الفحص الكامل...</div>'
+        : '<div class="loading">جاري عرض آخر فحص محفوظ وتحديث الأسعار...</div>';
       const btn = document.getElementById('refreshScanBtn');
       const oldText = btn ? btn.textContent : '';
-      if (btn) { btn.textContent = '⏳ جاري التحديث...'; btn.classList.add('refreshing'); btn.disabled = true; }
+      if (btn) { btn.textContent = force ? '⏳ فحص كامل...' : '⏳ تحميل سريع...'; btn.classList.add('refreshing'); btn.disabled = true; }
       try {
-        const res = await apiFetch(`/trade-scan?_=${Date.now()}`);
+        const qs = force ? 'force=true' : 'prefer_cache=true';
+        const res = await apiFetch(`/trade-scan?${qs}&_=${Date.now()}`);
         const data = await res.json();
         setScanData(data);
         renderScanData();
@@ -2761,17 +2867,16 @@
     }
 
     async function loadAll(manual=false) {
-      await Promise.allSettled([loadMarketMood(true), loadScan()]);
+      await Promise.allSettled([loadMarketMood(true), loadScan(!!manual)]);
     }
 
     initThemeMode();
     refreshRiskSettingsUI();
     loadMarketMood(true);
     window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
-    window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 45000);
+    window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 75000);
     loadAll();
   </script>
 </body>
 </html>
-
 
