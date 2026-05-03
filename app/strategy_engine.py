@@ -6,6 +6,7 @@ from app.market_data import *
 from app.historical_engine import *
 from app.market_sector_engine import *
 from app.news_engine import *
+from app.settings import NEWS_SCORE_ENABLED
 from app.sharia_filter import *
 from app.scoring_engine import *
 
@@ -597,6 +598,7 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
     news_fetch_skipped = True
     news_note = news_bundle.get("news_note", "لا يوجد خبر حديث")
     catalyst_score = 0
+    raw_news_effect_score = 0
 
     sharia_assessment = assess_sharia(
         symbol,
@@ -757,7 +759,12 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
         news_bundle = get_news_bundle(symbol, info["company"], info.get("sector", ""), info.get("industry", ""))
         news_fetch_skipped = False
         news_note = news_bundle.get("news_note", "لا يوجد خبر حديث")
-        catalyst_score = news_bundle.get("catalyst_score", 0)
+        raw_news_effect_score = news_bundle.get("catalyst_score", news_bundle.get("news_effect_score", 0))
+        catalyst_score = raw_news_effect_score if NEWS_SCORE_ENABLED else 0
+        if not NEWS_SCORE_ENABLED:
+            news_bundle["news_context_only"] = True
+            news_bundle["news_effect_score"] = 0
+            news_bundle["news_is_catalyst"] = False
 
     core_quality = compute_core_quality_score(
         trend_data["trend"],
@@ -946,6 +953,8 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
         "effective_volume_ratio": safe_round(effective_volume_ratio),
         "data_quality": data_quality,
         "catalyst_score": catalyst_score,
+        "news_raw_effect_score": raw_news_effect_score,
+        "news_context_only": not bool(NEWS_SCORE_ENABLED),
         "news_note": news_note,
         "news_title": news_bundle.get("news_title", ""),
         "news_badge": news_bundle.get("news_badge", ""),
@@ -953,8 +962,8 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
         "news_sentiment": news_bundle.get("news_sentiment", "neutral"),
         "news_scope": news_bundle.get("news_scope", "neutral"),
         "news_scope_label": news_bundle.get("news_scope_label", news_scope_label("neutral")),
-        "news_effect_score": news_bundle.get("news_effect_score", 0),
-        "news_is_catalyst": news_bundle.get("news_is_catalyst", False),
+        "news_effect_score": 0 if not NEWS_SCORE_ENABLED else news_bundle.get("news_effect_score", 0),
+        "news_is_catalyst": False if not NEWS_SCORE_ENABLED else news_bundle.get("news_is_catalyst", False),
         "news_context_note": news_bundle.get("news_context_note", ""),
         "news_related_tickers_count": news_bundle.get("news_related_tickers_count", 0),
         "news_freshness_label": news_bundle.get("news_freshness_label", ""),
@@ -1006,4 +1015,5 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
     except Exception:
         pass
     return plan
+
 
