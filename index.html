@@ -131,7 +131,7 @@
     :root[data-theme="light"] button.primary {
       box-shadow: 0 8px 20px rgba(37,99,235,.18);
     }
-    .container { max-width: 1440px; margin: 0 auto; padding: 18px; padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+    .container { max-width: 1440px; margin: 0 auto; padding: 18px; padding-bottom: calc(126px + env(safe-area-inset-bottom)); }
     .topbar, .hero, .stat, .card, .panel, .search-box, .table-wrap, .glossary-box, .section-box, .opening-box {
       background: var(--panel-bg);
       border: 1px solid var(--border-main);
@@ -295,27 +295,28 @@
     }
     .bottom-mobile-nav {
       position: fixed;
-      left: 12px;
-      right: 12px;
-      bottom: calc(12px + env(safe-area-inset-bottom));
+      left: 18px;
+      right: 18px;
+      bottom: calc(10px + env(safe-area-inset-bottom));
       z-index: 70;
-      max-width: 760px;
+      max-width: 560px;
       margin: 0 auto;
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      padding: 10px;
+      gap: 6px;
+      padding: 7px;
       background: var(--quick-bg);
       border: 1px solid var(--border-main);
-      border-radius: 22px;
-      box-shadow: 0 16px 34px rgba(0,0,0,.28);
+      border-radius: 18px;
+      box-shadow: 0 12px 24px rgba(0,0,0,.18);
       backdrop-filter: blur(10px);
     }
     .bottom-mobile-nav button {
-      min-height: 48px;
-      padding: 8px 6px;
-      border-radius: 16px;
-      font-size: 12px;
+      min-height: 40px;
+      padding: 6px 4px;
+      border-radius: 13px;
+      font-size: 11px;
+      line-height: 1.35;
       background: transparent;
       border: 1px solid transparent;
       color: var(--text-main);
@@ -354,30 +355,6 @@
     .badge-news-sector { background:#134e4a; color:#ccfbf1; }
 
     .compact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
-    .compact-grid-brief { grid-template-columns:repeat(4,minmax(0,1fr)); }
-    .quick-card-summary {
-      background: var(--panel-bg-soft);
-      border: 1px solid var(--border-soft);
-      border-radius: 14px;
-      padding: 11px 12px;
-      margin: 0 0 12px;
-      color: var(--text-main);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-    .quick-card-title {
-      color: var(--text-muted);
-      font-size: 12px;
-      font-weight: 900;
-      margin-bottom: 4px;
-    }
-    .compact-details-note {
-      color: var(--text-muted);
-      font-size: 12px;
-      line-height: 1.7;
-      margin: 8px 0 10px;
-      text-align: center;
-    }
     .compact-item { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:11px; }
     .compact-label { color:var(--text-muted); font-size:12px; margin-bottom:6px; }
     .compact-value { color:var(--text-strong); font-size:16px; font-weight:800; line-height:1.4; }
@@ -526,22 +503,22 @@
     .floating-nav-wrap {
       position: fixed;
       left: 14px;
-      bottom: calc(96px + env(safe-area-inset-bottom));
+      bottom: calc(84px + env(safe-area-inset-bottom));
       z-index: 80;
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 10px;
+      gap: 8px;
     }
     .floating-nav-toggle {
       border: none;
       border-radius: 999px;
-      padding: 12px 16px;
-      font-size: 14px;
+      padding: 10px 14px;
+      font-size: 13px;
       font-weight: 900;
       background: #2563eb;
       color: #fff;
-      box-shadow: 0 12px 30px rgba(37,99,235,.28);
+      box-shadow: 0 10px 24px rgba(37,99,235,.24);
     }
     .floating-nav-menu {
       display: none;
@@ -551,9 +528,9 @@
       border: 1px solid var(--border-main);
       border-radius: 18px;
       padding: 10px;
-      min-width: 190px;
+      min-width: 180px;
       box-shadow: var(--shadow-main);
-      max-height: 70vh;
+      max-height: 68vh;
       overflow: auto;
     }
     .floating-nav-menu.open { display: flex; }
@@ -666,7 +643,7 @@
     }
 
     @media (max-width: 760px) {
-      .container { padding: 12px; padding-bottom: calc(165px + env(safe-area-inset-bottom)); }
+      .container { padding: 12px; padding-bottom: calc(138px + env(safe-area-inset-bottom)); }
       .topbar { padding:14px; }
       .actions { gap:8px; }
       .actions button { flex:1 1 135px; }
@@ -696,20 +673,39 @@
       .company { font-size:14px; line-height:1.55; }
       .badges { justify-content:flex-start; }
       .badge { font-size:13px; padding:8px 10px; }
-      .floating-nav-wrap { left:10px; bottom:calc(100px + env(safe-area-inset-bottom)); }
-      .floating-nav-toggle { padding:12px 15px; font-size:14px; }
-      .floating-nav-menu { min-width:230px; max-height:62vh; }
+      .floating-nav-wrap { left:12px; bottom:calc(76px + env(safe-area-inset-bottom)); }
+      .floating-nav-toggle { padding:9px 13px; font-size:12.5px; }
+      .floating-nav-menu { min-width:210px; max-height:62vh; }
+      .bottom-mobile-nav { left:14px; right:14px; max-width:480px; gap:5px; padding:6px; border-radius:16px; }
+      .bottom-mobile-nav button { min-height:36px; font-size:10.5px; padding:5px 3px; border-radius:12px; }
     }
 
 
-    @media (max-width: 860px) {
-      .compact-grid.compact-grid-brief { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .market-mood-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-main);
+      border-radius: 18px;
+      box-shadow: var(--shadow-main);
+      padding: 14px;
+      margin: 0 0 16px;
     }
-    @media (max-width: 420px) {
-      .compact-grid.compact-grid-brief { gap: 7px; }
-      .compact-grid.compact-grid-brief .compact-item { padding: 9px; }
-      .compact-grid.compact-grid-brief .compact-value { font-size: 14px; }
-    }
+    .market-mood-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .market-mood-title { font-weight:900; font-size:18px; color:var(--text-strong); }
+    .market-mood-note { color:var(--text-muted); font-size:12px; line-height:1.7; }
+    .market-mood-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:10px; }
+    .mood-mini { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px; }
+    .mood-mini-label { color:var(--text-muted); font-size:12px; margin-bottom:6px; font-weight:800; }
+    .mood-mini-value { color:var(--text-strong); font-size:15px; line-height:1.7; font-weight:900; }
+    .live-status-chip { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:7px 10px; background:var(--panel-bg-soft); border:1px solid var(--border-soft); color:var(--text-muted); font-size:12px; font-weight:800; }
+    .price-plan-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:12px 0; }
+    .price-plan-item { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px; min-height:76px; }
+    .price-plan-label { color:var(--text-muted); font-size:12px; font-weight:800; margin-bottom:6px; }
+    .price-plan-value { color:var(--text-strong); font-size:17px; font-weight:900; line-height:1.4; }
+    .card-why-line { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px 12px; font-size:13px; line-height:1.8; color:var(--text-main); margin-bottom:12px; }
+    .card-why-line b { color:var(--text-strong); }
+    .compact-source-line { color:var(--text-muted); font-size:11.5px; line-height:1.6; margin-top:4px; }
+    @media (max-width: 760px) { .price-plan-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .market-mood-grid { grid-template-columns:1fr; } }
+
 </style>
 </head>
 <body>
@@ -722,6 +718,7 @@
         <button class="ghost" onclick="toggleSection('introHelp', this, 'إظهار الشرح', 'إخفاء الشرح')">إظهار الشرح</button>
         <button class="ghost" onclick="toggleSection('glossaryHelp', this, 'إظهار الرموز', 'إخفاء الرموز')">إظهار الرموز</button>
         <button class="ghost" id="themeToggleBtn" onclick="toggleThemeMode()">الوضع الليلي</button>
+        <button class="ghost" id="liveRefreshBtn" onclick="refreshRadarLiveFromSnapshot(false)">تحديث حي</button>
         <button class="primary" onclick="loadAll()">تحديث الكل</button>
         <button class="ghost" onclick="logoutSession()">تسجيل الخروج</button>
       </div>
@@ -730,21 +727,15 @@
     <div id="infoPopover" class="info-popover" role="dialog" aria-live="polite"></div>
 
     <div id="floatingNavWrap" class="floating-nav-wrap">
-      <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ الوصول</button>
+      <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ سريع</button>
       <div id="floatingNavMenu" class="floating-nav-menu">
         <button class="floating-nav-link" type="button" onclick="scrollToPageTop()">⬆️ أعلى الصفحة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('openingSection', 'openingContent')">🚀 الافتتاح</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('strong-section', 'strong-section-content')">🔥 دخول قوي</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('premarket-section', 'premarket-section-content')">🚀 تهيئة قوية</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('gray-strong-section', 'gray-strong-section-content')">⚠️ غير محسومة شرعيًا</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('cautious-section', 'cautious-section-content')">🟠 دخول بحذر</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('watch-section', 'watch-section-content')">👀 المراقبة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('riskPanelSection')">⚖️ المخاطرة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('portfolioSection', 'portfolioContentWrap')">💼 المحفظة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('watchlistSection', 'manualWatchlistContent')">📌 المتابعة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('shariaExcludedSection', 'shariaExcludedContent')">🚫 المستبعدة شرعيًا</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('performanceSection', 'performanceContent')">📊 الأداء</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('singleScanSection')">🔎 فحص سهم</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('marketMoodSection')">🧭 مزاج السوق</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('strong-section', 'strong-section-content')">دخول قوي</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('cautious-section', 'cautious-section-content')">دخول بحذر</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('gray-strong-section', 'gray-strong-section-content')">غير محسومة شرعيًا</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('watch-section', 'watch-section-content')">المراقبة</button>
+        <button class="floating-nav-link" type="button" onclick="openByNav('openingSection', 'openingContent')">وضع الافتتاح</button>
         <button class="floating-nav-link" type="button" onclick="scrollToPageBottom()">⬇️ أسفل الصفحة</button>
       </div>
     </div>
@@ -771,6 +762,21 @@
         <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">—</div></div>
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">—</div></div>
         <div class="stat"><div class="stat-label">المراقبة</div><div class="stat-value">—</div></div>
+      </div>
+    </div>
+
+    <div id="marketMoodSection" class="market-mood-card scroll-anchor">
+      <div class="market-mood-top">
+        <div>
+          <div class="market-mood-title">🧭 مزاج السوق</div>
+          <div class="market-mood-note">طبقة سياقية فقط، لا تدخل في نقاط الأسهم أو ترتيبها.</div>
+        </div>
+        <span id="marketMoodUpdated" class="live-status-chip">جاري التحميل...</span>
+      </div>
+      <div id="marketMoodContent" class="market-mood-grid">
+        <div class="mood-mini"><div class="mood-mini-label">الحالة</div><div class="mood-mini-value">—</div></div>
+        <div class="mood-mini"><div class="mood-mini-label">القطاعات الساخنة</div><div class="mood-mini-value">—</div></div>
+        <div class="mood-mini"><div class="mood-mini-label">شرح مختصر</div><div class="mood-mini-value">—</div></div>
       </div>
     </div>
 
@@ -1556,20 +1562,19 @@
       return [
         indicatorPill('الجودة', stock.metric_quality),
         indicatorPill('السيولة', stock.metric_volume),
+        indicatorPill('العائد/المخاطرة', stock.metric_rr),
         indicatorPill('الاتجاه', stock.metric_trend),
       ].join('');
     }
 
-    function briefWhyText(stock) {
-      const parts = [];
-      if (stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label) {
-        parts.push(safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label));
-      }
-      if (stock.metric_volume && stock.metric_volume.label) parts.push('السيولة: ' + safeText(stock.metric_volume.label));
-      if (stock.metric_trend && stock.metric_trend.label) parts.push('الاتجاه: ' + safeText(stock.metric_trend.label));
-      if (stock.market_support_label) parts.push('المؤشر: ' + safeText(stock.market_support_label));
-      if (stock.sector_support_label) parts.push('القطاع: ' + safeText(stock.sector_support_label));
-      return parts.slice(0, 4).join(' | ') || safeText(stock.quick_explainer || stock.ai_summary || 'سبب الظهور متوفر داخل التحليل الشامل.');
+    function shortText(value, maxLen=170) {
+      const s = String(value || '').replace(/\s+/g, ' ').trim();
+      if (!s) return '';
+      return s.length > maxLen ? s.slice(0, maxLen - 1) + '…' : s;
+    }
+
+    function pricePlanItem(label, value, sub='') {
+      return `<div class="price-plan-item"><div class="price-plan-label">${safeText(label)}</div><div class="price-plan-value">${safeText(value)}</div>${sub ? `<div class="compact-source-line">${safeText(sub)}</div>` : ''}</div>`;
     }
 
     const SECTION_DEFAULT_LIMIT = 5;
@@ -1651,7 +1656,7 @@
       const btn = document.getElementById('floatingNavToggle');
       if (!menu || !btn) return;
       menu.classList.toggle('open', !!isOpen);
-      btn.textContent = isOpen ? '✖ إخفاء' : '⚡ الوصول';
+      btn.textContent = isOpen ? '✖ إخفاء' : '⚡ سريع';
     }
 
     function toggleFloatingQuickNav() {
@@ -1880,41 +1885,35 @@
             </div>
           </div>
 
-          <div class="compact-grid compact-grid-brief">
-            ${compactItem('السعر الحالي', formatNumber(displayPrice))}
-            ${compactItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
-            ${compactItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
-            ${compactItem(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price))}
-          </div>
-
-          <div class="quick-card-summary">
-            <div class="quick-card-title">لماذا ظهر؟</div>
-            <div>${briefWhyText(stock)}</div>
+          <div class="price-plan-grid">
+            ${pricePlanItem('السعر الحالي', formatNumber(displayPrice), stock.price_source_label || '')}
+            ${pricePlanItem(safeText(stock.display_entry_label || 'الدخول'), formatNumber(stock.display_entry_price))}
+            ${pricePlanItem(safeText(stock.display_target_label || 'الهدف'), formatNumber(stock.display_target_price))}
+            ${pricePlanItem(safeText(stock.display_stop_label || 'الوقف'), formatNumber(stock.display_stop_price))}
           </div>
 
           <div class="indicator-strip">${importantIndicators(stock)}</div>
 
           ${hasPrimaryNews(stock) ? `<div class="news-line">
             ${newsBadge(stock)}
-            <span>${safeText(newsHeadlineText(stock))}</span>
+            <span>الأخبار معلومة فقط: ${safeText(shortText(newsHeadlineText(stock), 110))}</span>
           </div>` : ''}
 
-          ${stock.special_bucket_reason ? `<div class="summary-line compact-summary"><b>${safeText(stock.special_bucket_reason)}</b></div>` : ''}
-          <div class="compact-details-note">المؤشرات التفصيلية، السلوك التاريخي، القطاع، الدعم/المقاومة، الأخبار، وآراء المحللين داخل زر التحليل الشامل.</div>
+          <div class="card-why-line"><b>لماذا ظهر؟</b> ${safeText(shortText(stock.special_bucket_reason || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'تجتمع عدة مؤشرات فنية وسعرية داعمة، وافتح تحليل شامل للتفاصيل.', 190))}</div>
 
           <div class="card-actions">
-            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
-            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا يدويًا</button>` : ''}
             <button class="soft-primary" onclick="scanSingleFromCard('${safeText(stock.symbol)}')">🔎 فحص فردي</button>
-            <button class="ghost" onclick="loadAnalystSnapshot('${safeText(stock.symbol)}', true)">👥 المحللين</button>
-            <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
+            <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
+            <button class="ghost" onclick="loadAnalystSnapshot('${safeText(stock.symbol)}', true)">👥 المحللين</button>
+            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
+            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
           </div>
 
           ${cardNavBottom}
 
           <details class="detail-panel" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}')}">
-            <summary>تحليل شامل / إظهار التفاصيل</summary>
+            <summary>تحليل شامل</summary>
             <div class="details-grid">${details.join('')}</div>
             ${cardNavDetails}
           </details>
@@ -2111,6 +2110,80 @@
     }
 
 
+
+
+    function renderMarketMood(payload) {
+      const box = document.getElementById('marketMoodContent');
+      const updated = document.getElementById('marketMoodUpdated');
+      if (!box) return;
+      if (!payload || payload.ok === false) {
+        box.innerHTML = '<div class="mood-mini"><div class="mood-mini-label">مزاج السوق</div><div class="mood-mini-value">غير متوفر الآن</div></div>';
+        if (updated) updated.textContent = 'غير متوفر';
+        return;
+      }
+      const hot = (payload.hot_sectors || []).slice(0,3).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || 'لا توجد قطاعات ساخنة واضحة';
+      const weak = (payload.weak_sectors || []).slice(0,2).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || '—';
+      box.innerHTML = `
+        <div class="mood-mini"><div class="mood-mini-label">الحالة</div><div class="mood-mini-value">${safeText(payload.label || '—')} <span style="font-size:12px;color:var(--text-muted);">درجة ${formatNumber(payload.score || 0)}</span></div></div>
+        <div class="mood-mini"><div class="mood-mini-label">المؤشرات</div><div class="mood-mini-value">${safeText(payload.index_summary_ar || '—')}</div></div>
+        <div class="mood-mini"><div class="mood-mini-label">القطاعات الساخنة</div><div class="mood-mini-value">${safeText(hot)}</div></div>
+        <div class="mood-mini"><div class="mood-mini-label">قطاعات أضعف</div><div class="mood-mini-value">${safeText(weak)}</div></div>
+        <div class="mood-mini" style="grid-column:1/-1;"><div class="mood-mini-label">شرح عربي سريع</div><div class="mood-mini-value">${safeText(payload.summary_ar || payload.note || 'مزاج السوق سياقي فقط ولا يدخل في النقاط.')}</div></div>`;
+      if (updated) updated.textContent = payload.updated_at ? `آخر تحديث: ${safeText(payload.updated_at)}` : 'محدث';
+    }
+
+    async function loadMarketMood(silent=false) {
+      try {
+        const res = await apiFetch(`/market-mood?_=${Date.now()}`);
+        const data = await res.json();
+        renderMarketMood(data);
+      } catch(e) {
+        if (!silent) renderMarketMood({ok:false});
+      }
+    }
+
+    function applyRadarLivePayload(payload) {
+      if (!payload || payload.ok === false || !payload.groups) return false;
+      const mapGroup = (name) => ((payload.groups[name] && payload.groups[name].items) || []);
+      window.__scanData = window.__scanData || {};
+      window.__scanData.strong_entries = mapGroup('strong_entries');
+      window.__scanData.cautious_entries = mapGroup('cautious_entries');
+      window.__scanData.gray_strong = mapGroup('gray_strong');
+      window.__scanData.premarket_setups = mapGroup('premarket_setups');
+      window.__scanData.watchlist = mapGroup('watchlist');
+      window.__scanData.strong_entries_count = payload.groups.strong_entries?.count || window.__scanData.strong_entries.length;
+      window.__scanData.cautious_entries_count = payload.groups.cautious_entries?.count || window.__scanData.cautious_entries.length;
+      window.__scanData.gray_strong_count = payload.groups.gray_strong?.count || window.__scanData.gray_strong.length;
+      window.__scanData.premarket_setups_count = payload.groups.premarket_setups?.count || window.__scanData.premarket_setups.length;
+      window.__scanData.watchlist_count = payload.groups.watchlist?.count || window.__scanData.watchlist.length;
+      window.__scanData.market_phase_label = payload.market_phase_label || window.__scanData.market_phase_label;
+      window.__scanData.updated_at = payload.live_updated_at || window.__scanData.updated_at;
+      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.gray_strong_count + window.__scanData.premarket_setups_count + window.__scanData.watchlist_count;
+      return true;
+    }
+
+    async function refreshRadarLiveFromSnapshot(silent=true) {
+      const btn = document.getElementById('liveRefreshBtn');
+      const old = btn ? btn.textContent : '';
+      if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
+      try {
+        const openKeys = currentlyOpenSectionKeys();
+        const res = await apiFetch(`/radar-live-refresh?limit=80&_=${Date.now()}`);
+        const data = await res.json();
+        if (data.ok && applyRadarLivePayload(data)) {
+          renderScanData();
+          openKeys.forEach(key => ensureSectionOpen(key));
+          const updated = document.getElementById('heroUpdated');
+          if (updated) updated.textContent = `تحديث حي: ${safeText(data.live_updated_at || 'الآن')} • ${formatNumber(data.quotes_available || 0)} سعر`;
+        } else if (!silent) {
+          alert(data.message || data.error || 'لا توجد لقطة رادار محفوظة بعد. شغّل تحديث الكل أولًا.');
+        }
+      } catch(e) {
+        if (!silent) alert('تعذر التحديث الحي الآن');
+      } finally {
+        if (btn) { btn.textContent = old || 'تحديث حي'; btn.disabled = false; }
+      }
+    }
 
     function collectVisibleScanSymbols() {
       if (!window.__scanData) return [];
@@ -2559,12 +2632,14 @@
     }
 
     async function loadAll(manual=false) {
-      await loadScan();
+      await Promise.allSettled([loadMarketMood(true), loadScan()]);
     }
 
     initThemeMode();
     refreshRiskSettingsUI();
-    window.__liveQuotesTimer = window.setInterval(() => refreshLiveQuotesForScan(false), 45000);
+    loadMarketMood(true);
+    window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
+    window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 45000);
     loadAll();
   </script>
 </body>
