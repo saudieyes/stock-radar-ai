@@ -476,3 +476,4 @@ def analyze_historical_behavior(daily_bars, current_setup: str = "") -> dict:
         return base
 
 
+
