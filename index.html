@@ -970,7 +970,111 @@
       }
     }
 
-  </style>
+  
+
+    /* Fix27: stronger mobile alignment for card header and top/bottom navigation */
+    .card-local-nav {
+      width: 100%;
+      max-width: 100%;
+      align-items: stretch;
+    }
+    .card-nav-btn {
+      width: 100%;
+      max-width: 100%;
+      text-align: center;
+      white-space: normal;
+      overflow: hidden;
+    }
+    .card-heading-line > div { min-width: 0; }
+    .card-heading-line {
+      width: 100%;
+      max-width: 100%;
+    }
+    .card-top {
+      width: 100%;
+      max-width: 100%;
+    }
+    .badges {
+      width: 100%;
+      max-width: 100%;
+    }
+    .floating-nav-wrap {
+      bottom: calc(96px + env(safe-area-inset-bottom));
+    }
+    .floating-nav-toggle {
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+
+    @media (max-width: 760px) {
+      .card-top {
+        display: flex !important;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .card-heading-line {
+        display: grid !important;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 10px;
+      }
+      .card-heading-line > div {
+        min-width: 0;
+      }
+      .symbol {
+        font-size: 31px;
+        line-height: 1.05;
+      }
+      .company,
+      .card-rank-subtitle {
+        line-height: 1.55;
+      }
+      .badges {
+        justify-content: flex-start;
+        align-content: flex-start;
+      }
+      .badge {
+        max-width: 100%;
+      }
+      .card-local-nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px;
+      }
+      .card-local-nav.top {
+        margin-bottom: 12px;
+      }
+      .card-local-nav.bottom,
+      .card-local-nav.details {
+        margin-top: 12px;
+      }
+      .card-nav-btn {
+        min-height: 40px;
+        padding: 9px 6px;
+        font-size: 13px;
+        border-radius: 12px;
+      }
+      .price-plan-grid,
+      .details-grid,
+      .portfolio-metrics,
+      .watchlist-metrics,
+      .sharia-metrics {
+        grid-template-columns: 1fr;
+      }
+      .floating-nav-wrap {
+        left: 10px;
+        bottom: calc(92px + env(safe-area-inset-bottom));
+      }
+      .floating-nav-toggle {
+        padding: 8px 11px;
+        font-size: 11.5px;
+      }
+      .floating-nav-menu {
+        min-width: 180px;
+      }
+    }
+
+</style>
 </head>
 <body>
   <div class="container">
