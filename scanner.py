@@ -1993,5 +1993,3 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         "reasons": {t: source_reasons.get(t, []) for t in selected},
     }
     return selected
-
-
