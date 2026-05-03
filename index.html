@@ -205,6 +205,127 @@
     .section-title { font-size:20px; font-weight:900; }
     .section-count { color:var(--text-muted); font-size:13px; }
     .section-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .section-header {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-main);
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: var(--shadow-main);
+    }
+    .section-title-row {
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    .section-title {
+      color: var(--text-strong);
+    }
+    .section-rank-note {
+      color: var(--text-muted);
+      font-size: 12.5px;
+      line-height: 1.7;
+      margin-top: 3px;
+      font-weight: 700;
+    }
+    .section-preview {
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.7;
+      margin-top: 4px;
+    }
+    .section-count-pill {
+      min-width: 38px;
+      height: 34px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--panel-bg-soft);
+      border: 1px solid var(--border-soft);
+      color: var(--text-strong);
+      font-size: 15px;
+      font-weight: 900;
+      padding: 0 10px;
+    }
+    .section-tone-strong { border-color: rgba(96,165,250,.55); }
+    .section-tone-cautious { border-color: rgba(245,158,11,.62); }
+    .section-tone-gray { border-color: rgba(148,163,184,.58); }
+    .section-tone-watch { border-color: rgba(129,140,248,.55); }
+    .section-tone-open { border-color: rgba(56,189,248,.55); }
+    .section-limit-note {
+      margin: 10px 0 12px;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.7;
+      text-align: center;
+    }
+    .section-show-all-wrap { display:flex; justify-content:center; margin: 12px 0 4px; }
+    .section-show-all-btn {
+      background: var(--panel-bg-soft);
+      border: 1px solid var(--detail-btn-border);
+      color: var(--detail-btn-text);
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-weight: 900;
+    }
+    .rank-badge {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:42px;
+      height:34px;
+      border-radius:12px;
+      background:var(--panel-bg-soft);
+      border:1px solid var(--detail-btn-border);
+      color:var(--text-strong);
+      font-size:14px;
+      font-weight:900;
+      direction:ltr;
+    }
+    .card-heading-line {
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+    }
+    .card-rank-subtitle {
+      color:var(--text-muted);
+      font-size:12px;
+      margin-top:5px;
+      line-height:1.5;
+      font-weight:700;
+    }
+    .bottom-mobile-nav {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      z-index: 70;
+      max-width: 760px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+      background: var(--quick-bg);
+      border: 1px solid var(--border-main);
+      border-radius: 22px;
+      box-shadow: 0 16px 34px rgba(0,0,0,.28);
+      backdrop-filter: blur(10px);
+    }
+    .bottom-mobile-nav button {
+      min-height: 48px;
+      padding: 8px 6px;
+      border-radius: 16px;
+      font-size: 12px;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-main);
+      box-shadow: none;
+    }
+    .bottom-mobile-nav button.active-tab {
+      background: var(--panel-bg-soft);
+      border-color: var(--detail-btn-border);
+      color: var(--detail-btn-text);
+    }
 
     .cards { display:grid; grid-template-columns:1fr; gap:14px; }
     .card { width:100%; max-width:980px; margin:0 auto; }
@@ -332,7 +453,7 @@
     .floating-nav-wrap {
       position: fixed;
       left: 14px;
-      bottom: calc(22px + env(safe-area-inset-bottom));
+      bottom: calc(96px + env(safe-area-inset-bottom));
       z-index: 80;
       display: flex;
       flex-direction: column;
@@ -441,9 +562,9 @@
       border:1px solid var(--border-soft) !important;
       box-shadow:none;
     }
-    .badge-strong { border-color:rgba(34,197,94,.65) !important; }
+    .badge-strong { border-color:rgba(96,165,250,.72) !important; }
     .badge-cautious { border-color:rgba(245,158,11,.70) !important; }
-    .badge-watch { border-color:rgba(59,130,246,.62) !important; }
+    .badge-watch { border-color:rgba(129,140,248,.62) !important; }
     .badge-news-neg, .badge-news-legal { border-color:rgba(239,68,68,.70) !important; }
     .badge-news-pos { border-color:rgba(34,197,94,.65) !important; }
     .badge-news-sector, .badge-news-market { border-color:rgba(14,165,233,.62) !important; }
@@ -502,7 +623,7 @@
       .company { font-size:14px; line-height:1.55; }
       .badges { justify-content:flex-start; }
       .badge { font-size:13px; padding:8px 10px; }
-      .floating-nav-wrap { left:10px; bottom:calc(18px + env(safe-area-inset-bottom)); }
+      .floating-nav-wrap { left:10px; bottom:calc(100px + env(safe-area-inset-bottom)); }
       .floating-nav-toggle { padding:12px 15px; font-size:14px; }
       .floating-nav-menu { min-width:230px; max-height:62vh; }
     }
@@ -546,6 +667,13 @@
       </div>
     </div>
 
+
+    <nav class="bottom-mobile-nav" aria-label="التنقل السفلي">
+      <button class="active-tab" type="button" onclick="openByNav('content')">🎯<br>الرادار</button>
+      <button type="button" onclick="openByNav('portfolioSection', 'portfolioContentWrap')">💼<br>المحفظة</button>
+      <button type="button" onclick="openByNav('performanceSection', 'performanceContent')">📊<br>التتبع</button>
+      <button type="button" onclick="openByNav('singleScanSection')">🔎<br>فحص سهم</button>
+    </nav>
 
     <div class="hero">
       <div class="hero-left">
@@ -1250,6 +1378,33 @@
       ].join('');
     }
 
+    const SECTION_DEFAULT_LIMIT = 5;
+
+    function renderSectionItems(contentId, showAll=false) {
+      const el = document.getElementById(contentId);
+      const items = (window.__sectionItems && window.__sectionItems[contentId]) ? window.__sectionItems[contentId] : [];
+      if (!el) return;
+      const limit = showAll ? items.length : Math.min(SECTION_DEFAULT_LIMIT, items.length);
+      const visible = items.slice(0, limit);
+      const body = visible.length
+        ? visible.map((item, idx) => createCard(item, contentId, idx)).join('')
+        : '<div class="empty">لا توجد نتائج</div>';
+      const note = items.length > limit
+        ? `<div class="section-limit-note">يتم عرض أعلى ${limit} فقط الآن حتى لا تزدحم الشاشة. القائمة مرتبة من الأقوى إلى الأقل.</div>`
+        : '';
+      const showAllButton = items.length > limit
+        ? `<div class="section-show-all-wrap"><button class="section-show-all-btn" type="button" onclick="showAllSection('${safeText(contentId)}', this)">عرض كل ${formatNumber(items.length)}</button></div>`
+        : '';
+      el.innerHTML = `${note}<div class="cards">${body}</div>${showAllButton}`;
+      el.dataset.rendered = '1';
+      el.dataset.showAll = showAll ? '1' : '0';
+    }
+
+    function showAllSection(contentId, buttonEl=null) {
+      renderSectionItems(contentId, true);
+      if (buttonEl) buttonEl.style.display = 'none';
+    }
+
     function toggleSection(contentId, buttonEl, showLabel='إظهار', hideLabel='إخفاء') {
       const el = document.getElementById(contentId);
       if (!el) return;
@@ -1271,10 +1426,8 @@
           loadShariaExcluded();
           el.dataset.loaded = '1';
         }
-        if (el.dataset && el.dataset.rendered !== '1' && window.__sectionItems && window.__sectionItems[contentId]) {
-          const items = window.__sectionItems[contentId] || [];
-          el.innerHTML = `<div class="cards">${items.map((item, idx) => createCard(item, contentId, idx)).join('') || '<div class="empty">لا توجد نتائج</div>'}</div>`;
-          el.dataset.rendered = '1';
+        if (el.dataset && window.__sectionItems && window.__sectionItems[contentId] && el.dataset.rendered !== '1') {
+          renderSectionItems(contentId, false);
         }
         el.classList.remove('hidden-section');
         el.style.display = '';
@@ -1508,13 +1661,19 @@
         details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`, true));
       }
 
+      const rankNumber = Number(index || 0) + 1;
+      const rankSubtitle = sectionKey === 'single-stock' ? 'فحص فردي' : `الترتيب #${rankNumber} داخل هذه المجموعة`;
       return `
         <div class="card" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}">
           ${cardNavTop}
           <div class="card-top">
-            <div>
-              <div class="symbol">${safeText(stock.symbol)}</div>
-              <div class="company">${company}</div>
+            <div class="card-heading-line">
+              <span class="rank-badge">#${rankNumber}</span>
+              <div>
+                <div class="symbol">${safeText(stock.symbol)}</div>
+                <div class="company">${company}</div>
+                <div class="card-rank-subtitle">${safeText(rankSubtitle)}</div>
+              </div>
             </div>
             <div class="badges">
               ${badgeDecision(stock.decision)}
@@ -1580,23 +1739,41 @@
 
     window.__sectionItems = window.__sectionItems || {};
 
-    function renderSection(title, count, key, sectionId='') {
+    function renderSection(title, count, key, sectionId='', items=[], options={}) {
+      const preview = (items || []).slice(0, 3).map(x => safeText(x?.symbol || '')).filter(Boolean).join(' • ');
+      const tone = safeText(options.tone || '');
+      const defaultOpen = !!options.defaultOpen;
+      const openClass = defaultOpen ? '' : 'hidden-section';
+      const btnText = defaultOpen ? 'إخفاء' : 'إظهار';
+      const rendered = defaultOpen ? '1' : '0';
+      const orderedText = safeText(options.orderedText || 'مرتبة من الأقوى إلى الأقل حسب الجاهزية + الجودة + قرب الدخول.');
+      const inner = defaultOpen
+        ? (() => {
+            const limit = Math.min(SECTION_DEFAULT_LIMIT, items.length);
+            const body = (items || []).slice(0, limit).map((item, idx) => createCard(item, key, idx)).join('') || '<div class="empty">لا توجد نتائج</div>';
+            const note = items.length > limit ? `<div class="section-limit-note">يتم عرض أعلى ${limit} فقط الآن حتى لا تزدحم الشاشة. القائمة مرتبة من الأقوى إلى الأقل.</div>` : '';
+            const showAllButton = items.length > limit ? `<div class="section-show-all-wrap"><button class="section-show-all-btn" type="button" onclick="showAllSection('${safeText(key)}', this)">عرض كل ${formatNumber(items.length)}</button></div>` : '';
+            return `${note}<div class="cards">${body}</div>${showAllButton}`;
+          })()
+        : '<div class="cards"><div class="empty">اضغط إظهار لعرض القائمة</div></div>';
       return `
         <div class="section scroll-anchor" id="${sectionId}">
-          <div class="section-header">
+          <div class="section-header section-tone-${tone}">
             <div class="section-heading">
               <div class="section-title-row">
                 <div class="section-title">${title}</div>
+                <span class="section-count-pill">${formatNumber(count)}</span>
                 ${renderInfoButton(title)}
               </div>
-              <div class="section-count">${count} سهم</div>
+              <div class="section-rank-note">${orderedText}</div>
+              ${preview ? `<div class="section-preview">أعلى الأسهم: ${preview}${count > 3 ? ' ...' : ''}</div>` : '<div class="section-preview">لا توجد أسهم في هذا القسم الآن</div>'}
             </div>
             <div class="section-tools">
-              <button class="ghost detail-toggle" data-section-toggle="${key}" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">إظهار</button>
+              <button class="ghost detail-toggle" data-section-toggle="${key}" onclick="toggleSection('${key}', this, 'إظهار', 'إخفاء')">${btnText}</button>
             </div>
           </div>
-          <div id="${key}" class="hidden-section" data-rendered="0">
-            <div class="cards"><div class="empty">اضغط إظهار لعرض القائمة</div></div>
+          <div id="${key}" class="${openClass}" data-rendered="${rendered}" data-show-all="0">
+            ${inner}
           </div>
         </div>`;
     }
@@ -1648,15 +1825,15 @@
       document.getElementById('heroQuickStats').innerHTML = `
         <div class="stat"><div class="stat-label">Universe</div><div class="stat-value">${formatNumber(data.universe_count)}</div></div>
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
-        <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value green">${formatNumber(data.strong_entries_count)}</div></div>
-        <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value yellow">${formatNumber(data.cautious_entries_count)}</div></div>
-        <div class="stat"><div class="stat-label">تهيئة قوية</div><div class="stat-value yellow">${formatNumber(data.premarket_setups_count || 0)}</div></div>
-        <div class="stat"><div class="stat-label">قوي رمادي</div><div class="stat-value yellow">${formatNumber(data.gray_strong_count || 0)}</div></div>
+        <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">${formatNumber(data.strong_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">تهيئة قوية</div><div class="stat-value">${formatNumber(data.premarket_setups_count || 0)}</div></div>
+        <div class="stat"><div class="stat-label">قوي رمادي</div><div class="stat-value">${formatNumber(data.gray_strong_count || 0)}</div></div>
         <div class="stat"><div class="stat-label">استبعاد شرعي مبكر</div><div class="stat-value">${formatNumber(data.sharia_prefilter_blocked || 0)}</div></div>
       `;
 
       document.getElementById('statusbar').innerHTML = `
-        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value ${isOpen ? 'green' : 'yellow'}">${safeText(phaseLabel)}</div></div>
+        <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value">${safeText(phaseLabel)}</div></div>
         <div class="stat"><div class="stat-label">المراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
         <div class="stat"><div class="stat-label">وضع الافتتاح</div><div class="stat-value">${data?.opening_mode_active ? 'نشط' : '—'}</div></div>
         <div class="stat"><div class="stat-label">آخر تحديث</div><div class="stat-value" style="font-size:16px;">${safeText(data.updated_at || '—')}</div></div>
@@ -1678,11 +1855,11 @@
         'watch-section-content': watch,
       };
       document.getElementById('content').innerHTML = `
-        ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section')}
-        ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section')}
-        ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section')}
-        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section')}
-        ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section')}
+        ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
+        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious' })}
+        ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section', grayStrong, { tone: 'gray', orderedText: 'أسهم قوية فنيًا لكنها تحتاج حسمًا شرعيًا قبل التنفيذ.' })}
+        ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section', watch, { tone: 'watch' })}
+        ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section', premarket, { tone: 'open', orderedText: 'فرص تهيئة مبكرة تظهر قبل الافتتاح وأول الجلسة.' })}
       `;
     }
 
@@ -1802,7 +1979,7 @@
         if (changed && !silent) {
           const openKeys = currentlyOpenSectionKeys();
           renderScanData();
-          openKeys.forEach(key => toggleSection(key, document.querySelector(`[data-section-toggle="${key}"]`), 'إظهار', 'إخفاء'));
+          openKeys.forEach(key => ensureSectionOpen(key));
         }
       } catch(e) {}
     }
@@ -2208,3 +2385,5 @@
   </script>
 </body>
 </html>
+
+
