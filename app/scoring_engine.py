@@ -1,4 +1,5 @@
 from .utils import *
+from .settings import NEWS_SCORE_ENABLED
 
 def compute_execution_status(trade_type: str, decision: str, trend: str, volume_ratio: float, catalyst_score: float, breakout_quality: str) -> str:
     if breakout_quality == "FAILED" and trade_type == "Breakout":
@@ -48,6 +49,8 @@ def breakout_quality_label(trade_type: str, momentum: str, body_strength: float,
 
 def apply_news_decision_guard(decision: str, news_scope: str, news_sentiment: str, news_sessions_since: int, core_quality: float = 0.0) -> str:
     decision = str(decision or "مراقبة")
+    if not NEWS_SCORE_ENABLED:
+        return decision
     scope = str(news_scope or "neutral")
     sentiment = str(news_sentiment or "neutral")
     try:
@@ -123,7 +126,7 @@ def apply_safety_decision_guard(stock: dict, decision: str) -> tuple[str, list[s
         target_1 = float(stock.get("target_1", 0) or 0)
         entry = float(stock.get("entry", 0) or 0)
 
-        if news_scope == "company" and news_sentiment in {"negative", "legal"} and news_sessions <= NEGATIVE_NEWS_MAX_SESSIONS:
+        if NEWS_SCORE_ENABLED and news_scope == "company" and news_sentiment in {"negative", "legal"} and news_sessions <= NEGATIVE_NEWS_MAX_SESSIONS:
             reasons.append("خبر شركة تحذيري/سلبي حديث")
             if decision == "دخول قوي":
                 decision = "دخول بحذر"
@@ -202,7 +205,8 @@ def compute_core_quality_score(
     else:
         quality -= 6
 
-    if catalyst_score != 0:
+    # News is context-only by default. It must not promote opportunities.
+    if NEWS_SCORE_ENABLED and catalyst_score != 0:
         quality += float(catalyst_score or 0)
 
     news_scope = str(news_scope or "neutral")
@@ -762,3 +766,4 @@ def compute_timing_layer(current_price: float, intraday: dict, effective_volume_
         "smart_stop_price": safe_round(smart_stop_price),
         "smart_target_1": safe_round(smart_target_1),
     }
+
