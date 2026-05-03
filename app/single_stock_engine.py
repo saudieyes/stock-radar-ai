@@ -283,3 +283,4 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
+
