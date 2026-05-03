@@ -131,7 +131,7 @@
     :root[data-theme="light"] button.primary {
       box-shadow: 0 8px 20px rgba(37,99,235,.18);
     }
-    .container { max-width: 1440px; margin: 0 auto; padding: 18px; }
+    .container { max-width: 1440px; margin: 0 auto; padding: 18px; padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
     .topbar, .hero, .stat, .card, .panel, .search-box, .table-wrap, .glossary-box, .section-box, .opening-box {
       background: var(--panel-bg);
       border: 1px solid var(--border-main);
@@ -206,7 +206,8 @@
     .section-count { color:var(--text-muted); font-size:13px; }
     .section-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 
-    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; }
+    .cards { display:grid; grid-template-columns:1fr; gap:14px; }
+    .card { width:100%; max-width:980px; margin:0 auto; }
     .card { padding:14px; }
     .card-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
     .symbol { font-size:28px; font-weight:900; color:var(--text-strong); line-height:1; }
@@ -331,7 +332,7 @@
     .floating-nav-wrap {
       position: fixed;
       left: 14px;
-      bottom: 18px;
+      bottom: calc(22px + env(safe-area-inset-bottom));
       z-index: 80;
       display: flex;
       flex-direction: column;
@@ -471,7 +472,7 @@
     }
 
     @media (max-width: 760px) {
-      .container { padding: 12px; }
+      .container { padding: 12px; padding-bottom: calc(165px + env(safe-area-inset-bottom)); }
       .topbar { padding:14px; }
       .actions { gap:8px; }
       .actions button { flex:1 1 135px; }
@@ -501,7 +502,7 @@
       .company { font-size:14px; line-height:1.55; }
       .badges { justify-content:flex-start; }
       .badge { font-size:13px; padding:8px 10px; }
-      .floating-nav-wrap { left:10px; bottom:12px; }
+      .floating-nav-wrap { left:10px; bottom:calc(18px + env(safe-area-inset-bottom)); }
       .floating-nav-toggle { padding:12px 15px; font-size:14px; }
       .floating-nav-menu { min-width:230px; max-height:62vh; }
     }
@@ -1223,9 +1224,7 @@
         parts.push(`<div>${safeText(detail)}</div>`);
       }
       if (!parts.length) return 'لا يوجد خبر شركة مباشر مؤثر الآن.';
-      if (scope !== 'company') {
-        parts.push(`<div style="margin-top:8px; font-weight:800;">لا يضيف نقاط Catalyst ولا يرفع ترتيب السهم.</div>`);
-      }
+      parts.push(`<div style="margin-top:8px; font-weight:900;">الأخبار معلومة فقط ولا تدخل في حساب نقاط أو ترتيب السهم.</div>`);
       return parts.join('');
     }
 
@@ -1248,7 +1247,6 @@
         indicatorPill('العائد/المخاطرة', stock.metric_rr),
         indicatorPill('الاتجاه', stock.metric_trend),
         indicatorPill('الاستمرار', stock.metric_continuation),
-        indicatorPill('الخبر', stock.metric_news),
       ].join('');
     }
 
@@ -1397,6 +1395,14 @@
         }
         loadPortfolio();
       } catch (e) {}
+    }
+
+
+    async function scanSingleFromCard(symbol) {
+      const input = document.getElementById('singleSymbol');
+      if (input) input.value = String(symbol || '').toUpperCase();
+      openByNav('singleScanSection');
+      await scanSingleStock();
     }
 
     function createCard(stock, sectionKey='', index=0) {
@@ -1557,6 +1563,7 @@
           <div class="card-actions">
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا يدويًا</button>` : ''}
+            <button class="soft-primary" onclick="scanSingleFromCard('${safeText(stock.symbol)}')">🔎 فحص فردي</button>
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
           </div>
@@ -1671,11 +1678,11 @@
         'watch-section-content': watch,
       };
       document.getElementById('content').innerHTML = `
-        ${renderSection('🔥 دخول قوي', strong.length, 'strong-section-content', 'strong-section')}
-        ${renderSection('🚀 تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section')}
-        ${renderSection('⚠️ فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section')}
-        ${renderSection('🟠 دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section')}
-        ${renderSection('👀 المراقبة', watch.length, 'watch-section-content', 'watch-section')}
+        ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section')}
+        ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section')}
+        ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section')}
+        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section')}
+        ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section')}
       `;
     }
 
@@ -1742,6 +1749,64 @@
       </div>`;
     }
 
+
+
+    function collectVisibleScanSymbols() {
+      if (!window.__scanData) return [];
+      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','watchlist','top_ranked','opening_focus'];
+      const out = [];
+      keys.forEach(key => {
+        (window.__scanData[key] || []).forEach(item => {
+          const s = String(item?.symbol || '').toUpperCase().trim();
+          if (s && !out.includes(s)) out.push(s);
+        });
+      });
+      return out.slice(0, 240);
+    }
+
+    function currentlyOpenSectionKeys() {
+      return ['strong-section-content','cautious-section-content','premarket-section-content','gray-strong-section-content','watch-section-content']
+        .filter(id => { const el = document.getElementById(id); return el && !isSectionHidden(id); });
+    }
+
+    function applyLiveQuotesToScan(quotes) {
+      if (!window.__scanData || !quotes) return false;
+      let changed = false;
+      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','watchlist','top_ranked','opening_focus','all_results'];
+      keys.forEach(key => {
+        (window.__scanData[key] || []).forEach(item => {
+          const s = String(item?.symbol || '').toUpperCase().trim();
+          const q = quotes[s];
+          if (!q || !Number(q.price || 0)) return;
+          item.current_price_live = Number(q.price || 0);
+          item.display_price = Number(q.price || 0);
+          item.display_change_pct = Number(q.change_pct || 0);
+          item.change_vs_prev_close_pct = Number(q.change_pct || 0);
+          item.price_source = q.source || item.price_source;
+          item.price_source_label = q.source_label || item.price_source_label || 'FMP Live/REST';
+          item.live_price_available = true;
+          item.last_price_update_label = q.updated_label || item.last_price_update_label;
+          changed = true;
+        });
+      });
+      return changed;
+    }
+
+    async function refreshLiveQuotesForScan(silent=false) {
+      const symbols = collectVisibleScanSymbols();
+      if (!symbols.length) return;
+      try {
+        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&_=${Date.now()}`);
+        const data = await res.json();
+        const changed = applyLiveQuotesToScan(data.quotes || {});
+        if (changed && !silent) {
+          const openKeys = currentlyOpenSectionKeys();
+          renderScanData();
+          openKeys.forEach(key => toggleSection(key, document.querySelector(`[data-section-toggle="${key}"]`), 'إظهار', 'إخفاء'));
+        }
+      } catch(e) {}
+    }
+
     async function loadScan() {
       document.getElementById('content').innerHTML = '<div class="loading">جاري تحميل البيانات...</div>';
       const btn = document.getElementById('refreshScanBtn');
@@ -1752,6 +1817,7 @@
         const data = await res.json();
         setScanData(data);
         renderScanData();
+        refreshLiveQuotesForScan(true);
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
         document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
@@ -2137,8 +2203,8 @@
 
     initThemeMode();
     refreshRiskSettingsUI();
+    window.__liveQuotesTimer = window.setInterval(() => refreshLiveQuotesForScan(false), 45000);
     loadAll();
   </script>
 </body>
 </html>
-
