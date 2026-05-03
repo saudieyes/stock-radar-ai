@@ -44,6 +44,11 @@ from app.settings import (
     SNAPSHOT_CACHE_TTL_OPEN,
     HARAM_INDUSTRY_KEYWORDS,
     HARAM_SECTORS,
+    FIRST_RUN_SETUP_ENABLED,
+    NEWS_SCORE_ENABLED,
+    FMP_API_KEY,
+    FMP_WEBSOCKET_ENABLED,
+    LIVE_QUOTES_ENABLED,
 )
 from app.auth_session import build_auth_cookie_value, read_auth_cookie
 from app.utils import *
@@ -76,22 +81,40 @@ from app.strategy_engine import *
 from app.display_contract import *
 from app.single_stock_engine import scan_all, build_single_stock_response, get_last_scan_debug
 
+from app.sqlite_store import init_db, sqlite_status, set_json
+from app.user_auth_store import has_auth_user, create_first_user, verify_db_user
+from app.live_quotes import get_live_quotes
+
 app = FastAPI()
+
+try:
+    init_db()
+except Exception as exc:
+    print(f"SQLITE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+
 
 
 @app.middleware("http")
 async def auth_session_guard(request: Request, call_next):
-    if not APP_AUTH_ENABLED:
+    path = request.url.path or "/"
+    db_user_exists = has_auth_user()
+    auth_required = bool(APP_AUTH_ENABLED or db_user_exists)
+
+    if path in AUTH_EXEMPT_PATHS or path.startswith("/login") or path.startswith("/setup"):
         return await call_next(request)
 
-    path = request.url.path or "/"
-    if path in AUTH_EXEMPT_PATHS or path.startswith("/login"):
+    wants_html = ("text/html" in str(request.headers.get("accept", ""))) or path == "/"
+
+    if not auth_required:
+        if FIRST_RUN_SETUP_ENABLED:
+            if wants_html:
+                return RedirectResponse(url="/setup", status_code=307)
+            return JSONResponse({"ok": False, "error": "setup_required"}, status_code=428)
         return await call_next(request)
 
     if read_auth_cookie(request):
         return await call_next(request)
 
-    wants_html = ("text/html" in str(request.headers.get("accept", ""))) or path == "/"
     if wants_html:
         return RedirectResponse(url="/login", status_code=307)
     return JSONResponse({"ok": False, "error": "auth_required"}, status_code=401)
@@ -162,10 +185,80 @@ document.getElementById('loginPass').addEventListener('keydown', (e) => {{ if (e
     return HTMLResponse(html)
 
 
+def render_setup_page(error_message: str = "") -> HTMLResponse:
+    error_html = f'<div style="margin-bottom:12px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;padding:10px;border-radius:12px;">{error_message}</div>' if error_message else ''
+    html = f"""
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>الإعداد الأولي</title>
+<style>
+body{{margin:0;font-family:Arial,sans-serif;background:#eef5ff;color:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;}}
+.box{{width:min(440px,92vw);background:#fff;border:1px solid #dbeafe;border-radius:20px;box-shadow:0 18px 40px rgba(15,23,42,.12);padding:24px;}}
+h1{{margin:0 0 8px;font-size:26px}}
+p{{margin:0 0 18px;color:#475569;line-height:1.8}}
+input{{width:100%;padding:12px 14px;border-radius:12px;border:1px solid #cbd5e1;margin-bottom:12px;font-size:15px;box-sizing:border-box;}}
+button{{width:100%;padding:12px 14px;border:none;border-radius:12px;background:#2563eb;color:#fff;font-size:15px;font-weight:700;cursor:pointer;}}
+.note{{margin-top:14px;font-size:12px;color:#64748b;line-height:1.8}}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>⚙️ الإعداد الأولي</h1>
+<p>أنشئ مستخدم الأداة لأول مرة. سيتم حفظه في SQLite على مساحة التخزين الدائمة.</p>
+{error_html}
+<input id="setupUser" placeholder="اسم المستخدم" autocomplete="username" />
+<input id="setupPass" type="password" placeholder="كلمة المرور - 6 أحرف على الأقل" autocomplete="new-password" />
+<button onclick="doSetup()">إنشاء المستخدم</button>
+<div class="note">بعد الإنشاء سيتم تحويلك لتسجيل الدخول. إذا كنت تستخدم متغيرات Railway للدخول، فلن تظهر هذه الصفحة.</div>
+</div>
+<script>
+async function doSetup() {{
+  const username = document.getElementById('setupUser').value || '';
+  const password = document.getElementById('setupPass').value || '';
+  const res = await fetch('/setup', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ username, password }})
+  }});
+  if (res.ok) {{ window.location.href = '/login'; return; }}
+  const data = await res.json().catch(() => ({{}}));
+  alert(data.error === 'password_too_short' ? 'كلمة المرور قصيرة' : data.error === 'username_too_short' ? 'اسم المستخدم قصير' : 'تعذر إنشاء المستخدم');
+}}
+document.getElementById('setupPass').addEventListener('keydown', (e) => {{ if (e.key === 'Enter') doSetup(); }});
+</script>
+</body>
+</html>
+"""
+    return HTMLResponse(html)
+
+
+@app.get("/setup")
+def setup_page(request: Request):
+    if APP_AUTH_ENABLED or has_auth_user() or not FIRST_RUN_SETUP_ENABLED:
+        return RedirectResponse(url="/login" if (APP_AUTH_ENABLED or has_auth_user()) else "/", status_code=307)
+    return render_setup_page()
+
+
+@app.post("/setup")
+async def setup_submit(request: Request):
+    if APP_AUTH_ENABLED:
+        return JSONResponse({"ok": False, "error": "env_auth_enabled"}, status_code=409)
+    if has_auth_user():
+        return JSONResponse({"ok": False, "error": "user_already_exists"}, status_code=409)
+    payload = await request.json()
+    ok, msg = create_first_user(payload.get("username", ""), payload.get("password", ""))
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=400)
+    return {"ok": True}
+
+
 @app.get("/login")
 def login_page(request: Request):
-    if not APP_AUTH_ENABLED:
-        return RedirectResponse(url="/", status_code=307)
+    auth_required = bool(APP_AUTH_ENABLED or has_auth_user())
+    if not auth_required:
+        return RedirectResponse(url="/setup" if FIRST_RUN_SETUP_ENABLED else "/", status_code=307)
     if read_auth_cookie(request):
         return RedirectResponse(url="/", status_code=307)
     return render_login_page()
@@ -173,12 +266,18 @@ def login_page(request: Request):
 
 @app.post("/login")
 async def login_submit(request: Request):
-    if not APP_AUTH_ENABLED:
+    auth_required = bool(APP_AUTH_ENABLED or has_auth_user())
+    if not auth_required:
         return {"ok": True, "auth_enabled": False}
     payload = await request.json()
     username = str(payload.get("username", "") or "").strip()
     password = str(payload.get("password", "") or "")
-    if secrets.compare_digest(username, APP_AUTH_USERNAME) and secrets.compare_digest(password, APP_AUTH_PASSWORD):
+    valid = False
+    if APP_AUTH_ENABLED:
+        valid = secrets.compare_digest(username, APP_AUTH_USERNAME) and secrets.compare_digest(password, APP_AUTH_PASSWORD)
+    else:
+        valid = verify_db_user(username, password)
+    if valid:
         response = JSONResponse({"ok": True, "auth_enabled": True})
         response.set_cookie(
             key=APP_AUTH_COOKIE_NAME,
@@ -205,7 +304,8 @@ def session_state(request: Request):
     auth_info = read_auth_cookie(request)
     return {
         "authenticated": bool(auth_info),
-        "auth_enabled": APP_AUTH_ENABLED,
+        "auth_enabled": bool(APP_AUTH_ENABLED or has_auth_user()),
+        "auth_source": "env" if APP_AUTH_ENABLED else ("sqlite" if has_auth_user() else "none"),
         "username": auth_info.get("username", "") if auth_info else "",
     }
 
@@ -227,8 +327,43 @@ def health():
         "ok": True,
         "market_phase": get_market_phase(),
         "market_phase_label": market_phase_label(get_market_phase()),
-        "timestamp": datetime.now(ZoneInfo("America/New_York")).isoformat()
+        "timestamp": datetime.now(ZoneInfo("America/New_York")).isoformat(),
+        "sqlite": sqlite_status(),
+        "live_quotes_enabled": bool(LIVE_QUOTES_ENABLED),
+        "news_score_enabled": bool(NEWS_SCORE_ENABLED),
     }
+
+
+@app.get("/runtime-diagnostics")
+def runtime_diagnostics():
+    return {
+        "ok": True,
+        "sqlite": sqlite_status(),
+        "auth": {
+            "env_auth_enabled": bool(APP_AUTH_ENABLED),
+            "sqlite_user_exists": bool(has_auth_user()),
+            "first_run_setup_enabled": bool(FIRST_RUN_SETUP_ENABLED),
+        },
+        "live_data": {
+            "live_quotes_enabled": bool(LIVE_QUOTES_ENABLED),
+            "fmp_key_configured": bool(FMP_API_KEY),
+            "fmp_websocket_enabled_config": bool(FMP_WEBSOCKET_ENABLED),
+            "polygon_key_configured": bool(POLYGON_API_KEY),
+        },
+        "scoring": {
+            "news_score_enabled": bool(NEWS_SCORE_ENABLED),
+            "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
+        },
+        "data_dir": str(DATA_DIR),
+    }
+
+
+@app.get("/live-quotes")
+def live_quotes_endpoint(symbols: str = "", allow_fallback: bool = True):
+    clean = [s.strip().upper() for s in str(symbols or "").replace(";", ",").split(",") if s.strip()]
+    if not clean:
+        return {"ok": True, "quotes": {}, "diagnostics": {"symbols": 0}}
+    return get_live_quotes(clean, prefer_cache=True, allow_fallback=allow_fallback)
 
 
 
@@ -340,6 +475,16 @@ def _build_special_buckets(results: list[dict], market_phase: str) -> tuple[list
 def trade_scan(include_all: bool = False):
     results = scan_all()
     scan_debug = get_last_scan_debug()
+
+    try:
+        set_json("last_trade_scan_snapshot", {
+            "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+            "count": len(results or []),
+            "rows": results[:250],
+            "diagnostics": scan_debug,
+        })
+    except Exception:
+        pass
 
     phase = get_market_phase()
     # Clean strong/cautious lists should not include explicit non-compliant or gray names.
@@ -811,4 +956,3 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
