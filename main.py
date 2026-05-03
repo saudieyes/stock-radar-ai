@@ -81,7 +81,7 @@ from app.strategy_engine import *
 from app.display_contract import *
 from app.single_stock_engine import scan_all, build_single_stock_response, get_last_scan_debug
 
-from app.sqlite_store import init_db, sqlite_status, set_json
+from app.sqlite_store import init_db, sqlite_status, set_json, get_json
 from app.user_auth_store import has_auth_user, create_first_user, verify_db_user
 from app.live_quotes import get_live_quotes
 
@@ -349,6 +349,7 @@ def runtime_diagnostics():
             "fmp_key_configured": bool(FMP_API_KEY),
             "fmp_websocket_enabled_config": bool(FMP_WEBSOCKET_ENABLED),
             "polygon_key_configured": bool(POLYGON_API_KEY),
+            "last_radar_live_refresh": get_json("last_radar_live_refresh", {}),
         },
         "scoring": {
             "news_score_enabled": bool(NEWS_SCORE_ENABLED),
@@ -359,13 +360,277 @@ def runtime_diagnostics():
 
 
 @app.get("/live-quotes")
-def live_quotes_endpoint(symbols: str = "", allow_fallback: bool = True):
+def live_quotes_endpoint(symbols: str = "", allow_fallback: bool = True, prefer_cache: bool = True):
     clean = [s.strip().upper() for s in str(symbols or "").replace(";", ",").split(",") if s.strip()]
     if not clean:
         return {"ok": True, "quotes": {}, "diagnostics": {"symbols": 0}}
-    return get_live_quotes(clean, prefer_cache=True, allow_fallback=allow_fallback)
+    return get_live_quotes(clean, prefer_cache=prefer_cache, allow_fallback=allow_fallback)
 
 
+# Fix19: live radar refresh layer.
+# This is intentionally lightweight: it never reruns the heavy scan and never changes the
+# saved technical plan. It only overlays fresh FMP/Polygon quotes on the latest saved scan
+# snapshot, recalculates live distances/readiness hints, and returns newly sorted groups for
+# the UI. If live data fails, the normal /trade-scan and /single-stock routes remain unchanged.
+def _extract_live_symbol_list(rows: list[dict], limit: int = 220) -> list[str]:
+    out = []
+    for row in rows or []:
+        sym = normalize_symbol_text((row or {}).get("symbol", ""))
+        if sym and sym not in out:
+            out.append(sym)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _first_positive_number(row: dict, keys: list[str]) -> float:
+    for key in keys:
+        try:
+            val = safe_round(row.get(key, 0))
+            if val > 0:
+                return float(val)
+        except Exception:
+            continue
+    return 0.0
+
+
+def _live_distance_pct(price: float, ref: float) -> float | None:
+    try:
+        price = float(price or 0)
+        ref = float(ref or 0)
+        if price <= 0 or ref <= 0:
+            return None
+        return safe_round(((price - ref) / ref) * 100, 2)
+    except Exception:
+        return None
+
+
+def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
+    """Overlay live quote fields without replacing the saved analysis plan.
+
+    The returned row keeps the original plan prices. Extra fields are prefixed with
+    live_/snapshot_ so the UI can clearly show what came from the saved plan and what
+    changed after the latest quote.
+    """
+    out = dict(row or {})
+    symbol = normalize_symbol_text(out.get("symbol", ""))
+    quote = quote or {}
+    live_price = safe_round(quote.get("price", 0))
+    original_display_price = safe_round(out.get("display_price", out.get("current_price_live", out.get("current_price", 0))))
+
+    out["snapshot_display_price"] = original_display_price
+    out["snapshot_price_source_label"] = str(out.get("price_source_label", out.get("price_source", "")) or "")
+    out["live_overlay_available"] = bool(live_price > 0)
+
+    if live_price <= 0:
+        out["live_overlay_label"] = "لا يوجد سعر حي جديد"
+        out["live_rank_score"] = safe_round(out.get("display_rank_score", _stock_score_value(out)), 2)
+        out["live_rank_reason"] = "تم استخدام ترتيب التحليل المحفوظ لعدم توفر سعر حي جديد."
+        return out
+
+    prev_close = safe_round(quote.get("previous_close", 0))
+    change_pct = safe_round(quote.get("change_pct", 0), 2)
+    volume = safe_round(quote.get("volume", 0))
+    source_label = str(quote.get("source_label", "") or quote.get("source", "FMP/Live"))
+    updated_label = str(quote.get("updated_label", "") or "")
+
+    entry = _first_positive_number(out, [
+        "display_entry_price", "smart_entry_price", "entry_price_real", "entry", "breakout_price", "confirmation_price"
+    ])
+    stop = _first_positive_number(out, ["display_stop_price", "smart_stop_loss", "stop_loss", "stop"])
+    target1 = _first_positive_number(out, ["display_target_price", "smart_target_1", "target_1", "target1", "target"])
+
+    distance_to_entry = _live_distance_pct(live_price, entry)
+    distance_to_target = _live_distance_pct(live_price, target1)
+    distance_to_stop = _live_distance_pct(live_price, stop)
+    snapshot_move_pct = _live_distance_pct(live_price, original_display_price)
+
+    readiness = safe_round(out.get("execution_readiness_score", 0), 2)
+    quality = safe_round(out.get("quality_score", 0), 2)
+    base_rank = safe_round(out.get("display_rank_score", _stock_score_value(out)), 2)
+    live_adjustment = 0.0
+    live_label = "تحديث حي"
+    live_reason_bits = []
+
+    if distance_to_entry is not None:
+        abs_entry_dist = abs(distance_to_entry)
+        out["live_distance_to_entry_pct"] = distance_to_entry
+        if -0.65 <= distance_to_entry <= 1.25:
+            live_adjustment += 8.0
+            live_label = "قريب من نقطة التنفيذ"
+            live_reason_bits.append("السعر قريب من نقطة الدخول")
+        elif 1.25 < distance_to_entry <= 3.5:
+            live_adjustment += 2.0
+            live_label = "تحرك بعد الدخول"
+            live_reason_bits.append("السعر فوق الدخول لكن لم يبتعد كثيرًا")
+        elif distance_to_entry > 6.0:
+            live_adjustment -= 8.0
+            live_label = "ابتعد عن الدخول"
+            live_reason_bits.append("السعر ابتعد عن نقطة الدخول")
+        elif distance_to_entry < -3.5:
+            live_adjustment -= 3.5
+            live_label = "لم يؤكد الدخول بعد"
+            live_reason_bits.append("السعر ما زال دون نقطة الدخول")
+        else:
+            live_reason_bits.append(f"بعده عن الدخول {abs_entry_dist:.2f}%")
+
+    if target1 and live_price >= target1:
+        live_adjustment -= 12.0
+        live_label = "اقترب/حقق الهدف"
+        live_reason_bits.append("السعر وصل إلى الهدف الأول أو تجاوزه")
+    elif distance_to_target is not None:
+        out["live_distance_to_target_pct"] = distance_to_target
+
+    if stop and live_price <= stop:
+        live_adjustment -= 20.0
+        live_label = "كسر الوقف"
+        live_reason_bits.append("السعر عند/دون وقف الخسارة")
+    elif distance_to_stop is not None:
+        out["live_distance_to_stop_pct"] = distance_to_stop
+
+    if snapshot_move_pct is not None:
+        out["live_move_vs_snapshot_pct"] = snapshot_move_pct
+        if abs(snapshot_move_pct) >= 2.5:
+            out["snapshot_stale_warning"] = True
+            live_reason_bits.append("السعر تغير بوضوح عن لقطة التحليل")
+        else:
+            out["snapshot_stale_warning"] = False
+
+    live_rank = max(0.0, base_rank + live_adjustment)
+    out.update({
+        "live_price": live_price,
+        "current_price_live": live_price,
+        "display_price": live_price,
+        "display_change_pct": change_pct,
+        "previous_close_live": prev_close,
+        "volume_live": volume,
+        "price_source": str(quote.get("source", "live_overlay") or "live_overlay"),
+        "price_source_label": source_label,
+        "last_price_update_label": updated_label,
+        "live_overlay_label": live_label,
+        "live_rank_score": safe_round(live_rank, 2),
+        "live_rank_adjustment": safe_round(live_adjustment, 2),
+        "live_rank_reason": "، ".join(live_reason_bits[:4]) if live_reason_bits else "تم تحديث السعر الحي دون تغيير كبير في الخطة.",
+        "analysis_snapshot_price": original_display_price,
+        "analysis_snapshot_note": "الخطة الأصلية محفوظة؛ السعر الحي يستخدم لتحديث القرب والترتيب فقط.",
+    })
+    return out
+
+
+def _sort_live_bucket(rows: list[dict]) -> list[dict]:
+    return sorted(rows or [], key=lambda x: float(x.get("live_rank_score", x.get("display_rank_score", _stock_score_value(x))) or 0), reverse=True)
+
+
+def _live_bucket_payload(rows: list[dict], limit: int) -> dict:
+    sorted_rows = _sort_live_bucket(rows)
+    return {
+        "count": len(sorted_rows),
+        "items": sorted_rows[:max(1, int(limit or 25))],
+        "omitted": max(0, len(sorted_rows) - max(1, int(limit or 25))),
+    }
+
+
+@app.get("/radar-live-refresh")
+def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_watch: bool = True):
+    """Return a fast live overlay for the last /trade-scan snapshot.
+
+    This endpoint is the safe bridge toward a dynamic radar: the phone can call it
+    every 15-30 seconds without rerunning the full scanner. It updates price, live
+    distance to entry/target/stop, and live ordering. It does not use news points.
+    """
+    snapshot = get_json("last_trade_scan_snapshot", {})
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    if not isinstance(rows, list) or not rows:
+        return {
+            "ok": False,
+            "error": "no_saved_scan_snapshot",
+            "message": "شغّل فحص الرادار مرة واحدة أولاً عبر الصفحة الرئيسية أو /trade-scan.",
+            "news_score_enabled": bool(NEWS_SCORE_ENABLED),
+            "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
+        }
+
+    symbols = _extract_live_symbol_list(rows, limit=220)
+    quote_bundle = get_live_quotes(symbols, prefer_cache=True, allow_fallback=allow_fallback)
+    quotes = quote_bundle.get("quotes", {}) if isinstance(quote_bundle, dict) else {}
+    overlaid = []
+    for row in rows:
+        sym = normalize_symbol_text((row or {}).get("symbol", ""))
+        overlaid.append(_apply_live_quote_overlay(row, quotes.get(sym)))
+
+    phase = get_market_phase()
+    strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
+    gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
+    special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
+    cautious = [
+        x for x in overlaid
+        if x.get("decision") == "دخول بحذر"
+        and normalize_symbol_text(x.get("symbol", "")) not in special_symbols
+        and not _is_blocked_sharia(x)
+        and not _is_gray_sharia(x)
+    ]
+    if not include_watch:
+        watch = []
+
+    updated_at_raw = str(snapshot.get("updated_at", "") or "") if isinstance(snapshot, dict) else ""
+    snapshot_age_sec = None
+    try:
+        dt = datetime.strptime(updated_at_raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("America/New_York"))
+        snapshot_age_sec = int((datetime.now(ZoneInfo("America/New_York")) - dt).total_seconds())
+    except Exception:
+        pass
+
+    payload = {
+        "ok": True,
+        "mode": "live_overlay_from_saved_scan",
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "snapshot_updated_at": updated_at_raw,
+        "snapshot_age_sec": snapshot_age_sec,
+        "live_updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "symbols_requested": len(symbols),
+        "quotes_available": len(quotes),
+        "quote_diagnostics": quote_bundle.get("diagnostics", {}) if isinstance(quote_bundle, dict) else {},
+        "news_score_enabled": bool(NEWS_SCORE_ENABLED),
+        "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
+        "groups": {
+            "strong_entries": _live_bucket_payload(strong, limit),
+            "cautious_entries": _live_bucket_payload(cautious, limit),
+            "gray_strong": _live_bucket_payload(gray_strong, limit),
+            "premarket_setups": _live_bucket_payload(premarket_setups, limit),
+            "watchlist": _live_bucket_payload(watch, limit if include_watch else 1),
+        },
+    }
+    try:
+        set_json("last_radar_live_refresh", {
+            "updated_at": payload["live_updated_at"],
+            "symbols_requested": payload["symbols_requested"],
+            "quotes_available": payload["quotes_available"],
+            "quote_diagnostics": payload["quote_diagnostics"],
+        })
+    except Exception:
+        pass
+    return payload
+
+
+@app.get("/live-diagnostics")
+def live_diagnostics(symbols: str = "NVDA,AAPL,MSFT", allow_fallback: bool = True):
+    clean = [s.strip().upper() for s in str(symbols or "").replace(";", ",").split(",") if s.strip()]
+    clean = clean[:40]
+    bundle = get_live_quotes(clean, prefer_cache=False, allow_fallback=allow_fallback)
+    last_refresh = get_json("last_radar_live_refresh", {})
+    return {
+        "ok": True,
+        "requested_symbols": clean,
+        "bundle": bundle,
+        "last_radar_live_refresh": last_refresh if isinstance(last_refresh, dict) else {},
+        "sqlite": sqlite_status(),
+        "live_config": {
+            "live_quotes_enabled": bool(LIVE_QUOTES_ENABLED),
+            "fmp_key_configured": bool(FMP_API_KEY),
+            "fmp_websocket_enabled_config": bool(FMP_WEBSOCKET_ENABLED),
+            "polygon_key_configured": bool(POLYGON_API_KEY),
+        },
+    }
 
 
 def _stock_score_value(x: dict) -> float:
