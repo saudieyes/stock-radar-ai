@@ -180,11 +180,20 @@ SCAN_UNIVERSE_TARGET = int(_env_float("SCAN_UNIVERSE_TARGET", 190.0))
 SCAN_MAX_WORKERS = int(_env_float("SCAN_MAX_WORKERS", 16.0))
 
 
-# AI news classifier (Claude / Anthropic). The model classifies news only;
-# the trading engine still decides whether catalyst points are allowed.
+
 def _env_bool(name: str, default: bool = False) -> bool:
     return str(os.getenv(name, "true" if default else "false") or ("true" if default else "false")).strip().lower() in {"1", "true", "yes", "on"}
 
+# Durable runtime storage / first-run setup / live data controls.
+USE_SQLITE_STORAGE = _env_bool("USE_SQLITE_STORAGE", True)
+FIRST_RUN_SETUP_ENABLED = _env_bool("FIRST_RUN_SETUP_ENABLED", True)
+NEWS_SCORE_ENABLED = _env_bool("NEWS_SCORE_ENABLED", False)
+LIVE_QUOTES_ENABLED = _env_bool("LIVE_QUOTES_ENABLED", True)
+FMP_API_KEY = str(os.getenv("FMP_API_KEY", "") or "").strip()
+FMP_WEBSOCKET_ENABLED = _env_bool("FMP_WEBSOCKET_ENABLED", False)
+
+# AI news classifier (Claude / Anthropic). The model classifies news only;
+# the trading engine still decides whether catalyst points are allowed.
 ANTHROPIC_API_KEY = str(os.getenv("ANTHROPIC_API_KEY", "") or "").strip()
 AI_NEWS_PROVIDER = str(os.getenv("AI_NEWS_PROVIDER", "claude") or "claude").strip().lower()
 AI_NEWS_MODEL = str(os.getenv("AI_NEWS_MODEL", "claude-haiku-4-5-20251001") or "claude-haiku-4-5-20251001").strip()
@@ -205,4 +214,5 @@ NEWS_SCOPE_LABELS = {
     "neutral": "خبر محايد",
     "unrelated": "غير ذي صلة",
 }
+
 
