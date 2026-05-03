@@ -895,25 +895,40 @@ def _build_special_buckets(results: list[dict], market_phase: str) -> tuple[list
     return gray_bucket, premarket_bucket, sort_display_bucket(watch)
 
 
-@app.get("/trade-scan")
-def trade_scan(include_all: bool = False):
-    results = scan_all()
-    scan_debug = get_last_scan_debug()
 
+
+def _parse_scan_snapshot_age_sec(snapshot: dict) -> float:
     try:
-        set_json("last_trade_scan_snapshot", {
-            "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
-            "count": len(results or []),
-            "rows": results[:250],
-            "diagnostics": scan_debug,
-        })
+        updated = str((snapshot or {}).get("updated_at", "") or "").strip()
+        if not updated:
+            return 999999.0
+        try:
+            dt = datetime.strptime(updated, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return 999999.0
+        now_naive = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+        return max(0.0, (now_naive - dt).total_seconds())
     except Exception:
-        pass
+        return 999999.0
 
+
+def _trade_scan_cache_ttl_sec(phase: str, prefer_cache: bool = False) -> int:
+    try:
+        if prefer_cache:
+            if phase in {"open", "pre_market", "after_hours"}:
+                return int(os.getenv("RADAR_FAST_CACHE_TTL_OPEN_SEC", "240") or 240)
+            return int(os.getenv("RADAR_FAST_CACHE_TTL_CLOSED_SEC", "1800") or 1800)
+        if phase in {"open", "pre_market", "after_hours"}:
+            return int(os.getenv("RADAR_SCAN_CACHE_TTL_OPEN_SEC", "75") or 75)
+        return int(os.getenv("RADAR_SCAN_CACHE_TTL_CLOSED_SEC", "900") or 900)
+    except Exception:
+        return 75 if phase in {"open", "pre_market", "after_hours"} else 900
+
+
+def _build_trade_scan_response(results, scan_debug, include_all: bool = False, cache_hit: bool = False, cache_age_sec=None, payload_note: str = ""):
+    results = list(results or [])
+    scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
-    # Clean strong/cautious lists should not include explicit non-compliant or gray names.
-    # Gray technical winners get a separate bucket so the user sees the opportunity without
-    # mistaking it for a clean Sharia entry.
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
     gray_strong, premarket_setups, watch = _build_special_buckets(results, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
@@ -925,10 +940,14 @@ def trade_scan(include_all: bool = False):
         and not _is_gray_sharia(x)
     ])
 
-    return {
+    out = {
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
         "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "analysis_updated_at": scan_debug.get("updated_at", "") or scan_debug.get("scan_updated_at", ""),
+        "cache_hit": bool(cache_hit),
+        "cache_age_sec": round(float(cache_age_sec or 0), 1) if cache_age_sec is not None else None,
+        "payload_note": payload_note,
         "universe_count": int(scan_debug.get("after_manual_exclusion", scan_debug.get("raw_count", 150)) or 150),
         "source_target": int(scan_debug.get("source_target", scan_debug.get("raw_count", 150)) or 150),
         "source_active_count": int(scan_debug.get("source_active_count", scan_debug.get("raw_count", 150)) or 150),
@@ -965,8 +984,6 @@ def trade_scan(include_all: bool = False):
         "watchlist": watch[:50],
         "opening_mode_active": is_opening_window(),
         "opening_focus": build_opening_focus(results),
-        # Fix16 speed: do not send the full 190-row detailed payload to the phone by default.
-        # Sections above already contain the actionable rows; /debug-scan remains available for full inspection.
         "all_results": results if include_all else [],
         "all_results_omitted": 0 if include_all else max(0, len(results)),
         "payload_mode": "full_with_all_results" if include_all else "compact_actionable_sections",
@@ -974,6 +991,56 @@ def trade_scan(include_all: bool = False):
         "scan_max_workers": scan_debug.get("scan_max_workers", None),
         "scan_requested_universe": scan_debug.get("scan_requested_universe", None),
     }
+    return out
+
+
+@app.get("/trade-scan")
+def trade_scan(include_all: bool = False, force: bool = False, prefer_cache: bool = False):
+    """Full radar scan with a safe snapshot cache.
+
+    Fix25 speed: loading the page repeatedly should not rerun the heavy scan every time.
+    A recent saved snapshot is returned quickly, then the UI overlays live FMP prices.
+    Use force=true for a full fresh scan.
+    """
+    phase = get_market_phase()
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows_from_snapshot = snapshot.get("rows") if isinstance(snapshot, dict) else []
+    age_sec = _parse_scan_snapshot_age_sec(snapshot) if isinstance(snapshot, dict) else 999999.0
+    ttl_sec = _trade_scan_cache_ttl_sec(phase, bool(prefer_cache))
+
+    if (not force) and isinstance(rows_from_snapshot, list) and rows_from_snapshot and age_sec <= ttl_sec:
+        diag = dict(snapshot.get("diagnostics") or {})
+        diag.setdefault("updated_at", snapshot.get("updated_at", ""))
+        return _build_trade_scan_response(
+            rows_from_snapshot,
+            diag,
+            include_all=include_all,
+            cache_hit=True,
+            cache_age_sec=age_sec,
+            payload_note="تم عرض آخر فحص محفوظ بسرعة، ثم تُحدّث الأسعار حيًا عبر FMP.",
+        )
+
+    results = scan_all()
+    scan_debug = get_last_scan_debug()
+    try:
+        snapshot_payload = {
+            "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+            "count": len(results or []),
+            "rows": results[:250],
+            "diagnostics": scan_debug,
+        }
+        set_json("last_trade_scan_snapshot", snapshot_payload)
+    except Exception:
+        pass
+
+    return _build_trade_scan_response(
+        results,
+        scan_debug,
+        include_all=include_all,
+        cache_hit=False,
+        cache_age_sec=0,
+        payload_note="فحص كامل جديد.",
+    )
 
 
 @app.get("/single-stock")
@@ -1493,5 +1560,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
 
