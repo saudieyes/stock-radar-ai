@@ -454,10 +454,10 @@
     .floating-nav-wrap {
       position: fixed;
       left: 14px;
-      bottom: calc(84px + env(safe-area-inset-bottom));
+      bottom: calc(78px + env(safe-area-inset-bottom));
       z-index: 80;
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse;
       align-items: flex-start;
       gap: 8px;
     }
@@ -481,7 +481,7 @@
       padding: 10px;
       min-width: 180px;
       box-shadow: var(--shadow-main);
-      max-height: 68vh;
+      max-height: 52vh;
       overflow: auto;
     }
     .floating-nav-menu.open { display: flex; }
@@ -823,6 +823,92 @@
       .floating-nav-menu { min-width: 205px !important; max-height: 60vh !important; }
     }
 
+
+
+    /* Fix20: cleaner TradingView-like compact card layout */
+    .compact-card-shell {
+      display: grid;
+      gap: 10px;
+    }
+    .card-heading-line {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .card-rank-subtitle {
+      margin-top: 5px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.5;
+    }
+    .card-top .badges {
+      max-width: 48%;
+      justify-content: flex-start;
+    }
+    .plan-snapshot {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .quick-reason-line {
+      background: var(--panel-bg-soft);
+      border: 1px solid var(--border-soft);
+      border-radius: 16px;
+      padding: 10px 12px;
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.8;
+    }
+    .quick-reason-line b {
+      color: var(--detail-btn-text);
+      margin-left: 6px;
+    }
+    .compact-action-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 7px;
+      margin: 4px 0 2px;
+    }
+    .compact-action-row button {
+      min-height: 34px;
+      border-radius: 12px;
+      padding: 7px 6px;
+      font-size: 11.5px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .details-grid .detail-box.full {
+      grid-column: 1 / -1;
+    }
+    details.detail-panel summary.analysis-summary {
+      width: 100%;
+      justify-content: center;
+      border-radius: 15px;
+      min-height: 40px;
+      font-size: 13.5px;
+      margin-top: 4px;
+    }
+    .visible-context-only {
+      border-color: rgba(96,165,250,.35);
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    @media (max-width: 760px) {
+      .card-top {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+      .card-top .badges { max-width: 100%; }
+      .plan-snapshot { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .micro-item { min-height: 66px; padding: 9px; }
+      .micro-value { font-size: 15.5px; }
+      .decision-snapshot span { font-size: 11.5px; padding: 6px 8px; }
+      .indicator-strip { display: none; }
+      .compact-action-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .compact-action-row button { min-height: 34px; font-size: 11.5px; }
+      .floating-nav-wrap { flex-direction: column-reverse !important; }
+      .floating-nav-menu { max-height: 48vh !important; min-width: 168px !important; }
+    }
 </style>
 </head>
 <body>
@@ -852,12 +938,6 @@
         <button class="floating-nav-link" type="button" onclick="openByNav('gray-strong-section', 'gray-strong-section-content')">⚠️ غير محسومة شرعيًا</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('cautious-section', 'cautious-section-content')">🟠 دخول بحذر</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('watch-section', 'watch-section-content')">👀 المراقبة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('riskPanelSection')">⚖️ المخاطرة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('portfolioSection', 'portfolioContentWrap')">💼 المحفظة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('watchlistSection', 'manualWatchlistContent')">📌 المتابعة</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('shariaExcludedSection', 'shariaExcludedContent')">🚫 المستبعدة شرعيًا</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('performanceSection', 'performanceContent')">📊 الأداء</button>
-        <button class="floating-nav-link" type="button" onclick="openByNav('singleScanSection')">🔎 فحص سهم</button>
         <button class="floating-nav-link" type="button" onclick="scrollToPageBottom()">⬇️ أسفل الصفحة</button>
       </div>
     </div>
@@ -905,7 +985,7 @@
     <div id="introHelp" class="glossary-box section hidden-section scroll-anchor">
       <div class="summary-title">ℹ️ شرح سريع</div>
       <div class="glossary-grid">
-        <div class="glossary-item">الصفحة أصبحت مختصرة، والتفاصيل الكاملة داخل كل بطاقة عند الضغط على <b>عرض التفاصيل الكاملة</b>.</div>
+        <div class="glossary-item">الصفحة أصبحت مختصرة، والتفاصيل الكاملة داخل كل بطاقة عند الضغط على <b>تحليل شامل / إظهار التفاصيل</b>.</div>
         <div class="glossary-item">الأقسام الرئيسية تبدأ <b>مخفية</b> لتصل بسرعة لأي قائمة تريدها دون تمرير طويل.</div>
         <div class="glossary-item">الأداء الأسبوعي يعرض <b>ملخصًا سريعًا</b> لكل نوع، وتفاصيل الصفقات تظهر فقط عند الطلب.</div>
         <div class="glossary-item">اضغط <b>ℹ️</b> بجانب الخانة لتظهر فائدتها بسرعة ثم تختفي عند الضغط في أي مكان خارجها.</div>
@@ -1806,14 +1886,47 @@
       </div>`;
     }
 
+
+
+    function compactText(value, maxLen=150) {
+      const clean = safeText(value || '').replace(/\s+/g, ' ').trim();
+      if (!clean) return '';
+      return clean.length > maxLen ? clean.slice(0, maxLen - 1) + '…' : clean;
+    }
+
+    function compactCardReason(stock) {
+      const reason = compactText(stock.quick_explainer || stock.ai_summary || stock.source_reason || stock.special_bucket_reason || '', 170);
+      if (reason) return reason;
+      const parts = [
+        stock.display_plan_family_label || stock.strategy_label || '',
+        stock.execution_readiness_label ? `جاهزية ${stock.execution_readiness_label}` : '',
+        stock.market_support_label ? `المؤشر ${stock.market_support_label}` : '',
+        stock.sector_support_label ? `القطاع ${stock.sector_support_label}` : ''
+      ].filter(Boolean).map(safeText);
+      return parts.length ? parts.join(' • ') : 'لا يوجد سبب مختصر متاح.';
+    }
+
+    function renderCompactActionRow(stock, displayPrice) {
+      const symbol = safeText(stock.symbol);
+      const price = Number(displayPrice || 0);
+      return `<div class="compact-action-row">
+        <button class="soft-primary" onclick="scanSingleFromCard('${symbol}')">🔎 فحص</button>
+        <button class="soft-primary" onclick="addCardToPortfolio('${symbol}', ${price})">💼 محفظة</button>
+        <button class="soft-approve" onclick="addToWatchlist('${symbol}', ${price})">📌 متابعة</button>
+        ${stock.sharia_manual_excluded
+          ? `<button class="ghost" onclick="restoreShariaSymbol('${symbol}')">↩️ شرعي</button>`
+          : `<button class="soft-danger" onclick="excludeShariaSymbol('${symbol}')">🚫 شرعي</button>`}
+      </div>`;
+    }
+
     function createCard(stock, sectionKey='', index=0) {
       const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
       const cardNavTop = ''; // تم إخفاء أزرار الأول/السابق/التالي من أعلى البطاقة لتقليل الازدحام
-      const cardNavBottom = renderCardNav(sectionKey, index, 'bottom');
-      const cardNavDetails = renderCardNav(sectionKey, index, 'details');
+      const cardNavBottom = '';
+      const cardNavDetails = '';
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
@@ -1932,40 +2045,27 @@
             </div>
           </div>
 
-          ${renderPlanSnapshot(stock, displayPrice)}
+          <div class="compact-card-shell">
+            ${renderPlanSnapshot(stock, displayPrice)}
 
-          ${renderDecisionSnapshot(stock, displayDecisionText)}
+            ${renderDecisionSnapshot(stock, displayDecisionText)}
 
-          ${renderFastArabicSummary(stock)}
+            <div class="quick-reason-line"><b>لماذا ظهر؟</b>${compactCardReason(stock)}</div>
 
-          <div class="indicator-strip">${importantIndicators(stock)}</div>
+            <div class="indicator-strip">${importantIndicators(stock)}</div>
 
-          ${hasPrimaryNews(stock) ? `<div class="news-line">
-            ${newsBadge(stock)}
-            <span>${safeText(newsHeadlineText(stock))}</span>
-          </div>` : ''}
+            ${hasPrimaryNews(stock) ? `<div class="news-line visible-context-only">
+              ${newsBadge(stock)}
+              <span>الأخبار معلومة فقط: ${safeText(newsHeadlineText(stock))}</span>
+            </div>` : ''}
 
-          <div class="summary-line">
-            <div style="font-weight:800; margin-bottom:6px;">${safeText(stock.quick_explainer || '')}</div>
-            ${stock.special_bucket_reason ? `<div style="font-weight:900; color:var(--yellow); margin-bottom:6px;">${safeText(stock.special_bucket_reason)}</div>` : ''}
-            <div>${safeText(stock.ai_summary || 'لا يوجد ملخص')}</div>
+            ${renderCompactActionRow(stock, displayPrice)}
+
+            <details class="detail-panel">
+              <summary class="analysis-summary">تحليل شامل / إظهار التفاصيل</summary>
+              <div class="details-grid">${details.join('')}</div>
+            </details>
           </div>
-
-          <div class="card-actions">
-            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
-            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا يدويًا</button>` : ''}
-            <button class="soft-primary" onclick="scanSingleFromCard('${safeText(stock.symbol)}')">🔎 فحص فردي</button>
-            <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
-            <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
-          </div>
-
-          ${cardNavBottom}
-
-          <details class="detail-panel">
-            <summary>عرض التفاصيل الكاملة</summary>
-            <div class="details-grid">${details.join('')}</div>
-            ${cardNavDetails}
-          </details>
         </div>`;
     }
 
