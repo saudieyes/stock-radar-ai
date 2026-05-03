@@ -185,6 +185,10 @@
       display:inline-flex; align-items:center; gap:8px; border-radius:999px;
       padding:8px 12px; font-size:13px; font-weight:700; background:var(--panel-bg-soft); border:1px solid var(--border-soft);
     }
+    .live-radar-status { color: var(--text-strong); }
+    .live-radar-status.ok { border-color: rgba(59,130,246,.72); }
+    .live-radar-status.warn { border-color: rgba(245,158,11,.72); }
+    .live-radar-status.err { border-color: rgba(239,68,68,.58); }
     .hero-market {
       font-size:22px; font-weight:900;
     }
@@ -684,6 +688,16 @@
       direction: ltr;
       text-align: right;
     }
+    .live-snapshot-note {
+      grid-column: 1 / -1;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.6;
+      border-top: 1px solid var(--border-soft);
+      padding-top: 7px;
+      margin-top: 2px;
+    }
+
     .decision-snapshot {
       display: flex;
       flex-wrap: wrap;
@@ -921,6 +935,7 @@
         <button class="ghost" onclick="toggleSection('introHelp', this, 'إظهار الشرح', 'إخفاء الشرح')">إظهار الشرح</button>
         <button class="ghost" onclick="toggleSection('glossaryHelp', this, 'إظهار الرموز', 'إخفاء الرموز')">إظهار الرموز</button>
         <button class="ghost" id="themeToggleBtn" onclick="toggleThemeMode()">الوضع الليلي</button>
+        <button class="ghost" id="liveRefreshBtn" onclick="refreshRadarLiveOverlay(false)">⚡ تحديث حي</button>
         <button class="primary" onclick="loadAll()">تحديث الكل</button>
         <button class="ghost" onclick="logoutSession()">تسجيل الخروج</button>
       </div>
@@ -956,6 +971,7 @@
           <span class="hero-market" id="heroMarketLabel">—</span>
           <span class="hero-chip" id="heroUpdated">آخر تحديث: —</span>
           <span class="hero-chip" id="heroOpeningMode">وضع الافتتاح: —</span>
+          <span class="hero-chip live-radar-status" id="liveRadarStatus">الحي: لم يبدأ</span>
         </div>
         <div class="small-note" id="heroExplain">جاري تحميل حالة السوق...</div>
       </div>
@@ -1868,11 +1884,15 @@
     }
 
     function renderPlanSnapshot(stock, displayPrice) {
+      const liveNote = stock.live_overlay_available
+        ? `<div class="live-snapshot-note">السعر الحي: ${safeText(stock.price_source_label || 'FMP Live/REST')} • ${safeText(stock.last_price_update_label || stock.live_updated_label || '')}</div>`
+        : '';
       return `<div class="plan-snapshot">
         ${microItem('السعر الحالي', formatNumber(displayPrice))}
         ${microItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
         ${microItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
         ${microItem(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price))}
+        ${liveNote}
       </div>`;
     }
 
@@ -1924,8 +1944,8 @@
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
-      const cardNavTop = ''; // تم إخفاء أزرار الأول/السابق/التالي من أعلى البطاقة لتقليل الازدحام
-      const cardNavBottom = '';
+      const cardNavTop = sectionKey && sectionKey !== 'single-stock' ? renderCardNav(sectionKey, index, 'top') : '';
+      const cardNavBottom = sectionKey && sectionKey !== 'single-stock' ? renderCardNav(sectionKey, index, 'bottom') : '';
       const cardNavDetails = '';
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
@@ -1935,6 +1955,11 @@
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
       details.push(detailBox('مدة الصلاحية', safeText(stock.valid_for)));
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
+      if (stock.live_overlay_available) {
+        details.push(detailBox('السعر الحي الآن', `${formatNumber(stock.current_price_live || stock.display_price)} | ${safeText(stock.price_source_label || '')}`));
+        details.push(detailBox('سبب الترتيب الحي', safeText(stock.live_rank_reason || ''), true));
+        details.push(detailBox('سعر التحليل المحفوظ', formatNumber(stock.analysis_snapshot_price || stock.snapshot_display_price || 0)));
+      }
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
       details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
@@ -2066,6 +2091,7 @@
               <div class="details-grid">${details.join('')}</div>
             </details>
           </div>
+          ${cardNavBottom}
         </div>`;
     }
 
@@ -2316,6 +2342,73 @@
       } catch(e) {}
     }
 
+    function setLiveRadarStatus(text, cls='') {
+      const el = document.getElementById('liveRadarStatus');
+      if (!el) return;
+      el.classList.remove('ok','warn','err');
+      if (cls) el.classList.add(cls);
+      el.textContent = text || 'الحي: —';
+    }
+
+    function applyRadarLiveGroups(payload) {
+      if (!window.__scanData || !payload?.ok || !payload.groups) return false;
+      const map = {
+        strong_entries: 'strong_entries',
+        cautious_entries: 'cautious_entries',
+        gray_strong: 'gray_strong',
+        premarket_setups: 'premarket_setups',
+        watchlist: 'watchlist'
+      };
+      Object.entries(map).forEach(([payloadKey, dataKey]) => {
+        const group = payload.groups[payloadKey] || {};
+        window.__scanData[dataKey] = Array.isArray(group.items) ? group.items : [];
+        window.__scanData[`${dataKey}_count`] = Number(group.count || window.__scanData[dataKey].length || 0);
+      });
+      window.__scanData.market_phase = payload.market_phase || window.__scanData.market_phase;
+      window.__scanData.market_phase_label = payload.market_phase_label || window.__scanData.market_phase_label;
+      window.__scanData.live_updated_at = payload.live_updated_at || '';
+      window.__scanData.live_quote_diagnostics = payload.quote_diagnostics || {};
+      window.__scanData.count = Number(window.__scanData.strong_entries_count || 0)
+        + Number(window.__scanData.cautious_entries_count || 0)
+        + Number(window.__scanData.premarket_setups_count || 0)
+        + Number(window.__scanData.gray_strong_count || 0)
+        + Number(window.__scanData.watchlist_count || 0);
+      return true;
+    }
+
+    async function refreshRadarLiveOverlay(silent=false) {
+      if (!window.__scanData) {
+        if (!silent) setLiveRadarStatus('الحي: شغّل الرادار أولًا', 'warn');
+        return;
+      }
+      const btn = document.getElementById('liveRefreshBtn');
+      const oldText = btn ? btn.textContent : '';
+      if (btn && !silent) { btn.textContent = '⏳ حي...'; btn.disabled = true; btn.classList.add('refreshing'); }
+      try {
+        const res = await apiFetch(`/radar-live-refresh?limit=120&include_watch=true&_=${Date.now()}`);
+        const data = await res.json();
+        if (!data.ok) {
+          setLiveRadarStatus(data.message || 'الحي: لا توجد لقطة محفوظة', 'warn');
+          return;
+        }
+        const openKeys = currentlyOpenSectionKeys();
+        const applied = applyRadarLiveGroups(data);
+        if (applied) {
+          renderScanData();
+          openKeys.forEach(key => ensureSectionOpen(key));
+          const diag = data.quote_diagnostics || {};
+          const src = diag.source || diag.sources || '';
+          const q = Number(data.quotes_available || 0);
+          const t = data.live_updated_at ? String(data.live_updated_at).slice(11, 16) : '';
+          setLiveRadarStatus(`الحي: ${q} سعر • ${t}${src ? ' • ' + safeText(src) : ''}`, 'ok');
+        }
+      } catch(e) {
+        if (!silent) setLiveRadarStatus('الحي: تعذر التحديث', 'err');
+      } finally {
+        if (btn && !silent) { btn.textContent = oldText || '⚡ تحديث حي'; btn.disabled = false; btn.classList.remove('refreshing'); }
+      }
+    }
+
     async function loadScan() {
       document.getElementById('content').innerHTML = '<div class="loading">جاري تحميل البيانات...</div>';
       const btn = document.getElementById('refreshScanBtn');
@@ -2327,6 +2420,7 @@
         setScanData(data);
         renderScanData();
         refreshLiveQuotesForScan(true);
+        refreshRadarLiveOverlay(true);
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
         document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
@@ -2713,6 +2807,7 @@
     initThemeMode();
     refreshRiskSettingsUI();
     window.__liveQuotesTimer = window.setInterval(() => refreshLiveQuotesForScan(false), 45000);
+    window.__liveRadarOverlayTimer = window.setInterval(() => refreshRadarLiveOverlay(true), 60000);
     loadAll();
   </script>
 </body>
