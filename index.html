@@ -704,6 +704,28 @@
     .card-why-line { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px 12px; font-size:13px; line-height:1.8; color:var(--text-main); margin-bottom:12px; }
     .card-why-line b { color:var(--text-strong); }
     .compact-source-line { color:var(--text-muted); font-size:11.5px; line-height:1.6; margin-top:4px; }
+    .portfolio-summary-grid, .tracking-summary-grid {
+      display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:10px; margin-bottom:14px;
+    }
+    .portfolio-summary-card, .tracking-summary-card {
+      background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:16px; padding:12px;
+    }
+    .portfolio-summary-label, .tracking-summary-label { color:var(--text-muted); font-size:12px; font-weight:800; margin-bottom:6px; }
+    .portfolio-summary-value, .tracking-summary-value { color:var(--text-strong); font-size:18px; font-weight:900; line-height:1.35; }
+    .portfolio-card-list, .watchlist-card-list, .sharia-card-list { display:grid; grid-template-columns:1fr; gap:12px; }
+    .portfolio-card, .watchlist-card, .sharia-card {
+      background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:18px; padding:13px;
+    }
+    .portfolio-card-top, .watchlist-card-top, .sharia-card-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:10px; }
+    .portfolio-card-symbol, .watchlist-card-symbol, .sharia-card-symbol { font-size:21px; font-weight:900; color:var(--text-strong); }
+    .portfolio-card-sub, .watchlist-card-sub, .sharia-card-sub { color:var(--text-muted); font-size:12px; line-height:1.7; margin-top:4px; }
+    .portfolio-metrics, .watchlist-metrics, .sharia-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:10px 0; }
+    .portfolio-metric, .watchlist-metric, .sharia-metric { background:var(--panel-bg-soft-2); border:1px solid var(--border-main); border-radius:14px; padding:9px; }
+    .portfolio-metric-label, .watchlist-metric-label, .sharia-metric-label { color:var(--text-muted); font-size:11.5px; font-weight:800; margin-bottom:5px; }
+    .portfolio-metric-value, .watchlist-metric-value, .sharia-metric-value { color:var(--text-strong); font-size:14px; font-weight:900; line-height:1.45; }
+    .portfolio-note-line { color:var(--text-main); background:var(--panel-bg-soft-2); border:1px solid var(--border-main); border-radius:14px; padding:10px; font-size:12.5px; line-height:1.8; margin-top:9px; }
+    .mini-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .mini-actions button { min-height:34px; padding:7px 10px; font-size:12px; border-radius:12px; }
     @media (max-width: 760px) { .price-plan-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .market-mood-grid { grid-template-columns:1fr; } }
 
 </style>
@@ -1733,11 +1755,30 @@
     }
 
     async function addCardToPortfolio(symbol, currentPrice) {
+      const clean = String(symbol || '').toUpperCase().trim();
+      if (!clean) return;
+      const stock = (window.__stockPayloadBySymbol || {})[clean] || {};
+      const defaultPrice = Number(currentPrice || stock.display_price || stock.current_price_live || stock.display_entry_price || 0);
+      const buyInput = prompt(`سعر الشراء لـ ${clean}`, defaultPrice ? String(defaultPrice) : '');
+      if (buyInput === null) return;
+      const buyPrice = Number(String(buyInput).replace(',', '.'));
+      if (!buyPrice || buyPrice <= 0) { alert('سعر الشراء غير صحيح'); return; }
+      const qtyInput = prompt(`الكمية لـ ${clean} - اختياري`, '0');
+      if (qtyInput === null) return;
+      const quantity = Number(String(qtyInput || '0').replace(',', '.')) || 0;
       try {
         await apiFetch('/portfolio/add', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, buy_price: Number(currentPrice || 0), quantity: 0 })
+          body: JSON.stringify({
+            symbol: clean,
+            buy_price: buyPrice,
+            quantity,
+            target_price: Number(stock.display_target_price || stock.target_1 || 0),
+            stop_loss: Number(stock.display_stop_price || stock.stop_loss || 0),
+            source: 'radar_card',
+            note: stock.decision ? `أضيف من الرادار: ${stock.decision}` : 'أضيف من بطاقة الرادار'
+          })
         });
         const wrap = document.getElementById('portfolioContentWrap');
         if (wrap) {
@@ -1745,8 +1786,33 @@
           wrap.style.display = '';
           wrap.dataset.loaded = '1';
         }
-        loadPortfolio();
-      } catch (e) {}
+        await loadPortfolio();
+        alert(`تمت إضافة ${clean} للمحفظة`);
+      } catch (e) { alert('تعذر إضافة السهم للمحفظة'); }
+    }
+
+    async function trackSignalFromCard(symbol) {
+      const clean = String(symbol || '').toUpperCase().trim();
+      if (!clean) return;
+      const stock = (window.__stockPayloadBySymbol || {})[clean] || null;
+      if (!stock) { alert('لم أجد بيانات البطاقة للتتبع'); return; }
+      try {
+        const res = await apiFetch('/performance/track-signal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stock })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data && data.ok === false) throw new Error(data.error || 'track_failed');
+        const perf = document.getElementById('performanceContent');
+        if (perf && !perf.classList.contains('hidden-section')) {
+          perf.dataset.loaded = '1';
+          await loadPerformance();
+        }
+        alert(`تم تسجيل ${clean} في التتبع الأسبوعي`);
+      } catch (e) {
+        alert('تعذر تسجيل السهم في التتبع');
+      }
     }
 
 
@@ -1758,6 +1824,8 @@
     }
 
     function createCard(stock, sectionKey='', index=0) {
+      window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
+      if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
       const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
@@ -1905,6 +1973,7 @@
             <button class="soft-primary" onclick="scanSingleFromCard('${safeText(stock.symbol)}')">🔎 فحص فردي</button>
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
+            <button class="ghost" onclick="trackSignalFromCard('${safeText(stock.symbol)}')">📊 تتبع</button>
             <button class="ghost" onclick="loadAnalystSnapshot('${safeText(stock.symbol)}', true)">👥 المحللين</button>
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
@@ -2450,31 +2519,39 @@
           document.getElementById('shariaExcludedContent').innerHTML = '<div class="empty">لا توجد أسهم مستبعدة يدويًا بعد</div>';
           return;
         }
-        const rows = items.map(item => `
-          <tr>
-            <td>${safeText(item.symbol)}</td>
-            <td>${safeText(item.company || '—')}</td>
-            <td>${safeText(item.sharia_label || '—')}</td>
-            <td>${safeText(item.sharia_reason || '—')}</td>
-            <td>${safeText(item.note || '—')}</td>
-            <td>${formatNumber(item.current_price)}</td>
-            <td>${safeText(item.excluded_at || '—')}</td>
-            <td><button class="ghost" onclick="restoreShariaSymbol('${safeText(item.symbol)}')">↩️ إعادة</button></td>
-          </tr>`).join('');
-        document.getElementById('shariaExcludedContent').innerHTML = `
-          <div class="table-wrap">
-            <table class="list-table">
-              <thead>
-                <tr>
-                  <th>السهم</th><th>الشركة</th><th>الحالة</th><th>السبب</th><th>ملاحظة</th><th>السعر</th><th>وقت الاستبعاد</th><th></th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>`;
+        const cards = items.map(item => `
+          <div class="sharia-card">
+            <div class="sharia-card-top">
+              <div>
+                <div class="sharia-card-symbol">${safeText(item.symbol)}</div>
+                <div class="sharia-card-sub">${safeText(item.company || '—')} • ${safeText(item.sector || '—')}</div>
+              </div>
+              <span class="badge badge-news-legal">مستبعد شرعيًا</span>
+            </div>
+            <div class="sharia-metrics">
+              <div class="sharia-metric"><div class="sharia-metric-label">الحالة</div><div class="sharia-metric-value">${safeText(item.sharia_label || '—')}</div></div>
+              <div class="sharia-metric"><div class="sharia-metric-label">السعر</div><div class="sharia-metric-value">${formatNumber(item.current_price)}</div></div>
+              <div class="sharia-metric"><div class="sharia-metric-label">وقت الاستبعاد</div><div class="sharia-metric-value">${safeText(item.excluded_at || '—')}</div></div>
+              <div class="sharia-metric"><div class="sharia-metric-label">ملاحظة</div><div class="sharia-metric-value">${safeText(item.note || '—')}</div></div>
+            </div>
+            <div class="portfolio-note-line"><b>سبب الشرعية:</b> ${safeText(item.sharia_reason || 'مستبعد يدويًا من قائمتك الشرعية')}</div>
+            <div class="mini-actions">
+              <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
+              <button class="ghost" onclick="restoreShariaSymbol('${safeText(item.symbol)}')">↩️ إعادة السهم</button>
+            </div>
+          </div>`).join('');
+        document.getElementById('shariaExcludedContent').innerHTML = `<div class="sharia-card-list">${cards}</div>`;
       } catch (e) {
         document.getElementById('shariaExcludedContent').innerHTML = '<div class="error">تعذر تحميل القائمة الشرعية المستبعدة</div>';
       }
+    }
+
+
+    function portfolioColorClass(value) {
+      const n = Number(value || 0);
+      if (n > 0) return 'green';
+      if (n < 0) return 'red';
+      return '';
     }
 
     async function loadPortfolio() {
@@ -2482,37 +2559,56 @@
         const res = await apiFetch('/portfolio');
         const data = await res.json();
         const items = Array.isArray(data.items) ? data.items : [];
+        const summary = data.summary || {};
         document.getElementById('portfolioCount').innerHTML = `${items.length} سهم`;
         if (!items.length) {
           document.getElementById('portfolioContent').innerHTML = '<div class="empty">لا توجد أسهم في المحفظة بعد</div>';
           return;
         }
-        const rows = items.map(item => `
-          <tr>
-            <td>${safeText(item.symbol)}</td>
-            <td>${formatNumber(item.buy_price)}</td>
-            <td>${formatNumber(item.current_price)}</td>
-            <td>${formatPercent(item.holding_change_pct)}</td>
-            <td>${safeText(item.price_source_label)}</td>
-            <td>${safeText(item.market_phase_label)}</td>
-            <td>${safeText(item.type_label)}</td>
-            <td><b>${safeText(item.recommendation)}</b><br><span class="muted">${safeText(item.recommendation_note)}</span></td>
-            <td>${formatNumber(item.target_price)}</td>
-            <td>${formatNumber(item.stop_loss)}</td>
-            <td><button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button></td>
-          </tr>`).join('');
-        document.getElementById('portfolioContent').innerHTML = `
-          <table class="list-table">
-            <thead>
-              <tr>
-                <th>السهم</th><th>سعر الشراء</th><th>السعر الحالي</th><th>الربح/الخسارة</th><th>مصدر السعر</th><th>السوق</th><th>نوع الفرصة</th><th>التوصية</th><th>الهدف</th><th>الوقف</th><th></th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>`;
+        const summaryHtml = `
+          <div class="portfolio-summary-grid">
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">عدد المراكز</div><div class="portfolio-summary-value">${formatNumber(summary.positions || items.length)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">القيمة الحالية</div><div class="portfolio-summary-value">$${formatNumber(summary.market_value || 0)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">التكلفة</div><div class="portfolio-summary-value">$${formatNumber(summary.cost_value || 0)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">الربح/الخسارة</div><div class="portfolio-summary-value ${portfolioColorClass(summary.unrealized_pl)}">$${formatNumber(summary.unrealized_pl || 0)} (${formatNumber(summary.unrealized_pl_pct || 0)}%)</div></div>
+          </div>`;
+        const cards = items.map(item => {
+          const plClass = portfolioColorClass(item.holding_change_pct);
+          return `
+            <div class="portfolio-card">
+              <div class="portfolio-card-top">
+                <div>
+                  <div class="portfolio-card-symbol">${safeText(item.symbol)}</div>
+                  <div class="portfolio-card-sub">${safeText(item.type_label || '—')} • ${safeText(item.price_source_label || '—')}</div>
+                </div>
+                <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
+              </div>
+              <div class="portfolio-metrics">
+                <div class="portfolio-metric"><div class="portfolio-metric-label">سعر الشراء</div><div class="portfolio-metric-value">${formatNumber(item.buy_price)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">السعر الحالي</div><div class="portfolio-metric-value">${formatNumber(item.current_price)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">العائد الحالي</div><div class="portfolio-metric-value ${plClass}">${formatPercent(item.holding_change_pct)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">القيمة / التكلفة</div><div class="portfolio-metric-value">$${formatNumber(item.market_value)} / $${formatNumber(item.cost_value)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">الهدف</div><div class="portfolio-metric-value">${formatNumber(item.target_price)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">الوقف</div><div class="portfolio-metric-value">${formatNumber(item.stop_loss)}</div></div>
+              </div>
+              <div class="portfolio-note-line"><b>رأي الأداة:</b> ${safeText(item.recommendation_note || 'راقب السعر مقارنة بالخطة والوقف والهدف.')}</div>
+              <div class="mini-actions">
+                <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
+                <button class="ghost" onclick="addToWatchlist('${safeText(item.symbol)}', ${Number(item.current_price || item.buy_price || 0)})">📌 متابعة</button>
+                <button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button>
+              </div>
+            </div>`;
+        }).join('');
+        document.getElementById('portfolioContent').innerHTML = `${summaryHtml}<div class="portfolio-card-list">${cards}</div>`;
       } catch (e) {
         document.getElementById('portfolioContent').innerHTML = '<div class="error">تعذر تحميل المحفظة</div>';
       }
+    }
+
+    async function moveWatchlistToPortfolio(symbol, price) {
+      await addCardToPortfolio(symbol, price);
+      const content = document.getElementById('manualWatchlistContent');
+      if (content && !content.classList.contains('hidden-section')) await loadWatchlist();
     }
 
     async function loadWatchlist() {
@@ -2525,28 +2621,28 @@
           document.getElementById('manualWatchlistContent').innerHTML = '<div class="empty">لا توجد أسهم مضافة للمراقبة بعد</div>';
           return;
         }
-        const rows = items.map(item => `
-          <tr>
-            <td>${safeText(item.symbol)}</td>
-            <td>${formatNumber(item.added_price)}</td>
-            <td>${formatNumber(item.current_price)}</td>
-            <td>${formatPercent(item.change_pct)}</td>
-            <td>${safeText(item.price_source_label)}</td>
-            <td>${safeText(item.market_phase_label)}</td>
-            <td>${safeText(item.added_at)}</td>
-            <td><button class="delete" onclick="removeFromWatchlist('${safeText(item.symbol)}')">حذف</button></td>
-          </tr>`).join('');
-        document.getElementById('manualWatchlistContent').innerHTML = `
-          <div class="table-wrap">
-            <table class="list-table">
-              <thead>
-                <tr>
-                  <th>السهم</th><th>سعر الإضافة</th><th>السعر الآن</th><th>التغير</th><th>مصدر السعر</th><th>حالة السوق</th><th>وقت الإضافة</th><th></th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>`;
+        const cards = items.map(item => `
+          <div class="watchlist-card">
+            <div class="watchlist-card-top">
+              <div>
+                <div class="watchlist-card-symbol">${safeText(item.symbol)}</div>
+                <div class="watchlist-card-sub">أضيف: ${safeText(item.added_at || '—')} • ${safeText(item.price_source_label || '—')}</div>
+              </div>
+              <span class="badge badge-watch">متابعة</span>
+            </div>
+            <div class="watchlist-metrics">
+              <div class="watchlist-metric"><div class="watchlist-metric-label">سعر الإضافة</div><div class="watchlist-metric-value">${formatNumber(item.added_price)}</div></div>
+              <div class="watchlist-metric"><div class="watchlist-metric-label">السعر الآن</div><div class="watchlist-metric-value">${formatNumber(item.current_price)}</div></div>
+              <div class="watchlist-metric"><div class="watchlist-metric-label">التغير</div><div class="watchlist-metric-value ${portfolioColorClass(item.change_pct)}">${formatPercent(item.change_pct)}</div></div>
+              <div class="watchlist-metric"><div class="watchlist-metric-label">حالة السوق</div><div class="watchlist-metric-value">${safeText(item.market_phase_label || '—')}</div></div>
+            </div>
+            <div class="mini-actions">
+              <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
+              <button class="soft-primary" onclick="moveWatchlistToPortfolio('${safeText(item.symbol)}', ${Number(item.current_price || item.added_price || 0)})">💼 للمحفظة</button>
+              <button class="delete" onclick="removeFromWatchlist('${safeText(item.symbol)}')">حذف</button>
+            </div>
+          </div>`).join('');
+        document.getElementById('manualWatchlistContent').innerHTML = `<div class="watchlist-card-list">${cards}</div>`;
       } catch (e) {
         document.getElementById('manualWatchlistContent').innerHTML = '<div class="error">تعذر تحميل قائمة المراقبة</div>';
       }
@@ -2644,5 +2740,4 @@
   </script>
 </body>
 </html>
-
 
