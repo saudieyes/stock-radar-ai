@@ -531,13 +531,18 @@ def _live_bucket_payload(rows: list[dict], limit: int) -> dict:
 
 
 @app.get("/radar-live-refresh")
-def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_watch: bool = True):
+def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_watch: bool = True, prefer_cache: bool | None = None):
     """Return a fast live overlay for the last /trade-scan snapshot.
 
-    This endpoint is the safe bridge toward a dynamic radar: the phone can call it
-    every 15-30 seconds without rerunning the full scanner. It updates price, live
-    distance to entry/target/stop, and live ordering. It does not use news points.
+    During active/pre/after market hours, do not reuse the saved SQLite quote cache by
+    default: the UI should see fresh FMP REST/BATCH quotes. When the market is closed,
+    using the SQLite quote cache keeps the page fast and avoids unnecessary calls.
     """
+    phase = get_market_phase()
+    active_price_window = phase in {"open", "pre_market", "after_hours"}
+    if prefer_cache is None:
+        prefer_cache = not active_price_window
+
     snapshot = get_json("last_trade_scan_snapshot", {})
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
     if not isinstance(rows, list) or not rows:
@@ -550,14 +555,13 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         }
 
     symbols = _extract_live_symbol_list(rows, limit=220)
-    quote_bundle = get_live_quotes(symbols, prefer_cache=True, allow_fallback=allow_fallback)
+    quote_bundle = get_live_quotes(symbols, prefer_cache=bool(prefer_cache), allow_fallback=allow_fallback)
     quotes = quote_bundle.get("quotes", {}) if isinstance(quote_bundle, dict) else {}
     overlaid = []
     for row in rows:
         sym = normalize_symbol_text((row or {}).get("symbol", ""))
         overlaid.append(_apply_live_quote_overlay(row, quotes.get(sym)))
 
-    phase = get_market_phase()
     strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
     gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
@@ -590,6 +594,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "symbols_requested": len(symbols),
         "quotes_available": len(quotes),
         "quote_diagnostics": quote_bundle.get("diagnostics", {}) if isinstance(quote_bundle, dict) else {},
+        "quote_cache_policy": "cache_ok_closed_market" if bool(prefer_cache) else "fresh_fmp_during_active_market",
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         "groups": {
@@ -1560,4 +1565,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
