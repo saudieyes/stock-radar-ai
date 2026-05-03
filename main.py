@@ -633,6 +633,165 @@ def live_diagnostics(symbols: str = "NVDA,AAPL,MSFT", allow_fallback: bool = Tru
     }
 
 
+# Fix20: compact Market Mood / Sentiment layer.
+# Context-only: does not add points to stock scoring and does not promote/demote opportunities.
+MARKET_MOOD_INDEX_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM"]
+MARKET_MOOD_SECTOR_SYMBOLS = {
+    "XLK": "التكنولوجيا",
+    "SMH": "أشباه الموصلات",
+    "XLC": "الاتصالات",
+    "XLY": "الاستهلاكي الاختياري",
+    "XLI": "الصناعة",
+    "XLF": "الماليات",
+    "XLE": "الطاقة",
+    "XLV": "الصحة",
+    "XLP": "السلع الأساسية",
+    "XLU": "المرافق",
+    "XLRE": "العقار",
+    "XLB": "المواد",
+}
+
+
+def _safe_pct(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _quote_change_pct(q: dict) -> float:
+    return _safe_pct((q or {}).get("change_pct", (q or {}).get("changesPercentage", 0.0)), 0.0)
+
+
+def _market_mood_label(score: float, avg_index_pct: float) -> str:
+    if score >= 72 and avg_index_pct >= 0.25:
+        return "إيجابي قوي"
+    if score >= 58:
+        return "إيجابي بحذر"
+    if score <= 35:
+        return "سلبي"
+    if score <= 45:
+        return "حذر"
+    return "محايد"
+
+
+def _market_mood_risk_label(score: float) -> str:
+    if score >= 72:
+        return "اندفاع مرتفع"
+    if score >= 58:
+        return "مناسب لكن لا تطارد"
+    if score <= 35:
+        return "مخاطرة أعلى"
+    return "متوازن"
+
+
+def _build_market_mood_from_quotes(quotes: dict, diagnostics: dict | None = None) -> dict:
+    diagnostics = diagnostics or {}
+    index_rows = []
+    for sym in MARKET_MOOD_INDEX_SYMBOLS:
+        q = quotes.get(sym, {}) if isinstance(quotes, dict) else {}
+        index_rows.append({
+            "symbol": sym,
+            "price": _safe_pct(q.get("price", 0.0), 0.0),
+            "change_pct": _quote_change_pct(q),
+            "source_label": str(q.get("source_label", q.get("source", "")) or ""),
+        })
+
+    sector_rows = []
+    for sym, label in MARKET_MOOD_SECTOR_SYMBOLS.items():
+        q = quotes.get(sym, {}) if isinstance(quotes, dict) else {}
+        sector_rows.append({
+            "symbol": sym,
+            "label": label,
+            "price": _safe_pct(q.get("price", 0.0), 0.0),
+            "change_pct": _quote_change_pct(q),
+            "source_label": str(q.get("source_label", q.get("source", "")) or ""),
+        })
+
+    valid_indexes = [x for x in index_rows if x["price"] > 0]
+    valid_sectors = [x for x in sector_rows if x["price"] > 0]
+    avg_index_pct = sum(x["change_pct"] for x in valid_indexes) / max(1, len(valid_indexes))
+    positive_indexes = sum(1 for x in valid_indexes if x["change_pct"] > 0)
+    negative_indexes = sum(1 for x in valid_indexes if x["change_pct"] < 0)
+
+    sector_sorted = sorted(valid_sectors, key=lambda x: x["change_pct"], reverse=True)
+    hot_sectors = sector_sorted[:4]
+    weak_sectors = list(reversed(sector_sorted[-3:])) if sector_sorted else []
+    avg_hot_pct = sum(x["change_pct"] for x in hot_sectors) / max(1, len(hot_sectors))
+    breadth_pct = (positive_indexes / max(1, len(valid_indexes))) * 100.0
+
+    score = 50.0
+    score += max(-18.0, min(18.0, avg_index_pct * 8.0))
+    score += (positive_indexes - negative_indexes) * 4.0
+    score += max(-8.0, min(10.0, avg_hot_pct * 2.2))
+    score = max(0.0, min(100.0, score))
+
+    label = _market_mood_label(score, avg_index_pct)
+    risk_label = _market_mood_risk_label(score)
+    hot_text = "، ".join([f"{x['label']} {safe_round(x['change_pct'], 2)}%" for x in hot_sectors[:3]]) or "غير متوفر"
+    index_text = "، ".join([f"{x['symbol']} {safe_round(x['change_pct'], 2)}%" for x in index_rows if x["price"] > 0]) or "غير متوفر"
+
+    explanation_bits = []
+    if valid_indexes:
+        if avg_index_pct > 0.35:
+            explanation_bits.append("المؤشرات الرئيسية تميل للصعود")
+        elif avg_index_pct < -0.35:
+            explanation_bits.append("المؤشرات الرئيسية تحت ضغط")
+        else:
+            explanation_bits.append("المؤشرات الرئيسية متوازنة")
+    if hot_sectors:
+        explanation_bits.append(f"أقوى القطاعات الآن: {hot_text}")
+    if score >= 58:
+        explanation_bits.append("يمكن متابعة الفرص القريبة من الدخول دون مطاردة الأسعار البعيدة")
+    elif score <= 45:
+        explanation_bits.append("الأفضل رفع الحذر وتقليل حجم المخاطرة")
+    else:
+        explanation_bits.append("الفرز الفني يبقى أهم من المزاج العام")
+
+    return {
+        "ok": True,
+        "mode": "context_only_no_news_points",
+        "score": safe_round(score, 1),
+        "label": label,
+        "risk_label": risk_label,
+        "market_phase": get_market_phase(),
+        "market_phase_label": market_phase_label(get_market_phase()),
+        "avg_index_change_pct": safe_round(avg_index_pct, 2),
+        "index_breadth_pct": safe_round(breadth_pct, 1),
+        "indexes": index_rows,
+        "hot_sectors": hot_sectors,
+        "weak_sectors": weak_sectors,
+        "summary_ar": " | ".join(explanation_bits[:3]),
+        "index_summary_ar": index_text,
+        "hot_sectors_summary_ar": hot_text,
+        "source": diagnostics.get("source", diagnostics.get("sources", "FMP/Polygon live quotes")) if isinstance(diagnostics, dict) else "FMP/Polygon live quotes",
+        "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "note": "مزاج السوق طبقة سياقية فقط ولا تدخل في نقاط الأسهم أو ترتيبها.",
+    }
+
+
+@app.get("/market-mood")
+def market_mood_endpoint(allow_fallback: bool = True, prefer_cache: bool = True):
+    symbols = MARKET_MOOD_INDEX_SYMBOLS + list(MARKET_MOOD_SECTOR_SYMBOLS.keys())
+    try:
+        bundle = get_live_quotes(symbols, prefer_cache=prefer_cache, allow_fallback=allow_fallback)
+        quotes = bundle.get("quotes", {}) if isinstance(bundle, dict) else {}
+        diagnostics = bundle.get("diagnostics", {}) if isinstance(bundle, dict) else {}
+        payload = _build_market_mood_from_quotes(quotes, diagnostics)
+        payload["quote_diagnostics"] = diagnostics
+        set_json("last_market_mood", payload)
+        return payload
+    except Exception as exc:
+        cached = get_json("last_market_mood", {})
+        if isinstance(cached, dict) and cached.get("ok"):
+            cached["stale"] = True
+            cached["error"] = str(exc)[:160]
+            return cached
+        return {"ok": False, "error": str(exc)[:180], "note": "تعذر بناء مزاج السوق حاليًا."}
+
+
 def _stock_score_value(x: dict) -> float:
     try:
         return float(x.get("display_rank_score", 0) or 0) or (
@@ -1226,5 +1385,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
 
