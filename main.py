@@ -1208,6 +1208,14 @@ def trade_scan(include_all: bool = False):
         and not _is_gray_sharia(x)
     ])
 
+    # Fix23: automatically preserve strong/cautious signals in the weekly SQLite-backed tracker.
+    # This is intentionally after Sharia/gray filtering so the archive reflects the clean actionable buckets.
+    try:
+        for _row in (strong[:25] + cautious[:25]):
+            upsert_performance_signal(_row)
+    except Exception as exc:
+        print(f"PERFORMANCE_AUTO_UPSERT_ERROR: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
+
     return {
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
@@ -1327,18 +1335,29 @@ def portfolio_add(payload: dict = Body(...)):
             break
 
     now_text = ny_now().strftime("%Y-%m-%d %H:%M:%S")
+    optional_fields = {
+        "target_price": safe_round(payload.get("target_price", 0)),
+        "stop_loss": safe_round(payload.get("stop_loss", 0)),
+        "source": str(payload.get("source", "manual") or "manual").strip(),
+        "note": str(payload.get("note", "") or "").strip(),
+    }
     if existing:
         existing["buy_price"] = buy_price
         existing["quantity"] = quantity if quantity > 0 else existing.get("quantity", 0)
         existing["updated_at"] = now_text
+        for key, value in optional_fields.items():
+            if value:
+                existing[key] = value
     else:
-        items.insert(0, {
+        item = {
             "symbol": symbol,
             "buy_price": buy_price,
             "quantity": quantity,
             "added_at": now_text,
             "updated_at": now_text,
-        })
+        }
+        item.update({k: v for k, v in optional_fields.items() if v})
+        items.insert(0, item)
     save_portfolio_items(items)
     return {"ok": True, "message": "تم حفظ السهم في المحفظة", "items": items}
 
@@ -1381,6 +1400,9 @@ def portfolio_get():
         quantity = float(item.get("quantity", 0) or 0)
         market_value = current_price * quantity if current_price > 0 and quantity > 0 else 0.0
         cost_value = buy_price * quantity if buy_price > 0 and quantity > 0 else 0.0
+        planned_target = float(item.get("target_price", 0) or 0) or float(recommendation.get("target_price", 0) or 0)
+        planned_stop = float(item.get("stop_loss", 0) or 0) or float(recommendation.get("stop_loss", 0) or 0)
+        unrealized_pl = (market_value - cost_value) if market_value and cost_value else 0.0
         out.append({
             "symbol": symbol,
             "buy_price": safe_round(buy_price),
@@ -1392,15 +1414,25 @@ def portfolio_get():
             "type_label": str(plan.get("trade_type_label_ar", plan.get("display_plan_family_label", plan.get("strategy_label", ""))) or ""),
             "recommendation": recommendation["recommendation"],
             "recommendation_note": recommendation["recommendation_note"],
-            "target_price": recommendation["target_price"],
-            "stop_loss": recommendation["stop_loss"],
+            "target_price": safe_round(planned_target),
+            "stop_loss": safe_round(planned_stop),
             "market_value": safe_round(market_value),
             "cost_value": safe_round(cost_value),
+            "unrealized_pl": safe_round(unrealized_pl),
+            "source": str(item.get("source", "") or ""),
+            "note": str(item.get("note", "") or ""),
             "added_at": str(item.get("added_at", "") or ""),
             "updated_at": str(item.get("updated_at", "") or ""),
         })
 
-    return {"items": out}
+    summary = {
+        "positions": len(out),
+        "market_value": safe_round(sum(float(x.get("market_value", 0) or 0) for x in out)),
+        "cost_value": safe_round(sum(float(x.get("cost_value", 0) or 0) for x in out)),
+        "unrealized_pl": safe_round(sum(float(x.get("unrealized_pl", 0) or 0) for x in out)),
+    }
+    summary["unrealized_pl_pct"] = safe_round((summary["unrealized_pl"] / summary["cost_value"] * 100), 2) if summary["cost_value"] else 0.0
+    return {"items": out, "summary": summary}
 
 
 @app.post("/watchlist/add")
@@ -1601,6 +1633,23 @@ def data_sync_manual_sharia_approvals():
     return {"ok": bool(result.get("ok")), "count": len(payload), "result": result}
 
 
+@app.post("/performance/track-signal")
+def performance_track_signal(payload: dict = Body(...)):
+    """Manually add or refresh a radar card in the weekly performance tracker.
+
+    The frontend sends the same compact stock object already rendered in the card.
+    This does not change scoring; it only persists the signal in the SQLite-backed
+    weekly tracker so outcomes can be reviewed later.
+    """
+    stock = payload.get("stock") if isinstance(payload.get("stock"), dict) else payload
+    if not isinstance(stock, dict):
+        return JSONResponse({"ok": False, "error": "missing_stock_payload"}, status_code=400)
+    try:
+        upsert_performance_signal(stock)
+        return {"ok": True, "symbol": normalize_symbol_text(stock.get("symbol", "")), "message": "تم تسجيل الإشارة في التتبع الأسبوعي"}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}, status_code=500)
+
 @app.get("/performance")
 def performance_get():
     store = rollover_performance_store_if_needed(load_performance_store())
@@ -1668,5 +1717,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
 
