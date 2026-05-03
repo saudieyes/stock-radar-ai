@@ -131,7 +131,7 @@
     :root[data-theme="light"] button.primary {
       box-shadow: 0 8px 20px rgba(37,99,235,.18);
     }
-    .container { max-width: 1440px; margin: 0 auto; padding: 18px; padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+    .container { max-width: 1440px; margin: 0 auto; padding: 18px; padding-bottom: calc(126px + env(safe-area-inset-bottom)); }
     .topbar, .hero, .stat, .card, .panel, .search-box, .table-wrap, .glossary-box, .section-box, .opening-box {
       background: var(--panel-bg);
       border: 1px solid var(--border-main);
@@ -295,27 +295,28 @@
     }
     .bottom-mobile-nav {
       position: fixed;
-      left: 12px;
-      right: 12px;
-      bottom: calc(12px + env(safe-area-inset-bottom));
+      left: 18px;
+      right: 18px;
+      bottom: calc(10px + env(safe-area-inset-bottom));
       z-index: 70;
-      max-width: 760px;
+      max-width: 560px;
       margin: 0 auto;
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      padding: 10px;
+      gap: 6px;
+      padding: 7px;
       background: var(--quick-bg);
       border: 1px solid var(--border-main);
-      border-radius: 22px;
-      box-shadow: 0 16px 34px rgba(0,0,0,.28);
+      border-radius: 18px;
+      box-shadow: 0 12px 24px rgba(0,0,0,.18);
       backdrop-filter: blur(10px);
     }
     .bottom-mobile-nav button {
-      min-height: 48px;
-      padding: 8px 6px;
-      border-radius: 16px;
-      font-size: 12px;
+      min-height: 40px;
+      padding: 6px 4px;
+      border-radius: 13px;
+      font-size: 11px;
+      line-height: 1.35;
       background: transparent;
       border: 1px solid transparent;
       color: var(--text-main);
@@ -453,22 +454,22 @@
     .floating-nav-wrap {
       position: fixed;
       left: 14px;
-      bottom: calc(96px + env(safe-area-inset-bottom));
+      bottom: calc(84px + env(safe-area-inset-bottom));
       z-index: 80;
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 10px;
+      gap: 8px;
     }
     .floating-nav-toggle {
       border: none;
       border-radius: 999px;
-      padding: 12px 16px;
-      font-size: 14px;
+      padding: 10px 14px;
+      font-size: 13px;
       font-weight: 900;
       background: #2563eb;
       color: #fff;
-      box-shadow: 0 12px 30px rgba(37,99,235,.28);
+      box-shadow: 0 10px 24px rgba(37,99,235,.24);
     }
     .floating-nav-menu {
       display: none;
@@ -478,9 +479,9 @@
       border: 1px solid var(--border-main);
       border-radius: 18px;
       padding: 10px;
-      min-width: 190px;
+      min-width: 180px;
       box-shadow: var(--shadow-main);
-      max-height: 70vh;
+      max-height: 68vh;
       overflow: auto;
     }
     .floating-nav-menu.open { display: flex; }
@@ -593,7 +594,7 @@
     }
 
     @media (max-width: 760px) {
-      .container { padding: 12px; padding-bottom: calc(165px + env(safe-area-inset-bottom)); }
+      .container { padding: 12px; padding-bottom: calc(138px + env(safe-area-inset-bottom)); }
       .topbar { padding:14px; }
       .actions { gap:8px; }
       .actions button { flex:1 1 135px; }
@@ -615,6 +616,11 @@
       .card-local-nav { gap:7px; }
       .card-nav-btn { min-height:34px; font-size:12px; padding:7px 4px; border-radius:12px; }
       .card-actions { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+      .floating-nav-wrap { left: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); }
+      .floating-nav-toggle { padding: 9px 13px; font-size: 12.5px; }
+      .floating-nav-link { padding: 9px 10px; font-size: 13px; }
+      .bottom-mobile-nav { left: 14px; right: 14px; max-width: 480px; gap: 5px; padding: 6px; border-radius: 16px; }
+      .bottom-mobile-nav button { min-height: 36px; font-size: 10.5px; padding: 5px 3px; border-radius: 12px; }
       .card-actions button { min-height:42px; padding:10px 8px; }
       .compact-label, .detail-label { font-size:14px; }
       .compact-value { font-size:16px; }
@@ -626,6 +632,195 @@
       .floating-nav-wrap { left:10px; bottom:calc(100px + env(safe-area-inset-bottom)); }
       .floating-nav-toggle { padding:12px 15px; font-size:14px; }
       .floating-nav-menu { min-width:230px; max-height:62vh; }
+    }
+
+
+
+    /* Fix18c Practical Radar UI: compact mobile layout, safer Android bottom spacing, and less cluttered cards */
+    .hero-right {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .stat { padding: 12px; border-radius: 16px; }
+    .stat-value { font-size: 20px; }
+    .badge-strong, .badge-cautious, .badge-watch, .badge-phase, .badge-plan, .badge-stage {
+      background: var(--panel-bg-soft) !important;
+      color: var(--text-strong) !important;
+      border: 1px solid var(--border-soft) !important;
+    }
+    .badge-strong { border-color: rgba(96,165,250,.72) !important; }
+    .card-top {
+      align-items: flex-start;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .plan-snapshot {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .micro-item {
+      background: var(--panel-bg-soft);
+      border: 1px solid var(--border-soft);
+      border-radius: 14px;
+      padding: 10px;
+      min-height: 74px;
+    }
+    .micro-label {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 900;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .micro-value {
+      color: var(--text-strong);
+      font-size: 17px;
+      font-weight: 950;
+      line-height: 1.35;
+      direction: ltr;
+      text-align: right;
+    }
+    .decision-snapshot {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin: 8px 0 10px;
+    }
+    .decision-snapshot span {
+      background: var(--ghost-bg);
+      border: 1px solid var(--border-soft);
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--text-main);
+      line-height: 1.45;
+    }
+    .fast-summary {
+      background: var(--panel-bg-soft);
+      border: 1px solid var(--border-soft);
+      border-radius: 16px;
+      padding: 11px 12px;
+      margin: 10px 0;
+    }
+    .fast-summary-head {
+      color: var(--text-strong);
+      font-size: 14px;
+      font-weight: 950;
+      margin-bottom: 7px;
+    }
+    .fast-summary-text {
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 750;
+      line-height: 1.85;
+    }
+    .indicator-strip {
+      gap: 6px;
+      margin: 8px 0 10px;
+    }
+    .indicator-pill {
+      font-size: 12px;
+      padding: 6px 9px;
+    }
+    .card-actions {
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 7px;
+      margin-bottom: 8px;
+    }
+    .card-actions button {
+      min-height: 36px;
+      padding: 8px 9px;
+      border-radius: 13px;
+      font-size: 12px;
+    }
+    .card-local-nav.top { display: none !important; }
+    .card-local-nav.bottom {
+      margin: 8px 0;
+      gap: 6px;
+    }
+    .card-nav-btn {
+      min-height: 32px;
+      font-size: 11.5px;
+      border-radius: 11px;
+      padding: 6px 4px;
+    }
+    .bottom-mobile-nav {
+      left: 18px !important;
+      right: 18px !important;
+      bottom: calc(10px + env(safe-area-inset-bottom)) !important;
+      max-width: 520px !important;
+      gap: 5px !important;
+      padding: 6px !important;
+      border-radius: 16px !important;
+    }
+    .bottom-mobile-nav button {
+      min-height: 36px !important;
+      font-size: 10.5px !important;
+      line-height: 1.3 !important;
+      padding: 5px 3px !important;
+      border-radius: 12px !important;
+    }
+    .floating-nav-wrap {
+      left: 12px !important;
+      bottom: calc(70px + env(safe-area-inset-bottom)) !important;
+      gap: 7px !important;
+    }
+    .floating-nav-toggle {
+      padding: 9px 13px !important;
+      font-size: 12.5px !important;
+      box-shadow: 0 8px 22px rgba(37,99,235,.22) !important;
+    }
+    .container { padding-bottom: calc(128px + env(safe-area-inset-bottom)) !important; }
+
+    @media (max-width: 860px) {
+      .hero-right { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+      .statusbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat { padding: 10px; }
+      .stat-label { font-size: 12px; }
+      .stat-value { font-size: 18px; }
+      .details-grid { grid-template-columns: 1fr !important; }
+    }
+
+    @media (max-width: 760px) {
+      .container { padding-bottom: calc(130px + env(safe-area-inset-bottom)) !important; }
+      .topbar { border-radius: 16px; }
+      .title { font-size: 24px; }
+      .hero { padding: 12px; }
+      .hero-right { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; }
+      .stat { padding: 10px; min-height: 78px; }
+      .stat-value { font-size: 18px; }
+      .section-header { padding: 12px; }
+      .section-title { font-size: 18px; }
+      .section-rank-note, .section-preview { font-size: 12px; }
+      .card { padding: 12px; border-radius: 18px; }
+      .card-top { gap: 8px; }
+      .card-heading-line { gap: 8px; }
+      .rank-badge { min-width: 38px; height: 31px; font-size: 13px; }
+      .symbol { font-size: 28px !important; }
+      .company { font-size: 12.5px !important; }
+      .card-rank-subtitle { font-size: 11px; }
+      .badges { gap: 5px; }
+      .badge { min-height: 27px; padding: 6px 8px; font-size: 11.5px; }
+      .plan-snapshot { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+      .micro-item { min-height: 66px; padding: 9px; }
+      .micro-label { font-size: 11.5px; }
+      .micro-value { font-size: 15.5px; }
+      .decision-snapshot span { font-size: 11.5px; padding: 6px 8px; }
+      .fast-summary { padding: 10px; }
+      .fast-summary-text { font-size: 12.2px; line-height: 1.75; }
+      .card-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+      .card-actions button { min-height: 34px !important; font-size: 11.5px; padding: 7px 6px; }
+      .card-local-nav.bottom { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .card-nav-btn { min-height: 30px; font-size: 10.5px; padding: 5px 2px; }
+      .bottom-mobile-nav { left: 14px !important; right: 14px !important; max-width: 440px !important; }
+      .bottom-mobile-nav button { min-height: 34px !important; font-size: 10px !important; }
+      .floating-nav-wrap { bottom: calc(66px + env(safe-area-inset-bottom)) !important; }
+      .floating-nav-menu { min-width: 205px !important; max-height: 60vh !important; }
     }
 
 </style>
@@ -648,7 +843,7 @@
     <div id="infoPopover" class="info-popover" role="dialog" aria-live="polite"></div>
 
     <div id="floatingNavWrap" class="floating-nav-wrap">
-      <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ الوصول</button>
+      <button id="floatingNavToggle" class="floating-nav-toggle" type="button" onclick="toggleFloatingQuickNav()">⚡ سريع</button>
       <div id="floatingNavMenu" class="floating-nav-menu">
         <button class="floating-nav-link" type="button" onclick="scrollToPageTop()">⬆️ أعلى الصفحة</button>
         <button class="floating-nav-link" type="button" onclick="openByNav('openingSection', 'openingContent')">🚀 الافتتاح</button>
@@ -1457,7 +1652,7 @@
       const btn = document.getElementById('floatingNavToggle');
       if (!menu || !btn) return;
       menu.classList.toggle('open', !!isOpen);
-      btn.textContent = isOpen ? '✖ إخفاء' : '⚡ الوصول';
+      btn.textContent = isOpen ? '✖ إخفاء' : '⚡ سريع';
     }
 
     function toggleFloatingQuickNav() {
@@ -1558,12 +1753,65 @@
       await scanSingleStock();
     }
 
+
+    function metricShort(meta, fallback='—') {
+      if (meta && (meta.icon || meta.label)) return `${safeText(meta.icon || '')} ${safeText(meta.label || fallback)}`.trim();
+      return safeText(fallback || '—');
+    }
+
+    function microItem(label, value, infoKey='') {
+      const info = infoKey ? renderInfoButton(infoKey) : '';
+      return `<div class="micro-item"><div class="micro-label">${safeText(label)} ${info}</div><div class="micro-value">${value || '—'}</div></div>`;
+    }
+
+    function renderFastArabicSummary(stock) {
+      const quality = metricShort(stock.metric_quality, stock.quality_score ? formatNumber(stock.quality_score) : '—');
+      const liquidity = metricShort(stock.metric_volume, stock.effective_volume_ratio ? formatNumber(stock.effective_volume_ratio) : '—');
+      const trend = metricShort(stock.metric_trend, stock.trend || '—');
+      const risk = safeText(stock.risk_profile_label || (stock.display_risk_pct ? `${formatNumber(stock.display_risk_pct)}%` : '—'));
+      const exec = `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '—')}${stock.execution_readiness_score !== undefined ? ` (${formatNumber(stock.execution_readiness_score)})` : ''}`.trim();
+      const hist = stock.historical_behavior_label ? `${safeText(stock.historical_behavior_label)}${stock.historical_behavior_score ? ` (${formatNumber(stock.historical_behavior_score)})` : ''}` : '—';
+      const histCtx = stock.historical_context_label ? `${safeText(stock.historical_context_label)}${stock.historical_context_score ? ` (${formatNumber(stock.historical_context_score)})` : ''}` : '—';
+      const timing = stock.alignment_label ? `${safeText(stock.alignment_label)}${stock.alignment_score ? ` (${formatNumber(stock.alignment_score)})` : ''}` : '—';
+      const marketSector = safeText(stock.market_sector_live_label || stock.market_sector_live_detail || stock.market_sector_alignment_detail || '—');
+      const support = stock.nearest_support ? `${formatNumber(stock.nearest_support)} ${stock.nearest_support_label ? `| ${safeText(stock.nearest_support_label)}` : ''}` : '—';
+      const resistance = stock.nearest_resistance ? `${formatNumber(stock.nearest_resistance)} ${stock.nearest_resistance_label ? `| ${safeText(stock.nearest_resistance_label)}` : ''}` : '—';
+      return `
+        <div class="fast-summary">
+          <div class="fast-summary-head">ملخص عربي سريع</div>
+          <div class="fast-summary-text">
+            الجودة: ${quality} | السيولة: ${liquidity} | الاتجاه: ${trend} | المخاطرة: ${risk}<br>
+            الجاهزية: ${exec} | السلوك التاريخي: ${hist} | التاريخ مع المؤشر/القطاع: ${histCtx} | التوافق الزمني: ${timing}<br>
+            السوق/القطاع الآن: ${marketSector} | الدعم الأقرب: ${support} | المقاومة الأقرب: ${resistance}
+          </div>
+        </div>`;
+    }
+
+    function renderPlanSnapshot(stock, displayPrice) {
+      return `<div class="plan-snapshot">
+        ${microItem('السعر الحالي', formatNumber(displayPrice))}
+        ${microItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
+        ${microItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
+        ${microItem(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price))}
+      </div>`;
+    }
+
+    function renderDecisionSnapshot(stock, displayDecisionText) {
+      return `<div class="decision-snapshot">
+        <span>${safeText(displayDecisionText)}</span>
+        <span>${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '—')}${stock.execution_readiness_score !== undefined ? ` (${formatNumber(stock.execution_readiness_score)})` : ''}</span>
+        <span>R/R: ${formatNumber(stock.rr_1)}</span>
+        <span>مخاطرة: ${safeText(stock.risk_profile_label || '—')}</span>
+        <span>شرعيًا: ${safeText(stock.sharia_label || '—')}</span>
+      </div>`;
+    }
+
     function createCard(stock, sectionKey='', index=0) {
       const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
-      const cardNavTop = renderCardNav(sectionKey, index, 'top');
+      const cardNavTop = ''; // تم إخفاء أزرار الأول/السابق/التالي من أعلى البطاقة لتقليل الازدحام
       const cardNavBottom = renderCardNav(sectionKey, index, 'bottom');
       const cardNavDetails = renderCardNav(sectionKey, index, 'details');
       const details = [];
@@ -1684,27 +1932,11 @@
             </div>
           </div>
 
-          <div class="compact-grid">
-            ${compactItem('السوق', safeText(stock.market_phase_label))}
-            ${compactItem('النوع', displayDecisionText)}
-            ${compactItem('قوة الإشارة', `${safeText(stock.signal_strength_label || '—')} (${formatNumber(stock.signal_strength_score || 0)})`, 'قوة الإشارة')}
-            ${compactItem('سعر السهم', formatNumber(displayPrice))}
-            ${compactItem(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price))}
-            ${compactItem(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price))}
-            ${compactItem(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price))}
-            ${compactItem('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || ''))}
-            ${compactItem('مدة الصلاحية', safeText(stock.valid_for))}
-            ${compactItem('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`)}
-            ${compactItem('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')}`, 'جاهزية التنفيذ')}
-            ${compactItem('المؤشر', safeText(stock.market_support_label || '—'), 'المؤشر')}
-            ${compactItem('القطاع', safeText(stock.sector_etf_symbol ? (stock.sector_support_label || '—') : 'غير متوفر — ثقة أقل'), 'القطاع')}
-            ${compactItem('السوق/القطاع الآن', safeText(stock.market_sector_live_label || '—'), 'السوق/القطاع الآن')}
-            ${compactItem('الدعم الأقرب', stock.nearest_support ? `${formatNumber(stock.nearest_support)} | ${safeText(stock.nearest_support_strength || '')}` : '—', 'الدعم الأقرب')}
-            ${compactItem('المقاومة الأقرب', stock.nearest_resistance ? `${formatNumber(stock.nearest_resistance)} | ${safeText(stock.nearest_resistance_strength || '')}` : '—', 'المقاومة الأقرب')}
-            ${compactItem('المخاطرة', safeText(stock.risk_profile_label || '—'))}
-            ${compactItem('الشرعية', safeText(stock.sharia_label || '—'))}
-            ${compactItem('التذبذب', safeText(stock.volatility_label || '—'))}
-          </div>
+          ${renderPlanSnapshot(stock, displayPrice)}
+
+          ${renderDecisionSnapshot(stock, displayDecisionText)}
+
+          ${renderFastArabicSummary(stock)}
 
           <div class="indicator-strip">${importantIndicators(stock)}</div>
 
