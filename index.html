@@ -189,6 +189,87 @@
     .live-radar-status.ok { border-color: rgba(59,130,246,.72); }
     .live-radar-status.warn { border-color: rgba(245,158,11,.72); }
     .live-radar-status.err { border-color: rgba(239,68,68,.58); }
+    .market-mood-panel {
+      margin: -4px 0 16px;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-main);
+      border-radius: 18px;
+      box-shadow: var(--shadow-main);
+      padding: 14px;
+    }
+    .market-mood-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:12px;
+    }
+    .market-mood-title {
+      color: var(--text-strong);
+      font-size: 17px;
+      font-weight: 900;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .market-mood-note {
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.6;
+      margin-top: 3px;
+    }
+    .market-mood-grid {
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap:10px;
+    }
+    .market-mood-card {
+      background: var(--panel-bg-soft);
+      border: 1px solid var(--border-soft);
+      border-radius: 15px;
+      padding: 12px;
+      min-height: 92px;
+    }
+    .market-mood-label {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 7px;
+    }
+    .market-mood-value {
+      color: var(--text-strong);
+      font-size: 20px;
+      font-weight: 900;
+      line-height: 1.35;
+    }
+    .market-mood-mini {
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.65;
+      margin-top: 5px;
+    }
+    .market-mood-chiprow { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .market-mood-chip {
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      border-radius:999px;
+      border:1px solid var(--border-soft);
+      background: var(--ghost-bg);
+      color: var(--text-main);
+      font-size: 11.5px;
+      font-weight: 800;
+      padding: 5px 8px;
+    }
+    .market-mood-refresh {
+      padding:8px 11px;
+      min-height:34px;
+      border-radius:999px;
+      font-size:12px;
+      background:var(--panel-bg-soft);
+      border:1px solid var(--border-soft);
+      color:var(--text-strong);
+    }
     .hero-market {
       font-size:22px; font-weight:900;
     }
@@ -921,7 +1002,11 @@
       .compact-action-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .compact-action-row button { min-height: 34px; font-size: 11.5px; }
       .floating-nav-wrap { flex-direction: column-reverse !important; }
-      .floating-nav-menu { max-height: 48vh !important; min-width: 168px !important; }
+      .market-mood-panel { padding: 12px; margin-bottom: 14px; }
+      .market-mood-head { align-items:flex-start; }
+      .market-mood-grid { grid-template-columns: 1fr; gap:8px; }
+      .market-mood-card { min-height: unset; padding: 11px; }
+      .market-mood-value { font-size: 18px; }
     }
 </style>
 </head>
@@ -982,6 +1067,21 @@
         <div class="stat"><div class="stat-label">المراقبة</div><div class="stat-value">—</div></div>
       </div>
     </div>
+
+    <section id="marketMoodPanel" class="market-mood-panel" aria-live="polite">
+      <div class="market-mood-head">
+        <div>
+          <div class="market-mood-title">📡 مزاج السوق</div>
+          <div class="market-mood-note">طبقة سياقية فقط؛ لا تدخل في نقاط الأسهم أو ترتيبها.</div>
+        </div>
+        <button class="market-mood-refresh" type="button" onclick="loadMarketMood(false)">تحديث</button>
+      </div>
+      <div id="marketMoodContent" class="market-mood-grid">
+        <div class="market-mood-card"><div class="market-mood-label">الحالة</div><div class="market-mood-value">جاري التحميل...</div></div>
+        <div class="market-mood-card"><div class="market-mood-label">القطاعات الساخنة</div><div class="market-mood-value">—</div></div>
+        <div class="market-mood-card"><div class="market-mood-label">شرح سريع</div><div class="market-mood-mini">يتم بناء المزاج من المؤشرات والقطاعات اللحظية.</div></div>
+      </div>
+    </section>
 
     <div class="quick-nav">
       <a class="quick-link" href="#openingSection">🚀 الافتتاح</a>
@@ -2350,6 +2450,46 @@
       el.textContent = text || 'الحي: —';
     }
 
+    function renderMarketMood(data) {
+      const el = document.getElementById('marketMoodContent');
+      if (!el) return;
+      if (!data || !data.ok) {
+        el.innerHTML = `<div class="market-mood-card"><div class="market-mood-label">مزاج السوق</div><div class="market-mood-value">غير متوفر</div><div class="market-mood-mini">تعذر تحميل بيانات المزاج الآن.</div></div>`;
+        return;
+      }
+      const hot = Array.isArray(data.hot_sectors) ? data.hot_sectors.slice(0, 4) : [];
+      const indexes = Array.isArray(data.indexes) ? data.indexes.filter(x => Number(x.price || 0) > 0).slice(0, 4) : [];
+      const hotChips = hot.map(x => `<span class="market-mood-chip">${safeText(x.label || x.symbol)} ${formatNumber(x.change_pct || 0)}%</span>`).join('') || '<span class="market-mood-chip">غير متوفر</span>';
+      const indexChips = indexes.map(x => `<span class="market-mood-chip">${safeText(x.symbol)} ${formatNumber(x.change_pct || 0)}%</span>`).join('') || '<span class="market-mood-chip">لا توجد بيانات</span>';
+      const updated = data.updated_at ? String(data.updated_at).slice(11, 16) : '—';
+      el.innerHTML = `
+        <div class="market-mood-card">
+          <div class="market-mood-label">المزاج العام</div>
+          <div class="market-mood-value">${safeText(data.label || 'محايد')} <span style="font-size:13px;color:var(--text-muted);">${formatNumber(data.score || 0)}/100</span></div>
+          <div class="market-mood-mini">${safeText(data.risk_label || 'متوازن')} • ${safeText(data.market_phase_label || '')} • ${updated}</div>
+        </div>
+        <div class="market-mood-card">
+          <div class="market-mood-label">القطاعات الساخنة</div>
+          <div class="market-mood-chiprow">${hotChips}</div>
+          <div class="market-mood-mini">المصدر: ${safeText(data.source || 'FMP/Polygon')}</div>
+        </div>
+        <div class="market-mood-card">
+          <div class="market-mood-label">شرح عربي سريع</div>
+          <div class="market-mood-mini">${safeText(data.summary_ar || data.note || '')}</div>
+          <div class="market-mood-chiprow">${indexChips}</div>
+        </div>`;
+    }
+
+    async function loadMarketMood(silent=true) {
+      try {
+        const res = await apiFetch(`/market-mood?_=${Date.now()}`);
+        const data = await res.json();
+        renderMarketMood(data);
+      } catch(e) {
+        if (!silent) renderMarketMood({ok:false});
+      }
+    }
+
     function applyRadarLiveGroups(payload) {
       if (!window.__scanData || !payload?.ok || !payload.groups) return false;
       const map = {
@@ -2801,16 +2941,16 @@
     }
 
     async function loadAll(manual=false) {
-      await loadScan();
+      await Promise.allSettled([loadScan(), loadMarketMood(true)]);
     }
 
     initThemeMode();
     refreshRiskSettingsUI();
     window.__liveQuotesTimer = window.setInterval(() => refreshLiveQuotesForScan(false), 45000);
     window.__liveRadarOverlayTimer = window.setInterval(() => refreshRadarLiveOverlay(true), 60000);
+    window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
     loadAll();
   </script>
 </body>
 </html>
-
 
