@@ -13,6 +13,7 @@ from .settings import (
     MANUAL_SHARIA_APPROVALS_FILE,
 )
 from .utils import normalize_symbol_text
+from .sqlite_store import get_json, set_json
 
 _GITHUB_PULL_CACHE = {"ts": 0.0, "ok": False, "count": 0, "error": ""}
 
@@ -148,13 +149,20 @@ def _merge_remote_once(local_items: list[dict], force: bool = False) -> list[dic
 
 
 def load_manual_sharia_exclusions(force_github_pull: bool = False):
-    local_items = _normalize_exclusion_items(_load_local_raw())
-    merged_items = _merge_remote_once(local_items, force=force_github_pull)
-    return _normalize_exclusion_items(merged_items)
+    sqlite_items = _normalize_exclusion_items(get_json("manual_sharia_exclusions", []))
+    file_items = _normalize_exclusion_items(_load_local_raw())
+    merged_seed = _normalize_exclusion_items(sqlite_items + file_items)
+    merged_items = _merge_remote_once(merged_seed, force=force_github_pull)
+    cleaned = _normalize_exclusion_items(merged_items)
+    if cleaned:
+        set_json("manual_sharia_exclusions", cleaned)
+    return cleaned
 
 
 def save_manual_sharia_exclusions(items):
-    cleaned_dict = _items_to_dict(items)
+    cleaned = _normalize_exclusion_items(items)
+    cleaned_dict = _items_to_dict(cleaned)
+    set_json("manual_sharia_exclusions", cleaned)
     _safe_write_json(MANUAL_SHARIA_EXCLUSIONS_FILE, cleaned_dict)
 
 
@@ -279,13 +287,20 @@ def _merge_approval_remote_once(local_items: list[dict], force: bool = False) ->
 
 
 def load_manual_sharia_approvals(force_github_pull: bool = False):
-    local_items = _normalize_approval_items(_load_approval_local_raw())
-    merged_items = _merge_approval_remote_once(local_items, force=force_github_pull)
-    return _normalize_approval_items(merged_items)
+    sqlite_items = _normalize_approval_items(get_json("manual_sharia_approvals", []))
+    file_items = _normalize_approval_items(_load_approval_local_raw())
+    merged_seed = _normalize_approval_items(sqlite_items + file_items)
+    merged_items = _merge_approval_remote_once(merged_seed, force=force_github_pull)
+    cleaned = _normalize_approval_items(merged_items)
+    if cleaned:
+        set_json("manual_sharia_approvals", cleaned)
+    return cleaned
 
 
 def save_manual_sharia_approvals(items):
-    cleaned_dict = _approval_items_to_dict(items)
+    cleaned = _normalize_approval_items(items)
+    cleaned_dict = _approval_items_to_dict(cleaned)
+    set_json("manual_sharia_approvals", cleaned)
     _safe_write_json(MANUAL_SHARIA_APPROVALS_FILE, cleaned_dict)
 
 
@@ -295,4 +310,5 @@ def get_manual_sharia_approvals_map():
 
 def get_manual_sharia_approvals_sync_diagnostics() -> dict:
     return dict(_APPROVAL_PULL_CACHE or {})
+
 
