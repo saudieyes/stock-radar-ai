@@ -3,6 +3,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from .settings import PERFORMANCE_FILE
+from .sqlite_store import get_json, set_json
 from .utils import ny_now, safe_round
 def get_performance_week_window(base_dt=None):
     """
@@ -187,15 +188,21 @@ def collapse_performance_duplicates(records: list[dict]) -> list[dict]:
 
 
 def load_performance_store():
-    try:
-        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except:
+    raw = get_json("performance_store", None)
+    if raw is None:
+        try:
+            with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except:
+            raw = None
+
+    if raw is None:
         return make_blank_performance_store()
 
     if isinstance(raw, list):
         store = migrate_legacy_performance_items(raw)
         store["active_records"] = collapse_performance_duplicates(store.get("active_records", []))[:500]
+        set_json("performance_store", store)
         return store
 
     store = normalize_performance_store(raw)
@@ -206,6 +213,7 @@ def load_performance_store():
 def save_performance_store(store):
     try:
         payload = normalize_performance_store(store)
+        set_json("performance_store", payload)
         tmp_path = f"{PERFORMANCE_FILE}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -491,4 +499,5 @@ def upsert_performance_signal(stock: dict):
         except Exception:
             symbol = ""
         print(f"PERFORMANCE_TRACKER_ERROR: {symbol} | {type(e).__name__}: {str(e)[:240]}", flush=True)
+
 
