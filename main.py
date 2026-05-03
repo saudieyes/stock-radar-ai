@@ -792,289 +792,6 @@ def market_mood_endpoint(allow_fallback: bool = True, prefer_cache: bool = True)
         return {"ok": False, "error": str(exc)[:180], "note": "تعذر بناء مزاج السوق حاليًا."}
 
 
-
-# Fix21: Analyst Snapshot layer.
-# Context-only support for decision quality. It does not alter scoring, ranking, or news logic.
-ANALYST_SNAPSHOT_CACHE_TTL_SEC = int(float(os.getenv("ANALYST_SNAPSHOT_CACHE_TTL_SEC", "21600") or 21600))
-
-
-def _analyst_cache_key(symbol: str) -> str:
-    return f"analyst_snapshot::{normalize_symbol_text(symbol)}"
-
-
-def _as_list(data):
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for key in ("data", "results", "historical", "items"):
-            val = data.get(key)
-            if isinstance(val, list):
-                return val
-        return [data]
-    return []
-
-
-def _first_num_from_dict(row: dict, keys: list[str]) -> float:
-    for key in keys:
-        try:
-            val = row.get(key)
-            if val is None or val == "":
-                continue
-            num = float(str(val).replace("%", "").replace(",", "").strip())
-            if num != 0:
-                return safe_round(num, 4)
-        except Exception:
-            continue
-    return 0.0
-
-
-def _first_text_from_dict(row: dict, keys: list[str]) -> str:
-    for key in keys:
-        val = row.get(key)
-        if val is not None and str(val).strip():
-            return str(val).strip()
-    return ""
-
-
-def _fetch_fmp_json_candidates(urls: list[str], timeout: float = 8.0) -> tuple[list, str, dict]:
-    last_error = ""
-    for url in urls:
-        try:
-            resp = HTTP_SESSION.get(url, timeout=timeout)
-            meta = {"url_suffix": url.split("financialmodelingprep.com")[-1][:120], "status_code": resp.status_code}
-            if resp.status_code >= 400:
-                last_error = f"HTTP {resp.status_code}"
-                continue
-            data = resp.json()
-            rows = _as_list(data)
-            if rows:
-                return rows, "FMP", meta
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
-            continue
-    return [], "", {"error": last_error}
-
-
-def _build_analyst_snapshot(symbol: str, force_refresh: bool = False) -> dict:
-    symbol = normalize_symbol_text(symbol)
-    if not symbol:
-        return {"ok": False, "error": "missing_symbol"}
-
-    cache_key = _analyst_cache_key(symbol)
-    cached = get_json(cache_key, {})
-    now_ts = time.time()
-    if (not force_refresh) and isinstance(cached, dict) and cached.get("ok"):
-        try:
-            cached_at = float(cached.get("cached_at_ts", 0) or 0)
-            if cached_at and now_ts - cached_at <= ANALYST_SNAPSHOT_CACHE_TTL_SEC:
-                cached["cache_used"] = True
-                return cached
-        except Exception:
-            pass
-
-    if not FMP_API_KEY:
-        return {
-            "ok": True,
-            "available": False,
-            "symbol": symbol,
-            "source": "none",
-            "summary_ar": "لم يتم ضبط مفتاح FMP، لذلك لا تتوفر آراء المحللين.",
-            "cache_used": False,
-        }
-
-    base = str(os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com") or "https://financialmodelingprep.com").rstrip("/")
-    price_target_urls = [
-        f"{base}/stable/price-target-consensus?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/stable/price-target-summary?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/api/v4/price-target-consensus?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/api/v4/price-target-summary?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/api/v3/price-target/{symbol}?apikey={FMP_API_KEY}",
-    ]
-    recommendation_urls = [
-        f"{base}/stable/analyst-stock-recommendations?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/api/v3/analyst-stock-recommendations/{symbol}?apikey={FMP_API_KEY}",
-        f"{base}/stable/ratings-snapshot?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/api/v3/rating/{symbol}?apikey={FMP_API_KEY}",
-    ]
-    upgrade_urls = [
-        f"{base}/stable/upgrades-downgrades?symbol={symbol}&apikey={FMP_API_KEY}",
-        f"{base}/api/v4/upgrades-downgrades?symbol={symbol}&apikey={FMP_API_KEY}",
-    ]
-    estimates_urls = [
-        f"{base}/stable/analyst-estimates?symbol={symbol}&period=annual&apikey={FMP_API_KEY}",
-        f"{base}/api/v3/analyst-estimates/{symbol}?period=annual&apikey={FMP_API_KEY}",
-    ]
-
-    target_rows, target_source, target_meta = _fetch_fmp_json_candidates(price_target_urls)
-    rec_rows, rec_source, rec_meta = _fetch_fmp_json_candidates(recommendation_urls)
-    upgrade_rows, upgrade_source, upgrade_meta = _fetch_fmp_json_candidates(upgrade_urls)
-    estimates_rows, estimates_source, estimates_meta = _fetch_fmp_json_candidates(estimates_urls)
-
-    current_price = 0.0
-    try:
-        qb = get_live_quotes([symbol], prefer_cache=True, allow_fallback=True)
-        current_price = safe_round(((qb.get("quotes", {}) or {}).get(symbol, {}) or {}).get("price", 0), 4)
-    except Exception:
-        current_price = 0.0
-
-    latest_target = target_rows[0] if target_rows and isinstance(target_rows[0], dict) else {}
-    target_consensus = _first_num_from_dict(latest_target, [
-        "targetConsensus", "target_consensus", "priceTargetAverage", "priceTargetAvg", "targetMean",
-        "targetMedian", "priceTarget", "targetPrice", "average", "target"
-    ])
-    target_high = _first_num_from_dict(latest_target, ["targetHigh", "priceTargetHigh", "high", "maxTarget"])
-    target_low = _first_num_from_dict(latest_target, ["targetLow", "priceTargetLow", "low", "minTarget"])
-    target_date = _first_text_from_dict(latest_target, ["date", "publishedDate", "updatedAt", "lastUpdated", "calendarDate"])
-    upside_pct = safe_round(((target_consensus - current_price) / current_price) * 100, 2) if target_consensus and current_price else 0.0
-
-    latest_rec = rec_rows[0] if rec_rows and isinstance(rec_rows[0], dict) else {}
-    rec_date = _first_text_from_dict(latest_rec, ["date", "period", "updatedAt", "calendarDate"])
-    buy_count = int(_first_num_from_dict(latest_rec, [
-        "analystRatingsbuy", "analystRatingsBuy", "buy", "strongBuy", "numberOfBuyRatings", "buyCount"
-    ]) or 0)
-    hold_count = int(_first_num_from_dict(latest_rec, [
-        "analystRatingsHold", "analystRatingshold", "hold", "numberOfHoldRatings", "holdCount"
-    ]) or 0)
-    sell_count = int(_first_num_from_dict(latest_rec, [
-        "analystRatingsSell", "analystRatingssell", "sell", "strongSell", "numberOfSellRatings", "sellCount"
-    ]) or 0)
-    total_count = buy_count + hold_count + sell_count
-    rating_text = _first_text_from_dict(latest_rec, ["rating", "recommendation", "ratingRecommendation", "scoreRecommendation"])
-    if not rating_text:
-        if total_count:
-            buy_ratio = buy_count / total_count
-            if buy_ratio >= 0.65:
-                rating_text = "شراء قوي"
-            elif buy_ratio >= 0.45:
-                rating_text = "شراء/احتفاظ"
-            elif sell_count > buy_count:
-                rating_text = "حذر/تخفيض"
-            else:
-                rating_text = "محايد"
-        else:
-            rating_text = "غير متوفر"
-
-    upgrade_count = 0
-    downgrade_count = 0
-    neutral_count = 0
-    latest_action_date = ""
-    for row in upgrade_rows[:12] if isinstance(upgrade_rows, list) else []:
-        if not isinstance(row, dict):
-            continue
-        action = " ".join([
-            str(row.get("action") or ""),
-            str(row.get("newGrade") or ""),
-            str(row.get("previousGrade") or ""),
-            str(row.get("grade") or ""),
-        ]).lower()
-        latest_action_date = latest_action_date or _first_text_from_dict(row, ["publishedDate", "date", "updatedAt"])
-        if any(x in action for x in ["upgrade", "outperform", "buy", "overweight", "رفع"]):
-            upgrade_count += 1
-        elif any(x in action for x in ["downgrade", "underperform", "sell", "underweight", "خفض"]):
-            downgrade_count += 1
-        else:
-            neutral_count += 1
-
-    latest_est = estimates_rows[0] if estimates_rows and isinstance(estimates_rows[0], dict) else {}
-    est_date = _first_text_from_dict(latest_est, ["date", "period", "calendarDate"])
-    revenue_est = _first_num_from_dict(latest_est, ["estimatedRevenueAvg", "revenueAvg", "estimatedRevenue", "revenue"])
-    eps_est = _first_num_from_dict(latest_est, ["estimatedEpsAvg", "epsAvg", "estimatedEps", "eps"])
-
-    available = bool(target_rows or rec_rows or upgrade_rows or estimates_rows)
-    if available:
-        upside_phrase = ""
-        if target_consensus and current_price:
-            if upside_pct >= 15:
-                upside_phrase = f"السعر المستهدف يشير إلى إمكانية ارتفاع تقارب {upside_pct}%."
-            elif upside_pct >= 3:
-                upside_phrase = f"السعر المستهدف أعلى من السعر الحالي بنحو {upside_pct}%."
-            elif upside_pct <= -8:
-                upside_phrase = f"السعر المستهدف أقل من السعر الحالي بنحو {abs(upside_pct)}%، وهذا يحتاج حذرًا."
-            else:
-                upside_phrase = "السعر المستهدف قريب من السعر الحالي."
-        action_phrase = ""
-        if upgrade_count or downgrade_count:
-            action_phrase = f"آخر التحديثات: {upgrade_count} ترقيات و {downgrade_count} تخفيضات."
-        elif total_count:
-            action_phrase = f"التوصية الإجمالية مبنية على {total_count} تصنيفًا متاحًا."
-        summary_ar = " ".join([x for x in [
-            f"رأي المحللين: {rating_text}.",
-            upside_phrase,
-            action_phrase,
-            "هذه طبقة مساعدة فقط ولا تغيّر نقاط الرادار أو قرار الدخول."
-        ] if x]).strip()
-    else:
-        summary_ar = "لا تتوفر آراء محللين كافية لهذا السهم من FMP حاليًا. لا يؤثر ذلك على نقاط الرادار."
-
-    payload = {
-        "ok": True,
-        "available": available,
-        "symbol": symbol,
-        "source": "FMP REST" if available else "none",
-        "cache_used": False,
-        "cached_at_ts": now_ts,
-        "fetched_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
-        "current_price": current_price,
-        "consensus": {
-            "rating": rating_text,
-            "analyst_count": total_count,
-            "buy": buy_count,
-            "hold": hold_count,
-            "sell": sell_count,
-            "date": rec_date,
-        },
-        "price_target": {
-            "consensus": target_consensus,
-            "high": target_high,
-            "low": target_low,
-            "upside_pct": upside_pct,
-            "date": target_date,
-        },
-        "updates": {
-            "upgrades": upgrade_count,
-            "downgrades": downgrade_count,
-            "neutral": neutral_count,
-            "latest_date": latest_action_date,
-        },
-        "estimates": {
-            "date": est_date,
-            "revenue_avg": revenue_est,
-            "eps_avg": eps_est,
-        },
-        "summary_ar": summary_ar,
-        "diagnostics": {
-            "target_rows": len(target_rows or []),
-            "recommendation_rows": len(rec_rows or []),
-            "upgrade_rows": len(upgrade_rows or []),
-            "estimate_rows": len(estimates_rows or []),
-            "target_meta": target_meta,
-            "recommendation_meta": rec_meta,
-            "upgrade_meta": upgrade_meta,
-            "estimates_meta": estimates_meta,
-        },
-        "scoring_note": "context_only_no_points",
-    }
-    try:
-        set_json(cache_key, payload)
-    except Exception:
-        pass
-    return payload
-
-
-@app.get("/analyst-snapshot")
-def analyst_snapshot_endpoint(symbol: str, force_refresh: bool = False):
-    try:
-        return _build_analyst_snapshot(symbol, force_refresh=force_refresh)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "symbol": normalize_symbol_text(symbol),
-            "error": str(exc)[:180],
-            "summary_ar": "تعذر تحميل آراء المحللين مؤقتًا. لا يؤثر ذلك على ترتيب الرادار.",
-            "scoring_note": "context_only_no_points",
-        }
-
-
 def _stock_score_value(x: dict) -> float:
     try:
         return float(x.get("display_rank_score", 0) or 0) or (
@@ -1208,14 +925,6 @@ def trade_scan(include_all: bool = False):
         and not _is_gray_sharia(x)
     ])
 
-    # Fix23: automatically preserve strong/cautious signals in the weekly SQLite-backed tracker.
-    # This is intentionally after Sharia/gray filtering so the archive reflects the clean actionable buckets.
-    try:
-        for _row in (strong[:25] + cautious[:25]):
-            upsert_performance_signal(_row)
-    except Exception as exc:
-        print(f"PERFORMANCE_AUTO_UPSERT_ERROR: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
-
     return {
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
@@ -1324,6 +1033,10 @@ def portfolio_add(payload: dict = Body(...)):
     symbol = str(payload.get("symbol", "") or "").upper().strip()
     buy_price = safe_round(payload.get("buy_price", 0))
     quantity = safe_round(payload.get("quantity", 0))
+    target_price = safe_round(payload.get("target_price", payload.get("target", 0)))
+    stop_loss = safe_round(payload.get("stop_loss", payload.get("stop", 0)))
+    source_signal_type = str(payload.get("source_signal_type", payload.get("signal_type", "")) or "").strip()
+    note = str(payload.get("note", "") or "").strip()
     if not symbol or buy_price <= 0:
         return {"ok": False, "message": "الرمز وسعر الشراء مطلوبان"}
 
@@ -1335,31 +1048,34 @@ def portfolio_add(payload: dict = Body(...)):
             break
 
     now_text = ny_now().strftime("%Y-%m-%d %H:%M:%S")
-    optional_fields = {
-        "target_price": safe_round(payload.get("target_price", 0)),
-        "stop_loss": safe_round(payload.get("stop_loss", 0)),
-        "source": str(payload.get("source", "manual") or "manual").strip(),
-        "note": str(payload.get("note", "") or "").strip(),
+    payload_fields = {
+        "symbol": symbol,
+        "buy_price": buy_price,
+        "quantity": quantity,
+        "target_price": target_price,
+        "stop_loss": stop_loss,
+        "source_signal_type": source_signal_type,
+        "note": note,
+        "updated_at": now_text,
     }
+    # Preserve older values when the caller does not provide optional fields.
     if existing:
         existing["buy_price"] = buy_price
         existing["quantity"] = quantity if quantity > 0 else existing.get("quantity", 0)
+        if target_price > 0:
+            existing["target_price"] = target_price
+        if stop_loss > 0:
+            existing["stop_loss"] = stop_loss
+        if source_signal_type:
+            existing["source_signal_type"] = source_signal_type
+        if note:
+            existing["note"] = note
         existing["updated_at"] = now_text
-        for key, value in optional_fields.items():
-            if value:
-                existing[key] = value
     else:
-        item = {
-            "symbol": symbol,
-            "buy_price": buy_price,
-            "quantity": quantity,
-            "added_at": now_text,
-            "updated_at": now_text,
-        }
-        item.update({k: v for k, v in optional_fields.items() if v})
-        items.insert(0, item)
+        payload_fields["added_at"] = now_text
+        items.insert(0, payload_fields)
     save_portfolio_items(items)
-    return {"ok": True, "message": "تم حفظ السهم في المحفظة", "items": items}
+    return {"ok": True, "message": "تم حفظ السهم في المحفظة", "count": len(items), "symbol": symbol, "items": items}
 
 
 @app.post("/portfolio/remove")
@@ -1400,9 +1116,6 @@ def portfolio_get():
         quantity = float(item.get("quantity", 0) or 0)
         market_value = current_price * quantity if current_price > 0 and quantity > 0 else 0.0
         cost_value = buy_price * quantity if buy_price > 0 and quantity > 0 else 0.0
-        planned_target = float(item.get("target_price", 0) or 0) or float(recommendation.get("target_price", 0) or 0)
-        planned_stop = float(item.get("stop_loss", 0) or 0) or float(recommendation.get("stop_loss", 0) or 0)
-        unrealized_pl = (market_value - cost_value) if market_value and cost_value else 0.0
         out.append({
             "symbol": symbol,
             "buy_price": safe_round(buy_price),
@@ -1414,25 +1127,19 @@ def portfolio_get():
             "type_label": str(plan.get("trade_type_label_ar", plan.get("display_plan_family_label", plan.get("strategy_label", ""))) or ""),
             "recommendation": recommendation["recommendation"],
             "recommendation_note": recommendation["recommendation_note"],
-            "target_price": safe_round(planned_target),
-            "stop_loss": safe_round(planned_stop),
+            "target_price": recommendation["target_price"],
+            "stop_loss": recommendation["stop_loss"],
+            "saved_target_price": safe_round(item.get("target_price", 0)),
+            "saved_stop_loss": safe_round(item.get("stop_loss", 0)),
+            "source_signal_type": str(item.get("source_signal_type", "") or ""),
+            "note": str(item.get("note", "") or ""),
             "market_value": safe_round(market_value),
             "cost_value": safe_round(cost_value),
-            "unrealized_pl": safe_round(unrealized_pl),
-            "source": str(item.get("source", "") or ""),
-            "note": str(item.get("note", "") or ""),
             "added_at": str(item.get("added_at", "") or ""),
             "updated_at": str(item.get("updated_at", "") or ""),
         })
 
-    summary = {
-        "positions": len(out),
-        "market_value": safe_round(sum(float(x.get("market_value", 0) or 0) for x in out)),
-        "cost_value": safe_round(sum(float(x.get("cost_value", 0) or 0) for x in out)),
-        "unrealized_pl": safe_round(sum(float(x.get("unrealized_pl", 0) or 0) for x in out)),
-    }
-    summary["unrealized_pl_pct"] = safe_round((summary["unrealized_pl"] / summary["cost_value"] * 100), 2) if summary["cost_value"] else 0.0
-    return {"items": out, "summary": summary}
+    return {"items": out}
 
 
 @app.post("/watchlist/add")
@@ -1635,20 +1342,89 @@ def data_sync_manual_sharia_approvals():
 
 @app.post("/performance/track-signal")
 def performance_track_signal(payload: dict = Body(...)):
-    """Manually add or refresh a radar card in the weekly performance tracker.
+    # The UI may send either the stock fields directly, or {"stock": {...}}.
+    if isinstance(payload.get("stock"), dict):
+        payload = payload.get("stock") or {}
 
-    The frontend sends the same compact stock object already rendered in the card.
-    This does not change scoring; it only persists the signal in the SQLite-backed
-    weekly tracker so outcomes can be reviewed later.
-    """
-    stock = payload.get("stock") if isinstance(payload.get("stock"), dict) else payload
-    if not isinstance(stock, dict):
-        return JSONResponse({"ok": False, "error": "missing_stock_payload"}, status_code=400)
-    try:
-        upsert_performance_signal(stock)
-        return {"ok": True, "symbol": normalize_symbol_text(stock.get("symbol", "")), "message": "تم تسجيل الإشارة في التتبع الأسبوعي"}
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}, status_code=500)
+    symbol = normalize_symbol_text(payload.get("symbol", ""))
+    if not symbol:
+        return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
+
+    signal_type = str(payload.get("signal_type", payload.get("decision", "")) or "").strip()
+    if signal_type not in {"دخول قوي", "دخول بحذر"}:
+        # Manual tracking is allowed, but keep it explicit and conservative.
+        signal_type = "دخول بحذر"
+
+    entry_price = safe_round(payload.get("entry_price", payload.get("display_entry_price", 0)))
+    target_price = safe_round(payload.get("target_price", payload.get("display_target_price", 0)))
+    target_2_price = safe_round(payload.get("target_2_price", payload.get("target_2", 0)))
+    stop_loss = safe_round(payload.get("stop_loss", payload.get("display_stop_price", 0)))
+    current_price = safe_round(payload.get("current_price", payload.get("display_price", 0)))
+    if entry_price <= 0:
+        return JSONResponse({"ok": False, "error": "missing_entry_price", "message": "سعر الدخول مطلوب للتتبع"}, status_code=400)
+
+    before_store = rollover_performance_store_if_needed(load_performance_store())
+    before_count = len(before_store.get("active_records", []) or [])
+    stock = {
+        "symbol": symbol,
+        "decision": signal_type,
+        "display_entry_price": entry_price,
+        "display_target_price": target_price,
+        "target_2": target_2_price,
+        "display_stop_price": stop_loss,
+        "display_price": current_price,
+        "current_price_live": current_price,
+        "price_source_label": str(payload.get("price_source_label", "manual") or "manual"),
+        "price_source": str(payload.get("price_source", "manual") or "manual"),
+        "strategy_label": str(payload.get("strategy_label", payload.get("plan_family", "")) or ""),
+        "display_plan_family": str(payload.get("plan_family", payload.get("display_plan_family", "")) or ""),
+        "market_phase_label": str(payload.get("market_phase_label", "") or ""),
+        "valid_for": str(payload.get("valid_for", "") or ""),
+    }
+    upsert_performance_signal(stock)
+    after_store = rollover_performance_store_if_needed(load_performance_store())
+    after_count = len(after_store.get("active_records", []) or [])
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "signal_type": signal_type,
+        "before_count": before_count,
+        "after_count": after_count,
+        "message": "تم حفظ الإشارة في التتبع الأسبوعي",
+    }
+
+
+@app.get("/user-data-diagnostics")
+def user_data_diagnostics():
+    portfolio_items = load_portfolio_items()
+    watchlist_items = load_manual_watchlist()
+    sharia_exclusions = load_manual_sharia_exclusions()
+    sharia_approvals = load_manual_sharia_approvals()
+    performance_store = rollover_performance_store_if_needed(load_performance_store())
+    active_records = performance_store.get("active_records", []) or []
+    archive = performance_store.get("weekly_archive", []) or []
+    last_live = get_json("last_radar_live_refresh", {}) or {}
+    return {
+        "ok": True,
+        "sqlite": sqlite_status(),
+        "portfolio_count": len(portfolio_items or []),
+        "watchlist_count": len(watchlist_items or []),
+        "manual_sharia_exclusions_count": len(sharia_exclusions or []),
+        "manual_sharia_approvals_count": len(sharia_approvals or []),
+        "performance_active_count": len(active_records),
+        "performance_archive_weeks": len(archive),
+        "active_week": {
+            "week_key": performance_store.get("active_week_key"),
+            "week_start": performance_store.get("active_week_start"),
+            "week_end": performance_store.get("active_week_end"),
+        },
+        "last_radar_live_refresh": last_live,
+        "notes": {
+            "news_score_enabled": bool(NEWS_SCORE_ENABLED),
+            "market_mood_context_only": True,
+        },
+    }
+
 
 @app.get("/performance")
 def performance_get():
@@ -1717,4 +1493,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
