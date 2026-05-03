@@ -209,3 +209,4 @@ def classify_news_with_ai(symbol: str, company_name: str, sector: str, industry:
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
+
