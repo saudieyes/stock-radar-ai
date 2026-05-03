@@ -825,7 +825,152 @@
       .sharia-card { contain-intrinsic-size: 380px; }
     }
 
-</style>
+
+
+    /* Fix26: mobile alignment guard + stale-price clarity. */
+    html, body {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+    body {
+      text-align: right;
+      touch-action: pan-y;
+    }
+    .container,
+    .topbar,
+    .hero,
+    .market-mood-card,
+    .section,
+    .section-box,
+    .opening-box,
+    .panel,
+    .card,
+    .portfolio-card,
+    .watchlist-card,
+    .sharia-card {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+    }
+    .symbol,
+    .company,
+    .section-title,
+    .mood-mini-value,
+    .market-mood-title,
+    .market-mood-note,
+    .summary-sub,
+    .detail-value,
+    .card-why-line,
+    .portfolio-card-symbol,
+    .watchlist-card-symbol,
+    .sharia-card-symbol {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    .live-fresh-note {
+      margin: 8px 0 12px;
+      padding: 9px 11px;
+      border-radius: 14px;
+      border: 1px solid var(--border-soft);
+      background: var(--panel-bg-soft);
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.75;
+      font-weight: 800;
+    }
+    @media (max-width: 760px) {
+      .container {
+        width: 100%;
+        max-width: 520px;
+        margin-left: auto;
+        margin-right: auto;
+        padding-left: 10px;
+        padding-right: 10px;
+        overflow-x: hidden;
+      }
+      .cards,
+      .portfolio-card-list,
+      .watchlist-card-list,
+      .sharia-card-list {
+        width: 100%;
+        max-width: 100%;
+      }
+      .card,
+      .section-box,
+      .opening-box,
+      .panel,
+      .market-mood-card,
+      .portfolio-card,
+      .watchlist-card,
+      .sharia-card {
+        width: 100%;
+        max-width: 100%;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .section-header,
+      .section-title-row,
+      .card-top,
+      .portfolio-card-top,
+      .watchlist-card-top,
+      .sharia-card-top {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+      }
+      .card-top {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+      }
+      .card-heading-line,
+      .badges {
+        min-width: 0;
+        max-width: 100%;
+      }
+      .badges {
+        justify-content: flex-start;
+      }
+      .badge,
+      .hero-chip,
+      .live-status-chip,
+      .quick-link,
+      .section-show-all-btn {
+        white-space: normal;
+      }
+      .symbol {
+        font-size: clamp(30px, 12vw, 46px);
+        line-height: 1.05;
+      }
+      .company {
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      .market-mood-grid,
+      .portfolio-summary-grid,
+      .tracking-summary-grid {
+        grid-template-columns: 1fr;
+      }
+      .price-plan-grid,
+      .portfolio-metrics,
+      .watchlist-metrics,
+      .sharia-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 390px) {
+      .price-plan-grid,
+      .portfolio-metrics,
+      .watchlist-metrics,
+      .sharia-metrics {
+        grid-template-columns: 1fr;
+      }
+      .card-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+
+  </style>
 </head>
 <body>
   <div class="container">
@@ -2879,4 +3024,5 @@
   </script>
 </body>
 </html>
+
 
