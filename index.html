@@ -2889,6 +2889,61 @@
       return true;
     }
 
+
+    function userIsReadingRadarCard() {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      if (currentlyOpenDetailKeys().length) return true;
+      if (y < 220) return false;
+      const cards = Array.from(document.querySelectorAll('.card[data-symbol]'));
+      return cards.some(card => {
+        const r = card.getBoundingClientRect();
+        return r.bottom > 90 && r.top < (window.innerHeight - 110);
+      });
+    }
+
+    function latestStockBySymbolFromScanData() {
+      const out = {};
+      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','watchlist','top_ranked','opening_focus','all_results'];
+      keys.forEach(key => {
+        ((window.__scanData && window.__scanData[key]) || []).forEach(item => {
+          const s = String(item?.symbol || '').toUpperCase().trim();
+          if (s) out[s] = item;
+        });
+      });
+      return out;
+    }
+
+    function updateVisibleLivePriceDomFromScanData() {
+      const bySymbol = latestStockBySymbolFromScanData();
+      document.querySelectorAll('.live-price-item[data-symbol]').forEach(box => {
+        const s = String(box.dataset.symbol || '').toUpperCase().trim();
+        const item = bySymbol[s];
+        if (!item) return;
+        const displayPrice = Number(item.current_price_live || item.display_price || item.current_price || item.price || 0);
+        if (!Number.isFinite(displayPrice) || displayPrice <= 0) return;
+        const rawChange = item.display_change_pct ?? item.change_vs_prev_close_pct ?? item.change_pct ?? item.change_from_open_pct;
+        const change = Number(rawChange);
+        const hasChange = Number.isFinite(change);
+        const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
+        const sign = hasChange && change > 0 ? '+' : '';
+        const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
+        const valueEl = box.querySelector('.price-plan-value');
+        const changeEl = box.querySelector('.live-change-line');
+        const sourceEl = box.querySelector('.compact-source-line');
+        if (valueEl) {
+          valueEl.textContent = formatNumber(displayPrice);
+          valueEl.classList.remove('price-up','price-down','price-flat');
+          valueEl.classList.add(cls);
+        }
+        if (changeEl) {
+          changeEl.textContent = changeText;
+          changeEl.classList.remove('price-up','price-down','price-flat');
+          changeEl.classList.add(cls);
+        }
+        if (sourceEl) sourceEl.textContent = item.price_source_label || item.last_price_update_label || sourceEl.textContent || '';
+      });
+    }
+
     async function refreshRadarLiveFromSnapshot(silent=true) {
       if (window.__radarLiveBusy) return;
       if (silent && document.hidden) return;
@@ -2902,8 +2957,14 @@
         const res = await apiFetch(`/radar-live-refresh?limit=80&_=${Date.now()}`);
         const data = await res.json();
         if (data.ok && applyRadarLivePayload(data)) {
-          renderScanData();
-          restoreScanUiState(uiState);
+          if (silent && userIsReadingRadarCard()) {
+            // While the user is reading a card, never rebuild/reorder the page.
+            // Only update the visible live price fields to avoid scroll jumps.
+            updateVisibleLivePriceDomFromScanData();
+          } else {
+            renderScanData();
+            restoreScanUiState(uiState);
+          }
           const updated = document.getElementById('heroUpdated');
           if (updated) updated.textContent = `تحديث حي: ${safeText(data.live_updated_at || 'الآن')} • ${formatNumber(data.quotes_available || 0)} سعر`;
         } else if (!silent) {
@@ -3040,10 +3101,14 @@
         const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&_=${Date.now()}`);
         const data = await res.json();
         const changed = applyLiveQuotesToScan(data.quotes || {});
-        if (changed && !silent) {
-          const uiState = preserveScanUiState();
-          renderScanData();
-          restoreScanUiState(uiState);
+        if (changed) {
+          if (silent) {
+            updateVisibleLivePriceDomFromScanData();
+          } else {
+            const uiState = preserveScanUiState();
+            renderScanData();
+            restoreScanUiState(uiState);
+          }
         }
       } catch(e) {}
     }
@@ -3077,6 +3142,7 @@
       if (document.hidden) return;
       if (window.__periodicFullScanBusy) return;
       if (currentlyOpenDetailKeys().length) return;
+      if (userIsReadingRadarCard()) return;
       window.__periodicFullScanBusy = true;
       try {
         await loadScan(true);
