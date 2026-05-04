@@ -1555,6 +1555,157 @@
       .bottom-mobile-nav{padding-bottom:calc(8px + env(safe-area-inset-bottom));}
     }
 
+
+
+    /* ===== Fix40: stable bottom-sheet details + portfolio polish ===== */
+    body.modal-open { overflow: hidden !important; touch-action: none; }
+    body.modal-open .container { overflow: hidden; }
+
+    /* Details must scroll inside the sheet, not move the whole page */
+    details.detail-panel[open] {
+      position: fixed !important;
+      z-index: 5000 !important;
+      left: max(0px, env(safe-area-inset-left));
+      right: max(0px, env(safe-area-inset-right));
+      bottom: 0;
+      height: min(92dvh, 800px) !important;
+      max-height: min(92dvh, 800px) !important;
+      background: linear-gradient(180deg,#071827,#05101f) !important;
+      border: 1px solid rgba(65,137,198,.55) !important;
+      border-bottom: 0 !important;
+      border-radius: 24px 24px 0 0 !important;
+      box-shadow: 0 -18px 50px rgba(0,0,0,.58) !important;
+      overflow: hidden !important;
+      display: flex !important;
+      flex-direction: column !important;
+      contain: layout paint;
+      overscroll-behavior: contain;
+    }
+    details.detail-panel[open]::before{
+      content:''; position: fixed; inset: 0;
+      background: rgba(0,0,0,.64); backdrop-filter: blur(3px);
+      z-index: -1; pointer-events: auto;
+    }
+    details.detail-panel[open] > summary{
+      flex: 0 0 auto;
+      position: static !important;
+      display: flex !important;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px 10px !important;
+      margin: 0 !important;
+      background: #071827 !important;
+      border-bottom: 1px solid rgba(65,137,198,.35) !important;
+      color: #e9f7ff !important;
+      font-size: 18px !important;
+      font-weight: 900 !important;
+      list-style: none;
+      cursor: pointer;
+    }
+    details.detail-panel[open] > summary::before{
+      content:'';
+      position:absolute;
+      top:7px;
+      left:50%;
+      transform:translateX(-50%);
+      width:42px;
+      height:4px;
+      border-radius:99px;
+      background:rgba(143,176,201,.55);
+    }
+    .sheet-summary-title{display:flex;flex-direction:column;gap:2px;min-width:0;}
+    .sheet-summary-symbol{font-size:20px;font-weight:950;direction:ltr;text-align:right;color:#fff;}
+    .sheet-summary-note{font-size:12px;color:#8fb0c9;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .sheet-close-btn{
+      flex:0 0 auto;
+      border:1px solid rgba(96,165,250,.75) !important;
+      background:rgba(23,51,95,.95) !important;
+      color:#dbeafe !important;
+      border-radius:12px !important;
+      padding:8px 12px !important;
+      min-height:36px !important;
+      font-weight:900 !important;
+      font-size:13px !important;
+    }
+    details.detail-panel[open] .sheet-live-header{
+      flex:0 0 auto;
+      padding: 11px 16px !important;
+      background:#08223a !important;
+      border-bottom:1px solid rgba(65,137,198,.25) !important;
+    }
+    details.detail-panel[open] .details-grid{
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      overflow-y: auto !important;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      padding: 12px 12px calc(96px + env(safe-area-inset-bottom)) !important;
+      display: grid !important;
+      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+      gap: 9px !important;
+    }
+    details.detail-panel[open] .card-local-nav{
+      flex:0 0 auto;
+      position: sticky;
+      bottom: 0;
+      background: #071827;
+      border-top: 1px solid rgba(65,137,198,.30);
+      padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
+      z-index: 5;
+    }
+    @media(max-width:520px){
+      details.detail-panel[open] .details-grid{grid-template-columns:1fr !important;}
+      details.detail-panel[open]{height:min(93dvh, 820px) !important;}
+      .sheet-summary-symbol{font-size:18px;}
+      .sheet-summary-note{max-width:210px;}
+    }
+
+    /* Better compact portfolio while keeping existing data + live updates */
+    .portfolio-card{
+      border-radius:18px !important;
+      border-color:rgba(65,137,198,.35) !important;
+      background:linear-gradient(180deg, rgba(7,24,39,.96), rgba(8,18,34,.96)) !important;
+      box-shadow:0 10px 24px rgba(0,0,0,.16);
+    }
+    .portfolio-card-top{align-items:center !important;}
+    .portfolio-live-head{text-align:left;direction:ltr;min-width:96px;}
+    .portfolio-live-head .live-portfolio-price-top{font-size:23px;font-weight:950;line-height:1;}
+    .portfolio-live-head .live-portfolio-change-top{font-size:13px;font-weight:950;margin-top:4px;}
+    .portfolio-live-head .portfolio-source-line{font-size:10px;color:#8aa8c2;margin-top:3px;max-width:118px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .portfolio-card-symbol{font-size:27px !important;letter-spacing:.2px;}
+    .portfolio-metric-value .green, .portfolio-metric-value .red{font-weight:900;}
+
+    /* Light mode harmony for compact UI */
+    :root[data-theme="light"] .compact-radar-main,
+    :root[data-theme="light"] .portfolio-card,
+    :root[data-theme="light"] .market-mood-card,
+    :root[data-theme="light"] .section-header{
+      background:linear-gradient(180deg,#ffffff,#eef6ff) !important;
+      border-color:#bfd4ee !important;
+      color:#081224 !important;
+    }
+    :root[data-theme="light"] .compact-symbol,
+    :root[data-theme="light"] .sheet-live-title,
+    :root[data-theme="light"] .portfolio-card-symbol{color:#071427 !important;}
+    :root[data-theme="light"] .compact-company,
+    :root[data-theme="light"] .compact-why,
+    :root[data-theme="light"] .compact-source-line,
+    :root[data-theme="light"] .sheet-live-sub{color:#425873 !important;}
+    :root[data-theme="light"] .compact-plan-chip,
+    :root[data-theme="light"] .detail-box,
+    :root[data-theme="light"] .portfolio-metric{
+      background:#f4f8ff !important;
+      border-color:#c9d9ee !important;
+      color:#081224 !important;
+    }
+    :root[data-theme="light"] details.detail-panel[open]{background:linear-gradient(180deg,#ffffff,#edf5ff) !important;}
+    :root[data-theme="light"] details.detail-panel[open] > summary,
+    :root[data-theme="light"] details.detail-panel[open] .sheet-live-header,
+    :root[data-theme="light"] details.detail-panel[open] .card-local-nav{background:#edf5ff !important;color:#081224 !important;}
+    :root[data-theme="light"] .sheet-summary-symbol{color:#081224 !important;}
+    :root[data-theme="light"] .sheet-summary-note{color:#425873 !important;}
+
 </style>
 </head>
 <body>
@@ -2801,7 +2952,7 @@
       const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
       const sign = hasChange && change > 0 ? '+' : '';
       const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : '—';
-      const source = stock?.price_source_label || stock?.last_price_update_label || '';
+      const source = [stock?.price_source_label || stock?.price_source || '', stock?.last_price_update_label || stock?.updated_label || ''].filter(Boolean).join(' • ');
       return `<div class="${extraClass} live-price-item" data-symbol="${safeText(stock?.symbol || '')}">
         <div class="price-plan-value ${cls}">${safeText(formatNumber(displayPrice))}</div>
         <div class="live-change-line ${cls}">${safeText(changeText)}</div>
@@ -2821,17 +2972,57 @@
       return out.slice(0, 3).join('');
     }
 
+    function anyDetailPanelOpen() {
+      return !!document.querySelector('details.detail-panel[open]');
+    }
+
+    function setDetailModalState() {
+      document.body.classList.toggle('modal-open', anyDetailPanelOpen());
+    }
+
+    function closeDetailPanel(trigger, event=null) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const panel = trigger?.closest ? trigger.closest('details.detail-panel') : null;
+      if (panel) panel.open = false;
+      setDetailModalState();
+    }
+
+    function handleDetailPanelToggle(panel) {
+      if (!panel) return;
+      if (panel.open) {
+        document.querySelectorAll('details.detail-panel[open]').forEach(other => {
+          if (other !== panel) other.open = false;
+        });
+        setDetailModalState();
+        const grid = panel.querySelector('.details-grid');
+        if (grid) grid.scrollTop = 0;
+        const sym = panel.dataset.symbol || panel.closest('.card[data-symbol]')?.dataset.symbol || '';
+        if (sym) {
+          loadAnalystSnapshot(sym).catch(() => {});
+          loadAiContextSummary(sym).catch(() => {});
+        }
+      } else {
+        setTimeout(setDetailModalState, 0);
+      }
+    }
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('details.detail-panel[open]').forEach(panel => panel.open = false);
+        setDetailModalState();
+      }
+    });
+
     function openCardDetails(el) {
       const card = el?.closest ? el.closest('.card[data-symbol]') : null;
       if (!card) return;
       const details = card.querySelector('details.detail-panel');
       if (!details) return;
       details.open = true;
-      const sym = details.dataset.symbol || card.dataset.symbol || '';
-      if (sym) {
-        loadAnalystSnapshot(sym).catch(() => {});
-        loadAiContextSummary(sym).catch(() => {});
-      }
+      handleDetailPanelToggle(details);
     }
 
     function createCard(stock, sectionKey='', index=0) {
@@ -2854,7 +3045,9 @@
       details.push(detailBox(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price)));
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
       details.push(detailBox('مدة الصلاحية', safeText(stock.valid_for)));
-      details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
+      details.push(detailBox('مصدر السعر', safeText(stock.price_source_label || stock.price_source || '—')));
+      details.push(detailBox('آخر تحديث للسعر', safeText(stock.last_price_update_label || stock.updated_label || stock.updated_at || '—')));
+      details.push(detailBox('حالة السوق', safeText(stock.market_phase_label || (window.__scanData && window.__scanData.market_phase_label) || '—')));
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
       details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
@@ -2962,8 +3155,8 @@
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماد شرعي</button>` : ''}
           </div>
-          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}'); loadAiContextSummary('${safeText(stock.symbol)}')}">
-            <summary>تحليل شامل — اضغط للإغلاق</summary>
+          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="handleDetailPanelToggle(this)">
+            <summary><span class="sheet-summary-title"><span class="sheet-summary-symbol">${safeText(stock.symbol)}</span><span class="sheet-summary-note">تحليل شامل • اضغط هنا أو زر الإغلاق للإغلاق</span></span><button type="button" class="sheet-close-btn" onclick="closeDetailPanel(this, event)">إغلاق ✕</button></summary>
             <div class="sheet-live-header">
               <div><div class="sheet-live-title">${safeText(stock.symbol)}</div><div class="sheet-live-sub">${company} • ${safeText(rankSubtitle)}</div></div>
               ${compactPriceBlock(stock, displayPrice, 'sheet-live-price')}
@@ -3193,9 +3386,13 @@
       }).join('') || `<div class="mood-tile"><strong>المؤشرات</strong><span class="neu">—</span></div>`;
       const hot = (payload.hot_sectors || []).slice(0,3).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || 'لا توجد قطاعات ساخنة واضحة';
       const weak = (payload.weak_sectors || []).slice(0,2).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || '—';
+      const phaseLabel = safeText(payload.market_phase_label || (window.__scanData && window.__scanData.market_phase_label) || '—');
+      const phaseRaw = String(payload.market_phase || (window.__scanData && window.__scanData.market_phase) || '').toLowerCase();
+      const phaseTone = phaseRaw.includes('open') && !phaseRaw.includes('pre') ? 'pos' : (phaseRaw.includes('pre') || phaseRaw.includes('after')) ? 'neu' : 'neg';
       box.innerHTML = `
         <div class="mood-dashboard-strip">
           <div class="mood-tile"><div class="mood-gauge"><span class="mood-needle" style="transform:translateX(-50%) rotate(${angle}deg)"></span></div><strong class="${tone}">${label}</strong></div>
+          <div class="mood-tile"><strong>حالة السوق</strong><span class="${phaseTone}">${phaseLabel}</span></div>
           ${indexes}
           <div class="mood-tile"><strong>قطاعات نشطة</strong><span class="pos">${safeText(hot)}</span></div>
           <div class="mood-tile"><strong>أضعف</strong><span class="neg">${safeText(weak)}</span></div>
@@ -3756,8 +3953,13 @@
                 <div>
                   <div class="portfolio-card-symbol">${safeText(item.symbol)}</div>
                   <div class="portfolio-card-sub"><span>${safeText(item.type_label || '—')}</span> • <span class="portfolio-source-line">${safeText(item.price_source_label || '—')}</span></div>
+                  <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
                 </div>
-                <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
+                <div class="portfolio-live-head">
+                  <div class="live-portfolio-price-top ${portfolioColorClass(item.holding_change_pct)}">${formatNumber(item.current_price)}</div>
+                  <div class="live-portfolio-change-top ${plClass}">${formatPercent(item.holding_change_pct)}</div>
+                  <div class="portfolio-source-line">${safeText(item.price_source_label || '—')}</div>
+                </div>
               </div>
               <div class="portfolio-metrics">
                 <div class="portfolio-metric"><div class="portfolio-metric-label">سعر الشراء</div><div class="portfolio-metric-value">${formatNumber(item.buy_price)}</div></div>
@@ -3847,22 +4049,22 @@
           const marketValue = price * qty;
           const costValue = buy * qty;
           const cls = portfolioColorClass(pct);
-          const priceEl = card.querySelector('.live-portfolio-price');
-          const chgEl = card.querySelector('.live-portfolio-change');
+          const priceEls = card.querySelectorAll('.live-portfolio-price, .live-portfolio-price-top');
+          const chgEls = card.querySelectorAll('.live-portfolio-change, .live-portfolio-change-top');
           const mvEl = card.querySelector('.live-portfolio-market-cost');
-          const srcEl = card.querySelector('.portfolio-source-line');
-          if (priceEl) {
+          const srcEls = card.querySelectorAll('.portfolio-source-line');
+          priceEls.forEach(priceEl => {
             priceEl.textContent = formatNumber(price);
             priceEl.classList.remove('green','red');
             if (cls) priceEl.classList.add(cls);
-          }
-          if (chgEl) {
-            chgEl.textContent = formatPercent(pct);
+          });
+          chgEls.forEach(chgEl => {
+            chgEl.innerHTML = formatPercent(pct);
             chgEl.classList.remove('green','red');
             if (cls) chgEl.classList.add(cls);
-          }
+          });
           if (mvEl) mvEl.textContent = `$${formatNumber(marketValue)} / $${formatNumber(costValue)}`;
-          if (srcEl) srcEl.textContent = q.source_label || 'FMP Live/REST';
+          srcEls.forEach(srcEl => { srcEl.textContent = q.source_label || 'FMP Live/REST'; });
         });
         updatePortfolioSummaryFromDom();
       } catch (e) {}
