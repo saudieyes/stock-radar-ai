@@ -63,6 +63,14 @@
     "symbol": "AMWD",
     "updated_at": "2026-04-24 12:29:30"
   },
+  "APA": {
+    "excluded_at": "2026-05-04 14:20:28",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "APA",
+    "updated_at": "2026-05-04 14:20:28"
+  },
   "ARKO": {
     "excluded_at": "2026-05-01 14:55:34",
     "note": "استبعاد يدوي شرعي",
@@ -142,6 +150,14 @@
     "source": "manual",
     "symbol": "BULL",
     "updated_at": "2026-04-20 21:47:53"
+  },
+  "CABA": {
+    "excluded_at": "2026-05-04 10:53:05",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CABA",
+    "updated_at": "2026-05-04 10:54:32"
   },
   "CALY": {
     "excluded_at": "2026-05-01 11:27:59",
@@ -231,6 +247,14 @@
     "symbol": "CLF",
     "updated_at": "2026-04-27 05:50:23"
   },
+  "CLSK": {
+    "excluded_at": "2026-05-04 12:11:11",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CLSK",
+    "updated_at": "2026-05-04 12:11:11"
+  },
   "CMRC": {
     "excluded_at": "2026-04-20 21:48:31",
     "note": "",
@@ -303,6 +327,14 @@
     "symbol": "DJT",
     "updated_at": "2026-04-27 12:42:34"
   },
+  "DNA": {
+    "excluded_at": "2026-05-04 11:20:15",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DNA",
+    "updated_at": "2026-05-04 11:20:15"
+  },
   "DNUT": {
     "excluded_at": "2026-04-20 21:37:24",
     "note": "",
@@ -319,6 +351,14 @@
     "symbol": "DOUG",
     "updated_at": "2026-04-28 20:13:44"
   },
+  "DOW": {
+    "excluded_at": "2026-05-04 12:10:35",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DOW",
+    "updated_at": "2026-05-04 12:10:35"
+  },
   "DX": {
     "excluded_at": "2026-04-20 21:44:52",
     "note": "",
@@ -326,6 +366,14 @@
     "source": "manual",
     "symbol": "DX",
     "updated_at": "2026-04-20 21:44:52"
+  },
+  "DXYZ": {
+    "excluded_at": "2026-05-04 10:53:56",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DXYZ",
+    "updated_at": "2026-05-04 10:54:19"
   },
   "EAT": {
     "excluded_at": "2026-04-29 22:08:29",
