@@ -721,6 +721,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     for row in rows:
         sym = normalize_symbol_text((row or {}).get("symbol", ""))
         overlaid.append(_apply_live_quote_overlay(row, quotes.get(sym)))
+    # Manual Sharia decisions must override the saved scan snapshot immediately.
+    overlaid = _apply_manual_sharia_overrides(overlaid)
 
     strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
     gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
@@ -1356,6 +1358,95 @@ def _is_gray_sharia(stock: dict) -> bool:
     return bool(stock.get("sharia_is_gray")) or status == "gray"
 
 
+def _apply_manual_sharia_overrides_to_stock(stock: dict, manual_exclusions: dict | None = None, manual_approvals: dict | None = None) -> dict:
+    """Apply the user's latest manual Sharia decisions to cached/live rows.
+
+    Important: the radar live refresh is mostly an overlay over the latest saved
+    scan snapshot. If the user manually approves/excludes a ticker after that
+    snapshot was created, the old row can still carry `sharia_status=gray` or
+    appear in the wrong bucket until the next full rescan. This function makes
+    manual decisions authoritative at display/bucketing time without changing
+    the underlying technical logic.
+    """
+    out = dict(stock or {})
+    symbol = normalize_symbol_text(out.get("symbol", ""))
+    if not symbol:
+        return out
+
+    manual_exclusions = manual_exclusions or {}
+    manual_approvals = manual_approvals or {}
+
+    exclusion = manual_exclusions.get(symbol)
+    if exclusion:
+        note = str((exclusion or {}).get("note", "") or (exclusion or {}).get("reason", "") or "").strip()
+        reason = "مستبعد يدويًا من قائمتك الشرعية"
+        if note:
+            reason = f"{reason} - {note}"
+        out.update({
+            "sharia_status": "manual_excluded",
+            "sharia_label": "مستبعد يدويًا",
+            "sharia_reason": reason,
+            "sharia_manual_excluded": True,
+            "sharia_manual_approved": False,
+            "sharia_is_gray": False,
+            "is_halal": False,
+            "halal_ok": False,
+            "owner_action": "↩️ يمكنك إعادة السهم يدويًا إذا رغبت",
+        })
+        # Keep the technical fields intact, but make sure bucket filtering removes it.
+        if str(out.get("decision", "") or "") not in {"مستبعد يدويًا", "مرفوض شرعياً"}:
+            out.setdefault("original_decision", out.get("decision", ""))
+        out["decision"] = "مستبعد يدويًا"
+        return out
+
+    approval = manual_approvals.get(symbol)
+    if approval:
+        # Manual approval is intended for gray/unresolved names. Do not override
+        # clearly non-compliant business/debt blocks unless the existing row is gray
+        # or came from the gray bucket.
+        status = str(out.get("sharia_status", "") or "").lower()
+        decision = str(out.get("decision", "") or "")
+        was_gray_like = bool(out.get("sharia_is_gray")) or status in {"gray", "manual_approved"} or "غير محسوم" in decision or "رمادي" in decision
+        if was_gray_like:
+            note = str((approval or {}).get("note", "") or (approval or {}).get("reason", "") or "").strip()
+            reason = "متوافق يدويًا بعد مراجعتك"
+            if note:
+                reason = f"{reason} - {note}"
+            out.update({
+                "sharia_status": "manual_approved",
+                "sharia_label": "متوافق يدويًا",
+                "sharia_reason": reason,
+                "sharia_manual_excluded": False,
+                "sharia_manual_approved": True,
+                "manual_approved": True,
+                "sharia_is_gray": False,
+                "is_halal": True,
+                "halal_ok": True,
+            })
+            # If a copied gray bucket label is still present, restore the technical
+            # decision so it can move to the correct clean bucket immediately.
+            original = str(out.get("original_decision", "") or "").strip()
+            if "غير محسوم" in decision and original:
+                out["decision"] = original
+            elif decision in {"قوي لكن شرعيته غير محسومة", "تهيئة قوية غير محسومة شرعيًا"}:
+                out["decision"] = original or "مراقبة"
+        return out
+
+    return out
+
+
+def _apply_manual_sharia_overrides(rows: list[dict]) -> list[dict]:
+    try:
+        manual_exclusions = get_manual_sharia_exclusions_map()
+    except Exception:
+        manual_exclusions = {}
+    try:
+        manual_approvals = get_manual_sharia_approvals_map()
+    except Exception:
+        manual_approvals = {}
+    return [_apply_manual_sharia_overrides_to_stock(row, manual_exclusions, manual_approvals) for row in (rows or [])]
+
+
 def _copy_for_bucket(stock: dict, label: str, reason: str = "") -> dict:
     out = dict(stock or {})
     out.setdefault("original_decision", stock.get("decision", "") if isinstance(stock, dict) else "")
@@ -1467,7 +1558,7 @@ def _trade_scan_cache_ttl_sec(phase: str, prefer_cache: bool = False) -> int:
 
 
 def _build_trade_scan_response(results, scan_debug, include_all: bool = False, cache_hit: bool = False, cache_age_sec=None, payload_note: str = ""):
-    results = list(results or [])
+    results = _apply_manual_sharia_overrides(list(results or []))
     scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
@@ -1977,7 +2068,7 @@ def sharia_exclusions_add(payload: dict = Body(...)):
     if not found:
         items.insert(0, {"symbol": symbol, "note": note, "reason": note, "excluded_at": now_str, "updated_at": now_str, "source": "manual"})
     save_manual_sharia_exclusions(items)
-    return {"ok": True, "count": len(items), "symbol": symbol}
+    return {"ok": True, "count": len(items), "symbol": symbol, "saved": True}
 
 
 @app.post("/sharia-exclusions/remove")
@@ -2016,7 +2107,7 @@ def sharia_approvals_add(payload: dict = Body(...)):
     if not found:
         items.insert(0, {"symbol": symbol, "note": note, "reason": note, "approved_at": now_str, "updated_at": now_str, "source": "manual"})
     save_manual_sharia_approvals(items)
-    return {"ok": True, "count": len(items), "symbol": symbol}
+    return {"ok": True, "count": len(items), "symbol": symbol, "saved": True}
 
 
 @app.post("/sharia-approvals/remove")
@@ -2250,5 +2341,6 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
 
