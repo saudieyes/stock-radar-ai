@@ -2124,6 +2124,19 @@
       }
     }
 
+    async function openAnalystSnapshotFromCard(button, symbol) {
+      const clean = String(symbol || '').toUpperCase().trim();
+      if (!clean) return;
+      const card = button && button.closest ? button.closest('.card') : null;
+      const panel = card ? card.querySelector('details.detail-panel') : null;
+      if (panel && !panel.open) panel.open = true;
+      await loadAnalystSnapshot(clean, true);
+      const el = document.getElementById(analystDomId(clean));
+      if (el && el.scrollIntoView) {
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+      }
+    }
+
 
     function aiContextDomId(symbol) {
       return `aiContextSummary_${String(symbol || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
@@ -2579,11 +2592,9 @@
           ${stock.live_plan_action ? `<div class="live-plan-warning">صلاحية الخطة: ${safeText(stock.live_plan_action)}${stock.live_plan_reason ? ' • ' + safeText(shortText(stock.live_plan_reason, 130)) : ''}</div>` : ''}
 
           <div class="card-actions">
-            <button class="soft-primary" onclick="scanSingleFromCard('${safeText(stock.symbol)}')">🔎 فحص فردي</button>
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
-            <button class="ghost" onclick="trackSignalFromCard('${safeText(stock.symbol)}')">📊 تتبع</button>
-            <button class="ghost" onclick="loadAnalystSnapshot('${safeText(stock.symbol)}', true)">👥 المحللين</button>
+            <button class="ghost" onclick="openAnalystSnapshotFromCard(this, '${safeText(stock.symbol)}')">👥 المحللين</button>
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
           </div>
