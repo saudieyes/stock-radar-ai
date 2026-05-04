@@ -1647,7 +1647,7 @@
       overflow-y: auto !important;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      padding: 12px 12px calc(96px + env(safe-area-inset-bottom)) !important;
+      padding: 12px 12px calc(78px + env(safe-area-inset-bottom)) !important;
       display: grid !important;
       grid-template-columns: repeat(2,minmax(0,1fr)) !important;
       gap: 9px !important;
@@ -1668,6 +1668,28 @@
       border-top: 1px solid rgba(65,137,198,.30);
       padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
       z-index: 5;
+    }
+
+    /* Fix42: remove first/next navigation from the details sheet and provide a clear close control */
+    details.detail-panel[open] .detail-sheet-footer{
+      flex:0 0 auto;
+      position: sticky;
+      bottom: 0;
+      background: linear-gradient(180deg, rgba(7,24,39,.72), #071827 42%);
+      border-top: 1px solid rgba(65,137,198,.30);
+      padding: 10px 12px calc(12px + env(safe-area-inset-bottom)) !important;
+      z-index: 8;
+    }
+    details.detail-panel[open] .detail-sheet-close-full{
+      width:100%;
+      min-height:44px;
+      border-radius:14px;
+      border:1px solid rgba(96,165,250,.85);
+      background:rgba(23,51,95,.98);
+      color:#dbeafe;
+      font-weight:950;
+      font-size:16px;
+      font-family:'Tajawal',sans-serif;
     }
     @media(max-width:520px){
       details.detail-panel[open] .details-grid{grid-template-columns:1fr !important;}
@@ -3177,7 +3199,7 @@
               ${compactPriceBlock(stock, displayPrice, 'sheet-live-price')}
             </div>
             <div class="details-grid">${details.join('')}</div>
-            ${cardNavDetails}
+            <div class="detail-sheet-footer"><button type="button" class="detail-sheet-close-full" onclick="closeDetailPanel(this, event)">إغلاق التفاصيل ✕</button></div>
           </details>
         </div>`;
     }
