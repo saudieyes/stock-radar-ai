@@ -2153,6 +2153,51 @@
     }
 
 
+    function portfolioAnalystDomId(symbol) {
+      return `portfolioAnalyst_${String(symbol || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    }
+
+    function renderPortfolioAnalystPlaceholder(symbol) {
+      const clean = String(symbol || '').toUpperCase();
+      const id = portfolioAnalystDomId(clean);
+      return `
+        <div id="${id}" class="analyst-snapshot-box" data-symbol="${safeText(clean)}" data-loaded="0">
+          <div class="analyst-snapshot-header">
+            <div>
+              <div class="analyst-snapshot-title">Analyst Snapshot / آراء المحللين</div>
+              <div class="analyst-snapshot-note">للمحفظة فقط: معلومة مساعدة ولا تغيّر نقاط الرادار.</div>
+            </div>
+            <button class="analyst-load-btn" type="button" onclick="loadPortfolioAnalystSnapshot('${safeText(clean)}', true)">تحديث المحللين</button>
+          </div>
+          <div class="analyst-summary">افتح القسم لتحميل آراء المحللين لهذا السهم.</div>
+        </div>`;
+    }
+
+    async function loadPortfolioAnalystSnapshot(symbol, force=false) {
+      const clean = String(symbol || '').toUpperCase().trim();
+      if (!clean) return;
+      const el = document.getElementById(portfolioAnalystDomId(clean));
+      if (!el) return;
+      if (el.dataset.loaded === '1' && !force) return;
+      el.innerHTML = `
+        <div class="analyst-snapshot-header">
+          <div>
+            <div class="analyst-snapshot-title">Analyst Snapshot / آراء المحللين</div>
+            <div class="analyst-snapshot-note">جاري تحميل أحدث البيانات...</div>
+          </div>
+        </div>
+        <div class="analyst-summary">تحميل آراء المحللين من FMP...</div>`;
+      try {
+        const res = await apiFetch(`/analyst-snapshot?symbol=${encodeURIComponent(clean)}${force ? '&force_refresh=true' : ''}`);
+        const data = await res.json();
+        el.innerHTML = renderAnalystSnapshotPayload(data);
+        el.dataset.loaded = '1';
+      } catch (e) {
+        el.innerHTML = `<div class="analyst-summary">تعذر تحميل آراء المحللين مؤقتًا. لا يؤثر ذلك على قرار المحفظة.</div>`;
+      }
+    }
+
+
     function aiContextDomId(symbol) {
       return `aiContextSummary_${String(symbol || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
     }
@@ -3382,6 +3427,7 @@
         const data = await res.json();
         const items = Array.isArray(data.items) ? data.items : [];
         const summary = data.summary || {};
+        window.__portfolioItems = items;
         document.getElementById('portfolioCount').innerHTML = `${items.length} سهم`;
         if (!items.length) {
           document.getElementById('portfolioContent').innerHTML = '<div class="empty">لا توجد أسهم في المحفظة بعد</div>';
@@ -3389,42 +3435,129 @@
         }
         const summaryHtml = `
           <div class="portfolio-summary-grid">
-            <div class="portfolio-summary-card"><div class="portfolio-summary-label">عدد المراكز</div><div class="portfolio-summary-value">${formatNumber(summary.positions || items.length)}</div></div>
-            <div class="portfolio-summary-card"><div class="portfolio-summary-label">القيمة الحالية</div><div class="portfolio-summary-value">$${formatNumber(summary.market_value || 0)}</div></div>
-            <div class="portfolio-summary-card"><div class="portfolio-summary-label">التكلفة</div><div class="portfolio-summary-value">$${formatNumber(summary.cost_value || 0)}</div></div>
-            <div class="portfolio-summary-card"><div class="portfolio-summary-label">الربح/الخسارة</div><div class="portfolio-summary-value ${portfolioColorClass(summary.unrealized_pl)}">$${formatNumber(summary.unrealized_pl || 0)} (${formatNumber(summary.unrealized_pl_pct || 0)}%)</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">عدد المراكز</div><div class="portfolio-summary-value" id="portfolioSummaryPositions">${formatNumber(summary.positions || items.length)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">القيمة الحالية</div><div class="portfolio-summary-value" id="portfolioSummaryMarketValue">$${formatNumber(summary.market_value || 0)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">التكلفة</div><div class="portfolio-summary-value" id="portfolioSummaryCostValue">$${formatNumber(summary.cost_value || 0)}</div></div>
+            <div class="portfolio-summary-card"><div class="portfolio-summary-label">الربح/الخسارة</div><div class="portfolio-summary-value ${portfolioColorClass(summary.unrealized_pl)}" id="portfolioSummaryPL">$${formatNumber(summary.unrealized_pl || 0)} (${formatNumber(summary.unrealized_pl_pct || 0)}%)</div></div>
           </div>`;
         const cards = items.map(item => {
           const plClass = portfolioColorClass(item.holding_change_pct);
           return `
-            <div class="portfolio-card">
+            <div class="portfolio-card" data-portfolio-symbol="${safeText(item.symbol)}" data-buy-price="${Number(item.buy_price || 0)}" data-quantity="${Number(item.quantity || 1)}" data-current-price="${Number(item.current_price || 0)}">
               <div class="portfolio-card-top">
                 <div>
                   <div class="portfolio-card-symbol">${safeText(item.symbol)}</div>
-                  <div class="portfolio-card-sub">${safeText(item.type_label || '—')} • ${safeText(item.price_source_label || '—')}</div>
+                  <div class="portfolio-card-sub"><span>${safeText(item.type_label || '—')}</span> • <span class="portfolio-source-line">${safeText(item.price_source_label || '—')}</span></div>
                 </div>
                 <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
               </div>
               <div class="portfolio-metrics">
                 <div class="portfolio-metric"><div class="portfolio-metric-label">سعر الشراء</div><div class="portfolio-metric-value">${formatNumber(item.buy_price)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">السعر الحالي</div><div class="portfolio-metric-value">${formatNumber(item.current_price)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">العائد الحالي</div><div class="portfolio-metric-value ${plClass}">${formatPercent(item.holding_change_pct)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">القيمة / التكلفة</div><div class="portfolio-metric-value">$${formatNumber(item.market_value)} / $${formatNumber(item.cost_value)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">السعر الحالي</div><div class="portfolio-metric-value live-portfolio-price ${portfolioColorClass(item.holding_change_pct)}">${formatNumber(item.current_price)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">العائد الحالي</div><div class="portfolio-metric-value live-portfolio-change ${plClass}">${formatPercent(item.holding_change_pct)}</div></div>
+                <div class="portfolio-metric"><div class="portfolio-metric-label">القيمة / التكلفة</div><div class="portfolio-metric-value live-portfolio-market-cost">$${formatNumber(item.market_value)} / $${formatNumber(item.cost_value)}</div></div>
                 <div class="portfolio-metric"><div class="portfolio-metric-label">الهدف</div><div class="portfolio-metric-value">${formatNumber(item.target_price)}</div></div>
                 <div class="portfolio-metric"><div class="portfolio-metric-label">الوقف</div><div class="portfolio-metric-value">${formatNumber(item.stop_loss)}</div></div>
               </div>
               <div class="portfolio-note-line"><b>رأي الأداة:</b> ${safeText(item.recommendation_note || 'راقب السعر مقارنة بالخطة والوقف والهدف.')}</div>
+              <details class="detail-panel portfolio-analyst-panel" data-portfolio-analyst-symbol="${safeText(item.symbol)}" ontoggle="if(this.open){loadPortfolioAnalystSnapshot('${safeText(item.symbol)}')}">
+                <summary>👥 آراء المحللين</summary>
+                <div style="margin-top:10px;">${renderPortfolioAnalystPlaceholder(item.symbol)}</div>
+              </details>
               <div class="mini-actions">
                 <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
                 <button class="ghost" onclick="addToWatchlist('${safeText(item.symbol)}', ${Number(item.current_price || item.buy_price || 0)})">📌 متابعة</button>
+                <button class="ghost" onclick="loadPortfolioAnalystSnapshot('${safeText(item.symbol)}', true)">👥 تحديث المحللين</button>
                 <button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button>
               </div>
             </div>`;
         }).join('');
         document.getElementById('portfolioContent').innerHTML = `${summaryHtml}<div class="portfolio-card-list">${cards}</div>`;
+        refreshPortfolioLiveQuotes();
       } catch (e) {
         document.getElementById('portfolioContent').innerHTML = '<div class="error">تعذر تحميل المحفظة</div>';
       }
+    }
+
+
+    function portfolioIsVisible() {
+      const wrap = document.getElementById('portfolioContentWrap');
+      return !!(wrap && !wrap.classList.contains('hidden-section'));
+    }
+
+    function collectPortfolioSymbols() {
+      return Array.from(document.querySelectorAll('.portfolio-card[data-portfolio-symbol]'))
+        .map(el => String(el.dataset.portfolioSymbol || '').toUpperCase().trim())
+        .filter(Boolean);
+    }
+
+    function updatePortfolioSummaryFromDom() {
+      const cards = Array.from(document.querySelectorAll('.portfolio-card[data-portfolio-symbol]'));
+      if (!cards.length) return;
+      let marketValue = 0;
+      let costValue = 0;
+      cards.forEach(card => {
+        const price = Number(card.dataset.currentPrice || 0);
+        const buy = Number(card.dataset.buyPrice || 0);
+        const qty = Number(card.dataset.quantity || 1) || 1;
+        marketValue += price * qty;
+        costValue += buy * qty;
+      });
+      const pnl = marketValue - costValue;
+      const pct = costValue ? (pnl / costValue) * 100 : 0;
+      const marketEl = document.getElementById('portfolioSummaryMarketValue');
+      const costEl = document.getElementById('portfolioSummaryCostValue');
+      const plEl = document.getElementById('portfolioSummaryPL');
+      if (marketEl) marketEl.textContent = `$${formatNumber(marketValue)}`;
+      if (costEl) costEl.textContent = `$${formatNumber(costValue)}`;
+      if (plEl) {
+        plEl.textContent = `$${formatNumber(pnl)} (${formatNumber(pct)}%)`;
+        plEl.classList.remove('green','red');
+        const c = portfolioColorClass(pnl);
+        if (c) plEl.classList.add(c);
+      }
+    }
+
+    async function refreshPortfolioLiveQuotes() {
+      if (!portfolioIsVisible()) return;
+      const symbols = collectPortfolioSymbols();
+      if (!symbols.length) return;
+      try {
+        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&_=${Date.now()}`);
+        const data = await res.json();
+        const quotes = data.quotes || {};
+        symbols.forEach(sym => {
+          const q = quotes[sym];
+          if (!q || !Number(q.price || 0)) return;
+          const card = document.querySelector(`.portfolio-card[data-portfolio-symbol="${CSS.escape(sym)}"]`);
+          if (!card) return;
+          const price = Number(q.price || 0);
+          const buy = Number(card.dataset.buyPrice || 0);
+          const qty = Number(card.dataset.quantity || 1) || 1;
+          card.dataset.currentPrice = String(price);
+          const pct = buy ? ((price - buy) / buy) * 100 : 0;
+          const marketValue = price * qty;
+          const costValue = buy * qty;
+          const cls = portfolioColorClass(pct);
+          const priceEl = card.querySelector('.live-portfolio-price');
+          const chgEl = card.querySelector('.live-portfolio-change');
+          const mvEl = card.querySelector('.live-portfolio-market-cost');
+          const srcEl = card.querySelector('.portfolio-source-line');
+          if (priceEl) {
+            priceEl.textContent = formatNumber(price);
+            priceEl.classList.remove('green','red');
+            if (cls) priceEl.classList.add(cls);
+          }
+          if (chgEl) {
+            chgEl.textContent = formatPercent(pct);
+            chgEl.classList.remove('green','red');
+            if (cls) chgEl.classList.add(cls);
+          }
+          if (mvEl) mvEl.textContent = `$${formatNumber(marketValue)} / $${formatNumber(costValue)}`;
+          if (srcEl) srcEl.textContent = q.source_label || 'FMP Live/REST';
+        });
+        updatePortfolioSummaryFromDom();
+      } catch (e) {}
     }
 
     async function moveWatchlistToPortfolio(symbol, price) {
@@ -3558,6 +3691,7 @@
     loadMarketMood(true);
     window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
     window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 30000);
+    window.__portfolioLiveTimer = window.setInterval(() => refreshPortfolioLiveQuotes(), 30000);
     window.__fullScanTimer = window.setInterval(() => periodicFullRadarScan(), 300000);
     loadAll();
   </script>
