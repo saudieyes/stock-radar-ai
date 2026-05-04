@@ -490,6 +490,38 @@
       font-weight:900;
       font-size:12px;
     }
+
+    .ai-context-box {
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      background:var(--panel-bg-soft-2);
+      border:1px solid var(--border-main);
+      border-radius:14px;
+      padding:12px;
+    }
+    .ai-context-title { font-weight:900; color:var(--text-strong); }
+    .ai-context-note { color:var(--text-muted); font-size:12px; line-height:1.7; }
+    .ai-context-summary {
+      color:var(--text-main);
+      font-size:13px;
+      line-height:1.9;
+      background:var(--panel-bg-soft);
+      border:1px solid var(--border-soft);
+      border-radius:12px;
+      padding:10px;
+    }
+    .live-plan-warning {
+      color:var(--text-main);
+      font-size:12.5px;
+      line-height:1.75;
+      background:var(--panel-bg-soft);
+      border:1px solid var(--border-soft);
+      border-radius:14px;
+      padding:9px 11px;
+      margin-bottom:10px;
+      font-weight:800;
+    }
     .small-note {
       color:var(--text-muted); font-size:12px; line-height:1.8;
       background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:12px;
@@ -2082,11 +2114,61 @@
         </div>
         <div class="analyst-summary">تحميل آراء المحللين من FMP...</div>`;
       try {
-        const data = await apiFetch(`/analyst-snapshot?symbol=${encodeURIComponent(clean)}${force ? '&force_refresh=true' : ''}`);
-        el.innerHTML = renderAnalystSnapshotPayload(data);
+        const res = await apiFetch(`/analyst-snapshot?symbol=${encodeURIComponent(clean)}${force ? '&force_refresh=true' : ''}`);
+        const payload = await res.json();
+        el.innerHTML = renderAnalystSnapshotPayload(payload);
         el.dataset.loaded = '1';
       } catch (e) {
         el.innerHTML = `<div class="analyst-summary">تعذر تحميل آراء المحللين مؤقتًا. لا يؤثر ذلك على ترتيب السهم.</div>`;
+        el.dataset.loaded = '0';
+      }
+    }
+
+
+    function aiContextDomId(symbol) {
+      return `aiContextSummary_${String(symbol || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    }
+
+    function renderAiContextPlaceholder(symbol) {
+      const clean = String(symbol || '').toUpperCase();
+      const id = aiContextDomId(clean);
+      return `
+        <div id="${id}" class="ai-context-box" data-symbol="${safeText(clean)}" data-loaded="0">
+          <div class="ai-context-title">AI / الخبر ومزاج السوق</div>
+          <div class="ai-context-note">تلخيص وترجمة سياقية فقط، ولا تدخل في نقاط الرادار.</div>
+          <div class="ai-context-summary">سيتم تحميل الملخص عند فتح التحليل الشامل.</div>
+        </div>`;
+    }
+
+    function renderAiContextSummary(payload) {
+      const clean = String(payload?.symbol || '').toUpperCase();
+      const el = document.getElementById(aiContextDomId(clean));
+      if (!el) return;
+      const provider = payload?.provider === 'claude' ? 'AI' : 'تلخيص آلي مبسط';
+      el.dataset.loaded = '1';
+      el.innerHTML = `
+        <div class="ai-context-title">AI / الخبر ومزاج السوق</div>
+        <div class="ai-context-note">${safeText(provider)} • معلومة سياقية فقط ولا تدخل في النقاط</div>
+        <div class="ai-context-summary">${safeText(payload?.summary_ar || 'لا يوجد ملخص متاح حاليًا.')}</div>`;
+    }
+
+    async function loadAiContextSummary(symbol, force=false) {
+      const clean = String(symbol || '').toUpperCase().trim();
+      if (!clean) return;
+      const el = document.getElementById(aiContextDomId(clean));
+      if (!el) return;
+      if (el.dataset.loaded === '1' && !force) return;
+      el.dataset.loaded = force ? 'refreshing' : 'loading';
+      el.innerHTML = `
+        <div class="ai-context-title">AI / الخبر ومزاج السوق</div>
+        <div class="ai-context-note">جاري تحميل الملخص...</div>
+        <div class="ai-context-summary">تحميل الترجمة/التحليل السياقي...</div>`;
+      try {
+        const res = await apiFetch(`/ai-context-summary?symbol=${encodeURIComponent(clean)}${force ? '&force_refresh=true' : ''}`);
+        const payload = await res.json();
+        renderAiContextSummary(payload);
+      } catch(e) {
+        el.innerHTML = `<div class="ai-context-summary">تعذر تحميل الملخص السياقي مؤقتًا.</div>`;
         el.dataset.loaded = '0';
       }
     }
@@ -2415,7 +2497,9 @@
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
       details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', renderHistoricalContextBreakdown(stock), true, 'درجة التاريخ مع المؤشر والقطاع'));
       details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
+      details.push(detailBox('صلاحية الخطة بالسعر الحي', `${safeText(stock.live_plan_action || '—')}<br>${safeText(stock.live_plan_reason || '')}`, true));
       details.push(detailBox('آراء المحللين', renderAnalystPlaceholder(stock.symbol), true, 'آراء المحللين'));
+      details.push(detailBox('AI / الخبر ومزاج السوق', renderAiContextPlaceholder(stock.symbol), true, 'AI / الخبر ومزاج السوق'));
       details.push(detailBox('الأخبار', renderNewsDetails(stock), true));
       details.push(detailBox('الحالة الشرعية', safeText(stock.sharia_label || 'غير متوفر')));
       if (grayLabel) details.push(detailBox('التصنيف الفني قبل الشرعية', safeText(grayLabel), false));
@@ -2492,6 +2576,7 @@
           </div>` : ''}
 
           <div class="card-why-line"><b>لماذا ظهر؟</b> ${safeText(shortText(stock.special_bucket_reason || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'تجتمع عدة مؤشرات فنية وسعرية داعمة، وافتح تحليل شامل للتفاصيل.', 190))}</div>
+          ${stock.live_plan_action ? `<div class="live-plan-warning">صلاحية الخطة: ${safeText(stock.live_plan_action)}${stock.live_plan_reason ? ' • ' + safeText(shortText(stock.live_plan_reason, 130)) : ''}</div>` : ''}
 
           <div class="card-actions">
             <button class="soft-primary" onclick="scanSingleFromCard('${safeText(stock.symbol)}')">🔎 فحص فردي</button>
@@ -2505,7 +2590,7 @@
 
           ${cardNavBottom}
 
-          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}')}">
+          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}'); loadAiContextSummary('${safeText(stock.symbol)}')}">
             <summary>تحليل شامل</summary>
             <div class="details-grid">${details.join('')}</div>
             ${cardNavDetails}
@@ -2891,6 +2976,21 @@
         document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
       } finally {
         if (btn) { btn.textContent = oldText || '🔄 تحديث النتائج'; btn.classList.remove('refreshing'); btn.disabled = false; }
+      }
+    }
+
+
+    async function periodicFullRadarScan() {
+      // Full fresh scan about every 5 minutes while visible.
+      // Server worker also keeps state fresh if the phone browser is backgrounded.
+      if (document.hidden) return;
+      if (window.__periodicFullScanBusy) return;
+      if (currentlyOpenDetailKeys().length) return;
+      window.__periodicFullScanBusy = true;
+      try {
+        await loadScan(true);
+      } finally {
+        window.__periodicFullScanBusy = false;
       }
     }
 
@@ -3300,7 +3400,8 @@
     refreshRiskSettingsUI();
     loadMarketMood(true);
     window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
-    window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 75000);
+    window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 30000);
+    window.__fullScanTimer = window.setInterval(() => periodicFullRadarScan(), 300000);
     loadAll();
   </script>
 </body>
