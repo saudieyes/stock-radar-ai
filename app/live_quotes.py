@@ -102,127 +102,6 @@ def _ts_to_label(raw_ts=None) -> str:
         return datetime.now(NY_TZ).strftime("%H:%M:%S")
 
 
-# Fix37: extended-hours percentage reliability.
-# Some FMP extended trade rows are valid, but the regular batch quote may supply a
-# wrong/stale previousClose for small-cap/pre-market names.  Example observed in
-# production: CXDO extended price was correct-ish, but previousClose came as 6.54
-# while the trading platform used ~7.54, making the displayed % change misleading.
-# We therefore correct suspicious extended-hours baselines from daily historical EOD
-# before exposing change_pct to the UI or live radar ranking layer.
-_PREV_CLOSE_EOD_CACHE: dict[str, tuple[str, float]] = {}
-SUSPICIOUS_EXTENDED_CHANGE_PCT = float(os.getenv("SUSPICIOUS_EXTENDED_CHANGE_PCT", "15") or 15)
-PREV_CLOSE_DISAGREE_PCT = float(os.getenv("PREV_CLOSE_DISAGREE_PCT", "1.0") or 1.0)
-
-
-def _change_pct_from(price: float, prev: float) -> float:
-    try:
-        price = float(price or 0)
-        prev = float(prev or 0)
-        if price <= 0 or prev <= 0:
-            return 0.0
-        return ((price - prev) / prev) * 100
-    except Exception:
-        return 0.0
-
-
-def _fetch_fmp_previous_close_eod(symbol: str) -> float:
-    """Return the latest completed daily close for a symbol.
-
-    This is intentionally used only for suspicious/missing extended-hours baselines,
-    not on every symbol every 30 seconds. Results are cached per NY date.
-    """
-    symbol = str(symbol or "").upper().strip()
-    if not FMP_API_KEY or not symbol:
-        return 0.0
-    today_key = datetime.now(NY_TZ).date().isoformat()
-    cached = _PREV_CLOSE_EOD_CACHE.get(symbol)
-    if cached and cached[0] == today_key and cached[1] > 0:
-        return float(cached[1])
-
-    urls = [
-        f"{FMP_BASE_URL}/api/v3/historical-price-full/{symbol}?timeseries=8&apikey={FMP_API_KEY}",
-        f"{FMP_BASE_URL}/stable/historical-price-eod/full?symbol={symbol}&limit=8&apikey={FMP_API_KEY}",
-    ]
-    for url in urls:
-        try:
-            r = HTTP_SESSION.get(url, timeout=LIVE_QUOTES_TIMEOUT_SEC)
-            if r.status_code >= 400:
-                continue
-            data = r.json()
-            rows = []
-            if isinstance(data, dict):
-                for key in ("historical", "data", "results"):
-                    val = data.get(key)
-                    if isinstance(val, list):
-                        rows = val
-                        break
-                if not rows and (data.get("date") or data.get("close")):
-                    rows = [data]
-            elif isinstance(data, list):
-                rows = data
-            if not rows:
-                continue
-
-            # Prefer the latest completed trading day strictly before today's NY date.
-            fallback_close = 0.0
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                close = _first_number(row, ["close", "adjClose", "adj_close", "price"])
-                if close <= 0:
-                    continue
-                if fallback_close <= 0:
-                    fallback_close = close
-                row_date = str(row.get("date", "") or "")[:10]
-                if row_date and row_date < today_key:
-                    _PREV_CLOSE_EOD_CACHE[symbol] = (today_key, float(close))
-                    return float(close)
-            if fallback_close > 0:
-                _PREV_CLOSE_EOD_CACHE[symbol] = (today_key, float(fallback_close))
-                return float(fallback_close)
-        except Exception:
-            continue
-    return 0.0
-
-
-def _extended_prev_and_change(symbol: str, row: dict, regular_quote: dict | None, price: float) -> tuple[float, float, bool, str]:
-    """Pick a reliable previous close and change% for extended-hours quotes."""
-    symbol = str(symbol or "").upper().strip()
-    row_prev = _first_number(row or {}, [
-        "previousClose", "previous_close", "prevClose", "regularMarketPreviousClose", "closePrevious"
-    ])
-    reg = regular_quote or {}
-    reg_prev = _first_number(reg, ["previous_close", "previousClose", "prevClose"])
-
-    prev = row_prev if row_prev > 0 else reg_prev
-    source = "extended_row_previous_close" if row_prev > 0 else "regular_quote_previous_close"
-
-    if prev <= 0:
-        hist_prev = _fetch_fmp_previous_close_eod(symbol)
-        if hist_prev > 0:
-            prev = hist_prev
-            source = "historical_eod_previous_close"
-
-    implied_change = _change_pct_from(price, prev) if prev > 0 else 0.0
-
-    # If the baseline implies a very large extended-hours move, verify it from EOD.
-    # Real +20% movers still remain +20% if EOD confirms the same close.
-    if price > 0 and prev > 0 and abs(implied_change) >= SUSPICIOUS_EXTENDED_CHANGE_PCT:
-        hist_prev = _fetch_fmp_previous_close_eod(symbol)
-        if hist_prev > 0:
-            hist_change = _change_pct_from(price, hist_prev)
-            # Use historical EOD if it disagrees materially with the current baseline,
-            # or if it makes the move materially more plausible.
-            disagree = abs((hist_prev - prev) / hist_prev * 100) if hist_prev else 0.0
-            if disagree >= PREV_CLOSE_DISAGREE_PCT or abs(hist_change) < abs(implied_change):
-                prev = hist_prev
-                implied_change = hist_change
-                source = "historical_eod_previous_close"
-
-    reliable = bool(prev > 0)
-    return safe_round(prev, 4), safe_round(implied_change, 2), reliable, source
-
-
 def _normalize_fmp_regular_row(row: dict) -> dict | None:
     try:
         symbol = _first_text(row, ["symbol", "ticker"]).upper()
@@ -240,7 +119,13 @@ def _normalize_fmp_regular_row(row: dict) -> dict | None:
         return {
             "symbol": symbol,
             "price": safe_round(price, 4),
+            # previous_close is the normal day-change baseline during the regular session.
             "previous_close": safe_round(prev, 4),
+            # In premarket/afterhours FMP regular quote price usually represents the last
+            # regular-session close. Use it as the extended-hours baseline instead of
+            # previousClose, which can be yesterday's/older baseline and inflates percent change.
+            "regular_session_close": safe_round(price, 4),
+            "regular_previous_close": safe_round(prev, 4),
             "change_pct": safe_round(change_pct, 2),
             "volume": safe_round(volume),
             "source": "fmp_rest",
@@ -270,7 +155,17 @@ def _normalize_fmp_extended_trade_row(row: dict, regular_quote: dict | None = No
         if price <= 0:
             return None
 
-        prev, change_pct, change_reliable, prev_source = _extended_prev_and_change(symbol, row, regular_quote, price)
+        reg = regular_quote or {}
+        regular_prev = _first_number(reg, ["previous_close", "previousClose", "prevClose"])
+        # Extended-hours percent should be measured from the last regular-session close
+        # (for example premarket +2.4% from the last 16:00 close), not from the older
+        # previousClose baseline that can inflate percent change.
+        prev = _first_number(reg, ["regular_session_close", "regular_close", "close", "price"])
+        if prev <= 0:
+            prev = _first_number(row, ["regularSessionClose", "regular_close", "close", "previousClose", "previous_close", "prevClose"])
+
+        change_pct = ((price - prev) / prev) * 100 if prev > 0 else 0.0
+        change_pct_reliable = prev > 0
         volume = _first_number(row, ["volume", "size", "lastSize", "tradeSize", "v", "dayVolume"])
         raw_ts = row.get("timestamp") or row.get("time") or row.get("t") or row.get("lastUpdated")
         now = time.time()
@@ -278,8 +173,13 @@ def _normalize_fmp_extended_trade_row(row: dict, regular_quote: dict | None = No
         return {
             "symbol": symbol,
             "price": safe_round(price, 4),
+            # During extended-hours this is the last regular-session close baseline.
             "previous_close": safe_round(prev, 4),
+            "regular_session_close": safe_round(prev, 4),
+            "regular_previous_close": safe_round(regular_prev, 4),
+            "previous_close_source": "regular_session_close",
             "change_pct": safe_round(change_pct, 2),
+            "change_pct_reliable": bool(change_pct_reliable),
             "volume": safe_round(volume),
             "source": "fmp_extended_trade",
             "source_label": "FMP Extended/Trade",
@@ -288,8 +188,6 @@ def _normalize_fmp_extended_trade_row(row: dict, regular_quote: dict | None = No
             "market_phase": phase,
             "extended_hours": True,
             "extended_source": "trade",
-            "change_pct_reliable": bool(change_reliable),
-            "previous_close_source": prev_source,
         }
     except Exception:
         return None
@@ -316,7 +214,17 @@ def _normalize_fmp_extended_quote_row(row: dict, regular_quote: dict | None = No
         if price <= 0:
             return None
 
-        prev, change_pct, change_reliable, prev_source = _extended_prev_and_change(symbol, row, regular_quote, price)
+        reg = regular_quote or {}
+        regular_prev = _first_number(reg, ["previous_close", "previousClose", "prevClose"])
+        # Extended-hours percent should be measured from the last regular-session close
+        # (for example premarket +2.4% from the last 16:00 close), not from the older
+        # previousClose baseline that can inflate percent change.
+        prev = _first_number(reg, ["regular_session_close", "regular_close", "close", "price"])
+        if prev <= 0:
+            prev = _first_number(row, ["regularSessionClose", "regular_close", "close", "previousClose", "previous_close", "prevClose"])
+
+        change_pct = ((price - prev) / prev) * 100 if prev > 0 else 0.0
+        change_pct_reliable = prev > 0
         volume = _first_number(row, ["volume", "bidSize", "askSize", "size", "v"])
         raw_ts = row.get("timestamp") or row.get("time") or row.get("t") or row.get("lastUpdated")
         now = time.time()
@@ -324,8 +232,13 @@ def _normalize_fmp_extended_quote_row(row: dict, regular_quote: dict | None = No
         return {
             "symbol": symbol,
             "price": safe_round(price, 4),
+            # During extended-hours this is the last regular-session close baseline.
             "previous_close": safe_round(prev, 4),
+            "regular_session_close": safe_round(prev, 4),
+            "regular_previous_close": safe_round(regular_prev, 4),
+            "previous_close_source": "regular_session_close",
             "change_pct": safe_round(change_pct, 2),
+            "change_pct_reliable": bool(change_pct_reliable),
             "volume": safe_round(volume),
             "source": "fmp_extended_quote",
             "source_label": "FMP Extended/Quote",
@@ -334,8 +247,6 @@ def _normalize_fmp_extended_quote_row(row: dict, regular_quote: dict | None = No
             "market_phase": phase,
             "extended_hours": True,
             "extended_source": "quote",
-            "change_pct_reliable": bool(change_reliable),
-            "previous_close_source": prev_source,
             "bid": safe_round(bid, 4),
             "ask": safe_round(ask, 4),
         }
