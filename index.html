@@ -733,6 +733,21 @@
     .price-plan-item { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px; min-height:76px; }
     .price-plan-label { color:var(--text-muted); font-size:12px; font-weight:800; margin-bottom:6px; }
     .price-plan-value { color:var(--text-strong); font-size:17px; font-weight:900; line-height:1.4; }
+    .price-plan-value.price-up { color:#16a34a; }
+    .price-plan-value.price-down { color:#dc2626; }
+    .price-plan-value.price-flat { color:var(--text-strong); }
+    .live-change-line {
+      margin-top:6px;
+      font-size:13px;
+      font-weight:900;
+      direction:ltr;
+      text-align:right;
+      line-height:1.45;
+    }
+    .live-change-line.price-up { color:#16a34a; }
+    .live-change-line.price-down { color:#dc2626; }
+    .live-change-line.price-flat { color:var(--text-muted); }
+
     .card-why-line { background:var(--panel-bg-soft); border:1px solid var(--border-soft); border-radius:14px; padding:10px 12px; font-size:13px; line-height:1.8; color:var(--text-main); margin-bottom:12px; }
     .card-why-line b { color:var(--text-strong); }
     .compact-source-line { color:var(--text-muted); font-size:11.5px; line-height:1.6; margin-top:4px; }
@@ -2217,6 +2232,22 @@
       return `<div class="price-plan-item"><div class="price-plan-label">${safeText(label)}</div><div class="price-plan-value">${safeText(value)}</div>${sub ? `<div class="compact-source-line">${safeText(sub)}</div>` : ''}</div>`;
     }
 
+    function currentPricePlanItem(stock, displayPrice) {
+      const rawChange = stock?.display_change_pct ?? stock?.change_vs_prev_close_pct ?? stock?.change_pct ?? stock?.change_from_open_pct;
+      const change = Number(rawChange);
+      const hasChange = Number.isFinite(change);
+      const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
+      const sign = hasChange && change > 0 ? '+' : '';
+      const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
+      const source = stock?.price_source_label || stock?.last_price_update_label || '';
+      return `<div class="price-plan-item live-price-item" data-symbol="${safeText(stock?.symbol || '')}">
+        <div class="price-plan-label">السعر الحالي</div>
+        <div class="price-plan-value ${cls}">${safeText(formatNumber(displayPrice))}</div>
+        <div class="live-change-line ${cls}">${safeText(changeText)}</div>
+        ${source ? `<div class="compact-source-line">${safeText(source)}</div>` : ''}
+      </div>`;
+    }
+
     const SECTION_DEFAULT_LIMIT = 5;
 
     function renderSectionItems(contentId, showAll=false) {
@@ -2554,7 +2585,7 @@
       const rankNumber = Number(index || 0) + 1;
       const rankSubtitle = sectionKey === 'single-stock' ? 'فحص فردي' : `الترتيب #${rankNumber} داخل هذه المجموعة`;
       return `
-        <div class="card" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}">
+        <div class="card" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}" data-symbol="${safeText(stock.symbol)}">
           ${cardNavTop}
           <div class="card-top">
             <div class="card-heading-line">
@@ -2575,7 +2606,7 @@
           </div>
 
           <div class="price-plan-grid">
-            ${pricePlanItem('السعر الحالي', formatNumber(displayPrice), stock.price_source_label || '')}
+            ${currentPricePlanItem(stock, displayPrice)}
             ${pricePlanItem(safeText(stock.display_entry_label || 'الدخول'), formatNumber(stock.display_entry_price))}
             ${pricePlanItem(safeText(stock.display_target_label || 'الهدف'), formatNumber(stock.display_target_price))}
             ${pricePlanItem(safeText(stock.display_stop_label || 'الوقف'), formatNumber(stock.display_stop_price))}
@@ -2607,6 +2638,12 @@
             ${cardNavDetails}
           </details>
         </div>`;
+    }
+
+
+    if (!window.CSS) window.CSS = {};
+    if (!CSS.escape) {
+      CSS.escape = function(value) { return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '\\$&'); };
     }
 
     window.__sectionItems = window.__sectionItems || {};
@@ -2915,12 +2952,37 @@
       });
     }
 
+    function currentVisibleCardAnchor() {
+      const cards = Array.from(document.querySelectorAll('.card[data-symbol]'));
+      if (!cards.length) return null;
+      let best = null;
+      let bestDistance = Infinity;
+      const preferredTop = Math.max(70, window.innerHeight * 0.18);
+      cards.forEach(card => {
+        const rect = card.getBoundingClientRect();
+        if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+        const dist = Math.abs(rect.top - preferredTop);
+        if (dist < bestDistance) {
+          bestDistance = dist;
+          best = {
+            symbol: card.dataset.symbol || '',
+            sectionKey: card.dataset.sectionKey || '',
+            cardIndex: card.dataset.cardIndex || '',
+            top: rect.top
+          };
+        }
+      });
+      return best;
+    }
+
     function preserveScanUiState() {
       return {
         sections: currentlyOpenSectionKeys(),
         details: currentlyOpenDetailKeys(),
         showAll: ['strong-section-content','cautious-section-content','premarket-section-content','gray-strong-section-content','watch-section-content']
-          .filter(id => { const el = document.getElementById(id); return el && el.dataset.showAll === '1'; })
+          .filter(id => { const el = document.getElementById(id); return el && el.dataset.showAll === '1'; }),
+        scrollY: window.scrollY || document.documentElement.scrollTop || 0,
+        activeCard: currentVisibleCardAnchor()
       };
     }
 
@@ -2928,6 +2990,24 @@
       (state.sections || []).forEach(key => ensureSectionOpen(key));
       (state.showAll || []).forEach(key => renderSectionItems(key, true));
       restoreOpenDetails(state.details || []);
+
+      const restoreScroll = () => {
+        const active = state.activeCard || null;
+        if (active && active.symbol) {
+          const selector = `.card[data-symbol="${CSS.escape(active.symbol)}"]${active.sectionKey ? `[data-section-key="${CSS.escape(active.sectionKey)}"]` : ''}`;
+          const card = document.querySelector(selector);
+          if (card) {
+            const rect = card.getBoundingClientRect();
+            const target = Math.max(0, (window.scrollY || document.documentElement.scrollTop || 0) + rect.top - Number(active.top || 0));
+            window.scrollTo({ top: target, behavior: 'auto' });
+            return;
+          }
+        }
+        if (Number.isFinite(Number(state.scrollY))) {
+          window.scrollTo({ top: Math.max(0, Number(state.scrollY || 0)), behavior: 'auto' });
+        }
+      };
+      requestAnimationFrame(() => requestAnimationFrame(restoreScroll));
     }
 
     function applyLiveQuotesToScan(quotes) {
