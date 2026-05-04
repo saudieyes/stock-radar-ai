@@ -1743,6 +1743,88 @@
     :root[data-theme="light"] .sheet-summary-symbol{color:#081224 !important;}
     :root[data-theme="light"] .sheet-summary-note{color:#425873 !important;}
 
+
+
+    /* ===== Fix43: synchronize live prices + cleaner light mode ===== */
+    :root[data-theme="light"] body{
+      background:#eaf3ff !important;
+      color:#0b1728 !important;
+    }
+    :root[data-theme="light"] .container{
+      background:#eaf3ff !important;
+    }
+    :root[data-theme="light"] .topbar,
+    :root[data-theme="light"] .market-mood-card,
+    :root[data-theme="light"] .section-header{
+      background:linear-gradient(180deg,#ffffff,#edf6ff) !important;
+      border-color:#bcd2eb !important;
+      color:#0b1728 !important;
+    }
+    :root[data-theme="light"] .title,
+    :root[data-theme="light"] .section-title,
+    :root[data-theme="light"] .compact-symbol,
+    :root[data-theme="light"] .portfolio-card-symbol{
+      color:#071427 !important;
+      text-shadow:none !important;
+    }
+    :root[data-theme="light"] .card.compact-radar-card,
+    :root[data-theme="light"] .compact-radar-main,
+    :root[data-theme="light"] .portfolio-card{
+      background:linear-gradient(180deg,#ffffff,#f4f9ff) !important;
+      border-color:#b9d2ee !important;
+      box-shadow:0 8px 22px rgba(25,63,110,.10) !important;
+    }
+    :root[data-theme="light"] .compact-company,
+    :root[data-theme="light"] .compact-why,
+    :root[data-theme="light"] .compact-source-line,
+    :root[data-theme="light"] .mood-note-line,
+    :root[data-theme="light"] .section-rank-note{
+      color:#49617a !important;
+    }
+    :root[data-theme="light"] .compact-plan-chip,
+    :root[data-theme="light"] .detail-box,
+    :root[data-theme="light"] .price-plan-item,
+    :root[data-theme="light"] .portfolio-metric{
+      background:#f7fbff !important;
+      border-color:#bfd4ec !important;
+      color:#0b1728 !important;
+    }
+    :root[data-theme="light"] .detail-label,
+    :root[data-theme="light"] .price-plan-label,
+    :root[data-theme="light"] .compact-label{
+      color:#64768d !important;
+    }
+    :root[data-theme="light"] .detail-value,
+    :root[data-theme="light"] .price-plan-value,
+    :root[data-theme="light"] .compact-value{
+      color:#0b1728 !important;
+    }
+    :root[data-theme="light"] .price-plan-value.price-up,
+    :root[data-theme="light"] .live-change-line.price-up,
+    :root[data-theme="light"] .price-up{ color:#16a34a !important; }
+    :root[data-theme="light"] .price-plan-value.price-down,
+    :root[data-theme="light"] .live-change-line.price-down,
+    :root[data-theme="light"] .price-down{ color:#dc2626 !important; }
+    :root[data-theme="light"] details.detail-panel[open]{
+      background:linear-gradient(180deg,#ffffff,#eef6ff) !important;
+      border-color:#8fbce8 !important;
+    }
+    :root[data-theme="light"] details.detail-panel[open] > summary,
+    :root[data-theme="light"] details.detail-panel[open] .sheet-live-header,
+    :root[data-theme="light"] details.detail-panel[open] .detail-sheet-footer{
+      background:#eef6ff !important;
+      color:#0b1728 !important;
+      border-color:#b9d2ee !important;
+    }
+    :root[data-theme="light"] .sheet-summary-symbol,
+    :root[data-theme="light"] .sheet-live-title{
+      color:#071427 !important;
+    }
+    :root[data-theme="light"] .sheet-summary-note,
+    :root[data-theme="light"] .sheet-live-sub{
+      color:#49617a !important;
+    }
+
 </style>
 </head>
 <body>
@@ -2332,7 +2414,7 @@
 
     function detailBox(label, value, full=false, infoKey='') {
       if (value === null || value === undefined || value === "") return '';
-      return `<div class="detail-box ${full ? 'full' : ''}">
+      return `<div class="detail-box ${full ? 'full' : ''}" data-detail-label="${safeText(label)}">
         ${renderLabelWithInfo(label, infoKey || label, 'detail-label')}
         <div class="detail-value">${value}</div>
       </div>`;
@@ -3520,7 +3602,18 @@
           changeEl.classList.remove('price-up','price-down','price-flat');
           changeEl.classList.add(cls);
         }
-        if (sourceEl) sourceEl.textContent = item.price_source_label || item.last_price_update_label || sourceEl.textContent || '';
+        const sourceText = [item.price_source_label || item.price_source || '', item.last_price_update_label || item.updated_label || ''].filter(Boolean).join(' • ');
+        if (sourceEl) sourceEl.textContent = sourceText || sourceEl.textContent || '';
+
+        // مزامنة حقول التفاصيل المفتوحة أو الموجودة داخل البطاقة حتى لا ترى سعرًا في البطاقة وسعرًا مختلفًا داخل التحليل.
+        const safeSymbolSelector = CSS && CSS.escape ? CSS.escape(s) : s;
+        document.querySelectorAll(`.card[data-symbol="${safeSymbolSelector}"]`).forEach(card => {
+          card.querySelectorAll('[data-detail-label="سعر السهم"] .detail-value').forEach(el => { el.textContent = formatNumber(displayPrice); });
+          card.querySelectorAll('[data-detail-label="مصدر السعر"] .detail-value').forEach(el => { el.textContent = item.price_source_label || item.price_source || '—'; });
+          card.querySelectorAll('[data-detail-label="آخر تحديث للسعر"] .detail-value').forEach(el => { el.textContent = item.last_price_update_label || item.updated_label || item.updated_at || '—'; });
+          card.querySelectorAll('[data-detail-label="حالة السوق"] .detail-value').forEach(el => { el.textContent = item.market_phase_label || (window.__scanData && window.__scanData.market_phase_label) || '—'; });
+          card.querySelectorAll('[data-detail-label="حداثة السعر"] .detail-value').forEach(el => { el.textContent = `${item.price_freshness_icon || ''} ${item.price_freshness_label || ''}`.trim() || '—'; });
+        });
       });
     }
 
@@ -3538,6 +3631,10 @@
         const changed = data.ok && applyRadarLivePayload(data);
 
         if (changed) {
+          // بعد لقطة الرادار، نجلب السعر المباشر من /live-quotes أيضًا حتى لا تبقى البطاقات على سعر لقطة قديمة.
+          // هذا لا يغير التصنيف أو المنطق؛ فقط يزامن السعر/النسبة/المصدر في الواجهة.
+          await refreshLiveQuotesForScan(true);
+
           const reading = silent && (userIsReadingRadarCard() || currentlyOpenDetailKeys().length);
           if (reading) {
             // أثناء قراءة بطاقة أو فتح "تحليل شامل": لا نعيد بناء الصفحة ولا نغيّر مكانك.
