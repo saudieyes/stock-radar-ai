@@ -1298,533 +1298,6 @@
       .card-nav-btn { white-space: normal; }
     }
 
-
-
-    /* ===== Fix39: compact radar UI without changing backend logic ===== */
-    :root {
-      --ui-blue:#26a8ff;
-      --ui-green:#00d68f;
-      --ui-red:#ff4d6d;
-      --ui-amber:#f5a623;
-      --ui-card:#071827;
-      --ui-card-2:#0b1f35;
-      --ui-border:#1c4163;
-    }
-    #riskPanelSection,
-    .quick-nav a[href="#riskPanelSection"] { display:none !important; }
-    .container { max-width: 980px; padding: 0 10px calc(112px + env(safe-area-inset-bottom)); }
-    .topbar {
-      border-radius: 0 0 0 0;
-      margin: 0 -10px 0;
-      padding: 12px 14px;
-      background: linear-gradient(180deg, rgba(6,17,32,.98), rgba(8,23,42,.96));
-      border-left:0; border-right:0; border-top:0;
-      box-shadow: 0 8px 24px rgba(0,0,0,.18);
-    }
-    .title { font-size: 29px; line-height:1; color: var(--text-strong); letter-spacing:-.5px; }
-    .topbar .actions { align-items:center; gap:8px; }
-    .topbar .ghost, .topbar .primary {
-      min-height:44px;
-      border-radius:14px;
-      border-color:#1d5f8f;
-      background:#0b2238;
-      color:#d7efff;
-      box-shadow:none;
-      padding:8px 11px;
-    }
-    .topbar .primary {
-      min-width:118px;
-      background:linear-gradient(145deg,#075f9f,#0a84d8);
-      color:#dff4ff;
-      box-shadow:0 0 0 1px rgba(38,168,255,.45) inset, 0 0 20px rgba(38,168,255,.18);
-    }
-    .hero {
-      display:none !important;
-    }
-    .quick-nav { display:none !important; }
-    #statusbar { display:none; }
-
-    /* Market mood: compact strip + gauge */
-    .market-mood-card {
-      margin: 0 -10px 8px;
-      padding:0;
-      border-radius:0;
-      border-left:0; border-right:0;
-      background:#071827;
-      overflow:hidden;
-      box-shadow:none;
-    }
-    .market-mood-top { display:none !important; }
-    .market-mood-grid { display:block; padding:0; }
-    .mood-dashboard-strip {
-      display:flex;
-      align-items:center;
-      gap:0;
-      overflow-x:auto;
-      scrollbar-width:none;
-      border-bottom:1px solid rgba(38,168,255,.15);
-      background:linear-gradient(90deg, rgba(9,30,52,.98), rgba(6,20,36,.98));
-    }
-    .mood-dashboard-strip::-webkit-scrollbar{display:none;}
-    .mood-tile {
-      min-width:max-content;
-      padding:9px 13px;
-      border-left:1px solid rgba(60,120,170,.24);
-      display:flex;
-      align-items:center;
-      gap:7px;
-      color:#9bc3df;
-      font-weight:800;
-      white-space:nowrap;
-    }
-    .mood-tile strong{ color:#e9f7ff; font-size:13px; }
-    .mood-tile .pos{ color:var(--ui-green); }
-    .mood-tile .neg{ color:var(--ui-red); }
-    .mood-tile .neu{ color:#aeb9c8; }
-    .mood-gauge {
-      width:46px;height:26px;border-radius:46px 46px 0 0;
-      background:conic-gradient(from 270deg, var(--ui-red) 0deg 58deg, var(--ui-amber) 58deg 118deg, var(--ui-green) 118deg 180deg, transparent 180deg);
-      position:relative; overflow:hidden; flex:0 0 auto;
-    }
-    .mood-gauge::after{
-      content:''; position:absolute; right:8px; left:8px; bottom:0; height:18px;
-      background:#071827; border-radius:40px 40px 0 0;
-    }
-    .mood-needle{
-      position:absolute; bottom:1px; left:50%; width:2px; height:22px;
-      background:#fff; border-radius:2px; transform-origin:bottom center; z-index:2;
-    }
-    .mood-note-line {
-      padding:8px 12px;
-      color:#9bb5cc;
-      font-size:12px;
-      line-height:1.6;
-      background:rgba(9,30,52,.8);
-    }
-
-    /* Section headers compact */
-    #content { margin-top: 8px; }
-    .section { margin:0 0 9px; }
-    .section-header {
-      border-radius:0;
-      box-shadow:none;
-      background:#08223a;
-      border:1px solid rgba(38,168,255,.12);
-      border-right:0; border-left:0;
-      padding:10px 12px;
-    }
-    .section-title-row { gap:8px; }
-    .section-title { font-size:21px; color:#d6ecff; }
-    .section-count-pill {
-      display:inline-flex; align-items:center; justify-content:center;
-      min-width:58px; height:34px; padding:0 13px; border-radius:16px;
-      background:rgba(0,214,143,.15); color:var(--ui-green); font-size:19px; font-weight:900;
-    }
-    .section-tone-cautious .section-count-pill { background:rgba(245,166,35,.15); color:var(--ui-amber); }
-    .section-tone-watch .section-count-pill { background:rgba(38,168,255,.12); color:var(--ui-blue); }
-    .section-rank-note { color:#7f9eb9; font-size:13px; font-weight:800; }
-    .section-preview { display:none; }
-    .section-tools .ghost { padding:7px 12px; border-radius:12px; }
-    .cards { gap:7px; }
-
-    /* Compact stock row */
-    .card.compact-radar-card {
-      border-radius:15px;
-      padding:0;
-      overflow:hidden;
-      background:linear-gradient(180deg,rgba(9,26,47,.98),rgba(5,16,30,.98));
-      border:1px solid rgba(74,144,207,.35);
-      box-shadow:0 8px 18px rgba(0,0,0,.16);
-    }
-    .compact-radar-main {
-      display:grid;
-      grid-template-columns: auto minmax(0,1fr) auto auto;
-      gap:10px;
-      align-items:center;
-      padding:10px 12px;
-      cursor:pointer;
-      min-height:82px;
-      position:relative;
-    }
-    .compact-radar-main::before{
-      content:''; position:absolute; top:0; bottom:0; right:0; width:5px;
-      background:var(--ui-green); box-shadow:0 0 16px rgba(0,214,143,.45);
-    }
-    .compact-radar-card.tone-cautious .compact-radar-main::before{background:var(--ui-amber);box-shadow:0 0 16px rgba(245,166,35,.4);}
-    .compact-radar-card.tone-watch .compact-radar-main::before{background:var(--ui-blue);box-shadow:0 0 16px rgba(38,168,255,.35);}
-    .compact-rank {
-      width:42px;height:42px;border-radius:50%;
-      display:flex;align-items:center;justify-content:center;
-      border:2px solid var(--ui-green); color:var(--ui-green);
-      font-size:22px;font-weight:900;background:rgba(0,214,143,.10);
-    }
-    .tone-cautious .compact-rank{border-color:var(--ui-amber);color:var(--ui-amber);background:rgba(245,166,35,.10);}
-    .tone-watch .compact-rank{border-color:var(--ui-blue);color:var(--ui-blue);background:rgba(38,168,255,.10);}
-    .compact-stock-info{min-width:0;}
-    .compact-symbol-line{display:flex;align-items:center;gap:8px;min-width:0;}
-    .compact-symbol{font-size:28px;font-weight:950;color:#f6fbff;letter-spacing:.2px;line-height:1;direction:ltr;text-align:right;}
-    .compact-company{font-size:12px;color:#7f9db8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px;margin-top:4px;direction:ltr;text-align:right;}
-    .compact-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;}
-    .compact-tag{font-size:11px;font-weight:900;border-radius:8px;padding:4px 8px;background:#082d42;color:#3ad3ff;line-height:1;white-space:nowrap;}
-    .compact-tag.good{background:rgba(0,214,143,.13);color:var(--ui-green);}
-    .compact-tag.warn{background:rgba(245,166,35,.15);color:var(--ui-amber);}
-    .compact-price{text-align:left;direction:ltr;min-width:80px;}
-    .compact-price .price-plan-value{font-size:25px;line-height:1;font-weight:950;font-family:Arial,sans-serif;}
-    .compact-price .live-change-line{font-size:14px;font-weight:900;margin-top:4px;}
-    .compact-price .compact-source-line{font-size:10px;color:#7895ad;margin-top:2px;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .price-up{color:var(--ui-green)!important;}.price-down{color:var(--ui-red)!important;}.price-flat{color:#b7c4d3!important;}
-    .compact-score{width:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;}
-    .score-box{width:48px;height:29px;border-radius:6px;background:linear-gradient(90deg,#173457 0 48%, var(--ui-green) 48%);display:flex;align-items:end;justify-content:center;color:var(--ui-green);font-weight:950;font-size:18px;padding-bottom:1px;}
-    .tone-cautious .score-box{background:linear-gradient(90deg,#173457 0 48%, var(--ui-amber) 48%);color:var(--ui-amber);}
-    .score-label{font-size:10px;color:#7797b2;font-weight:800;}
-    .compact-row-actions{
-      display:flex;gap:6px;align-items:center;justify-content:flex-end;
-      padding:0 12px 10px 12px; flex-wrap:wrap;
-    }
-    .compact-row-actions button{font-size:12px;padding:7px 9px;border-radius:10px;min-height:34px;}
-    .compact-row-actions .soft-danger{background:#751a1a;color:#fee2e2;}
-    .compact-row-actions .soft-approve{background:#064e3b;color:#d1fae5;}
-    .compact-row-actions .soft-primary{background:#123c7a;color:#dbeafe;}
-    .compact-why{font-size:12px;color:#93b0ca;padding:0 12px 10px;line-height:1.55;}
-    .compact-plan-row{display:flex;gap:6px;align-items:center;padding:0 12px 10px;flex-wrap:wrap;}
-    .compact-plan-chip{font-size:11px;color:#b7cbe0;border:1px solid rgba(130,170,210,.28);border-radius:9px;padding:5px 8px;background:rgba(12,37,62,.72);}
-
-    /* Bottom sheet details from existing details element */
-    .compact-radar-card details.detail-panel:not([open]){display:none;}
-    .compact-radar-card details.detail-panel[open]{
-      position:fixed;
-      z-index:1000;
-      left:0; right:0; bottom:0;
-      height:min(91dvh, 760px);
-      background:linear-gradient(180deg,#071827,#05101f);
-      border:1px solid rgba(65,137,198,.5);
-      border-bottom:0;
-      border-radius:24px 24px 0 0;
-      box-shadow:0 -18px 50px rgba(0,0,0,.55);
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-    }
-    .compact-radar-card details.detail-panel[open]::before{
-      content:'';position:fixed;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(3px);z-index:-1;
-    }
-    details.detail-panel[open] > summary{
-      position:sticky;top:0;z-index:5;
-      list-style:none;
-      display:flex!important;align-items:center;justify-content:space-between;
-      padding:14px 18px 10px;
-      margin:0!important;
-      background:#071827;
-      border-bottom:1px solid rgba(65,137,198,.35);
-      color:#e9f7ff;
-      font-size:18px;
-    }
-    details.detail-panel[open] > summary::-webkit-details-marker{display:none;}
-    .sheet-live-header{
-      display:flex;align-items:center;justify-content:space-between;gap:12px;
-      padding:12px 18px;
-      background:#08223a;
-      border-bottom:1px solid rgba(65,137,198,.25);
-    }
-    .sheet-live-title{font-size:24px;font-weight:950;color:#fff;direction:ltr;}
-    .sheet-live-sub{font-size:12px;color:#8fb0c9;margin-top:3px;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .sheet-live-price{text-align:left;direction:ltr;}
-    .sheet-live-price .price-plan-value{font-size:25px;font-weight:950;}
-    .sheet-live-price .live-change-line{font-size:14px;font-weight:900;}
-    .compact-radar-card details.detail-panel[open] .details-grid{
-      overflow-y:auto;
-      padding:12px;
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:9px;
-    }
-    details.detail-panel[open] .detail-box{border-radius:14px;background:#0a2037;border-color:rgba(67,124,173,.28);}
-    details.detail-panel[open] .detail-label{font-size:12px;color:#8faccc;}
-    details.detail-panel[open] .detail-value{font-size:15px;line-height:1.7;}
-    details.detail-panel[open] .card-local-nav{padding:0 12px 14px;}
-    @media(max-width:520px){
-      .container{padding-left:8px;padding-right:8px;}
-      .topbar{margin-left:-8px;margin-right:-8px;}
-      .title{font-size:25px;}
-      .compact-radar-main{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;}
-      .compact-score{display:none;}
-      .compact-symbol{font-size:24px;}
-      .compact-price .price-plan-value{font-size:22px;}
-      .compact-company{max-width:160px;}
-      .compact-radar-card details.detail-panel[open] .details-grid{grid-template-columns:1fr;}
-      .bottom-mobile-nav{padding-bottom:calc(8px + env(safe-area-inset-bottom));}
-    }
-
-
-
-    /* ===== Fix40: stable bottom-sheet details + portfolio polish ===== */
-    body.modal-open { overflow: hidden !important; }
-    body.modal-open .container { overflow: hidden; }
-    /* Fix41: do NOT use touch-action:none on body; Android blocks scrolling inside the detail sheet. */
-    details.detail-panel[open],
-    details.detail-panel[open] .details-grid,
-    details.detail-panel[open] .sheet-live-header,
-    details.detail-panel[open] .card-local-nav {
-      touch-action: pan-y !important;
-    }
-
-    /* Details must scroll inside the sheet, not move the whole page */
-    details.detail-panel[open] {
-      position: fixed !important;
-      z-index: 5000 !important;
-      left: max(0px, env(safe-area-inset-left));
-      right: max(0px, env(safe-area-inset-right));
-      bottom: 0;
-      height: min(92dvh, 800px) !important;
-      max-height: min(92dvh, 800px) !important;
-      background: linear-gradient(180deg,#071827,#05101f) !important;
-      border: 1px solid rgba(65,137,198,.55) !important;
-      border-bottom: 0 !important;
-      border-radius: 24px 24px 0 0 !important;
-      box-shadow: 0 -18px 50px rgba(0,0,0,.58) !important;
-      overflow: hidden !important;
-      display: flex !important;
-      flex-direction: column !important;
-      contain: layout paint;
-      overscroll-behavior: contain;
-    }
-    details.detail-panel[open]::before{
-      content:''; position: fixed; inset: 0;
-      background: rgba(0,0,0,.64); backdrop-filter: blur(3px);
-      z-index: -1; pointer-events: auto;
-    }
-    details.detail-panel[open] > summary{
-      flex: 0 0 auto;
-      position: static !important;
-      display: flex !important;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 14px 16px 10px !important;
-      margin: 0 !important;
-      background: #071827 !important;
-      border-bottom: 1px solid rgba(65,137,198,.35) !important;
-      color: #e9f7ff !important;
-      font-size: 18px !important;
-      font-weight: 900 !important;
-      list-style: none;
-      cursor: pointer;
-    }
-    details.detail-panel[open] > summary::before{
-      content:'';
-      position:absolute;
-      top:7px;
-      left:50%;
-      transform:translateX(-50%);
-      width:42px;
-      height:4px;
-      border-radius:99px;
-      background:rgba(143,176,201,.55);
-    }
-    .sheet-summary-title{display:flex;flex-direction:column;gap:2px;min-width:0;}
-    .sheet-summary-symbol{font-size:20px;font-weight:950;direction:ltr;text-align:right;color:#fff;}
-    .sheet-summary-note{font-size:12px;color:#8fb0c9;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .sheet-close-btn{
-      flex:0 0 auto;
-      border:1px solid rgba(96,165,250,.75) !important;
-      background:rgba(23,51,95,.95) !important;
-      color:#dbeafe !important;
-      border-radius:12px !important;
-      padding:8px 12px !important;
-      min-height:36px !important;
-      font-weight:900 !important;
-      font-size:13px !important;
-    }
-    details.detail-panel[open] .sheet-live-header{
-      flex:0 0 auto;
-      padding: 11px 16px !important;
-      background:#08223a !important;
-      border-bottom:1px solid rgba(65,137,198,.25) !important;
-    }
-    details.detail-panel[open] .details-grid{
-      flex: 1 1 auto !important;
-      min-height: 0 !important;
-      overflow-y: auto !important;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
-      padding: 12px 12px calc(78px + env(safe-area-inset-bottom)) !important;
-      display: grid !important;
-      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
-      gap: 9px !important;
-    }
-    details.detail-panel[open] .details-grid{
-      max-height: calc(93dvh - 190px - env(safe-area-inset-bottom)) !important;
-    }
-    details.detail-panel[open] .detail-box,
-    details.detail-panel[open] .card-local-nav,
-    details.detail-panel[open] .sheet-live-header{
-      pointer-events: auto !important;
-    }
-    details.detail-panel[open] .card-local-nav{
-      flex:0 0 auto;
-      position: sticky;
-      bottom: 0;
-      background: #071827;
-      border-top: 1px solid rgba(65,137,198,.30);
-      padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
-      z-index: 5;
-    }
-
-    /* Fix42: remove first/next navigation from the details sheet and provide a clear close control */
-    details.detail-panel[open] .detail-sheet-footer{
-      flex:0 0 auto;
-      position: sticky;
-      bottom: 0;
-      background: linear-gradient(180deg, rgba(7,24,39,.72), #071827 42%);
-      border-top: 1px solid rgba(65,137,198,.30);
-      padding: 10px 12px calc(12px + env(safe-area-inset-bottom)) !important;
-      z-index: 8;
-    }
-    details.detail-panel[open] .detail-sheet-close-full{
-      width:100%;
-      min-height:44px;
-      border-radius:14px;
-      border:1px solid rgba(96,165,250,.85);
-      background:rgba(23,51,95,.98);
-      color:#dbeafe;
-      font-weight:950;
-      font-size:16px;
-      font-family:'Tajawal',sans-serif;
-    }
-    @media(max-width:520px){
-      details.detail-panel[open] .details-grid{grid-template-columns:1fr !important;}
-      details.detail-panel[open]{height:min(93dvh, 820px) !important;}
-      .sheet-summary-symbol{font-size:18px;}
-      .sheet-summary-note{max-width:210px;}
-    }
-
-    /* Better compact portfolio while keeping existing data + live updates */
-    .portfolio-card{
-      border-radius:18px !important;
-      border-color:rgba(65,137,198,.35) !important;
-      background:linear-gradient(180deg, rgba(7,24,39,.96), rgba(8,18,34,.96)) !important;
-      box-shadow:0 10px 24px rgba(0,0,0,.16);
-    }
-    .portfolio-card-top{align-items:center !important;}
-    .portfolio-live-head{text-align:left;direction:ltr;min-width:96px;}
-    .portfolio-live-head .live-portfolio-price-top{font-size:23px;font-weight:950;line-height:1;}
-    .portfolio-live-head .live-portfolio-change-top{font-size:13px;font-weight:950;margin-top:4px;}
-    .portfolio-live-head .portfolio-source-line{font-size:10px;color:#8aa8c2;margin-top:3px;max-width:118px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .portfolio-card-symbol{font-size:27px !important;letter-spacing:.2px;}
-    .portfolio-metric-value .green, .portfolio-metric-value .red{font-weight:900;}
-
-    /* Light mode harmony for compact UI */
-    :root[data-theme="light"] .compact-radar-main,
-    :root[data-theme="light"] .portfolio-card,
-    :root[data-theme="light"] .market-mood-card,
-    :root[data-theme="light"] .section-header{
-      background:linear-gradient(180deg,#ffffff,#eef6ff) !important;
-      border-color:#bfd4ee !important;
-      color:#081224 !important;
-    }
-    :root[data-theme="light"] .compact-symbol,
-    :root[data-theme="light"] .sheet-live-title,
-    :root[data-theme="light"] .portfolio-card-symbol{color:#071427 !important;}
-    :root[data-theme="light"] .compact-company,
-    :root[data-theme="light"] .compact-why,
-    :root[data-theme="light"] .compact-source-line,
-    :root[data-theme="light"] .sheet-live-sub{color:#425873 !important;}
-    :root[data-theme="light"] .compact-plan-chip,
-    :root[data-theme="light"] .detail-box,
-    :root[data-theme="light"] .portfolio-metric{
-      background:#f4f8ff !important;
-      border-color:#c9d9ee !important;
-      color:#081224 !important;
-    }
-    :root[data-theme="light"] details.detail-panel[open]{background:linear-gradient(180deg,#ffffff,#edf5ff) !important;}
-    :root[data-theme="light"] details.detail-panel[open] > summary,
-    :root[data-theme="light"] details.detail-panel[open] .sheet-live-header,
-    :root[data-theme="light"] details.detail-panel[open] .card-local-nav{background:#edf5ff !important;color:#081224 !important;}
-    :root[data-theme="light"] .sheet-summary-symbol{color:#081224 !important;}
-    :root[data-theme="light"] .sheet-summary-note{color:#425873 !important;}
-
-
-
-    /* ===== Fix43: synchronize live prices + cleaner light mode ===== */
-    :root[data-theme="light"] body{
-      background:#eaf3ff !important;
-      color:#0b1728 !important;
-    }
-    :root[data-theme="light"] .container{
-      background:#eaf3ff !important;
-    }
-    :root[data-theme="light"] .topbar,
-    :root[data-theme="light"] .market-mood-card,
-    :root[data-theme="light"] .section-header{
-      background:linear-gradient(180deg,#ffffff,#edf6ff) !important;
-      border-color:#bcd2eb !important;
-      color:#0b1728 !important;
-    }
-    :root[data-theme="light"] .title,
-    :root[data-theme="light"] .section-title,
-    :root[data-theme="light"] .compact-symbol,
-    :root[data-theme="light"] .portfolio-card-symbol{
-      color:#071427 !important;
-      text-shadow:none !important;
-    }
-    :root[data-theme="light"] .card.compact-radar-card,
-    :root[data-theme="light"] .compact-radar-main,
-    :root[data-theme="light"] .portfolio-card{
-      background:linear-gradient(180deg,#ffffff,#f4f9ff) !important;
-      border-color:#b9d2ee !important;
-      box-shadow:0 8px 22px rgba(25,63,110,.10) !important;
-    }
-    :root[data-theme="light"] .compact-company,
-    :root[data-theme="light"] .compact-why,
-    :root[data-theme="light"] .compact-source-line,
-    :root[data-theme="light"] .mood-note-line,
-    :root[data-theme="light"] .section-rank-note{
-      color:#49617a !important;
-    }
-    :root[data-theme="light"] .compact-plan-chip,
-    :root[data-theme="light"] .detail-box,
-    :root[data-theme="light"] .price-plan-item,
-    :root[data-theme="light"] .portfolio-metric{
-      background:#f7fbff !important;
-      border-color:#bfd4ec !important;
-      color:#0b1728 !important;
-    }
-    :root[data-theme="light"] .detail-label,
-    :root[data-theme="light"] .price-plan-label,
-    :root[data-theme="light"] .compact-label{
-      color:#64768d !important;
-    }
-    :root[data-theme="light"] .detail-value,
-    :root[data-theme="light"] .price-plan-value,
-    :root[data-theme="light"] .compact-value{
-      color:#0b1728 !important;
-    }
-    :root[data-theme="light"] .price-plan-value.price-up,
-    :root[data-theme="light"] .live-change-line.price-up,
-    :root[data-theme="light"] .price-up{ color:#16a34a !important; }
-    :root[data-theme="light"] .price-plan-value.price-down,
-    :root[data-theme="light"] .live-change-line.price-down,
-    :root[data-theme="light"] .price-down{ color:#dc2626 !important; }
-    :root[data-theme="light"] details.detail-panel[open]{
-      background:linear-gradient(180deg,#ffffff,#eef6ff) !important;
-      border-color:#8fbce8 !important;
-    }
-    :root[data-theme="light"] details.detail-panel[open] > summary,
-    :root[data-theme="light"] details.detail-panel[open] .sheet-live-header,
-    :root[data-theme="light"] details.detail-panel[open] .detail-sheet-footer{
-      background:#eef6ff !important;
-      color:#0b1728 !important;
-      border-color:#b9d2ee !important;
-    }
-    :root[data-theme="light"] .sheet-summary-symbol,
-    :root[data-theme="light"] .sheet-live-title{
-      color:#071427 !important;
-    }
-    :root[data-theme="light"] .sheet-summary-note,
-    :root[data-theme="light"] .sheet-live-sub{
-      color:#49617a !important;
-    }
-
 </style>
 </head>
 <body>
@@ -2414,7 +1887,7 @@
 
     function detailBox(label, value, full=false, infoKey='') {
       if (value === null || value === undefined || value === "") return '';
-      return `<div class="detail-box ${full ? 'full' : ''}" data-detail-label="${safeText(label)}">
+      return `<div class="detail-box ${full ? 'full' : ''}">
         ${renderLabelWithInfo(label, infoKey || label, 'detail-label')}
         <div class="detail-value">${value}</div>
       </div>`;
@@ -3044,106 +2517,6 @@
       await scanSingleStock();
     }
 
-
-
-    function compactToneFromSection(sectionKey, stock) {
-      const k = String(sectionKey || '').toLowerCase();
-      const d = String(stock?.decision || '').toLowerCase();
-      if (k.includes('cautious') || d.includes('بحذر')) return 'cautious';
-      if (k.includes('watch') || d.includes('مراقبة')) return 'watch';
-      if (k.includes('gray')) return 'cautious';
-      return 'strong';
-    }
-
-    function compactScoreValue(stock) {
-      const vals = [stock?.signal_strength_score, stock?.quality_score, stock?.execution_readiness_score, stock?.display_rank_score];
-      for (const v of vals) {
-        const n = Number(v);
-        if (Number.isFinite(n) && n > 0) return Math.round(n);
-      }
-      return 0;
-    }
-
-    function compactPriceBlock(stock, displayPrice, extraClass='compact-price') {
-      const rawChange = stock?.display_change_pct ?? stock?.change_vs_prev_close_pct ?? stock?.change_pct ?? stock?.change_from_open_pct;
-      const change = Number(rawChange);
-      const hasChange = Number.isFinite(change);
-      const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
-      const sign = hasChange && change > 0 ? '+' : '';
-      const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : '—';
-      const source = [stock?.price_source_label || stock?.price_source || '', stock?.last_price_update_label || stock?.updated_label || ''].filter(Boolean).join(' • ');
-      return `<div class="${extraClass} live-price-item" data-symbol="${safeText(stock?.symbol || '')}">
-        <div class="price-plan-value ${cls}">${safeText(formatNumber(displayPrice))}</div>
-        <div class="live-change-line ${cls}">${safeText(changeText)}</div>
-        ${source ? `<div class="compact-source-line">${safeText(source)}</div>` : ''}
-      </div>`;
-    }
-
-    function compactTags(stock, grayLabel='') {
-      const out = [];
-      const plan = stock?.display_plan_family_label || stock?.strategy_label || stock?.trade_type_label_ar || '';
-      const stage = stock?.signal_stage_label || stock?.signal_stage || '';
-      const sharia = stock?.sharia_label || '';
-      if (plan) out.push(`<span class="compact-tag good">${safeText(shortText(plan, 18))}</span>`);
-      if (stage) out.push(`<span class="compact-tag">${safeText(shortText(stage, 18))}</span>`);
-      if (grayLabel) out.push(`<span class="compact-tag warn">غير محسوم شرعيًا</span>`);
-      else if (String(sharia).trim()) out.push(`<span class="compact-tag good">${safeText(shortText(sharia, 16))}</span>`);
-      return out.slice(0, 3).join('');
-    }
-
-    function anyDetailPanelOpen() {
-      return !!document.querySelector('details.detail-panel[open]');
-    }
-
-    function setDetailModalState() {
-      document.body.classList.toggle('modal-open', anyDetailPanelOpen());
-    }
-
-    function closeDetailPanel(trigger, event=null) {
-      if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      const panel = trigger?.closest ? trigger.closest('details.detail-panel') : null;
-      if (panel) panel.open = false;
-      setDetailModalState();
-    }
-
-    function handleDetailPanelToggle(panel) {
-      if (!panel) return;
-      if (panel.open) {
-        document.querySelectorAll('details.detail-panel[open]').forEach(other => {
-          if (other !== panel) other.open = false;
-        });
-        setDetailModalState();
-        const grid = panel.querySelector('.details-grid');
-        if (grid) grid.scrollTop = 0;
-        const sym = panel.dataset.symbol || panel.closest('.card[data-symbol]')?.dataset.symbol || '';
-        if (sym) {
-          loadAnalystSnapshot(sym).catch(() => {});
-          loadAiContextSummary(sym).catch(() => {});
-        }
-      } else {
-        setTimeout(setDetailModalState, 0);
-      }
-    }
-
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        document.querySelectorAll('details.detail-panel[open]').forEach(panel => panel.open = false);
-        setDetailModalState();
-      }
-    });
-
-    function openCardDetails(el) {
-      const card = el?.closest ? el.closest('.card[data-symbol]') : null;
-      if (!card) return;
-      const details = card.querySelector('details.detail-panel');
-      if (!details) return;
-      details.open = true;
-      handleDetailPanelToggle(details);
-    }
-
     function createCard(stock, sectionKey='', index=0) {
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
@@ -3151,12 +2524,11 @@
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
+      const cardNavTop = renderCardNav(sectionKey, index, 'top');
+      const cardNavBottom = renderCardNav(sectionKey, index, 'bottom');
       const cardNavDetails = renderCardNav(sectionKey, index, 'details');
+      const analystId = analystDomId(stock.symbol);
       const detailKey = `${safeText(sectionKey || 'section')}:${safeText(stock.symbol || '')}`;
-      const tone = compactToneFromSection(sectionKey, stock);
-      const rankNumber = Number(index || 0) + 1;
-      const rankSubtitle = sectionKey === 'single-stock' ? 'فحص فردي' : `الترتيب #${rankNumber} داخل هذه المجموعة`;
-      const score = compactScoreValue(stock);
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
@@ -3164,9 +2536,7 @@
       details.push(detailBox(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price)));
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
       details.push(detailBox('مدة الصلاحية', safeText(stock.valid_for)));
-      details.push(detailBox('مصدر السعر', safeText(stock.price_source_label || stock.price_source || '—')));
-      details.push(detailBox('آخر تحديث للسعر', safeText(stock.last_price_update_label || stock.updated_label || stock.updated_at || '—')));
-      details.push(detailBox('حالة السوق', safeText(stock.market_phase_label || (window.__scanData && window.__scanData.market_phase_label) || '—')));
+      details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
       details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
@@ -3215,6 +2585,7 @@
       details.push(detailBox('نجاح الارتدادات تاريخيًا', `${formatNumber(stock.historical_pullback_success_pct)}% من ${formatNumber(stock.historical_pullback_cases || 0)} حالة${stock.historical_pullback_speed_label ? ' | ' + safeText(stock.historical_pullback_speed_label) : ''}`));
       details.push(detailBox('استجابة السيولة تاريخيًا', `${formatNumber(stock.historical_volume_followthrough_pct)}% من ${formatNumber(stock.historical_volume_cases || 0)} حالة`));
       details.push(detailBox('درجة التاريخ مع المؤشر والقطاع', renderHistoricalContextBreakdown(stock), true, 'درجة التاريخ مع المؤشر والقطاع'));
+      details.push(detailBox('لوحة الحجم والمخاطرة', renderPositionSizingBlock(stock), true));
       details.push(detailBox('صلاحية الخطة بالسعر الحي', `${safeText(stock.live_plan_action || '—')}<br>${safeText(stock.live_plan_reason || '')}`, true));
       details.push(detailBox('آراء المحللين', renderAnalystPlaceholder(stock.symbol), true, 'آراء المحللين'));
       details.push(detailBox('AI / الخبر ومزاج السوق', renderAiContextPlaceholder(stock.symbol), true, 'AI / الخبر ومزاج السوق'));
@@ -3228,7 +2599,10 @@
       details.push(detailBox('ملخص عربي سريع', safeText(stock.quick_explainer || ''), true));
       details.push(detailBox('ملخص فني', safeText(stock.ai_summary || ''), true));
 
-      if (stock.alternate_entry_label && Number(stock.alternate_entry_price || 0) > 0) details.push(detailBox(safeText(stock.alternate_entry_label), formatNumber(stock.alternate_entry_price)));
+      if (stock.alternate_entry_label && Number(stock.alternate_entry_price || 0) > 0) {
+        details.push(detailBox(safeText(stock.alternate_entry_label), formatNumber(stock.alternate_entry_price)));
+      }
+
       if (stock.display_plan_family === 'breakout') {
         details.push(detailBox('سعر الاختراق', formatNumber(stock.breakout_price)));
         details.push(detailBox('سعر التأكيد', formatNumber(stock.confirmation_price)));
@@ -3238,7 +2612,9 @@
         details.push(detailBox('إعادة دخول قرب الارتداد', formatNumber(stock.reentry_pullback_price)));
         details.push(detailBox('إعادة دخول بعد اختراق جديد', formatNumber(stock.rebreakout_price)));
       } else if (stock.display_plan_family === 'pullback') {
-        const zoneText = stock.pullback_zone_low && stock.pullback_zone_high ? `${formatNumber(stock.pullback_zone_low)} - ${formatNumber(stock.pullback_zone_high)}` : '';
+        const zoneText = stock.pullback_zone_low && stock.pullback_zone_high
+          ? `${formatNumber(stock.pullback_zone_low)} - ${formatNumber(stock.pullback_zone_high)}`
+          : '';
         details.push(detailBox('منطقة الارتداد', zoneText));
         details.push(detailBox('تأكيد سيولة الارتداد', safeText(stock.pullback_volume_label)));
         details.push(detailBox('تراجع متعدد الشموع', safeText(stock.pullback_multi_bar_label)));
@@ -3246,42 +2622,65 @@
         details.push(detailBox('Fibonacci 50%', formatNumber(stock.fib_50)));
         details.push(detailBox('Fibonacci 61.8%', formatNumber(stock.fib_62)));
       }
-      if (Array.isArray(stock.risk_flags) && stock.risk_flags.length) details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`, true));
 
+      if (Array.isArray(stock.risk_flags) && stock.risk_flags.length) {
+        details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`, true));
+      }
+
+      const rankNumber = Number(index || 0) + 1;
+      const rankSubtitle = sectionKey === 'single-stock' ? 'فحص فردي' : `الترتيب #${rankNumber} داخل هذه المجموعة`;
       return `
-        <div class="card compact-radar-card tone-${tone}" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}" data-symbol="${safeText(stock.symbol)}">
-          <div class="compact-radar-main" onclick="openCardDetails(this)">
-            <div class="compact-rank">${rankNumber}</div>
-            <div class="compact-stock-info">
-              <div class="compact-symbol-line"><div class="compact-symbol">${safeText(stock.symbol)}</div></div>
-              <div class="compact-company">${company}</div>
-              <div class="compact-tags">${compactTags(stock, grayLabel)}</div>
+        <div class="card" data-section-key="${safeText(sectionKey)}" data-card-index="${Number(index || 0)}" data-symbol="${safeText(stock.symbol)}">
+          ${cardNavTop}
+          <div class="card-top">
+            <div class="card-heading-line">
+              <span class="rank-badge">#${rankNumber}</span>
+              <div>
+                <div class="symbol">${safeText(stock.symbol)}</div>
+                <div class="company">${company}</div>
+                <div class="card-rank-subtitle">${safeText(rankSubtitle)}</div>
+              </div>
             </div>
-            ${compactPriceBlock(stock, displayPrice)}
-            <div class="compact-score"><div class="score-box">${formatNumber(score)}</div><div class="score-label">قوة</div></div>
-          </div>
-          <div class="compact-plan-row">
-            <span class="compact-plan-chip">${safeText(displayDecisionText || '—')}</span>
-            <span class="compact-plan-chip">الدخول ${formatNumber(stock.display_entry_price)}</span>
-            <span class="compact-plan-chip">الهدف ${formatNumber(stock.display_target_price)}</span>
-            <span class="compact-plan-chip">الوقف ${formatNumber(stock.display_stop_price)}</span>
-          </div>
-          <div class="compact-why">${safeText(shortText(stock.special_bucket_reason || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'افتح التفاصيل لمراجعة سبب ظهور السهم.', 125))}</div>
-          <div class="compact-row-actions" onclick="event.stopPropagation()">
-            <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 محفظة</button>
-            <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 مراقبة</button>
-            <button class="ghost" onclick="openAnalystSnapshotFromCard(this, '${safeText(stock.symbol)}')">👥 محللين</button>
-            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 شرعي</button>`}
-            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماد شرعي</button>` : ''}
-          </div>
-          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="handleDetailPanelToggle(this)">
-            <summary><span class="sheet-summary-title"><span class="sheet-summary-symbol">${safeText(stock.symbol)}</span><span class="sheet-summary-note">تحليل شامل • اضغط هنا أو زر الإغلاق للإغلاق</span></span><button type="button" class="sheet-close-btn" onclick="closeDetailPanel(this, event)">إغلاق ✕</button></summary>
-            <div class="sheet-live-header">
-              <div><div class="sheet-live-title">${safeText(stock.symbol)}</div><div class="sheet-live-sub">${company} • ${safeText(rankSubtitle)}</div></div>
-              ${compactPriceBlock(stock, displayPrice, 'sheet-live-price')}
+            <div class="badges">
+              ${badgeDecision(stock.decision)}
+              ${phaseBadge(stock.market_phase_label)}
+              ${strengthBadge(stock)}
+              ${planBadge(stock)}
+              ${stageBadge(stock)}
             </div>
+          </div>
+
+          <div class="price-plan-grid">
+            ${currentPricePlanItem(stock, displayPrice)}
+            ${pricePlanItem(safeText(stock.display_entry_label || 'الدخول'), formatNumber(stock.display_entry_price))}
+            ${pricePlanItem(safeText(stock.display_target_label || 'الهدف'), formatNumber(stock.display_target_price))}
+            ${pricePlanItem(safeText(stock.display_stop_label || 'الوقف'), formatNumber(stock.display_stop_price))}
+          </div>
+
+          <div class="indicator-strip">${importantIndicators(stock)}</div>
+
+          ${hasPrimaryNews(stock) ? `<div class="news-line">
+            ${newsBadge(stock)}
+            <span>الأخبار معلومة فقط: ${safeText(shortText(newsHeadlineText(stock), 110))}</span>
+          </div>` : ''}
+
+          <div class="card-why-line"><b>لماذا ظهر؟</b> ${safeText(shortText(stock.special_bucket_reason || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'تجتمع عدة مؤشرات فنية وسعرية داعمة، وافتح تحليل شامل للتفاصيل.', 190))}</div>
+          ${stock.live_plan_action ? `<div class="live-plan-warning">صلاحية الخطة: ${safeText(stock.live_plan_action)}${stock.live_plan_reason ? ' • ' + safeText(shortText(stock.live_plan_reason, 130)) : ''}</div>` : ''}
+
+          <div class="card-actions">
+            <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
+            <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
+            <button class="ghost" onclick="openAnalystSnapshotFromCard(this, '${safeText(stock.symbol)}')">👥 المحللين</button>
+            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
+            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
+          </div>
+
+          ${cardNavBottom}
+
+          <details class="detail-panel" data-detail-key="${detailKey}" data-symbol="${safeText(stock.symbol)}" ontoggle="if(this.open){loadAnalystSnapshot('${safeText(stock.symbol)}'); loadAiContextSummary('${safeText(stock.symbol)}')}">
+            <summary>تحليل شامل</summary>
             <div class="details-grid">${details.join('')}</div>
-            <div class="detail-sheet-footer"><button type="button" class="detail-sheet-close-full" onclick="closeDetailPanel(this, event)">إغلاق التفاصيل ✕</button></div>
+            ${cardNavDetails}
           </details>
         </div>`;
     }
@@ -3490,36 +2889,20 @@
       const updated = document.getElementById('marketMoodUpdated');
       if (!box) return;
       if (!payload || payload.ok === false) {
-        box.innerHTML = '<div class="mood-note-line">مزاج السوق غير متوفر الآن.</div>';
+        box.innerHTML = '<div class="mood-mini"><div class="mood-mini-label">مزاج السوق</div><div class="mood-mini-value">غير متوفر الآن</div></div>';
         if (updated) updated.textContent = 'غير متوفر';
         return;
       }
-      const score = Number(payload.score || 50);
-      const label = safeText(payload.label || 'محايد');
-      const angle = Math.max(-75, Math.min(75, ((score - 50) / 50) * 75));
-      const tone = score >= 60 ? 'pos' : score <= 40 ? 'neg' : 'neu';
-      const indexes = (payload.indexes || []).slice(0,4).map(x => {
-        const c = Number(x.change_pct || 0);
-        const cls = c > 0 ? 'pos' : c < 0 ? 'neg' : 'neu';
-        return `<div class="mood-tile"><strong>${safeText(x.symbol || '')}</strong><span class="${cls}">${c > 0 ? '+' : ''}${formatNumber(c)}%</span></div>`;
-      }).join('') || `<div class="mood-tile"><strong>المؤشرات</strong><span class="neu">—</span></div>`;
       const hot = (payload.hot_sectors || []).slice(0,3).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || 'لا توجد قطاعات ساخنة واضحة';
       const weak = (payload.weak_sectors || []).slice(0,2).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || '—';
-      const phaseLabel = safeText(payload.market_phase_label || (window.__scanData && window.__scanData.market_phase_label) || '—');
-      const phaseRaw = String(payload.market_phase || (window.__scanData && window.__scanData.market_phase) || '').toLowerCase();
-      const phaseTone = phaseRaw.includes('open') && !phaseRaw.includes('pre') ? 'pos' : (phaseRaw.includes('pre') || phaseRaw.includes('after')) ? 'neu' : 'neg';
       box.innerHTML = `
-        <div class="mood-dashboard-strip">
-          <div class="mood-tile"><div class="mood-gauge"><span class="mood-needle" style="transform:translateX(-50%) rotate(${angle}deg)"></span></div><strong class="${tone}">${label}</strong></div>
-          <div class="mood-tile"><strong>حالة السوق</strong><span class="${phaseTone}">${phaseLabel}</span></div>
-          ${indexes}
-          <div class="mood-tile"><strong>قطاعات نشطة</strong><span class="pos">${safeText(hot)}</span></div>
-          <div class="mood-tile"><strong>أضعف</strong><span class="neg">${safeText(weak)}</span></div>
-        </div>
-        <div class="mood-note-line">${safeText(payload.summary_ar || payload.note || 'مزاج السوق سياقي فقط ولا يدخل في نقاط الأسهم أو ترتيبها.')} ${payload.updated_at ? '• آخر تحديث: ' + safeText(payload.updated_at) : ''}</div>`;
+        <div class="mood-mini"><div class="mood-mini-label">الحالة</div><div class="mood-mini-value">${safeText(payload.label || '—')} <span style="font-size:12px;color:var(--text-muted);">درجة ${formatNumber(payload.score || 0)}</span></div></div>
+        <div class="mood-mini"><div class="mood-mini-label">المؤشرات</div><div class="mood-mini-value">${safeText(payload.index_summary_ar || '—')}</div></div>
+        <div class="mood-mini"><div class="mood-mini-label">القطاعات الساخنة</div><div class="mood-mini-value">${safeText(hot)}</div></div>
+        <div class="mood-mini"><div class="mood-mini-label">قطاعات أضعف</div><div class="mood-mini-value">${safeText(weak)}</div></div>
+        <div class="mood-mini" style="grid-column:1/-1;"><div class="mood-mini-label">شرح عربي سريع</div><div class="mood-mini-value">${safeText(payload.summary_ar || payload.note || 'مزاج السوق سياقي فقط ولا يدخل في النقاط.')}</div></div>`;
       if (updated) updated.textContent = payload.updated_at ? `آخر تحديث: ${safeText(payload.updated_at)}` : 'محدث';
     }
-
 
     async function loadMarketMood(silent=false) {
       try {
@@ -3602,18 +2985,7 @@
           changeEl.classList.remove('price-up','price-down','price-flat');
           changeEl.classList.add(cls);
         }
-        const sourceText = [item.price_source_label || item.price_source || '', item.last_price_update_label || item.updated_label || ''].filter(Boolean).join(' • ');
-        if (sourceEl) sourceEl.textContent = sourceText || sourceEl.textContent || '';
-
-        // مزامنة حقول التفاصيل المفتوحة أو الموجودة داخل البطاقة حتى لا ترى سعرًا في البطاقة وسعرًا مختلفًا داخل التحليل.
-        const safeSymbolSelector = CSS && CSS.escape ? CSS.escape(s) : s;
-        document.querySelectorAll(`.card[data-symbol="${safeSymbolSelector}"]`).forEach(card => {
-          card.querySelectorAll('[data-detail-label="سعر السهم"] .detail-value').forEach(el => { el.textContent = formatNumber(displayPrice); });
-          card.querySelectorAll('[data-detail-label="مصدر السعر"] .detail-value').forEach(el => { el.textContent = item.price_source_label || item.price_source || '—'; });
-          card.querySelectorAll('[data-detail-label="آخر تحديث للسعر"] .detail-value').forEach(el => { el.textContent = item.last_price_update_label || item.updated_label || item.updated_at || '—'; });
-          card.querySelectorAll('[data-detail-label="حالة السوق"] .detail-value').forEach(el => { el.textContent = item.market_phase_label || (window.__scanData && window.__scanData.market_phase_label) || '—'; });
-          card.querySelectorAll('[data-detail-label="حداثة السعر"] .detail-value').forEach(el => { el.textContent = `${item.price_freshness_icon || ''} ${item.price_freshness_label || ''}`.trim() || '—'; });
-        });
+        if (sourceEl) sourceEl.textContent = item.price_source_label || item.last_price_update_label || sourceEl.textContent || '';
       });
     }
 
@@ -3631,10 +3003,6 @@
         const changed = data.ok && applyRadarLivePayload(data);
 
         if (changed) {
-          // بعد لقطة الرادار، نجلب السعر المباشر من /live-quotes أيضًا حتى لا تبقى البطاقات على سعر لقطة قديمة.
-          // هذا لا يغير التصنيف أو المنطق؛ فقط يزامن السعر/النسبة/المصدر في الواجهة.
-          await refreshLiveQuotesForScan(true);
-
           const reading = silent && (userIsReadingRadarCard() || currentlyOpenDetailKeys().length);
           if (reading) {
             // أثناء قراءة بطاقة أو فتح "تحليل شامل": لا نعيد بناء الصفحة ولا نغيّر مكانك.
@@ -4087,13 +3455,8 @@
                 <div>
                   <div class="portfolio-card-symbol">${safeText(item.symbol)}</div>
                   <div class="portfolio-card-sub"><span>${safeText(item.type_label || '—')}</span> • <span class="portfolio-source-line">${safeText(item.price_source_label || '—')}</span></div>
-                  <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
                 </div>
-                <div class="portfolio-live-head">
-                  <div class="live-portfolio-price-top ${portfolioColorClass(item.holding_change_pct)}">${formatNumber(item.current_price)}</div>
-                  <div class="live-portfolio-change-top ${plClass}">${formatPercent(item.holding_change_pct)}</div>
-                  <div class="portfolio-source-line">${safeText(item.price_source_label || '—')}</div>
-                </div>
+                <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
               </div>
               <div class="portfolio-metrics">
                 <div class="portfolio-metric"><div class="portfolio-metric-label">سعر الشراء</div><div class="portfolio-metric-value">${formatNumber(item.buy_price)}</div></div>
@@ -4183,22 +3546,22 @@
           const marketValue = price * qty;
           const costValue = buy * qty;
           const cls = portfolioColorClass(pct);
-          const priceEls = card.querySelectorAll('.live-portfolio-price, .live-portfolio-price-top');
-          const chgEls = card.querySelectorAll('.live-portfolio-change, .live-portfolio-change-top');
+          const priceEl = card.querySelector('.live-portfolio-price');
+          const chgEl = card.querySelector('.live-portfolio-change');
           const mvEl = card.querySelector('.live-portfolio-market-cost');
-          const srcEls = card.querySelectorAll('.portfolio-source-line');
-          priceEls.forEach(priceEl => {
+          const srcEl = card.querySelector('.portfolio-source-line');
+          if (priceEl) {
             priceEl.textContent = formatNumber(price);
             priceEl.classList.remove('green','red');
             if (cls) priceEl.classList.add(cls);
-          });
-          chgEls.forEach(chgEl => {
-            chgEl.innerHTML = formatPercent(pct);
+          }
+          if (chgEl) {
+            chgEl.textContent = formatPercent(pct);
             chgEl.classList.remove('green','red');
             if (cls) chgEl.classList.add(cls);
-          });
+          }
           if (mvEl) mvEl.textContent = `$${formatNumber(marketValue)} / $${formatNumber(costValue)}`;
-          srcEls.forEach(srcEl => { srcEl.textContent = q.source_label || 'FMP Live/REST'; });
+          if (srcEl) srcEl.textContent = q.source_label || 'FMP Live/REST';
         });
         updatePortfolioSummaryFromDom();
       } catch (e) {}
