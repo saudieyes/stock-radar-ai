@@ -10,6 +10,7 @@ import time
 import json
 import secrets
 import hashlib
+import threading
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
@@ -130,6 +131,37 @@ async def disable_http_cache(request, call_next):
 
 
 SECTOR_DATA, COMPANIES_DATA, BALANCE_DATA, INCOME_DATA = initialize_reference_data()
+
+# Fix29 live radar runtime settings.
+# Prices are fresh during open/pre/after market; cached quote prices are allowed only when closed.
+ACTIVE_MARKET_PHASES = {"open", "pre_market", "after_hours"}
+LIVE_RADAR_PRICE_REFRESH_SEC = int(float(os.getenv("LIVE_RADAR_PRICE_REFRESH_SEC", "30") or 30))
+LIVE_RADAR_FULL_SCAN_SEC = int(float(os.getenv("LIVE_RADAR_FULL_SCAN_SEC", "300") or 300))
+LIVE_RADAR_WORKER_ENABLED = str(os.getenv("LIVE_RADAR_WORKER_ENABLED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+LIVE_RADAR_WORKER_MAX_SYMBOLS = int(float(os.getenv("LIVE_RADAR_WORKER_MAX_SYMBOLS", "220") or 220))
+LIVE_RADAR_WORKER_LOCK = threading.Lock()
+LIVE_RADAR_FULL_SCAN_LOCK = threading.Lock()
+LIVE_RADAR_WORKER_STATE = {
+    "enabled": LIVE_RADAR_WORKER_ENABLED,
+    "running": False,
+    "last_live_refresh_at": "",
+    "last_full_scan_at": "",
+    "last_error": "",
+    "iterations": 0,
+    "full_scans": 0,
+    "live_refreshes": 0,
+    "price_refresh_sec": LIVE_RADAR_PRICE_REFRESH_SEC,
+    "full_scan_sec": LIVE_RADAR_FULL_SCAN_SEC,
+}
+
+
+def _is_active_market_phase(phase: str | None = None) -> bool:
+    return str(phase or get_market_phase() or "closed") in ACTIVE_MARKET_PHASES
+
+
+def _prefer_price_cache_for_phase(phase: str | None = None) -> bool:
+    # User rule: no cached prices while market/pre/after-hours are active.
+    return not _is_active_market_phase(phase)
 
 
 def render_login_page(error_message: str = "") -> HTMLResponse:
@@ -350,6 +382,7 @@ def runtime_diagnostics():
             "fmp_websocket_enabled_config": bool(FMP_WEBSOCKET_ENABLED),
             "polygon_key_configured": bool(POLYGON_API_KEY),
             "last_radar_live_refresh": get_json("last_radar_live_refresh", {}),
+            "live_radar_worker": get_json("live_radar_worker_status", {}),
         },
         "scoring": {
             "news_score_enabled": bool(NEWS_SCORE_ENABLED),
@@ -360,11 +393,19 @@ def runtime_diagnostics():
 
 
 @app.get("/live-quotes")
-def live_quotes_endpoint(symbols: str = "", allow_fallback: bool = True, prefer_cache: bool = True):
+def live_quotes_endpoint(symbols: str = "", allow_fallback: bool = True, prefer_cache: bool | None = None):
     clean = [s.strip().upper() for s in str(symbols or "").replace(";", ",").split(",") if s.strip()]
     if not clean:
         return {"ok": True, "quotes": {}, "diagnostics": {"symbols": 0}}
-    return get_live_quotes(clean, prefer_cache=prefer_cache, allow_fallback=allow_fallback)
+    phase = get_market_phase()
+    if prefer_cache is None:
+        prefer_cache = _prefer_price_cache_for_phase(phase)
+    bundle = get_live_quotes(clean, prefer_cache=bool(prefer_cache), allow_fallback=allow_fallback)
+    if isinstance(bundle, dict):
+        bundle["market_phase"] = phase
+        bundle["market_phase_label"] = market_phase_label(phase)
+        bundle["quote_cache_policy"] = "cache_ok_closed_market" if bool(prefer_cache) else "fresh_fmp_during_active_market"
+    return bundle
 
 
 # Fix19: live radar refresh layer.
@@ -514,8 +555,127 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
         "analysis_snapshot_price": original_display_price,
         "analysis_snapshot_note": "الخطة الأصلية محفوظة؛ السعر الحي يستخدم لتحديث القرب والترتيب فقط.",
     })
-    return out
+    return _live_plan_validity_guard(out)
 
+
+
+def _live_plan_validity_guard(row: dict) -> dict:
+    """Reclassify the visible decision from fresh price vs saved plan.
+
+    This never changes Sharia status and never gives news points. It only prevents
+    stale strong/cautious labels when live price has invalidated the saved plan,
+    and it can promote candidates already inside the saved scan universe when the
+    live price reaches the plan conditions.
+    """
+    out = dict(row or {})
+    original_decision = str(out.get("original_decision") or out.get("decision") or "")
+    out["original_decision"] = original_decision
+
+    if _is_blocked_sharia(out):
+        out["live_plan_status"] = "sharia_blocked"
+        out["live_plan_action"] = "مستبعد شرعيًا"
+        return out
+
+    live_price = safe_round(out.get("live_price", out.get("display_price", 0)))
+    if live_price <= 0 or not out.get("live_overlay_available"):
+        out["effective_decision"] = original_decision
+        out["live_plan_status"] = "no_fresh_price"
+        out["live_plan_action"] = "لم يصل سعر حي جديد"
+        return out
+
+    entry = _first_positive_number(out, ["display_entry_price", "smart_entry_price", "entry_price_real", "entry", "breakout_price", "confirmation_price"])
+    stop = _first_positive_number(out, ["display_stop_price", "smart_stop_loss", "stop_loss", "stop"])
+    target1 = _first_positive_number(out, ["display_target_price", "smart_target_1", "target_1", "target1", "target"])
+    quality = safe_round(out.get("quality_score", 0))
+    execution = safe_round(out.get("execution_readiness_score", 0))
+    risk_pct = safe_round(out.get("display_risk_pct", out.get("risk_pct", 99)))
+    base_score = safe_round(out.get("display_rank_score", _stock_score_value(out)), 2)
+    dist_entry = _live_distance_pct(live_price, entry) if entry else None
+    dist_snapshot = _live_distance_pct(live_price, safe_round(out.get("analysis_snapshot_price", out.get("snapshot_display_price", 0))))
+
+    status = "valid"
+    action = "الخطة ما زالت صالحة"
+    new_decision = original_decision
+    adjustment = 0.0
+    reasons = []
+
+    if stop and live_price <= stop:
+        status = "invalid_stop_broken"
+        action = "الخطة غير صالحة: كسر الوقف"
+        new_decision = "مراقبة"
+        adjustment -= 45
+        reasons.append("السعر الحي كسر وقف الخطة")
+    elif target1 and live_price >= target1:
+        status = "target_reached"
+        action = "تم الوصول للهدف الأول"
+        new_decision = "مراقبة"
+        adjustment -= 22
+        reasons.append("السعر وصل/تجاوز الهدف الأول")
+    elif entry and dist_entry is not None:
+        if original_decision == "دخول قوي":
+            if dist_entry < -1.0:
+                status = "strong_failed_below_entry"
+                action = "هبط من دخول قوي: السعر دون الدخول"
+                new_decision = "مراقبة"
+                adjustment -= 30
+                reasons.append("السعر الحي دون نقطة الدخول بأكثر من 1%")
+            elif dist_entry > 4.0:
+                status = "late_after_entry"
+                action = "لم يعد دخولًا قويًا: السعر ابتعد"
+                new_decision = "دخول بحذر"
+                adjustment -= 15
+                reasons.append("السعر ابتعد عن نقطة الدخول")
+        elif original_decision == "دخول بحذر":
+            if dist_entry < -1.8:
+                status = "cautious_failed_below_entry"
+                action = "هبط إلى مراقبة"
+                new_decision = "مراقبة"
+                adjustment -= 18
+                reasons.append("السعر دون منطقة التفعيل")
+            elif -0.4 <= dist_entry <= 1.25 and quality >= 78 and execution >= 54 and risk_pct <= 8.5:
+                status = "promoted_to_strong"
+                action = "ترقى إلى دخول قوي"
+                new_decision = "دخول قوي"
+                adjustment += 15
+                reasons.append("السعر الحي أكد منطقة الدخول مع جودة وجاهزية عالية")
+        else:
+            if -0.5 <= dist_entry <= 1.25 and quality >= 78 and execution >= 54 and risk_pct <= 8.5:
+                status = "promoted_to_strong"
+                action = "دخل قائمة دخول قوي"
+                new_decision = "دخول قوي"
+                adjustment += 18
+                reasons.append("تحققت شروط الدخول القوي من السعر الحي")
+            elif -0.8 <= dist_entry <= 2.5 and quality >= 62 and risk_pct <= 12:
+                status = "promoted_to_cautious"
+                action = "دخل قائمة دخول بحذر"
+                new_decision = "دخول بحذر"
+                adjustment += 10
+                reasons.append("تحققت شروط الدخول بحذر من السعر الحي")
+
+    if dist_snapshot is not None and abs(dist_snapshot) >= 2.5 and status == "valid":
+        status = "snapshot_far_from_live"
+        action = "السعر ابتعد عن لقطة التحليل"
+        if original_decision == "دخول قوي":
+            new_decision = "دخول بحذر"
+            adjustment -= 8
+        reasons.append("فرق السعر الحالي عن لقطة التحليل أصبح واضحًا")
+
+    if _is_gray_sharia(out) and new_decision == "دخول قوي":
+        # Keep technical strength, but route to gray bucket instead of clean strong.
+        out["gray_technical_decision"] = "دخول قوي"
+
+    out["decision"] = new_decision
+    out["effective_decision"] = new_decision
+    out["live_plan_status"] = status
+    out["live_plan_action"] = action
+    out["live_plan_reason"] = "، ".join(reasons[:3]) if reasons else action
+    out["live_plan_adjustment"] = safe_round(adjustment, 2)
+    out["live_rank_score"] = safe_round(max(0.0, safe_round(out.get("live_rank_score", base_score)) + adjustment), 2)
+    if reasons:
+        existing = str(out.get("live_rank_reason", "") or "")
+        merged = "، ".join([x for x in [existing] + reasons if x][:5])
+        out["live_rank_reason"] = merged
+    return out
 
 def _sort_live_bucket(rows: list[dict]) -> list[dict]:
     return sorted(rows or [], key=lambda x: float(x.get("live_rank_score", x.get("display_rank_score", _stock_score_value(x))) or 0), reverse=True)
@@ -637,6 +797,95 @@ def live_diagnostics(symbols: str = "NVDA,AAPL,MSFT", allow_fallback: bool = Tru
         },
     }
 
+
+
+# Fix29: server-side live radar worker. Keeps radar state fresh even if the mobile page is backgrounded.
+def _live_radar_worker_save_state(**kwargs):
+    try:
+        LIVE_RADAR_WORKER_STATE.update(kwargs)
+        LIVE_RADAR_WORKER_STATE["updated_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+        set_json("live_radar_worker_status", dict(LIVE_RADAR_WORKER_STATE))
+    except Exception:
+        pass
+
+
+def _live_radar_worker_loop():
+    if not LIVE_RADAR_WORKER_ENABLED:
+        _live_radar_worker_save_state(enabled=False, running=False, last_error="worker_disabled")
+        return
+    with LIVE_RADAR_WORKER_LOCK:
+        if LIVE_RADAR_WORKER_STATE.get("running"):
+            return
+        LIVE_RADAR_WORKER_STATE["running"] = True
+    _live_radar_worker_save_state(enabled=True, running=True, last_error="")
+    last_live_ts = 0.0
+    last_full_ts = 0.0
+    time.sleep(6)
+    while True:
+        try:
+            phase = get_market_phase()
+            active = _is_active_market_phase(phase)
+            LIVE_RADAR_WORKER_STATE["iterations"] = int(LIVE_RADAR_WORKER_STATE.get("iterations", 0) or 0) + 1
+            LIVE_RADAR_WORKER_STATE["market_phase"] = phase
+            LIVE_RADAR_WORKER_STATE["active_price_window"] = active
+            if not active:
+                _live_radar_worker_save_state(last_error="", active_price_window=False)
+                time.sleep(60)
+                continue
+
+            now_ts = time.time()
+            snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+            age_sec = _parse_scan_snapshot_age_sec(snapshot) if isinstance(snapshot, dict) else 999999.0
+
+            if (not snapshot.get("rows")) or age_sec >= LIVE_RADAR_FULL_SCAN_SEC or (now_ts - last_full_ts >= LIVE_RADAR_FULL_SCAN_SEC):
+                if LIVE_RADAR_FULL_SCAN_LOCK.acquire(blocking=False):
+                    try:
+                        # Full scan every ~5 minutes during active sessions.
+                        trade_scan(include_all=False, force=True, prefer_cache=False)
+                        last_full_ts = time.time()
+                        LIVE_RADAR_WORKER_STATE["full_scans"] = int(LIVE_RADAR_WORKER_STATE.get("full_scans", 0) or 0) + 1
+                        LIVE_RADAR_WORKER_STATE["last_full_scan_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+                    finally:
+                        LIVE_RADAR_FULL_SCAN_LOCK.release()
+
+            if now_ts - last_live_ts >= LIVE_RADAR_PRICE_REFRESH_SEC:
+                payload = radar_live_refresh(limit=80, allow_fallback=True, include_watch=True, prefer_cache=False)
+                last_live_ts = time.time()
+                LIVE_RADAR_WORKER_STATE["live_refreshes"] = int(LIVE_RADAR_WORKER_STATE.get("live_refreshes", 0) or 0) + 1
+                LIVE_RADAR_WORKER_STATE["last_live_refresh_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+                if isinstance(payload, dict):
+                    LIVE_RADAR_WORKER_STATE["last_quotes_available"] = payload.get("quotes_available", 0)
+                    LIVE_RADAR_WORKER_STATE["last_quote_cache_policy"] = payload.get("quote_cache_policy", "")
+
+            _live_radar_worker_save_state(last_error="", running=True)
+            time.sleep(max(5, min(30, LIVE_RADAR_PRICE_REFRESH_SEC)))
+        except Exception as exc:
+            _live_radar_worker_save_state(last_error=f"{type(exc).__name__}: {str(exc)[:180]}", running=True)
+            time.sleep(30)
+
+
+@app.on_event("startup")
+def start_live_radar_worker():
+    if not LIVE_RADAR_WORKER_ENABLED:
+        return
+    try:
+        t = threading.Thread(target=_live_radar_worker_loop, daemon=True, name="live-radar-worker")
+        t.start()
+    except Exception as exc:
+        _live_radar_worker_save_state(running=False, last_error=f"startup_error: {str(exc)[:160]}")
+
+
+@app.get("/live-radar-worker-status")
+def live_radar_worker_status():
+    status = get_json("live_radar_worker_status", {}) or {}
+    out = dict(LIVE_RADAR_WORKER_STATE)
+    if isinstance(status, dict):
+        out.update(status)
+    out["runtime_now"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    out["market_phase"] = get_market_phase()
+    out["market_phase_label"] = market_phase_label(get_market_phase())
+    out["rule"] = "fresh_fmp_prices_during_open_pre_after; no sqlite quote cache while active"
+    return {"ok": True, "worker": out}
 
 # Fix20: compact Market Mood / Sentiment layer.
 # Context-only: does not add points to stock scoring and does not promote/demote opportunities.
@@ -778,14 +1027,18 @@ def _build_market_mood_from_quotes(quotes: dict, diagnostics: dict | None = None
 
 
 @app.get("/market-mood")
-def market_mood_endpoint(allow_fallback: bool = True, prefer_cache: bool = True):
+def market_mood_endpoint(allow_fallback: bool = True, prefer_cache: bool | None = None):
     symbols = MARKET_MOOD_INDEX_SYMBOLS + list(MARKET_MOOD_SECTOR_SYMBOLS.keys())
     try:
-        bundle = get_live_quotes(symbols, prefer_cache=prefer_cache, allow_fallback=allow_fallback)
+        phase = get_market_phase()
+        if prefer_cache is None:
+            prefer_cache = _prefer_price_cache_for_phase(phase)
+        bundle = get_live_quotes(symbols, prefer_cache=bool(prefer_cache), allow_fallback=allow_fallback)
         quotes = bundle.get("quotes", {}) if isinstance(bundle, dict) else {}
         diagnostics = bundle.get("diagnostics", {}) if isinstance(bundle, dict) else {}
         payload = _build_market_mood_from_quotes(quotes, diagnostics)
         payload["quote_diagnostics"] = diagnostics
+        payload["quote_cache_policy"] = "cache_ok_closed_market" if bool(prefer_cache) else "fresh_fmp_during_active_market"
         set_json("last_market_mood", payload)
         return payload
     except Exception as exc:
@@ -795,6 +1048,289 @@ def market_mood_endpoint(allow_fallback: bool = True, prefer_cache: bool = True)
             cached["error"] = str(exc)[:160]
             return cached
         return {"ok": False, "error": str(exc)[:180], "note": "تعذر بناء مزاج السوق حاليًا."}
+
+
+
+# Fix21: Analyst Snapshot layer.
+# Context-only support for decision quality. It does not alter scoring, ranking, or news logic.
+ANALYST_SNAPSHOT_CACHE_TTL_SEC = int(float(os.getenv("ANALYST_SNAPSHOT_CACHE_TTL_SEC", "21600") or 21600))
+
+
+def _analyst_cache_key(symbol: str) -> str:
+    return f"analyst_snapshot::{normalize_symbol_text(symbol)}"
+
+
+def _as_list(data):
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("data", "results", "historical", "items"):
+            val = data.get(key)
+            if isinstance(val, list):
+                return val
+        return [data]
+    return []
+
+
+def _first_num_from_dict(row: dict, keys: list[str]) -> float:
+    for key in keys:
+        try:
+            val = row.get(key)
+            if val is None or val == "":
+                continue
+            num = float(str(val).replace("%", "").replace(",", "").strip())
+            if num != 0:
+                return safe_round(num, 4)
+        except Exception:
+            continue
+    return 0.0
+
+
+def _first_text_from_dict(row: dict, keys: list[str]) -> str:
+    for key in keys:
+        val = row.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return ""
+
+
+def _fetch_fmp_json_candidates(urls: list[str], timeout: float = 8.0) -> tuple[list, str, dict]:
+    last_error = ""
+    for url in urls:
+        try:
+            resp = HTTP_SESSION.get(url, timeout=timeout)
+            meta = {"url_suffix": url.split("financialmodelingprep.com")[-1][:120], "status_code": resp.status_code}
+            if resp.status_code >= 400:
+                last_error = f"HTTP {resp.status_code}"
+                continue
+            data = resp.json()
+            rows = _as_list(data)
+            if rows:
+                return rows, "FMP", meta
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+            continue
+    return [], "", {"error": last_error}
+
+
+def _build_analyst_snapshot(symbol: str, force_refresh: bool = False) -> dict:
+    symbol = normalize_symbol_text(symbol)
+    if not symbol:
+        return {"ok": False, "error": "missing_symbol"}
+
+    cache_key = _analyst_cache_key(symbol)
+    cached = get_json(cache_key, {})
+    now_ts = time.time()
+    if (not force_refresh) and isinstance(cached, dict) and cached.get("ok"):
+        try:
+            cached_at = float(cached.get("cached_at_ts", 0) or 0)
+            if cached_at and now_ts - cached_at <= ANALYST_SNAPSHOT_CACHE_TTL_SEC:
+                cached["cache_used"] = True
+                return cached
+        except Exception:
+            pass
+
+    if not FMP_API_KEY:
+        return {
+            "ok": True,
+            "available": False,
+            "symbol": symbol,
+            "source": "none",
+            "summary_ar": "لم يتم ضبط مفتاح FMP، لذلك لا تتوفر آراء المحللين.",
+            "cache_used": False,
+        }
+
+    base = str(os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com") or "https://financialmodelingprep.com").rstrip("/")
+    price_target_urls = [
+        f"{base}/stable/price-target-consensus?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/stable/price-target-summary?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/api/v4/price-target-consensus?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/api/v4/price-target-summary?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/api/v3/price-target/{symbol}?apikey={FMP_API_KEY}",
+    ]
+    recommendation_urls = [
+        f"{base}/stable/analyst-stock-recommendations?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/api/v3/analyst-stock-recommendations/{symbol}?apikey={FMP_API_KEY}",
+        f"{base}/stable/ratings-snapshot?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/api/v3/rating/{symbol}?apikey={FMP_API_KEY}",
+    ]
+    upgrade_urls = [
+        f"{base}/stable/upgrades-downgrades?symbol={symbol}&apikey={FMP_API_KEY}",
+        f"{base}/api/v4/upgrades-downgrades?symbol={symbol}&apikey={FMP_API_KEY}",
+    ]
+    estimates_urls = [
+        f"{base}/stable/analyst-estimates?symbol={symbol}&period=annual&apikey={FMP_API_KEY}",
+        f"{base}/api/v3/analyst-estimates/{symbol}?period=annual&apikey={FMP_API_KEY}",
+    ]
+
+    target_rows, target_source, target_meta = _fetch_fmp_json_candidates(price_target_urls)
+    rec_rows, rec_source, rec_meta = _fetch_fmp_json_candidates(recommendation_urls)
+    upgrade_rows, upgrade_source, upgrade_meta = _fetch_fmp_json_candidates(upgrade_urls)
+    estimates_rows, estimates_source, estimates_meta = _fetch_fmp_json_candidates(estimates_urls)
+
+    current_price = 0.0
+    try:
+        qb = get_live_quotes([symbol], prefer_cache=_prefer_price_cache_for_phase(), allow_fallback=True)
+        current_price = safe_round(((qb.get("quotes", {}) or {}).get(symbol, {}) or {}).get("price", 0), 4)
+    except Exception:
+        current_price = 0.0
+
+    latest_target = target_rows[0] if target_rows and isinstance(target_rows[0], dict) else {}
+    target_consensus = _first_num_from_dict(latest_target, [
+        "targetConsensus", "target_consensus", "priceTargetAverage", "priceTargetAvg", "targetMean",
+        "targetMedian", "priceTarget", "targetPrice", "average", "target"
+    ])
+    target_high = _first_num_from_dict(latest_target, ["targetHigh", "priceTargetHigh", "high", "maxTarget"])
+    target_low = _first_num_from_dict(latest_target, ["targetLow", "priceTargetLow", "low", "minTarget"])
+    target_date = _first_text_from_dict(latest_target, ["date", "publishedDate", "updatedAt", "lastUpdated", "calendarDate"])
+    upside_pct = safe_round(((target_consensus - current_price) / current_price) * 100, 2) if target_consensus and current_price else 0.0
+
+    latest_rec = rec_rows[0] if rec_rows and isinstance(rec_rows[0], dict) else {}
+    rec_date = _first_text_from_dict(latest_rec, ["date", "period", "updatedAt", "calendarDate"])
+    buy_count = int(_first_num_from_dict(latest_rec, [
+        "analystRatingsbuy", "analystRatingsBuy", "buy", "strongBuy", "numberOfBuyRatings", "buyCount"
+    ]) or 0)
+    hold_count = int(_first_num_from_dict(latest_rec, [
+        "analystRatingsHold", "analystRatingshold", "hold", "numberOfHoldRatings", "holdCount"
+    ]) or 0)
+    sell_count = int(_first_num_from_dict(latest_rec, [
+        "analystRatingsSell", "analystRatingssell", "sell", "strongSell", "numberOfSellRatings", "sellCount"
+    ]) or 0)
+    total_count = buy_count + hold_count + sell_count
+    rating_text = _first_text_from_dict(latest_rec, ["rating", "recommendation", "ratingRecommendation", "scoreRecommendation"])
+    if not rating_text:
+        if total_count:
+            buy_ratio = buy_count / total_count
+            if buy_ratio >= 0.65:
+                rating_text = "شراء قوي"
+            elif buy_ratio >= 0.45:
+                rating_text = "شراء/احتفاظ"
+            elif sell_count > buy_count:
+                rating_text = "حذر/تخفيض"
+            else:
+                rating_text = "محايد"
+        else:
+            rating_text = "غير متوفر"
+
+    upgrade_count = 0
+    downgrade_count = 0
+    neutral_count = 0
+    latest_action_date = ""
+    for row in upgrade_rows[:12] if isinstance(upgrade_rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        action = " ".join([
+            str(row.get("action") or ""),
+            str(row.get("newGrade") or ""),
+            str(row.get("previousGrade") or ""),
+            str(row.get("grade") or ""),
+        ]).lower()
+        latest_action_date = latest_action_date or _first_text_from_dict(row, ["publishedDate", "date", "updatedAt"])
+        if any(x in action for x in ["upgrade", "outperform", "buy", "overweight", "رفع"]):
+            upgrade_count += 1
+        elif any(x in action for x in ["downgrade", "underperform", "sell", "underweight", "خفض"]):
+            downgrade_count += 1
+        else:
+            neutral_count += 1
+
+    latest_est = estimates_rows[0] if estimates_rows and isinstance(estimates_rows[0], dict) else {}
+    est_date = _first_text_from_dict(latest_est, ["date", "period", "calendarDate"])
+    revenue_est = _first_num_from_dict(latest_est, ["estimatedRevenueAvg", "revenueAvg", "estimatedRevenue", "revenue"])
+    eps_est = _first_num_from_dict(latest_est, ["estimatedEpsAvg", "epsAvg", "estimatedEps", "eps"])
+
+    available = bool(target_rows or rec_rows or upgrade_rows or estimates_rows)
+    if available:
+        upside_phrase = ""
+        if target_consensus and current_price:
+            if upside_pct >= 15:
+                upside_phrase = f"السعر المستهدف يشير إلى إمكانية ارتفاع تقارب {upside_pct}%."
+            elif upside_pct >= 3:
+                upside_phrase = f"السعر المستهدف أعلى من السعر الحالي بنحو {upside_pct}%."
+            elif upside_pct <= -8:
+                upside_phrase = f"السعر المستهدف أقل من السعر الحالي بنحو {abs(upside_pct)}%، وهذا يحتاج حذرًا."
+            else:
+                upside_phrase = "السعر المستهدف قريب من السعر الحالي."
+        action_phrase = ""
+        if upgrade_count or downgrade_count:
+            action_phrase = f"آخر التحديثات: {upgrade_count} ترقيات و {downgrade_count} تخفيضات."
+        elif total_count:
+            action_phrase = f"التوصية الإجمالية مبنية على {total_count} تصنيفًا متاحًا."
+        summary_ar = " ".join([x for x in [
+            f"رأي المحللين: {rating_text}.",
+            upside_phrase,
+            action_phrase,
+            "هذه طبقة مساعدة فقط ولا تغيّر نقاط الرادار أو قرار الدخول."
+        ] if x]).strip()
+    else:
+        summary_ar = "لا تتوفر آراء محللين كافية لهذا السهم من FMP حاليًا. لا يؤثر ذلك على نقاط الرادار."
+
+    payload = {
+        "ok": True,
+        "available": available,
+        "symbol": symbol,
+        "source": "FMP REST" if available else "none",
+        "cache_used": False,
+        "cached_at_ts": now_ts,
+        "fetched_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "current_price": current_price,
+        "consensus": {
+            "rating": rating_text,
+            "analyst_count": total_count,
+            "buy": buy_count,
+            "hold": hold_count,
+            "sell": sell_count,
+            "date": rec_date,
+        },
+        "price_target": {
+            "consensus": target_consensus,
+            "high": target_high,
+            "low": target_low,
+            "upside_pct": upside_pct,
+            "date": target_date,
+        },
+        "updates": {
+            "upgrades": upgrade_count,
+            "downgrades": downgrade_count,
+            "neutral": neutral_count,
+            "latest_date": latest_action_date,
+        },
+        "estimates": {
+            "date": est_date,
+            "revenue_avg": revenue_est,
+            "eps_avg": eps_est,
+        },
+        "summary_ar": summary_ar,
+        "diagnostics": {
+            "target_rows": len(target_rows or []),
+            "recommendation_rows": len(rec_rows or []),
+            "upgrade_rows": len(upgrade_rows or []),
+            "estimate_rows": len(estimates_rows or []),
+            "target_meta": target_meta,
+            "recommendation_meta": rec_meta,
+            "upgrade_meta": upgrade_meta,
+            "estimates_meta": estimates_meta,
+        },
+        "scoring_note": "context_only_no_points",
+    }
+    try:
+        set_json(cache_key, payload)
+    except Exception:
+        pass
+    return payload
+
+
+@app.get("/analyst-snapshot")
+def analyst_snapshot_endpoint(symbol: str, force_refresh: bool = False):
+    try:
+        return _build_analyst_snapshot(symbol, force_refresh=force_refresh)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "symbol": normalize_symbol_text(symbol),
+            "error": str(exc)[:180],
+            "summary_ar": "تعذر تحميل آراء المحللين مؤقتًا. لا يؤثر ذلك على ترتيب الرادار.",
+            "scoring_note": "context_only_no_points",
+        }
 
 
 def _stock_score_value(x: dict) -> float:
@@ -924,10 +1460,10 @@ def _trade_scan_cache_ttl_sec(phase: str, prefer_cache: bool = False) -> int:
                 return int(os.getenv("RADAR_FAST_CACHE_TTL_OPEN_SEC", "240") or 240)
             return int(os.getenv("RADAR_FAST_CACHE_TTL_CLOSED_SEC", "1800") or 1800)
         if phase in {"open", "pre_market", "after_hours"}:
-            return int(os.getenv("RADAR_SCAN_CACHE_TTL_OPEN_SEC", "75") or 75)
+            return int(os.getenv("RADAR_SCAN_CACHE_TTL_OPEN_SEC", "300") or 300)
         return int(os.getenv("RADAR_SCAN_CACHE_TTL_CLOSED_SEC", "900") or 900)
     except Exception:
-        return 75 if phase in {"open", "pre_market", "after_hours"} else 900
+        return 300 if phase in {"open", "pre_market", "after_hours"} else 900
 
 
 def _build_trade_scan_response(results, scan_debug, include_all: bool = False, cache_hit: bool = False, cache_age_sec=None, payload_note: str = ""):
@@ -1073,6 +1609,155 @@ def debug_scan():
 def debug_last_scan():
     return {"ok": True, "diagnostics": get_last_scan_debug()}
 
+
+
+# Fix29: AI-style Arabic context/news summary.
+# Uses Claude only if ANTHROPIC_API_KEY + AI_CONTEXT_SUMMARY_ENABLED are configured;
+# otherwise returns a deterministic Arabic summary so the UI remains stable.
+AI_CONTEXT_SUMMARY_CACHE_TTL_SEC = int(float(os.getenv("AI_CONTEXT_SUMMARY_CACHE_TTL_SEC", "900") or 900))
+AI_CONTEXT_SUMMARY_ENABLED = str(os.getenv("AI_CONTEXT_SUMMARY_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ai_context_cache_key(symbol: str) -> str:
+    return f"ai_context_summary::{normalize_symbol_text(symbol)}"
+
+
+def _find_stock_from_last_snapshot(symbol: str) -> dict:
+    symbol = normalize_symbol_text(symbol)
+    snap = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snap.get("rows", []) if isinstance(snap, dict) else []
+    for row in rows or []:
+        if normalize_symbol_text((row or {}).get("symbol", "")) == symbol:
+            return dict(row or {})
+    return {}
+
+
+def _rule_based_ai_context(symbol: str, stock: dict, news_bundle: dict, market_mood: dict) -> str:
+    title = str((news_bundle or {}).get("news_title", "") or "").strip()
+    scope = str((news_bundle or {}).get("news_scope_label", (news_bundle or {}).get("news_scope", "")) or "")
+    sentiment = str((news_bundle or {}).get("news_sentiment", "neutral") or "neutral")
+    age = str((news_bundle or {}).get("news_age_label", "") or "")
+    mood = str((market_mood or {}).get("label", "") or "")
+    decision = str((stock or {}).get("decision", "") or "")
+    plan = str((stock or {}).get("live_plan_action", "") or (stock or {}).get("execution_status_ar", "") or "")
+    parts = []
+    if title:
+        parts.append(f"الخبر المتاح عن {symbol}: {title}.")
+        if scope or age:
+            parts.append(f"تصنيفه: {scope or 'معلومة سياقية'}{('، ' + age) if age else ''}.")
+        if sentiment in {"positive", "negative", "mixed", "legal"}:
+            sentiment_ar = {"positive":"إيجابي", "negative":"سلبي", "mixed":"مختلط", "legal":"قانوني/تنظيمي"}.get(sentiment, sentiment)
+            parts.append(f"النبرة: {sentiment_ar}.")
+    else:
+        parts.append("لا يوجد خبر حديث موثوق ومباشر يمكن تلخيصه لهذا السهم الآن.")
+    if mood:
+        parts.append(f"مزاج السوق العام: {mood}، وهو عامل سياقي فقط.")
+    if decision or plan:
+        parts.append(f"حالة الرادار الحالية: {decision or 'غير محددة'}{(' - ' + plan) if plan else ''}.")
+    parts.append("هذا الملخص لا يضيف نقاطًا ولا يبدل شروط الدخول؛ القرار يبقى مبنيًا على السعر والخطة والمؤشرات.")
+    return " ".join(parts)
+
+
+def _build_ai_context_summary(symbol: str, force_refresh: bool = False) -> dict:
+    symbol = normalize_symbol_text(symbol)
+    if not symbol:
+        return {"ok": False, "error": "missing_symbol"}
+    cache_key = _ai_context_cache_key(symbol)
+    cached = get_json(cache_key, {})
+    now_ts = time.time()
+    if (not force_refresh) and isinstance(cached, dict) and cached.get("ok"):
+        try:
+            if now_ts - float(cached.get("cached_at_ts", 0) or 0) <= AI_CONTEXT_SUMMARY_CACHE_TTL_SEC:
+                cached["cache_used"] = True
+                return cached
+        except Exception:
+            pass
+
+    stock = _find_stock_from_last_snapshot(symbol)
+    info = COMPANIES_DATA.get(symbol, {}) if isinstance(COMPANIES_DATA, dict) else {}
+    company = str(stock.get("company") or info.get("companyName") or info.get("name") or symbol)
+    sector = str(stock.get("sector") or info.get("sector") or "")
+    industry = str(stock.get("industry") or info.get("industry") or "")
+    try:
+        news_bundle = get_news_bundle(symbol, company, sector, industry)
+    except Exception:
+        news_bundle = {}
+    market_mood = get_json("last_market_mood", {}) or {}
+    fallback_summary = _rule_based_ai_context(symbol, stock, news_bundle, market_mood)
+    provider = "rule_based"
+    summary_ar = fallback_summary
+
+    try:
+        from app.settings import ANTHROPIC_API_KEY, AI_NEWS_MODEL
+        if AI_CONTEXT_SUMMARY_ENABLED and ANTHROPIC_API_KEY:
+            body = {
+                "model": AI_NEWS_MODEL,
+                "max_tokens": 360,
+                "temperature": 0,
+                "system": "أنت مساعد عربي مختصر لأداة رادار أسهم. لخّص الخبر ومزاج السوق فقط. لا تقدم توصية شراء أو بيع. لا تضف نقاطًا. أعد نصًا عربيًا قصيرًا فقط.",
+                "messages": [{"role": "user", "content": json.dumps({
+                    "symbol": symbol,
+                    "company": company,
+                    "current_decision": stock.get("decision", ""),
+                    "live_plan_action": stock.get("live_plan_action", ""),
+                    "news": {
+                        "title": news_bundle.get("news_title", ""),
+                        "scope": news_bundle.get("news_scope_label", news_bundle.get("news_scope", "")),
+                        "sentiment": news_bundle.get("news_sentiment", ""),
+                        "age": news_bundle.get("news_age_label", ""),
+                        "context_note": news_bundle.get("news_context_note", ""),
+                    },
+                    "market_mood": {
+                        "label": market_mood.get("label", ""),
+                        "summary": market_mood.get("summary_ar", ""),
+                    },
+                    "strict": "الأخبار ومزاج السوق معلومات فقط ولا تدخل في نقاط الرادار."
+                }, ensure_ascii=False)}],
+            }
+            resp = HTTP_SESSION.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=body,
+                timeout=8,
+            )
+            if resp.status_code < 300:
+                data = resp.json()
+                text = " ".join(str(x.get("text", "") or "") for x in (data.get("content", []) or []) if isinstance(x, dict)).strip()
+                if text:
+                    summary_ar = text[:900]
+                    provider = "claude"
+    except Exception:
+        provider = "rule_based"
+
+    payload = {
+        "ok": True,
+        "symbol": symbol,
+        "provider": provider,
+        "cache_used": False,
+        "cached_at_ts": now_ts,
+        "fetched_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "summary_ar": summary_ar,
+        "news": news_bundle,
+        "market_mood_label": market_mood.get("label", ""),
+        "scoring_note": "context_only_no_points",
+    }
+    try:
+        set_json(cache_key, payload)
+    except Exception:
+        pass
+    return payload
+
+
+@app.get("/ai-context-summary")
+def ai_context_summary_endpoint(symbol: str, force_refresh: bool = False):
+    try:
+        return _build_ai_context_summary(symbol, force_refresh=force_refresh)
+    except Exception as exc:
+        return {"ok": False, "symbol": normalize_symbol_text(symbol), "error": str(exc)[:180], "summary_ar": "تعذر توليد الملخص السياقي مؤقتًا."}
 
 @app.get("/debug-news/{symbol}")
 def debug_news_symbol(symbol: str):
