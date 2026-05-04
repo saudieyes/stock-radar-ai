@@ -2992,30 +2992,37 @@
     async function refreshRadarLiveFromSnapshot(silent=true) {
       if (window.__radarLiveBusy) return;
       if (silent && document.hidden) return;
-      if (silent && currentlyOpenDetailKeys().length) return;
       window.__radarLiveBusy = true;
       const btn = document.getElementById('liveRefreshBtn');
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
         const uiState = preserveScanUiState();
-        const res = await apiFetch(`/radar-live-refresh?limit=80&_=${Date.now()}`);
+        const res = await apiFetch(`/radar-live-refresh?limit=120&_=${Date.now()}`);
         const data = await res.json();
-        if (data.ok && applyRadarLivePayload(data)) {
-          if (silent && userIsReadingRadarCard()) {
-            // While the user is reading a card, never rebuild/reorder the page.
-            // Only update the visible live price fields to avoid scroll jumps.
+        const changed = data.ok && applyRadarLivePayload(data);
+
+        if (changed) {
+          const reading = silent && (userIsReadingRadarCard() || currentlyOpenDetailKeys().length);
+          if (reading) {
+            // أثناء قراءة بطاقة أو فتح "تحليل شامل": لا نعيد بناء الصفحة ولا نغيّر مكانك.
+            // نحدث السعر والنسبة والمصدر داخل نفس البطاقة فقط.
             updateVisibleLivePriceDomFromScanData();
           } else {
             renderScanData();
             restoreScanUiState(uiState);
           }
+
           const updated = document.getElementById('heroUpdated');
           if (updated) updated.textContent = `تحديث حي: ${safeText(data.live_updated_at || 'الآن')} • ${formatNumber(data.quotes_available || 0)} سعر`;
-        } else if (!silent) {
-          alert(data.message || data.error || 'لا توجد لقطة رادار محفوظة بعد. شغّل تحديث الكل أولًا.');
+        } else {
+          // احتياط: إذا لم يرجع الرادار الحي مجموعات محدثة، نحدث الأسعار مباشرة من /live-quotes.
+          await refreshLiveQuotesForScan(true);
+          if (!silent) alert(data.message || data.error || 'لا توجد لقطة رادار محفوظة بعد. شغّل تحديث الكل أولًا.');
         }
       } catch(e) {
+        // احتياط ثانٍ: لا نترك الأسعار ثابتة إذا تعثر radar-live-refresh.
+        try { await refreshLiveQuotesForScan(true); } catch(_) {}
         if (!silent) alert('تعذر التحديث الحي الآن');
       } finally {
         window.__radarLiveBusy = false;
