@@ -1558,8 +1558,15 @@
 
 
     /* ===== Fix40: stable bottom-sheet details + portfolio polish ===== */
-    body.modal-open { overflow: hidden !important; touch-action: none; }
+    body.modal-open { overflow: hidden !important; }
     body.modal-open .container { overflow: hidden; }
+    /* Fix41: do NOT use touch-action:none on body; Android blocks scrolling inside the detail sheet. */
+    details.detail-panel[open],
+    details.detail-panel[open] .details-grid,
+    details.detail-panel[open] .sheet-live-header,
+    details.detail-panel[open] .card-local-nav {
+      touch-action: pan-y !important;
+    }
 
     /* Details must scroll inside the sheet, not move the whole page */
     details.detail-panel[open] {
@@ -1644,6 +1651,14 @@
       display: grid !important;
       grid-template-columns: repeat(2,minmax(0,1fr)) !important;
       gap: 9px !important;
+    }
+    details.detail-panel[open] .details-grid{
+      max-height: calc(93dvh - 190px - env(safe-area-inset-bottom)) !important;
+    }
+    details.detail-panel[open] .detail-box,
+    details.detail-panel[open] .card-local-nav,
+    details.detail-panel[open] .sheet-live-header{
+      pointer-events: auto !important;
     }
     details.detail-panel[open] .card-local-nav{
       flex:0 0 auto;
