@@ -1298,6 +1298,431 @@
       .card-nav-btn { white-space: normal; }
     }
 
+
+
+    /* Fix45: modern compact radar + safe modal details (UI only) */
+    .risk-panel-section, .position-size-panel, [data-risk-panel="1"] { display:none !important; }
+
+    body.modal-lock {
+      overflow: hidden !important;
+      touch-action: none;
+    }
+    .modern-detail-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: none;
+      background: rgba(0,0,0,.62);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+    }
+    .modern-detail-overlay.open { display: block; }
+    .modern-detail-sheet {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: min(88vh, 760px);
+      background: var(--panel-bg, #0b1525);
+      border-top: 1px solid var(--border-main, #243d5e);
+      border-radius: 22px 22px 0 0;
+      box-shadow: 0 -18px 50px rgba(0,0,0,.42);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      direction: rtl;
+      transform: translateY(0);
+    }
+    .modern-detail-drag {
+      width: 42px;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--border-main, #334155);
+      margin: 10px auto 8px;
+      opacity: .9;
+      flex: 0 0 auto;
+    }
+    .modern-detail-head {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      padding: 0 14px 10px;
+      border-bottom: 1px solid var(--border-soft, #243d5e);
+    }
+    .modern-detail-symbol {
+      font-size: 24px;
+      font-weight: 950;
+      color: var(--text-strong, #ddeeff);
+      line-height: 1.05;
+      direction: ltr;
+      text-align: right;
+    }
+    .modern-detail-company {
+      color: var(--text-muted, #8badc8);
+      font-size: 12px;
+      line-height: 1.5;
+      margin-top: 3px;
+      overflow-wrap: anywhere;
+    }
+    .modern-detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .modern-detail-chip {
+      border: 1px solid var(--border-soft, #243d5e);
+      background: var(--panel-bg-soft, rgba(77,184,255,.08));
+      border-radius: 999px;
+      padding: 5px 8px;
+      color: var(--text-main, #ddeeff);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+    .modern-detail-price {
+      text-align: left;
+      min-width: 92px;
+    }
+    .modern-detail-price .md-price {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 20px;
+      font-weight: 900;
+      color: var(--text-strong, #ddeeff);
+      direction: ltr;
+      white-space: nowrap;
+    }
+    .modern-detail-price .md-change {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 900;
+      direction: ltr;
+      margin-top: 3px;
+      white-space: nowrap;
+    }
+    .modern-detail-close {
+      margin-top: 8px;
+      width: 100%;
+      min-height: 34px;
+      border-radius: 12px;
+      border: 1px solid var(--border-main, #334155);
+      background: var(--panel-bg-soft, #0e1c30);
+      color: var(--text-strong, #ddeeff);
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .modern-detail-tabs {
+      flex: 0 0 auto;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding: 10px 14px 8px;
+      border-bottom: 1px solid var(--border-soft, #243d5e);
+    }
+    .modern-detail-tabs::-webkit-scrollbar { display:none; }
+    .modern-detail-tab {
+      flex: 0 0 auto;
+      border: 1px solid var(--border-soft, #243d5e);
+      background: var(--panel-bg-soft, #0e1c30);
+      color: var(--text-muted, #8badc8);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .modern-detail-tab.active {
+      color: var(--detail-btn-text, #4db8ff);
+      border-color: var(--detail-btn-border, #4db8ff);
+      background: var(--detail-btn-bg, rgba(77,184,255,.12));
+    }
+    .modern-detail-body {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      padding: 12px 14px calc(18px + env(safe-area-inset-bottom));
+      touch-action: pan-y;
+    }
+    .modern-detail-body .details-grid {
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+      margin: 0;
+    }
+    .modern-detail-body .detail-box {
+      border-radius: 14px;
+      padding: 10px;
+    }
+    .modern-detail-body .detail-box.full { grid-column: 1 / -1; }
+    .modern-detail-body .card-local-nav { display:none !important; }
+    .modern-detail-footer {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--border-soft, #243d5e);
+      background: var(--panel-bg, #0b1525);
+    }
+    .modern-detail-action {
+      min-height: 40px;
+      border-radius: 13px;
+      border: 1px solid var(--border-soft, #243d5e);
+      background: var(--panel-bg-soft, #0e1c30);
+      color: var(--text-strong, #ddeeff);
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .modern-detail-action.primary {
+      border-color: var(--detail-btn-border, #4db8ff);
+      color: var(--detail-btn-text, #4db8ff);
+      background: var(--detail-btn-bg, rgba(77,184,255,.12));
+    }
+
+    .compact-modern .quick-nav { display:none !important; }
+    .compact-modern .card-local-nav { display:none !important; }
+    .compact-modern .cards {
+      gap: 7px;
+    }
+    .compact-modern .cards > .card {
+      max-width: 100%;
+      border-radius: 15px;
+      padding: 10px 11px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 10px;
+      align-items: center;
+      cursor: pointer;
+      border-right: 3px solid rgba(77,184,255,.55);
+    }
+    .compact-modern .cards > .card:nth-child(even) {
+      background: var(--panel-bg-soft, rgba(255,255,255,.035));
+    }
+    .compact-modern .card-top {
+      grid-column: 1 / 2;
+      margin: 0;
+      display: block;
+      min-width: 0;
+    }
+    .compact-modern .card-heading-line {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      min-width: 0;
+    }
+    .compact-modern .rank-badge {
+      min-width: 30px;
+      height: 28px;
+      border-radius: 999px;
+      font-size: 12px;
+      align-self: start;
+    }
+    .compact-modern .symbol {
+      font-size: 19px;
+      line-height: 1.1;
+      direction: ltr;
+      text-align: right;
+    }
+    .compact-modern .company {
+      font-size: 11px;
+      margin-top: 2px;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .compact-modern .card-rank-subtitle { display:none; }
+    .compact-modern .badges {
+      display: flex;
+      justify-content: flex-start;
+      margin-top: 5px;
+      gap: 4px;
+      max-height: 24px;
+      overflow: hidden;
+    }
+    .compact-modern .badge {
+      min-height: 20px;
+      padding: 3px 7px;
+      font-size: 10px;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+    .compact-modern .price-plan-grid {
+      grid-column: 2 / 3;
+      grid-row: 1 / 3;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 86px;
+      margin: 0;
+      align-items: flex-start;
+      justify-content: center;
+    }
+    .compact-modern .price-plan-grid .price-plan-item:not(:first-child) { display:none; }
+    .compact-modern .price-plan-grid .price-plan-item {
+      border: 0;
+      background: transparent;
+      padding: 0;
+      min-height: 0;
+      text-align: left;
+    }
+    .compact-modern .price-plan-label { display:none; }
+    .compact-modern .price-plan-value {
+      font-size: 18px;
+      line-height: 1.15;
+      direction: ltr;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .compact-modern .compact-source-line {
+      font-size: 10px;
+      line-height: 1.2;
+      direction: ltr;
+      text-align: left;
+      max-width: 100px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .compact-modern .indicator-strip {
+      grid-column: 1 / -1;
+      margin: 0;
+      display: flex;
+      flex-wrap: nowrap;
+      overflow: hidden;
+      gap: 5px;
+      max-height: 24px;
+    }
+    .compact-modern .indicator-pill {
+      padding: 3px 7px;
+      font-size: 10px;
+      line-height: 1.4;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .compact-modern .news-line,
+    .compact-modern .card-why-line,
+    .compact-modern .live-plan-warning {
+      grid-column: 1 / -1;
+      margin: 0;
+      padding: 7px 9px;
+      font-size: 11px;
+      line-height: 1.55;
+      max-height: 44px;
+      overflow: hidden;
+    }
+    .compact-modern .card-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      overflow-x: auto;
+      gap: 7px;
+      margin: 0;
+      padding-top: 2px;
+      scrollbar-width: none;
+    }
+    .compact-modern .card-actions::-webkit-scrollbar { display:none; }
+    .compact-modern .card-actions button {
+      flex: 0 0 auto;
+      min-height: 32px;
+      padding: 7px 10px;
+      font-size: 11px;
+      border-radius: 999px;
+    }
+    .compact-modern details.detail-panel {
+      grid-column: 1 / -1;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      margin: 0;
+    }
+    .compact-modern details.detail-panel summary {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--detail-btn-border, #4db8ff);
+      background: var(--detail-btn-bg, rgba(77,184,255,.12));
+      color: var(--detail-btn-text, #4db8ff);
+      font-size: 12px;
+      font-weight: 950;
+      list-style: none;
+    }
+    .compact-modern details.detail-panel summary::-webkit-details-marker { display:none; }
+    .compact-modern details.detail-panel[open] > .details-grid,
+    .compact-modern details.detail-panel[open] > .card-local-nav { display:none !important; }
+
+    .compact-modern .market-mood-card {
+      border-radius: 14px;
+      padding: 10px 12px;
+    }
+    .compact-modern .market-mood-top {
+      margin-bottom: 4px;
+    }
+    .compact-modern .market-mood-title::before {
+      content: '◔';
+      display: inline-flex;
+      margin-left: 6px;
+      color: var(--detail-btn-text, #4db8ff);
+      font-size: 18px;
+    }
+    .compact-modern .market-mood-grid {
+      display: flex;
+      overflow-x: auto;
+      gap: 8px;
+      scrollbar-width: none;
+    }
+    .compact-modern .market-mood-grid::-webkit-scrollbar { display:none; }
+    .compact-modern .mood-mini {
+      flex: 0 0 145px;
+      padding: 8px;
+    }
+
+    .compact-modern .section-header {
+      padding: 12px 14px;
+      border-radius: 16px;
+    }
+    .compact-modern .section-preview,
+    .compact-modern .section-rank-note { font-size: 11px; }
+    .compact-modern .section-tools {
+      gap: 6px;
+    }
+    .compact-modern .section-tools button {
+      min-height: 34px;
+      padding: 7px 10px;
+      font-size: 11px;
+      border-radius: 999px;
+    }
+
+    html[data-theme="light"] .modern-detail-sheet,
+    :root[data-theme="light"] .modern-detail-sheet {
+      background: #ffffff;
+      color: #0f172a;
+    }
+    :root[data-theme="light"] .compact-modern .cards > .card:nth-child(even) { background: #f5f8fd; }
+    :root[data-theme="light"] .compact-modern .cards > .card:nth-child(odd) { background: #ffffff; }
+    :root[data-theme="light"] .modern-detail-footer,
+    :root[data-theme="light"] .modern-detail-head,
+    :root[data-theme="light"] .modern-detail-tabs {
+      background: #ffffff;
+    }
+
+    @media (max-width: 760px) {
+      .modern-detail-sheet { max-height: 90vh; }
+      .modern-detail-body .details-grid { grid-template-columns: 1fr; }
+      .modern-detail-head { grid-template-columns: minmax(0,1fr) auto; }
+      .modern-detail-symbol { font-size: 23px; }
+      .modern-detail-price .md-price { font-size: 19px; }
+      .compact-modern .cards > .card { padding: 9px 10px; }
+      .compact-modern .card-actions button { min-height: 31px; }
+    }
+
 </style>
 </head>
 <body>
@@ -3702,6 +4127,196 @@
     window.__fullScanTimer = window.setInterval(() => periodicFullRadarScan(), 300000);
     loadAll();
   </script>
+
+
+<!-- Fix45 modern safe details modal -->
+<div id="modernDetailOverlay" class="modern-detail-overlay" aria-hidden="true">
+  <div class="modern-detail-sheet" role="dialog" aria-modal="true" aria-label="تحليل السهم">
+    <div class="modern-detail-drag"></div>
+    <div class="modern-detail-head">
+      <div>
+        <div id="modernDetailSymbol" class="modern-detail-symbol">—</div>
+        <div id="modernDetailCompany" class="modern-detail-company">—</div>
+        <div id="modernDetailMeta" class="modern-detail-meta"></div>
+      </div>
+      <div class="modern-detail-price">
+        <div id="modernDetailPrice" class="md-price">—</div>
+        <div id="modernDetailChange" class="md-change">—</div>
+        <button type="button" class="modern-detail-close" onclick="closeModernDetail()">إغلاق ✕</button>
+      </div>
+    </div>
+    <div class="modern-detail-tabs" id="modernDetailTabs">
+      <button type="button" class="modern-detail-tab active" data-filter="all">الكل</button>
+      <button type="button" class="modern-detail-tab" data-filter="plan">الخطة</button>
+      <button type="button" class="modern-detail-tab" data-filter="market">السوق</button>
+      <button type="button" class="modern-detail-tab" data-filter="analyst">المحللين</button>
+      <button type="button" class="modern-detail-tab" data-filter="news">الأخبار</button>
+    </div>
+    <div id="modernDetailBody" class="modern-detail-body"></div>
+    <div class="modern-detail-footer">
+      <button type="button" id="modernDetailPortfolioBtn" class="modern-detail-action primary">💼 للمحفظة</button>
+      <button type="button" id="modernDetailWatchBtn" class="modern-detail-action">📌 متابعة</button>
+      <button type="button" class="modern-detail-action" onclick="closeModernDetail()">إغلاق</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  'use strict';
+  document.documentElement.classList.add('compact-modern');
+
+  function q(sel, root=document){ return root.querySelector(sel); }
+  function qa(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+  function txt(el){ return (el && el.textContent || '').trim(); }
+  function getCardFromNode(node){ return node ? node.closest('.card') : null; }
+
+  function hidePositionSizeBlocks(root=document){
+    qa('.detail-box', root).forEach(box => {
+      const label = txt(q('.detail-label', box));
+      if (/لوحة الحجم|Position Size|Risk Panel/i.test(label)) box.style.display = 'none';
+    });
+    qa('.section-title-row, .section-header, .panel, .opening-box, .section-box', root).forEach(el => {
+      if (/Position Size|Risk Panel|لوحة الحجم/i.test(txt(el))) {
+        const section = el.closest('.section-box, .opening-box, .panel, .section') || el;
+        section.style.display = 'none';
+      }
+    });
+  }
+
+  function colorChangeClass(changeText){
+    const s = String(changeText || '');
+    if (s.includes('-')) return 'red';
+    if (s.includes('+') || s.includes('▲')) return 'green';
+    return '';
+  }
+
+  window.closeModernDetail = function(){
+    const overlay = document.getElementById('modernDetailOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden','true');
+    document.body.classList.remove('modal-lock');
+    const body = document.getElementById('modernDetailBody');
+    if (body) body.innerHTML = '';
+  };
+
+  function filterModernDetails(filter){
+    const body = document.getElementById('modernDetailBody');
+    if (!body) return;
+    const all = filter === 'all';
+    qa('.detail-box', body).forEach(box => {
+      const label = txt(q('.detail-label', box));
+      let show = all;
+      if (filter === 'plan') show = /سعر|الدخول|الهدف|وقف|الخطة|المخاطرة|العائد|صلاحية|نوع الفرصة|جاهزية|تنفيذ/i.test(label);
+      if (filter === 'market') show = /المؤشر|القطاع|السوق|مزاج|التوافق|تاريخ|سيولة|اتجاه|VWAP|Runner|Continuation/i.test(label);
+      if (filter === 'analyst') show = /محلل|المحللين|Analyst/i.test(label);
+      if (filter === 'news') show = /خبر|الأخبار|AI|مزاج السوق/i.test(label);
+      box.style.display = show ? '' : 'none';
+    });
+  }
+
+  function openModernDetailFromCard(card){
+    if (!card) return;
+    const details = q('details.detail-panel:not(.portfolio-analyst-panel)', card);
+    if (!details) return;
+    const symbol = details.dataset.symbol || txt(q('.symbol', card)) || '';
+    const company = txt(q('.company', card)) || symbol;
+    const price = txt(q('.price-plan-grid .price-plan-value', card)) || '—';
+    const change = txt(q('.compact-source-line', card)) || txt(q('.price-change-chip', card)) || '';
+    const detailGrid = q('.details-grid', details);
+    const overlay = document.getElementById('modernDetailOverlay');
+    const body = document.getElementById('modernDetailBody');
+    if (!overlay || !body || !detailGrid) return;
+
+    const cloned = detailGrid.cloneNode(true);
+    hidePositionSizeBlocks(cloned);
+    body.innerHTML = '';
+    body.appendChild(cloned);
+
+    const symEl = document.getElementById('modernDetailSymbol');
+    const coEl = document.getElementById('modernDetailCompany');
+    const priceEl = document.getElementById('modernDetailPrice');
+    const chgEl = document.getElementById('modernDetailChange');
+    const metaEl = document.getElementById('modernDetailMeta');
+    if (symEl) symEl.textContent = symbol;
+    if (coEl) coEl.textContent = company;
+    if (priceEl) priceEl.textContent = price;
+    if (chgEl) {
+      chgEl.textContent = change || 'آخر تحديث السعر ظاهر في التفاصيل';
+      chgEl.className = 'md-change ' + colorChangeClass(change);
+    }
+    if (metaEl) {
+      const chips = qa('.badges .badge', card).slice(0, 4).map(b => `<span class="modern-detail-chip">${b.textContent.trim()}</span>`).join('');
+      metaEl.innerHTML = chips || '<span class="modern-detail-chip">تحليل شامل</span>';
+    }
+    const pBtn = document.getElementById('modernDetailPortfolioBtn');
+    const wBtn = document.getElementById('modernDetailWatchBtn');
+    if (pBtn) pBtn.onclick = function(){ if (typeof addCardToPortfolio === 'function') addCardToPortfolio(symbol, Number(String(price).replace(/[^0-9.\-]/g,'')) || 0); };
+    if (wBtn) wBtn.onclick = function(){ if (typeof addToWatchlist === 'function') addToWatchlist(symbol, Number(String(price).replace(/[^0-9.\-]/g,'')) || 0); };
+
+    qa('.modern-detail-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === 'all'));
+    filterModernDetails('all');
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden','false');
+    document.body.classList.add('modal-lock');
+    if (typeof loadAnalystSnapshot === 'function') loadAnalystSnapshot(symbol);
+    if (typeof loadAiContextSummary === 'function') loadAiContextSummary(symbol);
+  }
+
+  // Intercept only stock detail summaries. Keep portfolio analyst details normal.
+  document.addEventListener('click', function(e){
+    const summary = e.target.closest && e.target.closest('details.detail-panel:not(.portfolio-analyst-panel) > summary');
+    if (summary) {
+      const details = summary.parentElement;
+      const card = details.closest('.card');
+      e.preventDefault();
+      e.stopPropagation();
+      if (details.open) details.open = false;
+      openModernDetailFromCard(card);
+      return;
+    }
+    const card = e.target.closest && e.target.closest('.cards > .card');
+    if (card && !e.target.closest('button, a, input, select, textarea, details, summary')) {
+      openModernDetailFromCard(card);
+    }
+    if (e.target.id === 'modernDetailOverlay') closeModernDetail();
+  }, true);
+
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeModernDetail(); });
+  document.getElementById('modernDetailTabs')?.addEventListener('click', function(e){
+    const btn = e.target.closest('.modern-detail-tab');
+    if (!btn) return;
+    qa('.modern-detail-tab', this).forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+    filterModernDetails(btn.dataset.filter || 'all');
+  });
+
+  // Preserve scroll around sharia actions that re-render the radar.
+  function preserveScrollWrapper(name){
+    const original = window[name];
+    if (typeof original !== 'function' || original.__preserveScroll) return;
+    const wrapped = async function(){
+      const y = window.scrollY;
+      const args = arguments;
+      try { return await original.apply(this, args); }
+      finally { setTimeout(() => window.scrollTo({ top: y, behavior: 'auto' }), 120); }
+    };
+    wrapped.__preserveScroll = true;
+    window[name] = wrapped;
+  }
+
+  function install(){
+    hidePositionSizeBlocks(document);
+    preserveScrollWrapper('excludeShariaSymbol');
+    preserveScrollWrapper('approveShariaSymbol');
+    preserveScrollWrapper('restoreShariaSymbol');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
+  else install();
+  setInterval(() => hidePositionSizeBlocks(document), 2500);
+})();
+</script>
+
 </body>
 </html>
 
