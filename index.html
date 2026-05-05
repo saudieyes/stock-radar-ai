@@ -586,7 +586,7 @@
     }
     .info-btn:hover { opacity:1; transform:translateY(-1px); }
     .info-popover {
-      position:fixed; z-index:60; width:300px; max-width:calc(100vw - 24px);
+      position:fixed; z-index:20000; width:300px; max-width:calc(100vw - 24px);
       background:var(--panel-bg); color:var(--text-main);
       border:1px solid var(--border-main); border-radius:16px; box-shadow:var(--shadow-main);
       padding:12px 14px; display:none;
@@ -2571,9 +2571,10 @@
     };
 
     function renderInfoButton(key) {
-      if (!INFO_TEXTS[key]) return '';
-      const encoded = encodeURIComponent(key);
-      return `<button class="info-btn" type="button" data-info-key="${encoded}" onclick="toggleInfo(event)" aria-label="شرح ${safeText(key)}">ℹ️</button>`;
+      const cleanKey = String(key || '').trim();
+      if (!cleanKey) return '';
+      const encoded = encodeURIComponent(cleanKey);
+      return `<button class="info-btn" type="button" data-info-key="${encoded}" onclick="toggleInfo(event)" aria-label="شرح ${safeText(cleanKey)}">ℹ️</button>`;
     }
 
     function renderLabelWithInfo(label, infoKey = '', className = 'detail-label') {
@@ -2596,9 +2597,12 @@
       event.stopPropagation();
 
       const key = decodeURIComponent(btn.dataset.infoKey || '');
-      const info = INFO_TEXTS[key];
+      const info = INFO_TEXTS[key] || {
+        title: key || 'شرح',
+        body: 'شرح سريع لهذه الخانة. إذا احتجت تفصيلًا أكثر افتح التحليل الشامل أو راجع نفس الحقل داخل التفاصيل.'
+      };
       const pop = document.getElementById('infoPopover');
-      if (!info || !pop) return;
+      if (!pop) return;
 
       const sameKeyOpen = pop.classList.contains('visible') && pop.dataset.key === key;
       if (sameKeyOpen) {
@@ -2644,7 +2648,7 @@
     });
 
     window.addEventListener('resize', closeInfoPopover);
-    window.addEventListener('scroll', closeInfoPopover, true);
+    // لا نغلق شرح ℹ️ بسبب أي تمرير داخلي حتى لا يختفي فورًا على الجوال.
     document.addEventListener('click', function(event) {
       const menu = document.getElementById('floatingNavMenu');
       const wrap = document.getElementById('floatingNavWrap');
@@ -3102,8 +3106,22 @@
     }
 
     function showAllSection(contentId, buttonEl=null) {
+      const el = document.getElementById(contentId);
+      const visibleCards = el ? Array.from(el.querySelectorAll('.card')) : [];
+      const anchorCard = visibleCards[Math.max(0, Math.min(SECTION_DEFAULT_LIMIT - 1, visibleCards.length - 1))] || null;
+      const anchorSymbol = anchorCard ? String(anchorCard.dataset.symbol || '') : '';
+      const anchorTop = anchorCard ? anchorCard.getBoundingClientRect().top : null;
       renderSectionItems(contentId, true);
       if (buttonEl) buttonEl.style.display = 'none';
+      requestAnimationFrame(() => {
+        if (!el || anchorTop === null) return;
+        let newAnchor = null;
+        if (anchorSymbol && window.CSS && CSS.escape) newAnchor = el.querySelector(`.card[data-symbol="${CSS.escape(anchorSymbol)}"]`);
+        newAnchor = newAnchor || el.querySelectorAll('.card')[Math.max(0, SECTION_DEFAULT_LIMIT - 1)] || el.querySelector('.card');
+        if (!newAnchor) return;
+        const delta = newAnchor.getBoundingClientRect().top - anchorTop;
+        if (Math.abs(delta) > 2) window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+      });
     }
 
     function toggleSection(contentId, buttonEl, showLabel='إظهار', hideLabel='إخفاء') {
@@ -4627,6 +4645,7 @@
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden','false');
     document.body.classList.add('modal-lock');
+    resetModernDetailScroll();
     loadModernAnalystSnapshot(clean, true);
   };
 
@@ -4675,6 +4694,15 @@
     });
   }
 
+  function resetModernDetailScroll(){
+    const body = document.getElementById('modernDetailBody');
+    const sheet = document.querySelector('.modern-detail-sheet');
+    requestAnimationFrame(() => {
+      if (body) body.scrollTop = 0;
+      if (sheet) sheet.scrollTop = 0;
+    });
+  }
+
   function openModernDetailFromCard(card){
     if (!card) return;
     const details = q('details.detail-panel:not(.portfolio-analyst-panel)', card);
@@ -4720,6 +4748,7 @@
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden','false');
     document.body.classList.add('modal-lock');
+    resetModernDetailScroll();
     if (typeof loadModernAnalystSnapshot === 'function') loadModernAnalystSnapshot(symbol, false);
     if (typeof loadAiContextSummary === 'function') loadAiContextSummary(symbol);
   }
@@ -4812,6 +4841,8 @@
 })();
 </script>
 
+
+<!-- fix49: info buttons, show-all anchor, modal scroll reset -->
 </body>
 </html>
 
