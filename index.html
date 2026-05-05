@@ -1809,90 +1809,265 @@
 
   
 
-    /* ===== Fix47: larger readable cards + compact target/support/resistance chips ===== */
-    html { font-size: 16px; }
-    .card { padding: 16px; }
-    .symbol { font-size: 36px; line-height:1.05; }
-    .company { font-size: 15px; line-height:1.6; }
-    .card-rank-subtitle { font-size: 13px; }
-    .badge { font-size:14px; padding:8px 11px; min-height:32px; }
-    .price-plan-grid { gap:7px; margin:10px 0 8px; }
-    .price-plan-item { min-height:64px; padding:9px; border-radius:13px; }
-    .price-plan-label { font-size:13px; }
-    .price-plan-value { font-size:18px; }
-    .compact-source-line { font-size:13px; }
-    .live-change-line { font-size:15px; }
-    .indicator-strip { gap:6px; }
-    .card-why-line { font-size:15px; line-height:1.75; padding:10px 12px; }
-    .level-chip-row {
+    /* Fix47: bigger readable cards, no horizontal plan scroll, compact equal actions, cleaner portfolio */
+    .cards > .card,
+    .compact-modern .cards > .card {
+      padding: 18px 18px 20px !important;
+      border-radius: 24px !important;
+    }
+    .symbol, .compact-modern .symbol { font-size: 34px !important; line-height: 1.05 !important; }
+    .company, .compact-modern .company { font-size: 17px !important; line-height: 1.45 !important; }
+    .rank-badge { font-size: 18px !important; min-width: 44px !important; height: 44px !important; }
+    .badge { font-size: 15px !important; padding: 8px 12px !important; line-height: 1.25 !important; }
+    .price-plan-grid,
+    .compact-modern .price-plan-grid {
+      display:grid !important;
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+      gap:10px !important;
+      overflow:visible !important;
+      padding:0 !important;
+      margin:12px 0 10px !important;
+    }
+    .price-plan-item,
+    .compact-modern .price-plan-item {
+      min-width:0 !important;
+      width:100% !important;
+      padding:12px 11px !important;
+      border-radius:17px !important;
+      min-height:72px !important;
+      overflow:visible !important;
+    }
+    .price-plan-label { font-size:14px !important; line-height:1.35 !important; white-space:normal !important; }
+    .price-plan-value { font-size:20px !important; line-height:1.2 !important; white-space:normal !important; word-break:break-word !important; }
+    .live-price-item .price-plan-value { font-size:31px !important; font-weight:950 !important; }
+    .live-change-line { font-size:16px !important; font-weight:950 !important; margin-top:5px !important; }
+    .compact-source-line { font-size:12.5px !important; line-height:1.35 !important; white-space:normal !important; }
+    .level-quick-grid {
+      grid-column:1/-1;
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:9px;
+      margin: 4px 0 10px;
+    }
+    .level-quick-chip {
+      border:1px solid var(--border-main);
+      background:var(--panel-bg-soft-2);
+      border-radius:16px;
+      padding:10px 11px;
+      min-height:54px;
       display:flex;
-      flex-wrap:nowrap;
-      overflow-x:auto;
-      gap:7px;
-      padding:2px 0 8px;
-      margin:0 0 4px;
-      scrollbar-width:none;
+      flex-direction:column;
+      justify-content:center;
+      gap:4px;
+      overflow:hidden;
     }
-    .level-chip-row::-webkit-scrollbar { display:none; }
-    .level-chip {
-      flex:0 0 auto;
-      display:inline-flex;
-      align-items:center;
-      gap:5px;
-      border:1px solid var(--border-soft);
-      background:var(--panel-bg-soft);
-      color:var(--text-strong);
-      border-radius:999px;
-      padding:7px 10px;
-      font-size:13.5px;
-      font-weight:900;
-      line-height:1.25;
-      white-space:nowrap;
+    .level-quick-label { color:var(--text-muted); font-size:13px; font-weight:900; line-height:1.25; }
+    .level-quick-value { color:var(--text-strong); font-size:17px; font-weight:950; line-height:1.25; overflow-wrap:anywhere; }
+    .level-quick-chip.support { border-color:rgba(22,163,74,.28); background:rgba(22,163,74,.07); }
+    .level-quick-chip.resistance { border-color:rgba(245,158,11,.34); background:rgba(245,158,11,.07); }
+    .level-quick-chip.high { border-color:rgba(59,130,246,.28); background:rgba(59,130,246,.07); }
+    .indicator-strip { gap:8px !important; flex-wrap:wrap !important; overflow:visible !important; }
+    .indicator-pill, .compact-modern .indicator-pill { font-size:13px !important; padding:7px 10px !important; white-space:normal !important; flex:1 1 calc(50% - 8px) !important; text-align:center !important; }
+    .news-line, .card-why-line, .live-plan-warning,
+    .compact-modern .news-line, .compact-modern .card-why-line, .compact-modern .live-plan-warning {
+      font-size:14.5px !important;
+      line-height:1.75 !important;
+      max-height:none !important;
+      overflow:visible !important;
+      padding:11px 12px !important;
     }
-    .level-chip small { color:var(--text-muted); font-size:11px; font-weight:900; }
-    .level-chip.target { border-color:rgba(37,99,235,.45); }
-    .level-chip.support { border-color:rgba(22,163,74,.45); }
-    .level-chip.resistance { border-color:rgba(245,158,11,.50); }
-    .level-chip.major { border-color:rgba(168,85,247,.50); }
-    .card-actions {
-      display:flex !important;
-      flex-wrap:nowrap !important;
-      overflow-x:auto;
+    .card-actions,
+    .compact-modern .card-actions {
+      display:grid !important;
+      grid-template-columns:repeat(auto-fit,minmax(112px,1fr)) !important;
+      gap:9px !important;
+      overflow:visible !important;
+      padding:0 !important;
+      margin-top:10px !important;
+    }
+    .card-actions button,
+    .compact-modern .card-actions button {
+      flex:initial !important;
+      max-width:none !important;
+      width:100% !important;
+      min-height:44px !important;
+      padding:10px 8px !important;
+      border-radius:16px !important;
+      font-size:15px !important;
+      line-height:1.25 !important;
+      font-weight:950 !important;
+      white-space:normal !important;
+    }
+    details.detail-panel summary,
+    .compact-modern details.detail-panel summary {
+      font-size:17px !important;
+      min-height:48px !important;
+      padding:11px 18px !important;
+      border-radius:18px !important;
+    }
+    .section-limit-note { font-size:15px !important; line-height:1.7 !important; }
+
+    .portfolio-card-list { gap:10px !important; }
+    .portfolio-row-card,
+    .portfolio-card.portfolio-row-card {
+      padding:14px !important;
+      border-radius:20px !important;
+      overflow:visible !important;
+    }
+    .portfolio-row-main {
+      display:grid !important;
+      grid-template-columns:minmax(0,1fr) auto !important;
+      gap:10px !important;
+      align-items:start !important;
+    }
+    .portfolio-card-symbol { font-size:28px !important; line-height:1.05 !important; }
+    .portfolio-card-sub { font-size:14px !important; line-height:1.5 !important; }
+    .portfolio-row-price-wrap { min-width:92px !important; text-align:left !important; direction:ltr !important; }
+    .portfolio-row-price { font-size:27px !important; line-height:1.05 !important; }
+    .portfolio-row-change { font-size:15px !important; line-height:1.25 !important; }
+    .portfolio-row-badge { grid-column:1/-1 !important; justify-self:start !important; font-size:14px !important; padding:7px 11px !important; border-radius:14px !important; }
+    .portfolio-row-metrics {
+      display:grid !important;
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
       gap:8px !important;
-      margin-bottom:10px;
-      padding-bottom:2px;
-      scrollbar-width:none;
+      overflow:visible !important;
+      margin-top:10px !important;
     }
-    .card-actions::-webkit-scrollbar { display:none; }
-    .card-actions button {
-      flex:0 0 auto;
-      min-width:108px;
-      min-height:36px !important;
-      padding:8px 10px !important;
-      border-radius:13px !important;
+    .portfolio-row-metrics span {
+      flex:initial !important;
+      white-space:normal !important;
+      border-radius:15px !important;
+      padding:9px 10px !important;
       font-size:13.5px !important;
-      line-height:1.25;
+      line-height:1.35 !important;
+      min-height:48px !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:space-between !important;
+      gap:6px !important;
     }
-    .soft-primary { background:#2563eb !important; }
-    .soft-approve { background:#0f766e !important; }
-    .soft-danger { background:#991b1b !important; }
-    .detail-panel summary { font-size:17px; }
-
-    @media (max-width: 760px) {
-      .card { padding:16px; }
-      .symbol { font-size:38px; }
-      .company { font-size:15px; }
-      .badge { font-size:14px; padding:8px 10px; }
-      .price-plan-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
-      .price-plan-item { min-height:62px; padding:8px 7px; }
-      .price-plan-label { font-size:12.5px; }
-      .price-plan-value { font-size:17px; }
-      .level-chip { font-size:13px; padding:7px 9px; }
-      .card-actions button { min-width:104px; font-size:13px !important; }
-      .card-why-line { font-size:15px; }
+    .portfolio-row-metrics b { font-size:14.5px !important; }
+    .portfolio-note-line {
+      font-size:14px !important;
+      line-height:1.7 !important;
+      max-height:none !important;
+      overflow:visible !important;
+      padding:10px 11px !important;
+    }
+    .portfolio-row-actions {
+      display:grid !important;
+      grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+      gap:7px !important;
+      overflow:visible !important;
+      margin-top:10px !important;
+    }
+    .portfolio-row-actions button {
+      width:100% !important;
+      min-height:38px !important;
+      padding:8px 5px !important;
+      font-size:12.5px !important;
+      border-radius:14px !important;
+      white-space:normal !important;
+    }
+    .live-portfolio-change span { color:inherit !important; }
+    @media (max-width:390px){
+      .symbol, .compact-modern .symbol { font-size:30px !important; }
+      .company, .compact-modern .company { font-size:15px !important; }
+      .price-plan-grid, .compact-modern .price-plan-grid { grid-template-columns:1fr !important; }
+      .level-quick-grid { grid-template-columns:1fr !important; }
+      .portfolio-row-actions { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
     }
 
-  </style>
+
+
+    /* Fix48: preserve portfolio + analysts, clearer readable cards without horizontal scrolling */
+    .cards > .card,
+    .compact-modern .cards > .card {
+      padding: 19px 18px 21px !important;
+    }
+    .symbol, .compact-modern .symbol { font-size: 36px !important; letter-spacing: .2px !important; }
+    .company, .compact-modern .company { font-size: 17.5px !important; }
+    .live-price-item .price-plan-value { font-size: 33px !important; }
+    .live-change-line { font-size: 17px !important; }
+    .level-quick-grid {
+      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+      gap: 10px !important;
+      overflow: visible !important;
+    }
+    .level-quick-chip { min-height: 58px !important; padding: 11px 12px !important; }
+    .level-quick-label { font-size: 13.8px !important; }
+    .level-quick-value { font-size: 18px !important; }
+    .level-quick-chip.high { grid-column: 1 / -1 !important; }
+    .card-actions,
+    .compact-modern .card-actions {
+      grid-template-columns: repeat(3,minmax(0,1fr)) !important;
+      gap: 10px !important;
+    }
+    .card-actions:has(button:nth-child(4)),
+    .compact-modern .card-actions:has(button:nth-child(4)) {
+      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+    }
+    .card-actions button,
+    .compact-modern .card-actions button {
+      min-height: 48px !important;
+      font-size: 16px !important;
+      border-radius: 18px !important;
+    }
+    .portfolio-card-list { gap: 12px !important; }
+    .portfolio-row-card,
+    .portfolio-card.portfolio-row-card {
+      padding: 15px !important;
+      border-radius: 21px !important;
+    }
+    .portfolio-row-main { grid-template-columns: minmax(0,1fr) auto !important; }
+    .portfolio-card-symbol { font-size: 30px !important; }
+    .portfolio-card-sub { font-size: 15px !important; }
+    .portfolio-row-price { font-size: 29px !important; }
+    .portfolio-row-change { font-size: 16px !important; font-weight: 950 !important; }
+    .portfolio-row-metrics {
+      display: grid !important;
+      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+      gap: 9px !important;
+      overflow: visible !important;
+    }
+    .portfolio-row-metrics span {
+      min-width: 0 !important;
+      white-space: normal !important;
+      font-size: 14px !important;
+      min-height: 50px !important;
+    }
+    .portfolio-row-actions {
+      display: grid !important;
+      grid-template-columns: repeat(4,minmax(0,1fr)) !important;
+      gap: 8px !important;
+      overflow: visible !important;
+    }
+    .portfolio-row-actions button {
+      min-height: 42px !important;
+      font-size: 13px !important;
+      border-radius: 15px !important;
+      white-space: normal !important;
+    }
+    .portfolio-row-actions button:nth-child(3) {
+      border-color: rgba(59,130,246,.55) !important;
+      color: var(--primary-strong) !important;
+      font-weight: 950 !important;
+    }
+    .analyst-snapshot-box { overflow: visible !important; }
+    .modern-detail-body .analyst-grid,
+    .analyst-grid {
+      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+    }
+    .analyst-cell-value { font-size: 16px !important; }
+    @media (max-width:390px){
+      .card-actions, .compact-modern .card-actions { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+      .level-quick-grid { grid-template-columns:1fr !important; }
+      .portfolio-row-actions { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+      .portfolio-row-metrics { grid-template-columns:1fr !important; }
+      .symbol, .compact-modern .symbol { font-size: 32px !important; }
+      .live-price-item .price-plan-value { font-size: 31px !important; }
+    }
+</style>
 </head>
 <body>
   <div class="container">
@@ -2151,6 +2326,14 @@
       const cls = num > 0 ? "green" : num < 0 ? "red" : "";
       const sign = num > 0 ? "+" : "";
       return `<span class="${cls}">${sign}${num.toFixed(2)}%</span>`;
+    }
+
+    function formatPercentPlain(value) {
+      if (value === null || value === undefined || value === "") return "";
+      const num = Number(value);
+      if (Number.isNaN(num)) return String(value || "").replace(/<[^>]*>/g, "");
+      const sign = num > 0 ? "+" : "";
+      return `${sign}${num.toFixed(2)}%`;
     }
 
     function safeText(value) {
@@ -2871,6 +3054,15 @@
       return `<div class="price-plan-item"><div class="price-plan-label">${safeText(label)}</div><div class="price-plan-value">${safeText(value)}</div>${sub ? `<div class="compact-source-line">${safeText(sub)}</div>` : ''}</div>`;
     }
 
+
+    function levelQuickChip(label, value, strength='', cls='') {
+      const v = String(value ?? '').trim();
+      if (!v || v === '0' || v === '—') return '';
+      const s = String(strength || '').trim();
+      const shown = s ? `${v} | ${s}` : v;
+      return `<div class="level-quick-chip ${safeText(cls)}"><div class="level-quick-label">${safeText(label)}</div><div class="level-quick-value">${safeText(shown)}</div></div>`;
+    }
+
     function currentPricePlanItem(stock, displayPrice) {
       const rawChange = stock?.display_change_pct ?? stock?.change_vs_prev_close_pct ?? stock?.change_pct ?? stock?.change_from_open_pct;
       const change = Number(rawChange);
@@ -3111,26 +3303,6 @@
       await scanSingleStock();
     }
 
-
-    function renderCompactLevelChips(stock) {
-      const chips = [];
-      const addChip = (cls, label, value, strength='') => {
-        const cleanValue = safeText(String(value || '').trim());
-        if (!cleanValue || cleanValue === '—' || cleanValue === '0') return;
-        const cleanStrength = safeText(shortText(String(strength || '').replace(/\s+/g, ' ').trim(), 16));
-        chips.push(`<span class="level-chip ${safeText(cls)}"><small>${safeText(label)}</small>${cleanValue}${cleanStrength ? ` <small>${cleanStrength}</small>` : ''}</span>`);
-      };
-      const target = formatNumber(stock.display_target_price || stock.target_1 || stock.target_price || 0);
-      const support = Number(stock.nearest_support || 0) ? formatNumber(stock.nearest_support) : '';
-      const resistance = Number(stock.nearest_resistance || 0) ? formatNumber(stock.nearest_resistance) : '';
-      const major = Number(stock.major_resistance || 0) ? formatNumber(stock.major_resistance) : '';
-      addChip('target', 'هدف', target, stock.display_target_label || '');
-      addChip('support', 'دعم', support, stock.nearest_support_label || '');
-      addChip('resistance', 'مقاومة', resistance, stock.nearest_resistance_label || '');
-      addChip('major', 'قمة/كبرى', major, stock.major_resistance_label || '');
-      return chips.length ? `<div class="level-chip-row" aria-label="مستويات مختصرة">${chips.join('')}</div>` : '';
-    }
-
     function createCard(stock, sectionKey='', index=0) {
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
@@ -3241,6 +3413,13 @@
         details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`, true));
       }
 
+      const quickLevels = [
+        levelQuickChip('دعم أقرب', stock.nearest_support ? formatNumber(stock.nearest_support) : '', stock.nearest_support_label || stock.support_strength_label || '', 'support'),
+        levelQuickChip('مقاومة أقرب', stock.nearest_resistance ? formatNumber(stock.nearest_resistance) : '', stock.nearest_resistance_label || stock.resistance_strength_label || '', 'resistance'),
+        levelQuickChip('قرب القمة', stock.major_resistance ? formatNumber(stock.major_resistance) : (stock.high_52w ? formatNumber(stock.high_52w) : (stock.year_high ? formatNumber(stock.year_high) : '')), stock.major_resistance_label || stock.high_label || stock.ath_label || '', 'high')
+      ].filter(Boolean).join('');
+      const levelQuickGrid = quickLevels ? `<div class="level-quick-grid">${quickLevels}</div>` : '';
+
       const rankNumber = Number(index || 0) + 1;
       const rankSubtitle = sectionKey === 'single-stock' ? 'فحص فردي' : `الترتيب #${rankNumber} داخل هذه المجموعة`;
       return `
@@ -3271,8 +3450,9 @@
             ${pricePlanItem(safeText(stock.display_stop_label || 'الوقف'), formatNumber(stock.display_stop_price))}
           </div>
 
+          ${levelQuickGrid}
+
           <div class="indicator-strip">${importantIndicators(stock)}</div>
-          ${renderCompactLevelChips(stock)}
 
           ${hasPrimaryNews(stock) ? `<div class="news-line">
             ${newsBadge(stock)}
@@ -4102,7 +4282,7 @@
                 </div>
                 <div class="portfolio-row-price-wrap">
                   <div class="portfolio-row-price live-portfolio-price ${plClass}">${formatNumber(current)}</div>
-                  <div class="portfolio-row-change live-portfolio-change ${plClass}">${formatPercent(pct)}</div>
+                  <div class="portfolio-row-change live-portfolio-change ${plClass}">${formatPercentPlain(pct)}</div>
                 </div>
                 <span class="badge badge-plan portfolio-row-badge">${safeText(item.recommendation || 'متابعة')}</span>
               </div>
@@ -4198,7 +4378,7 @@
             if (cls) priceEl.classList.add(cls);
           }
           if (chgEl) {
-            chgEl.textContent = formatPercent(pct);
+            chgEl.textContent = formatPercentPlain(pct);
             chgEl.classList.remove('green','red');
             if (cls) chgEl.classList.add(cls);
           }
@@ -4595,6 +4775,40 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
   else install();
   setInterval(() => hidePositionSizeBlocks(document), 2500);
+})();
+</script>
+
+
+<script>
+(function(){
+  'use strict';
+  function stripHtmlPercentArtifacts(root=document){
+    root.querySelectorAll('.live-portfolio-change, .portfolio-summary-value, .portfolio-row-change').forEach(el => {
+      const s = (el.textContent || '').trim();
+      const m = s.match(/<span[^>]*>([^<]+)<\/span>/i);
+      if (m) el.textContent = m[1];
+    });
+  }
+  function keepPortfolioAnalystsVisible(){
+    document.querySelectorAll('.portfolio-row-actions').forEach(actions => {
+      const hasAnalyst = Array.from(actions.querySelectorAll('button')).some(b => /محلل|المحللين/.test(b.textContent || ''));
+      if (!hasAnalyst) {
+        const card = actions.closest('.portfolio-card[data-portfolio-symbol]');
+        const sym = card ? card.dataset.portfolioSymbol : '';
+        if (sym) {
+          const btn = document.createElement('button');
+          btn.className = 'ghost';
+          btn.type = 'button';
+          btn.textContent = '👥 المحللين';
+          btn.onclick = function(){ if (window.openPortfolioAnalystModal) window.openPortfolioAnalystModal(sym); };
+          actions.appendChild(btn);
+        }
+      }
+    });
+  }
+  const run = () => { stripHtmlPercentArtifacts(); keepPortfolioAnalystsVisible(); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+  setInterval(run, 2500);
 })();
 </script>
 
