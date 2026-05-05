@@ -1723,7 +1723,176 @@
       .compact-modern .card-actions button { min-height: 31px; }
     }
 
-</style>
+
+
+    /* Fix46 polish: compact actions, dynamic mood, compact portfolio rows */
+    .card-actions {
+      display:flex !important;
+      flex-wrap:wrap !important;
+      gap:7px !important;
+      align-items:center !important;
+    }
+    .card-actions button {
+      min-height:30px !important;
+      padding:6px 10px !important;
+      border-radius:999px !important;
+      font-size:10.8px !important;
+      line-height:1.25 !important;
+      flex:1 1 calc(33.333% - 8px) !important;
+      max-width:calc(50% - 5px) !important;
+      box-shadow:none !important;
+    }
+    .card-actions .soft-primary { background:rgba(37,99,235,.88) !important; }
+    .card-actions .soft-approve { background:rgba(15,118,110,.88) !important; }
+    .card-actions .soft-danger, .card-actions .delete { background:rgba(153,27,27,.88) !important; }
+    .card-actions .ghost { background:var(--panel-bg-soft-2) !important; border-color:var(--border-main) !important; }
+    @media (max-width:420px){ .card-actions button{ flex:1 1 calc(50% - 6px) !important; max-width:none !important; } }
+
+    .mood-modern-card {
+      grid-column:1/-1;
+      border:1px solid var(--border-main);
+      background:linear-gradient(135deg,var(--panel-bg-soft),var(--panel-bg-soft-2));
+      border-radius:20px;
+      padding:14px;
+      display:grid;
+      gap:12px;
+      overflow:hidden;
+    }
+    .mood-modern-main { display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px; align-items:center; }
+    .mood-dial {
+      width:86px;height:50px;border-radius:86px 86px 0 0;position:relative;overflow:hidden;
+      background:conic-gradient(from 270deg, #ef4444 0 55deg, #f59e0b 55deg 115deg, #22c55e 115deg 180deg, transparent 180deg 360deg);
+      border:1px solid rgba(148,163,184,.32);
+      box-shadow:inset 0 -18px 0 rgba(255,255,255,.14);
+    }
+    .mood-dial::after{content:'';position:absolute;left:16px;right:16px;bottom:0;height:28px;background:var(--panel-bg);border-radius:48px 48px 0 0;border:1px solid rgba(148,163,184,.18);border-bottom:0;}
+    .mood-needle{position:absolute;left:50%;bottom:2px;width:3px;height:38px;background:var(--text-strong);border-radius:999px;transform-origin:bottom center;z-index:2;box-shadow:0 0 10px rgba(0,0,0,.35);}
+    .mood-modern-title{font-size:19px;font-weight:950;color:var(--text-strong);}
+    .mood-modern-label{font-size:12px;font-weight:900;margin-top:3px;}
+    .mood-modern-label.positive{color:#16a34a}.mood-modern-label.negative{color:#dc2626}.mood-modern-label.neutral{color:#64748b}
+    .mood-modern-summary{font-size:12.5px;line-height:1.75;color:var(--text-main);margin-top:6px;}
+    .mood-index-line{font-weight:900;color:var(--text-strong);font-size:13px;background:var(--panel-bg-soft-2);border:1px solid var(--border-main);border-radius:14px;padding:9px;}
+    .mood-sector-block{display:grid;gap:6px;}
+    .mood-sector-title{font-size:12px;font-weight:900;color:var(--text-muted);}
+    .sector-chip-row{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px;}
+    .sector-chip-row::-webkit-scrollbar{display:none;}
+    .sector-chip{flex:0 0 auto;border-radius:999px;border:1px solid var(--border-main);padding:6px 9px;font-size:11px;font-weight:800;background:var(--panel-bg-soft-2);white-space:nowrap;}
+    .sector-chip.positive{color:#16a34a;border-color:rgba(22,163,74,.32);background:rgba(22,163,74,.09)}
+    .sector-chip.negative{color:#dc2626;border-color:rgba(220,38,38,.28);background:rgba(220,38,38,.08)}
+    .sector-chip.neutral{color:var(--text-muted)}
+
+    .portfolio-card-list{gap:8px !important;}
+    .portfolio-row-card{padding:10px !important;border-radius:17px !important;}
+    .portfolio-row-main{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px;align-items:center;}
+    .portfolio-card-symbol{font-size:22px !important;line-height:1 !important;}
+    .portfolio-card-sub{font-size:11px !important;line-height:1.5 !important;}
+    .portfolio-row-price-wrap{text-align:left;direction:ltr;min-width:72px;}
+    .portfolio-row-price{font-size:22px;font-weight:950;line-height:1;}
+    .portfolio-row-change{font-size:12px;font-weight:900;margin-top:4px;}
+    .portfolio-row-badge{font-size:11px !important;padding:5px 8px !important;white-space:nowrap;}
+    .portfolio-row-metrics{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-top:8px;padding-bottom:1px;}
+    .portfolio-row-metrics::-webkit-scrollbar{display:none;}
+    .portfolio-row-metrics span{flex:0 0 auto;background:var(--panel-bg-soft-2);border:1px solid var(--border-main);border-radius:999px;padding:5px 8px;font-size:10.5px;color:var(--text-muted);}
+    .portfolio-row-metrics b{color:var(--text-strong);font-weight:950;}
+    .portfolio-note-line{font-size:11.5px !important;line-height:1.55 !important;padding:7px 9px !important;margin-top:8px !important;max-height:48px;overflow:hidden;}
+    .portfolio-row-actions{display:flex !important;flex-wrap:nowrap !important;overflow-x:auto;gap:6px !important;margin-top:8px !important;scrollbar-width:none;}
+    .portfolio-row-actions::-webkit-scrollbar{display:none;}
+    .portfolio-row-actions button{flex:0 0 auto !important;min-height:29px !important;font-size:10.5px !important;padding:6px 9px !important;border-radius:999px !important;}
+    .green, .live-portfolio-change.green, .live-portfolio-price.green, .portfolio-summary-value.green { color:#16a34a !important; }
+    .red, .live-portfolio-change.red, .live-portfolio-price.red, .portfolio-summary-value.red { color:#dc2626 !important; }
+    html[data-theme="dark"] .green, :root[data-theme="dark"] .green { color:#22c55e !important; }
+    html[data-theme="dark"] .red, :root[data-theme="dark"] .red { color:#fb7185 !important; }
+
+    .modern-detail-body .analyst-snapshot-box{border-radius:18px;background:var(--panel-bg-soft-2);}
+    .analyst-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+    @media (max-width:520px){.analyst-grid{grid-template-columns:1fr 1fr}.portfolio-row-main{grid-template-columns:minmax(0,1fr) auto}.portfolio-row-badge{grid-column:1/-1;justify-self:start}.mood-modern-main{grid-template-columns:1fr}.mood-dial{margin:auto}.mood-modern-text{text-align:center}}
+
+  
+
+    /* ===== Fix47: larger readable cards + compact target/support/resistance chips ===== */
+    html { font-size: 16px; }
+    .card { padding: 16px; }
+    .symbol { font-size: 36px; line-height:1.05; }
+    .company { font-size: 15px; line-height:1.6; }
+    .card-rank-subtitle { font-size: 13px; }
+    .badge { font-size:14px; padding:8px 11px; min-height:32px; }
+    .price-plan-grid { gap:7px; margin:10px 0 8px; }
+    .price-plan-item { min-height:64px; padding:9px; border-radius:13px; }
+    .price-plan-label { font-size:13px; }
+    .price-plan-value { font-size:18px; }
+    .compact-source-line { font-size:13px; }
+    .live-change-line { font-size:15px; }
+    .indicator-strip { gap:6px; }
+    .card-why-line { font-size:15px; line-height:1.75; padding:10px 12px; }
+    .level-chip-row {
+      display:flex;
+      flex-wrap:nowrap;
+      overflow-x:auto;
+      gap:7px;
+      padding:2px 0 8px;
+      margin:0 0 4px;
+      scrollbar-width:none;
+    }
+    .level-chip-row::-webkit-scrollbar { display:none; }
+    .level-chip {
+      flex:0 0 auto;
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      border:1px solid var(--border-soft);
+      background:var(--panel-bg-soft);
+      color:var(--text-strong);
+      border-radius:999px;
+      padding:7px 10px;
+      font-size:13.5px;
+      font-weight:900;
+      line-height:1.25;
+      white-space:nowrap;
+    }
+    .level-chip small { color:var(--text-muted); font-size:11px; font-weight:900; }
+    .level-chip.target { border-color:rgba(37,99,235,.45); }
+    .level-chip.support { border-color:rgba(22,163,74,.45); }
+    .level-chip.resistance { border-color:rgba(245,158,11,.50); }
+    .level-chip.major { border-color:rgba(168,85,247,.50); }
+    .card-actions {
+      display:flex !important;
+      flex-wrap:nowrap !important;
+      overflow-x:auto;
+      gap:8px !important;
+      margin-bottom:10px;
+      padding-bottom:2px;
+      scrollbar-width:none;
+    }
+    .card-actions::-webkit-scrollbar { display:none; }
+    .card-actions button {
+      flex:0 0 auto;
+      min-width:108px;
+      min-height:36px !important;
+      padding:8px 10px !important;
+      border-radius:13px !important;
+      font-size:13.5px !important;
+      line-height:1.25;
+    }
+    .soft-primary { background:#2563eb !important; }
+    .soft-approve { background:#0f766e !important; }
+    .soft-danger { background:#991b1b !important; }
+    .detail-panel summary { font-size:17px; }
+
+    @media (max-width: 760px) {
+      .card { padding:16px; }
+      .symbol { font-size:38px; }
+      .company { font-size:15px; }
+      .badge { font-size:14px; padding:8px 10px; }
+      .price-plan-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+      .price-plan-item { min-height:62px; padding:8px 7px; }
+      .price-plan-label { font-size:12.5px; }
+      .price-plan-value { font-size:17px; }
+      .level-chip { font-size:13px; padding:7px 9px; }
+      .card-actions button { min-width:104px; font-size:13px !important; }
+      .card-why-line { font-size:15px; }
+    }
+
+  </style>
 </head>
 <body>
   <div class="container">
@@ -2942,6 +3111,26 @@
       await scanSingleStock();
     }
 
+
+    function renderCompactLevelChips(stock) {
+      const chips = [];
+      const addChip = (cls, label, value, strength='') => {
+        const cleanValue = safeText(String(value || '').trim());
+        if (!cleanValue || cleanValue === '—' || cleanValue === '0') return;
+        const cleanStrength = safeText(shortText(String(strength || '').replace(/\s+/g, ' ').trim(), 16));
+        chips.push(`<span class="level-chip ${safeText(cls)}"><small>${safeText(label)}</small>${cleanValue}${cleanStrength ? ` <small>${cleanStrength}</small>` : ''}</span>`);
+      };
+      const target = formatNumber(stock.display_target_price || stock.target_1 || stock.target_price || 0);
+      const support = Number(stock.nearest_support || 0) ? formatNumber(stock.nearest_support) : '';
+      const resistance = Number(stock.nearest_resistance || 0) ? formatNumber(stock.nearest_resistance) : '';
+      const major = Number(stock.major_resistance || 0) ? formatNumber(stock.major_resistance) : '';
+      addChip('target', 'هدف', target, stock.display_target_label || '');
+      addChip('support', 'دعم', support, stock.nearest_support_label || '');
+      addChip('resistance', 'مقاومة', resistance, stock.nearest_resistance_label || '');
+      addChip('major', 'قمة/كبرى', major, stock.major_resistance_label || '');
+      return chips.length ? `<div class="level-chip-row" aria-label="مستويات مختصرة">${chips.join('')}</div>` : '';
+    }
+
     function createCard(stock, sectionKey='', index=0) {
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
@@ -3083,6 +3272,7 @@
           </div>
 
           <div class="indicator-strip">${importantIndicators(stock)}</div>
+          ${renderCompactLevelChips(stock)}
 
           ${hasPrimaryNews(stock) ? `<div class="news-line">
             ${newsBadge(stock)}
@@ -3095,7 +3285,6 @@
           <div class="card-actions">
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
-            <button class="ghost" onclick="openAnalystSnapshotFromCard(this, '${safeText(stock.symbol)}')">👥 المحللين</button>
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
           </div>
@@ -3314,18 +3503,42 @@
       const updated = document.getElementById('marketMoodUpdated');
       if (!box) return;
       if (!payload || payload.ok === false) {
-        box.innerHTML = '<div class="mood-mini"><div class="mood-mini-label">مزاج السوق</div><div class="mood-mini-value">غير متوفر الآن</div></div>';
+        box.innerHTML = '<div class="mood-modern-card"><div class="mood-modern-main"><div class="mood-dial neutral"><div class="mood-needle" style="transform:rotate(0deg)"></div></div><div><div class="mood-modern-title">مزاج السوق</div><div class="mood-modern-label neutral">غير متوفر الآن</div></div></div></div>';
         if (updated) updated.textContent = 'غير متوفر';
         return;
       }
-      const hot = (payload.hot_sectors || []).slice(0,3).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || 'لا توجد قطاعات ساخنة واضحة';
-      const weak = (payload.weak_sectors || []).slice(0,2).map(x => `${x.symbol || ''} ${x.label || ''} ${formatNumber(x.change_pct || 0)}%`).join(' • ') || '—';
+      const score = Number(payload.score || 0);
+      const moodClass = score >= 62 ? 'positive' : score <= 44 ? 'negative' : 'neutral';
+      const moodIcon = moodClass === 'positive' ? '🟢' : moodClass === 'negative' ? '🔴' : '⚪';
+      const angle = Math.max(-75, Math.min(75, ((score || 50) - 50) * 1.5));
+      const hotItems = (payload.hot_sectors || []).slice(0,4).map(x => `
+        <span class="sector-chip positive"><b>${safeText(x.symbol || '')}</b> ${safeText(x.label || '')} ${formatNumber(x.change_pct || 0)}%</span>
+      `).join('') || '<span class="sector-chip neutral">لا توجد قطاعات ساخنة واضحة</span>';
+      const weakItems = (payload.weak_sectors || []).slice(0,4).map(x => `
+        <span class="sector-chip negative"><b>${safeText(x.symbol || '')}</b> ${safeText(x.label || '')} ${formatNumber(x.change_pct || 0)}%</span>
+      `).join('') || '<span class="sector-chip neutral">—</span>';
       box.innerHTML = `
-        <div class="mood-mini"><div class="mood-mini-label">الحالة</div><div class="mood-mini-value">${safeText(payload.label || '—')} <span style="font-size:12px;color:var(--text-muted);">درجة ${formatNumber(payload.score || 0)}</span></div></div>
-        <div class="mood-mini"><div class="mood-mini-label">المؤشرات</div><div class="mood-mini-value">${safeText(payload.index_summary_ar || '—')}</div></div>
-        <div class="mood-mini"><div class="mood-mini-label">القطاعات الساخنة</div><div class="mood-mini-value">${safeText(hot)}</div></div>
-        <div class="mood-mini"><div class="mood-mini-label">قطاعات أضعف</div><div class="mood-mini-value">${safeText(weak)}</div></div>
-        <div class="mood-mini" style="grid-column:1/-1;"><div class="mood-mini-label">شرح عربي سريع</div><div class="mood-mini-value">${safeText(payload.summary_ar || payload.note || 'مزاج السوق سياقي فقط ولا يدخل في النقاط.')}</div></div>`;
+        <div class="mood-modern-card ${moodClass}">
+          <div class="mood-modern-main">
+            <div class="mood-dial ${moodClass}">
+              <div class="mood-needle" style="transform:rotate(${angle}deg)"></div>
+            </div>
+            <div class="mood-modern-text">
+              <div class="mood-modern-title">${moodIcon} ${safeText(payload.label || 'مزاج السوق')}</div>
+              <div class="mood-modern-label ${moodClass}">درجة ${formatNumber(score)} • ${safeText(payload.market_phase_label || '')}</div>
+              <div class="mood-modern-summary">${safeText(payload.summary_ar || payload.note || 'مزاج السوق سياقي فقط ولا يدخل في النقاط.')}</div>
+            </div>
+          </div>
+          <div class="mood-index-line">${safeText(payload.index_summary_ar || '—')}</div>
+          <div class="mood-sector-block">
+            <div class="mood-sector-title">🔥 القطاعات النشطة</div>
+            <div class="sector-chip-row">${hotItems}</div>
+          </div>
+          <div class="mood-sector-block">
+            <div class="mood-sector-title">🔻 القطاعات الأضعف</div>
+            <div class="sector-chip-row">${weakItems}</div>
+          </div>
+        </div>`;
       if (updated) updated.textContent = payload.updated_at ? `آخر تحديث: ${safeText(payload.updated_at)}` : 'محدث';
     }
 
@@ -3873,33 +4086,37 @@
             <div class="portfolio-summary-card"><div class="portfolio-summary-label">الربح/الخسارة</div><div class="portfolio-summary-value ${portfolioColorClass(summary.unrealized_pl)}" id="portfolioSummaryPL">$${formatNumber(summary.unrealized_pl || 0)} (${formatNumber(summary.unrealized_pl_pct || 0)}%)</div></div>
           </div>`;
         const cards = items.map(item => {
-          const plClass = portfolioColorClass(item.holding_change_pct);
+          const pct = Number(item.holding_change_pct || 0);
+          const plClass = portfolioColorClass(pct);
+          const current = Number(item.current_price || 0);
+          const buy = Number(item.buy_price || 0);
+          const qty = Number(item.quantity || 1) || 1;
+          const marketValue = Number(item.market_value || (current * qty) || 0);
+          const costValue = Number(item.cost_value || (buy * qty) || 0);
           return `
-            <div class="portfolio-card" data-portfolio-symbol="${safeText(item.symbol)}" data-buy-price="${Number(item.buy_price || 0)}" data-quantity="${Number(item.quantity || 1)}" data-current-price="${Number(item.current_price || 0)}">
-              <div class="portfolio-card-top">
-                <div>
+            <div class="portfolio-card portfolio-row-card" data-portfolio-symbol="${safeText(item.symbol)}" data-buy-price="${buy}" data-quantity="${qty}" data-current-price="${current}">
+              <div class="portfolio-row-main">
+                <div class="portfolio-row-symbol-wrap">
                   <div class="portfolio-card-symbol">${safeText(item.symbol)}</div>
                   <div class="portfolio-card-sub"><span>${safeText(item.type_label || '—')}</span> • <span class="portfolio-source-line">${safeText(item.price_source_label || '—')}</span></div>
                 </div>
-                <span class="badge badge-plan">${safeText(item.recommendation || 'متابعة')}</span>
+                <div class="portfolio-row-price-wrap">
+                  <div class="portfolio-row-price live-portfolio-price ${plClass}">${formatNumber(current)}</div>
+                  <div class="portfolio-row-change live-portfolio-change ${plClass}">${formatPercent(pct)}</div>
+                </div>
+                <span class="badge badge-plan portfolio-row-badge">${safeText(item.recommendation || 'متابعة')}</span>
               </div>
-              <div class="portfolio-metrics">
-                <div class="portfolio-metric"><div class="portfolio-metric-label">سعر الشراء</div><div class="portfolio-metric-value">${formatNumber(item.buy_price)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">السعر الحالي</div><div class="portfolio-metric-value live-portfolio-price ${portfolioColorClass(item.holding_change_pct)}">${formatNumber(item.current_price)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">العائد الحالي</div><div class="portfolio-metric-value live-portfolio-change ${plClass}">${formatPercent(item.holding_change_pct)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">القيمة / التكلفة</div><div class="portfolio-metric-value live-portfolio-market-cost">$${formatNumber(item.market_value)} / $${formatNumber(item.cost_value)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">الهدف</div><div class="portfolio-metric-value">${formatNumber(item.target_price)}</div></div>
-                <div class="portfolio-metric"><div class="portfolio-metric-label">الوقف</div><div class="portfolio-metric-value">${formatNumber(item.stop_loss)}</div></div>
+              <div class="portfolio-row-metrics">
+                <span>شراء <b>${formatNumber(buy)}</b></span>
+                <span>قيمة/تكلفة <b class="live-portfolio-market-cost">$${formatNumber(marketValue)} / $${formatNumber(costValue)}</b></span>
+                <span>هدف <b>${formatNumber(item.target_price)}</b></span>
+                <span>وقف <b>${formatNumber(item.stop_loss)}</b></span>
               </div>
               <div class="portfolio-note-line"><b>رأي الأداة:</b> ${safeText(item.recommendation_note || 'راقب السعر مقارنة بالخطة والوقف والهدف.')}</div>
-              <details class="detail-panel portfolio-analyst-panel" data-portfolio-analyst-symbol="${safeText(item.symbol)}" ontoggle="if(this.open){loadPortfolioAnalystSnapshot('${safeText(item.symbol)}')}">
-                <summary>👥 آراء المحللين</summary>
-                <div style="margin-top:10px;">${renderPortfolioAnalystPlaceholder(item.symbol)}</div>
-              </details>
-              <div class="mini-actions">
+              <div class="mini-actions portfolio-row-actions">
                 <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
                 <button class="ghost" onclick="addToWatchlist('${safeText(item.symbol)}', ${Number(item.current_price || item.buy_price || 0)})">📌 متابعة</button>
-                <button class="ghost" onclick="loadPortfolioAnalystSnapshot('${safeText(item.symbol)}', true)">👥 تحديث المحللين</button>
+                <button class="ghost" onclick="openPortfolioAnalystModal('${safeText(item.symbol)}')">👥 المحللين</button>
                 <button class="delete" onclick="removePortfolioItem('${safeText(item.symbol)}')">حذف</button>
               </div>
             </div>`;
@@ -4170,6 +4387,69 @@
   function txt(el){ return (el && el.textContent || '').trim(); }
   function getCardFromNode(node){ return node ? node.closest('.card') : null; }
 
+
+  function modernAnalystDomId(symbol){ return `modernAnalyst_${String(symbol || '').replace(/[^A-Za-z0-9_-]/g, '_')}`; }
+  function prepareModernAnalystPlaceholders(root, symbol){
+    const clean = String(symbol || '').toUpperCase().trim();
+    if (!clean || !root) return;
+    qa('.analyst-snapshot-box', root).forEach((box, idx) => {
+      box.id = modernAnalystDomId(clean);
+      box.dataset.symbol = clean;
+      box.dataset.loaded = '0';
+      const btn = q('.analyst-load-btn', box);
+      if (btn) btn.onclick = function(ev){ ev.preventDefault(); loadModernAnalystSnapshot(clean, true); };
+    });
+  }
+  function setModernAnalystRefreshButton(el, symbol){
+    const btn = q('.analyst-load-btn', el);
+    if (btn) btn.onclick = function(ev){ ev.preventDefault(); loadModernAnalystSnapshot(symbol, true); };
+  }
+  window.loadModernAnalystSnapshot = async function(symbol, force=false){
+    const clean = String(symbol || '').toUpperCase().trim();
+    if (!clean) return;
+    const el = document.getElementById(modernAnalystDomId(clean));
+    if (!el) return;
+    if (el.dataset.loaded === '1' && !force) return;
+    el.dataset.loaded = force ? 'refreshing' : 'loading';
+    el.innerHTML = `<div class="analyst-snapshot-header"><div><div class="analyst-snapshot-title">Analyst Snapshot / آراء المحللين</div><div class="analyst-snapshot-note">جاري تحميل أحدث بيانات المحللين...</div></div></div><div class="analyst-summary">تحميل آراء المحللين من FMP...</div>`;
+    try {
+      const res = await apiFetch(`/analyst-snapshot?symbol=${encodeURIComponent(clean)}${force ? '&force_refresh=true' : ''}&_=${Date.now()}`);
+      const payload = await res.json();
+      el.innerHTML = renderAnalystSnapshotPayload(payload);
+      el.dataset.loaded = '1';
+      setModernAnalystRefreshButton(el, clean);
+    } catch(e) {
+      el.innerHTML = `<div class="analyst-summary">تعذر تحميل آراء المحللين مؤقتًا لهذا السهم. لا يؤثر ذلك على ترتيب الرادار.</div>`;
+      el.dataset.loaded = '0';
+    }
+  };
+  window.openPortfolioAnalystModal = function(symbol){
+    const clean = String(symbol || '').toUpperCase().trim();
+    if (!clean) return;
+    const overlay = document.getElementById('modernDetailOverlay');
+    const body = document.getElementById('modernDetailBody');
+    if (!overlay || !body) return;
+    const card = document.querySelector(`.portfolio-card[data-portfolio-symbol="${CSS.escape(clean)}"]`);
+    const price = card ? txt(q('.live-portfolio-price', card)) : '—';
+    const change = card ? txt(q('.live-portfolio-change', card)) : '—';
+    const symEl = document.getElementById('modernDetailSymbol');
+    const coEl = document.getElementById('modernDetailCompany');
+    const priceEl = document.getElementById('modernDetailPrice');
+    const chgEl = document.getElementById('modernDetailChange');
+    const metaEl = document.getElementById('modernDetailMeta');
+    if (symEl) symEl.textContent = clean;
+    if (coEl) coEl.textContent = 'آراء المحللين للمحفظة';
+    if (priceEl) priceEl.textContent = price || '—';
+    if (chgEl) { chgEl.textContent = change || '—'; chgEl.className = 'md-change ' + colorChangeClass(change); }
+    if (metaEl) metaEl.innerHTML = '<span class="modern-detail-chip">👥 المحللين</span><span class="modern-detail-chip">طبقة مساعدة فقط</span>';
+    body.innerHTML = `<div id="${modernAnalystDomId(clean)}" class="analyst-snapshot-box" data-symbol="${clean}" data-loaded="0"><div class="analyst-summary">جاري تجهيز نافذة المحللين...</div></div>`;
+    qa('.modern-detail-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === 'analyst'));
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden','false');
+    document.body.classList.add('modal-lock');
+    loadModernAnalystSnapshot(clean, true);
+  };
+
   function hidePositionSizeBlocks(root=document){
     qa('.detail-box', root).forEach(box => {
       const label = txt(q('.detail-label', box));
@@ -4232,6 +4512,7 @@
     hidePositionSizeBlocks(cloned);
     body.innerHTML = '';
     body.appendChild(cloned);
+    prepareModernAnalystPlaceholders(cloned, symbol);
 
     const symEl = document.getElementById('modernDetailSymbol');
     const coEl = document.getElementById('modernDetailCompany');
@@ -4259,7 +4540,7 @@
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden','false');
     document.body.classList.add('modal-lock');
-    if (typeof loadAnalystSnapshot === 'function') loadAnalystSnapshot(symbol);
+    if (typeof loadModernAnalystSnapshot === 'function') loadModernAnalystSnapshot(symbol, false);
     if (typeof loadAiContextSummary === 'function') loadAiContextSummary(symbol);
   }
 
