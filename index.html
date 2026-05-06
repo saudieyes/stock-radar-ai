@@ -3324,7 +3324,7 @@
     function createCard(stock, sectionKey='', index=0) {
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
-      const displayPrice = stock.display_price ?? stock.current_price_live ?? stock.financials?.current_price ?? 0;
+      const displayPrice = stock.current_price_live ?? stock.display_price ?? stock.financials?.current_price ?? 0;
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
@@ -3783,46 +3783,109 @@
     }
 
     function latestStockBySymbolFromScanData() {
+      // Prefer the freshest live item per symbol. In some snapshots the same symbol can appear
+      // in more than one bucket, and a later stale all_results copy used to overwrite the live one.
       const out = {};
       const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','watchlist','top_ranked','opening_focus','all_results'];
-      keys.forEach(key => {
+      const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
+      const itemFreshnessScore = (item, keyIndex) => {
+        const livePrice = num(item?.current_price_live);
+        const displayPrice = num(item?.display_price);
+        const currentPrice = num(item?.current_price || item?.price);
+        let score = 0;
+        if (livePrice > 0) score += 10000;
+        if (item?.live_price_available) score += 2500;
+        if (displayPrice > 0) score += 1000;
+        if (currentPrice > 0) score += 400;
+        if (String(item?.price_freshness_label || '').includes('مباشر')) score += 250;
+        if (String(item?.price_source_label || '').toLowerCase().includes('live')) score += 120;
+        score += Math.max(0, 80 - keyIndex); // Prefer displayed buckets over all_results ties.
+        return score;
+      };
+      keys.forEach((key, keyIndex) => {
         ((window.__scanData && window.__scanData[key]) || []).forEach(item => {
           const s = String(item?.symbol || '').toUpperCase().trim();
-          if (s) out[s] = item;
+          if (!s) return;
+          const score = itemFreshnessScore(item, keyIndex);
+          if (!out[s] || score >= out[s].score) out[s] = { item, score };
         });
       });
-      return out;
+      const clean = {};
+      Object.keys(out).forEach(s => { clean[s] = out[s].item; });
+      return clean;
+    }
+
+    function livePricePresentationFromItem(item) {
+      if (!item) return null;
+      const displayPrice = Number(item.current_price_live || item.display_price || item.current_price || item.price || 0);
+      if (!Number.isFinite(displayPrice) || displayPrice <= 0) return null;
+      const rawChange = item.display_change_pct ?? item.change_vs_prev_close_pct ?? item.change_pct ?? item.change_from_open_pct;
+      const change = Number(rawChange);
+      const hasChange = Number.isFinite(change);
+      const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
+      const sign = hasChange && change > 0 ? '+' : '';
+      const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
+      const sourceText = item.last_price_update_label || item.price_source_label || item.price_freshness_label || '';
+      return { displayPrice, cls, changeText, sourceText };
+    }
+
+    function applyLivePriceToBox(box, item) {
+      const p = livePricePresentationFromItem(item);
+      if (!box || !p) return false;
+      const valueEl = box.querySelector('.price-plan-value');
+      const changeEl = box.querySelector('.live-change-line');
+      const sourceEl = box.querySelector('.compact-source-line');
+      if (valueEl) {
+        valueEl.textContent = formatNumber(p.displayPrice);
+        valueEl.classList.remove('price-up','price-down','price-flat');
+        valueEl.classList.add(p.cls);
+      }
+      if (changeEl) {
+        changeEl.textContent = p.changeText;
+        changeEl.classList.remove('price-up','price-down','price-flat');
+        changeEl.classList.add(p.cls);
+      }
+      if (sourceEl && p.sourceText) sourceEl.textContent = p.sourceText;
+      return true;
     }
 
     function updateVisibleLivePriceDomFromScanData() {
       const bySymbol = latestStockBySymbolFromScanData();
-      document.querySelectorAll('.live-price-item[data-symbol]').forEach(box => {
-        const s = String(box.dataset.symbol || '').toUpperCase().trim();
+      let changed = 0;
+
+      // Update by card first, so every visible duplicate of the same symbol is refreshed.
+      document.querySelectorAll('.card[data-symbol]').forEach(card => {
+        const s = String(card.dataset.symbol || '').toUpperCase().trim();
         const item = bySymbol[s];
         if (!item) return;
-        const displayPrice = Number(item.current_price_live || item.display_price || item.current_price || item.price || 0);
-        if (!Number.isFinite(displayPrice) || displayPrice <= 0) return;
-        const rawChange = item.display_change_pct ?? item.change_vs_prev_close_pct ?? item.change_pct ?? item.change_from_open_pct;
-        const change = Number(rawChange);
-        const hasChange = Number.isFinite(change);
-        const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
-        const sign = hasChange && change > 0 ? '+' : '';
-        const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
-        const valueEl = box.querySelector('.price-plan-value');
-        const changeEl = box.querySelector('.live-change-line');
-        const sourceEl = box.querySelector('.compact-source-line');
-        if (valueEl) {
-          valueEl.textContent = formatNumber(displayPrice);
-          valueEl.classList.remove('price-up','price-down','price-flat');
-          valueEl.classList.add(cls);
-        }
-        if (changeEl) {
-          changeEl.textContent = changeText;
-          changeEl.classList.remove('price-up','price-down','price-flat');
-          changeEl.classList.add(cls);
-        }
-        if (sourceEl) sourceEl.textContent = item.price_source_label || item.last_price_update_label || sourceEl.textContent || '';
+        card.querySelectorAll('.live-price-item').forEach(box => {
+          if (applyLivePriceToBox(box, item)) changed += 1;
+        });
       });
+
+      // Fallback for any standalone live-price-item not inside a card.
+      document.querySelectorAll('.live-price-item[data-symbol]').forEach(box => {
+        if (box.closest('.card[data-symbol]')) return;
+        const s = String(box.dataset.symbol || '').toUpperCase().trim();
+        const item = bySymbol[s];
+        if (applyLivePriceToBox(box, item)) changed += 1;
+      });
+
+      // Keep the modern details sheet header aligned with the currently opened card.
+      const overlay = document.getElementById('modernDetailOverlay');
+      const symEl = document.getElementById('modernDetailSymbol');
+      if (overlay && overlay.classList.contains('open') && symEl) {
+        const s = String(symEl.textContent || '').toUpperCase().trim();
+        const p = livePricePresentationFromItem(bySymbol[s]);
+        const priceEl = document.getElementById('modernDetailPrice');
+        const chgEl = document.getElementById('modernDetailChange');
+        if (p && priceEl) priceEl.textContent = formatNumber(p.displayPrice);
+        if (p && chgEl) {
+          chgEl.textContent = p.changeText;
+          chgEl.className = 'md-change ' + (p.cls === 'price-up' ? 'green' : p.cls === 'price-down' ? 'red' : '');
+        }
+      }
+      return changed;
     }
 
     async function refreshRadarLiveFromSnapshot(silent=true) {
@@ -3847,7 +3910,12 @@
           } else {
             renderScanData();
             restoreScanUiState(uiState);
+            requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
           }
+
+          // Always run a light DOM price pass after applying the live payload. It does not rebuild
+          // the page and only touches price/change/source text inside existing radar cards.
+          updateVisibleLivePriceDomFromScanData();
 
           const updated = document.getElementById('heroUpdated');
           if (updated) updated.textContent = `تحديث حي: ${safeText(data.live_updated_at || 'الآن')} • ${formatNumber(data.quotes_available || 0)} سعر`;
@@ -4710,7 +4778,7 @@
     const symbol = details.dataset.symbol || txt(q('.symbol', card)) || '';
     const company = txt(q('.company', card)) || symbol;
     const price = txt(q('.price-plan-grid .price-plan-value', card)) || '—';
-    const change = txt(q('.compact-source-line', card)) || txt(q('.price-change-chip', card)) || '';
+    const change = txt(q('.live-change-line', card)) || txt(q('.compact-source-line', card)) || txt(q('.price-change-chip', card)) || '';
     const detailGrid = q('.details-grid', details);
     const overlay = document.getElementById('modernDetailOverlay');
     const body = document.getElementById('modernDetailBody');
@@ -4845,6 +4913,7 @@
 <!-- fix49: info buttons, show-all anchor, modal scroll reset -->
 </body>
 </html>
+
 
 
 
