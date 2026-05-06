@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Body, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, PlainTextResponse
 import requests
 import os
 import csv
@@ -85,6 +85,17 @@ from app.single_stock_engine import scan_all, build_single_stock_response, get_l
 from app.sqlite_store import init_db, sqlite_status, set_json, get_json
 from app.user_auth_store import has_auth_user, create_first_user, verify_db_user
 from app.live_quotes import get_live_quotes
+from app.tracking_intelligence import (
+    init_tracking_intelligence_db,
+    tracking_status,
+    record_tracking_snapshots,
+    mark_tracking_absences_from_scan,
+    refresh_tracking_prices_from_rows,
+    build_tracking_weekly_report,
+    build_tracking_weekly_brief,
+    export_tracking_json,
+    export_tracking_csv,
+)
 
 app = FastAPI()
 
@@ -92,6 +103,11 @@ try:
     init_db()
 except Exception as exc:
     print(f"SQLITE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+
+try:
+    init_tracking_intelligence_db()
+except Exception as exc:
+    print(f"TRACKING_INTELLIGENCE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
 
 
@@ -737,6 +753,15 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     if not include_watch:
         watch = []
 
+    tracking_live_stats = {}
+    try:
+        # Update Tracking Intelligence outcomes from the same fresh prices already
+        # fetched for the live overlay. This adds no API calls and does not create
+        # new tracking records from the 30-second loop.
+        tracking_live_stats = refresh_tracking_prices_from_rows(overlaid, source="radar_live_refresh")
+    except Exception as exc:
+        tracking_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
     updated_at_raw = str(snapshot.get("updated_at", "") or "") if isinstance(snapshot, dict) else ""
     snapshot_age_sec = None
     try:
@@ -759,6 +784,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "quote_cache_policy": "cache_ok_closed_market" if bool(prefer_cache) else "fresh_fmp_during_active_market",
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
+        "tracking_intelligence": tracking_live_stats,
         "groups": {
             "strong_entries": _live_bucket_payload(strong, limit),
             "cautious_entries": _live_bucket_payload(cautious, limit),
@@ -1623,6 +1649,34 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "scan_max_workers": scan_debug.get("scan_max_workers", None),
         "scan_requested_universe": scan_debug.get("scan_requested_universe", None),
     }
+
+    # Tracking Intelligence V1 is intentionally passive: full-scan snapshots only,
+    # SQLite writes only, no extra API calls, and no changes to decision/Sharia/price logic.
+    if not cache_hit:
+        try:
+            tracking_stats = record_tracking_snapshots(
+                strong_rows=strong,
+                cautious_rows=cautious,
+                gray_strong_rows=gray_strong,
+                market_phase=phase,
+                source="trade_scan_full",
+            )
+            absence_stats = mark_tracking_absences_from_scan(
+                current_signal_ids=tracking_stats.get("signal_ids", []) if isinstance(tracking_stats, dict) else [],
+                source="trade_scan_full",
+            )
+            out["tracking_intelligence"] = {
+                "ok": bool((tracking_stats or {}).get("ok", False)) and bool((absence_stats or {}).get("ok", False)),
+                "mode": "passive_full_scan_snapshot",
+                "recorded": {k: v for k, v in (tracking_stats or {}).items() if k != "signal_ids"},
+                "absences": absence_stats,
+            }
+        except Exception as exc:
+            out["tracking_intelligence"] = {
+                "ok": False,
+                "mode": "passive_full_scan_snapshot",
+                "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+            }
     return out
 
 
@@ -2267,11 +2321,47 @@ def user_data_diagnostics():
             "week_end": performance_store.get("active_week_end"),
         },
         "last_radar_live_refresh": last_live,
+        "tracking_intelligence": tracking_status(),
         "notes": {
             "news_score_enabled": bool(NEWS_SCORE_ENABLED),
             "market_mood_context_only": True,
+            "tracking_intelligence_passive": True,
         },
     }
+
+
+@app.get("/tracking-intelligence")
+@app.get("/tracking-intelligence/weekly")
+def tracking_intelligence_weekly(week_key: str = "", include_items: bool = False, format: str = "json"):
+    # Computed on demand only. This endpoint does not run in the price/scan
+    # decision path and does not fetch market data. Gray strong is technical-only.
+    fmt = str(format or "json").strip().lower()
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(
+            build_tracking_weekly_brief(week_key=week_key or None, include_items=True),
+            media_type="text/plain; charset=utf-8",
+        )
+    return build_tracking_weekly_report(week_key=week_key or None, include_items=include_items)
+
+
+@app.get("/tracking-intelligence/export.json")
+def tracking_intelligence_export_json(week_key: str = "", include_items: bool = True, limit: int = 5000):
+    # On-demand export only: no UI changes, no extra price calls, no decision changes.
+    return export_tracking_json(week_key=week_key or None, include_items=include_items, limit=limit)
+
+
+@app.get("/tracking-intelligence/export.csv")
+def tracking_intelligence_export_csv(week_key: str = "", limit: int = 5000):
+    # UTF-8 BOM helps Excel open Arabic text correctly.
+    csv_text = "﻿" + export_tracking_csv(week_key=week_key or None, limit=limit)
+    filename_week = str(week_key or "current").strip() or "current"
+    headers = {"Content-Disposition": f'attachment; filename="tracking_intelligence_{filename_week}.csv"'}
+    return Response(content=csv_text, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/tracking-intelligence/status")
+def tracking_intelligence_status():
+    return tracking_status()
 
 
 @app.get("/performance")
@@ -2341,6 +2431,7 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
 
 
