@@ -1491,6 +1491,53 @@ def _tracking_loss_rows(week_key: str, limit: int = 5000) -> list[dict]:
         return []
 
 
+def _tracking_all_rows(week_key: str, limit: int = 12000) -> list[dict]:
+    """Return tracked signals for denominator/base-rate analysis.
+
+    This is diagnostic-only. It lets the loss report compare a risk factor's
+    failures against all times that factor appeared, instead of counting the
+    factor inside losing rows only.
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tracking_signals
+                WHERE week_key=?
+                ORDER BY updated_at_ts DESC
+                LIMIT ?
+                """,
+                (week_key, int(limit or 12000)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _is_loss_row(row: dict) -> bool:
+    outcome = str((row or {}).get("outcome_group") or "").strip().lower()
+    status = str((row or {}).get("status") or "").strip().lower()
+    stopped_at = str((row or {}).get("stopped_at") or "").strip()
+    return bool(outcome in {"loss", "stopped", "failed"} or status in {"stopped", "broken_before_activation"} or stopped_at)
+
+
+def _is_target_row(row: dict) -> bool:
+    outcome = str((row or {}).get("outcome_group") or "").strip().lower()
+    status = str((row or {}).get("status") or "").strip().lower()
+    return bool(
+        outcome in {"target", "target_hit", "win", "winner", "target_1", "target_2", "hit"}
+        or status in {"target_hit", "target_2_hit", "above_target"}
+        or str((row or {}).get("target_hit_at") or "").strip()
+        or str((row or {}).get("target_2_hit_at") or "").strip()
+    )
+
+
+def _is_partial_gain_row(row: dict) -> bool:
+    outcome = str((row or {}).get("outcome_group") or "").strip().lower()
+    status = str((row or {}).get("status") or "").strip().lower()
+    return bool(outcome in {"partial_gain", "green", "gain"} or status in {"partial_gain", "above_entry", "active_gain"})
+
+
 def _loss_stage(row: dict) -> tuple[str, str]:
     activated = bool(str(row.get("activated_at") or "").strip())
     stopped = bool(str(row.get("stopped_at") or "").strip())
@@ -1507,37 +1554,188 @@ def _loss_stage(row: dict) -> tuple[str, str]:
     return "غير محدد", "الخسارة مسجلة لكن مرحلة الفشل غير واضحة"
 
 
-def _loss_reason_tags(item: dict) -> list[str]:
-    """Build practical loss-reason tags from existing tracking fields only."""
+def _risk_factor_tags(item: dict) -> list[str]:
+    """Risk/context factors that can be counted against all appearances.
+
+    These are denominator-safe factors: they describe the setup at/around
+    appearance, not the post-failure result. For example, "قرب من قمة تاريخية"
+    can be compared as: appeared N times, lost M times. Failure-only reasons
+    such as "كسر الدعم" stay in _loss_reason_tags and should not be treated as
+    base-rate risk factors.
+    """
     tags = [str(x) for x in (item.get("risk_tags") or []) if str(x).strip()]
     out: list[str] = []
+
+    def add(text: str) -> None:
+        text = str(text or "").strip()
+        if text and text not in out:
+            out.append(text)
+
     for tag in tags:
-        if tag not in out:
-            out.append(tag)
+        # Keep useful pre-existing risk tags, but skip failure-result tags that
+        # do not have a meaningful denominator across all signals.
+        if any(x in tag for x in ["كسر الدعم", "ضرب الوقف", "فشل سريع", "الخطة مكسورة"]):
+            continue
+        add(tag)
+
     res_dist = _safe_float(item.get("nearest_resistance_distance_pct"), 999.0)
     res_strength = str(item.get("nearest_resistance_strength") or "")
     if res_dist <= 1.25 and any(x in res_strength for x in ["قوي", "strong", "very"]):
-        out.append("قريب من مقاومة قوية")
+        add("قريب من مقاومة قوية")
     elif res_dist <= 1.0:
-        out.append("قريب من مقاومة")
+        add("قريب من مقاومة")
+
+    if _safe_float(item.get("distance_to_ath_pct"), 999.0) <= 3.0:
+        add("قرب من قمة تاريخية")
+    if _safe_float(item.get("distance_to_52w_high_pct"), 999.0) <= 3.0:
+        add("قرب من قمة سنوية")
+    if _safe_float(item.get("volatility_pct"), 0.0) >= 8.0:
+        add("تذبذب عالي")
     if bool(item.get("is_late_above_entry")):
-        out.append("دخول متأخر فوق نقطة الدخول")
+        add("دخول متأخر فوق نقطة الدخول")
     if bool(item.get("is_entry_far")) or _safe_float(item.get("entry_distance_pct"), 0.0) >= 3.0:
-        out.append("نقطة الدخول بعيدة")
+        add("نقطة الدخول بعيدة")
+
     market = str(item.get("market_support_label") or "")
     sector = str(item.get("sector_support_label") or "")
     if any(x in market for x in ["غير داعم", "ضعيف", "سلبي", "هبوط"]):
-        out.append("السوق غير داعم")
+        add("السوق غير داعم")
     if any(x in sector for x in ["غير داعم", "ضعيف", "سلبي", "هبوط"]):
-        out.append("القطاع غير داعم")
+        add("القطاع غير داعم")
+
+    return out[:10]
+
+
+def _loss_reason_tags(item: dict) -> list[str]:
+    """Build practical loss-reason tags from existing tracking fields only."""
+    out: list[str] = []
+
+    def add(text: str) -> None:
+        text = str(text or "").strip()
+        if text and text not in out:
+            out.append(text)
+
+    # Include denominator-safe risk/context factors first.
+    for tag in _risk_factor_tags(item):
+        add(tag)
+
+    # Then include failure-result tags, which are useful for loss diagnosis but
+    # should not be interpreted as base-rate risk factors.
+    for tag in [str(x) for x in (item.get("risk_tags") or []) if str(x).strip()]:
+        if any(x in tag for x in ["كسر الدعم", "ضرب الوقف", "فشل سريع", "الخطة مكسورة"]):
+            add(tag)
+
     if "بعد التفعيل" in str(item.get("failure_stage") or "") and _safe_float(item.get("max_gain_pct"), 0.0) <= 0.5:
-        out.append("فشل سريع بعد التفعيل")
-    # Preserve order while removing duplicates.
-    clean: list[str] = []
-    for tag in out:
-        if tag and tag not in clean:
-            clean.append(tag)
-    return clean[:8]
+        add("فشل سريع بعد التفعيل")
+
+    return out[:10]
+
+
+def _tracking_item_from_row(r: dict) -> dict:
+    """Normalize one tracking row for loss/base-rate diagnostics."""
+    stage, stage_note = _loss_stage(r)
+    risk_tags = _json_loads((r or {}).get("risk_tags_json"), []) or []
+    snapshot = _json_loads((r or {}).get("snapshot_json"), {}) or {}
+    return {
+        "symbol": (r or {}).get("symbol"),
+        "bucket": (r or {}).get("signal_bucket"),
+        "label": (r or {}).get("signal_label"),
+        "status": (r or {}).get("status"),
+        "status_label": (r or {}).get("status_label"),
+        "outcome_group": (r or {}).get("outcome_group"),
+        "first_seen_at": (r or {}).get("first_seen_at"),
+        "activated_at": (r or {}).get("activated_at"),
+        "stopped_at": (r or {}).get("stopped_at"),
+        "target_hit_at": (r or {}).get("target_hit_at"),
+        "target_2_hit_at": (r or {}).get("target_2_hit_at"),
+        "entry_price": safe_round((r or {}).get("entry_price"), 4),
+        "stop_loss": safe_round((r or {}).get("stop_loss"), 4),
+        "target_price": safe_round((r or {}).get("target_price"), 4),
+        "max_gain_pct": safe_round((r or {}).get("max_gain_pct"), 2),
+        "max_loss_pct": safe_round((r or {}).get("max_loss_pct"), 2),
+        "minutes_to_activation": safe_round((r or {}).get("minutes_to_activation"), 1),
+        "minutes_to_stop": safe_round((r or {}).get("minutes_to_stop"), 1),
+        "failure_stage": stage,
+        "failure_stage_note": stage_note,
+        "risk_tags": risk_tags,
+        "plan_family": (r or {}).get("plan_family", ""),
+        "signal_reason": (r or {}).get("signal_reason", ""),
+        "nearest_resistance_distance_pct": safe_round((r or {}).get("nearest_resistance_distance_pct"), 2),
+        "nearest_resistance_strength": (r or {}).get("nearest_resistance_strength", ""),
+        "distance_to_52w_high_pct": safe_round((r or {}).get("distance_to_52w_high_pct"), 2),
+        "distance_to_ath_pct": safe_round((r or {}).get("distance_to_ath_pct"), 2),
+        "volatility_pct": safe_round((r or {}).get("volatility_pct"), 2),
+        "market_support_label": (r or {}).get("market_support_label", ""),
+        "sector_support_label": (r or {}).get("sector_support_label", ""),
+        "entry_distance_pct": safe_round((r or {}).get("entry_distance_pct"), 2),
+        "is_late_above_entry": bool((r or {}).get("is_late_above_entry")),
+        "is_entry_far": bool((r or {}).get("is_entry_far")),
+        "snapshot_note": snapshot.get("quick_explainer") or snapshot.get("ai_summary") or "",
+    }
+
+
+def _build_risk_factor_base_rates(all_rows: list[dict], loss_rows: list[dict]) -> list[dict]:
+    """Compare each risk factor with its own denominator across all tracked signals."""
+    all_ids_by_factor: dict[str, set[str]] = {}
+    loss_ids_by_factor: dict[str, set[str]] = {}
+    target_ids_by_factor: dict[str, set[str]] = {}
+    partial_ids_by_factor: dict[str, set[str]] = {}
+    not_activated_ids_by_factor: dict[str, set[str]] = {}
+
+    loss_ids = {str((r or {}).get("id") or f"{(r or {}).get('symbol')}|{idx}") for idx, r in enumerate(loss_rows)}
+
+    for idx, r in enumerate(all_rows or []):
+        rid = str((r or {}).get("id") or f"{(r or {}).get('symbol')}|{idx}")
+        item = _tracking_item_from_row(r)
+        factors = _risk_factor_tags(item)
+        if not factors:
+            continue
+        is_loss = rid in loss_ids or _is_loss_row(r)
+        is_target = _is_target_row(r)
+        is_partial = _is_partial_gain_row(r)
+        is_not_activated = not bool(str((r or {}).get("activated_at") or "").strip()) and not is_loss and not is_target
+        for f in factors:
+            all_ids_by_factor.setdefault(f, set()).add(rid)
+            if is_loss:
+                loss_ids_by_factor.setdefault(f, set()).add(rid)
+            if is_target:
+                target_ids_by_factor.setdefault(f, set()).add(rid)
+            if is_partial:
+                partial_ids_by_factor.setdefault(f, set()).add(rid)
+            if is_not_activated:
+                not_activated_ids_by_factor.setdefault(f, set()).add(rid)
+
+    out: list[dict] = []
+    total_all = max(len(all_rows or []), 1)
+    total_losses = max(len(loss_rows or []), 1)
+    global_loss_rate = (len(loss_rows or []) / total_all) * 100.0
+    for factor, ids in all_ids_by_factor.items():
+        appearances = len(ids)
+        if appearances <= 0:
+            continue
+        losses = len(loss_ids_by_factor.get(factor, set()))
+        targets = len(target_ids_by_factor.get(factor, set()))
+        partials = len(partial_ids_by_factor.get(factor, set()))
+        not_activated = len(not_activated_ids_by_factor.get(factor, set()))
+        failure_rate = (losses / appearances) * 100.0 if appearances else 0.0
+        exposure_rate = (appearances / total_all) * 100.0 if total_all else 0.0
+        share_of_losses = (losses / total_losses) * 100.0 if total_losses else 0.0
+        out.append({
+            "factor": factor,
+            "appearances": appearances,
+            "losses": losses,
+            "targets": targets,
+            "partial_gains": partials,
+            "not_activated": not_activated,
+            "failure_rate_pct": safe_round(failure_rate, 1),
+            "exposure_rate_pct": safe_round(exposure_rate, 1),
+            "share_of_losses_pct": safe_round(share_of_losses, 1),
+            "global_loss_rate_pct": safe_round(global_loss_rate, 1),
+            "risk_delta_pct": safe_round(failure_rate - global_loss_rate, 1),
+        })
+
+    out.sort(key=lambda x: (_safe_float(x.get("risk_delta_pct"), 0.0), _safe_float(x.get("failure_rate_pct"), 0.0), int(x.get("appearances") or 0)), reverse=True)
+    return out
 
 
 def _loss_group_key(item: dict) -> tuple:
@@ -1737,45 +1935,18 @@ def build_loss_analysis_report(
     """
     week_key, _ws, _we = _week_parts(week_key)
     rows = _tracking_loss_rows(week_key, limit=limit)
+    # Use a wider denominator than the displayed loss limit, so factor failure
+    # rates are not computed against losses only. This is still read-only and
+    # does not affect tracking/radar behavior.
+    all_limit = max(int(limit or 500) * 8, 5000)
+    all_rows = _tracking_all_rows(week_key, limit=all_limit)
     items = []
     for r in rows:
-        stage, stage_note = _loss_stage(r)
-        risk_tags = _json_loads(r.get("risk_tags_json"), []) or []
-        snapshot = _json_loads(r.get("snapshot_json"), {}) or {}
-        item = {
-            "symbol": r.get("symbol"),
-            "bucket": r.get("signal_bucket"),
-            "label": r.get("signal_label"),
-            "status": r.get("status"),
-            "status_label": r.get("status_label"),
-            "outcome_group": r.get("outcome_group"),
-            "first_seen_at": r.get("first_seen_at"),
-            "activated_at": r.get("activated_at"),
-            "stopped_at": r.get("stopped_at"),
-            "entry_price": safe_round(r.get("entry_price"), 4),
-            "stop_loss": safe_round(r.get("stop_loss"), 4),
-            "target_price": safe_round(r.get("target_price"), 4),
-            "max_gain_pct": safe_round(r.get("max_gain_pct"), 2),
-            "max_loss_pct": safe_round(r.get("max_loss_pct"), 2),
-            "minutes_to_activation": safe_round(r.get("minutes_to_activation"), 1),
-            "minutes_to_stop": safe_round(r.get("minutes_to_stop"), 1),
-            "failure_stage": stage,
-            "failure_stage_note": stage_note,
-            "risk_tags": risk_tags,
-            "plan_family": r.get("plan_family", ""),
-            "signal_reason": r.get("signal_reason", ""),
-            "nearest_resistance_distance_pct": safe_round(r.get("nearest_resistance_distance_pct"), 2),
-            "nearest_resistance_strength": r.get("nearest_resistance_strength", ""),
-            "market_support_label": r.get("market_support_label", ""),
-            "sector_support_label": r.get("sector_support_label", ""),
-            "entry_distance_pct": safe_round(r.get("entry_distance_pct"), 2),
-            "is_late_above_entry": bool(r.get("is_late_above_entry")),
-            "is_entry_far": bool(r.get("is_entry_far")),
-            "snapshot_note": snapshot.get("quick_explainer") or snapshot.get("ai_summary") or "",
-        }
+        item = _tracking_item_from_row(r)
         item["derived_loss_reasons"] = _loss_reason_tags(item)
         items.append(item)
 
+    risk_base_rates = _build_risk_factor_base_rates(all_rows, rows)
     stage_counts = _count_by(items, "failure_stage")
     bucket_counts = _count_by(items, "bucket")
     tag_counts: dict[str, int] = {}
@@ -1806,9 +1977,22 @@ def build_loss_analysis_report(
 
         if tag_counts:
             lines.append("")
-            lines.append("أكثر أسباب الخسارة/الخطر تكرارًا:")
+            lines.append("أكثر أسباب الخسارة/الخطر داخل الخسائر فقط:")
             for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
                 lines.append(f"- {k}: {v}")
+            lines.append("ملاحظة: هذه أعداد داخل الخسائر فقط، وليست نسبة فشل العامل.")
+
+        if risk_base_rates:
+            lines.append("")
+            lines.append("نسبة فشل عوامل الخطر مقارنة بكل مرات ظهورها:")
+            for rbr in risk_base_rates[:10]:
+                factor = rbr.get("factor")
+                lines.append(
+                    f"- {factor}: ظهر {rbr.get('appearances')} | خسر {rbr.get('losses')} "
+                    f"| فشل {rbr.get('failure_rate_pct')}% "
+                    f"| متوسط فشل عام {rbr.get('global_loss_rate_pct')}% "
+                    f"| فرق {rbr.get('risk_delta_pct')} نقطة"
+                )
 
         # Compact interpretation, not a scoring change.
         lines.append("")
@@ -1817,7 +2001,13 @@ def build_loss_analysis_report(
         lines.append(f"- أكثر مرحلة فشل: {top_stage[0]} ({top_stage[1]})")
         if tag_counts:
             top_tags = [f"{k} ({v})" for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:4]]
-            lines.append(f"- أكثر الأنماط المتكررة: {'، '.join(top_tags)}")
+            lines.append(f"- أكثر الأنماط داخل الخسائر: {'، '.join(top_tags)}")
+        if risk_base_rates:
+            top_risk = risk_base_rates[0]
+            lines.append(
+                f"- أعلى عامل خطر حسب المقام: {top_risk.get('factor')} "
+                f"فشل {top_risk.get('failure_rate_pct')}% من {top_risk.get('appearances')} ظهور"
+            )
         repeat_heavy = [g for g in grouped if int(g.get("signals_count") or 0) >= 5]
         if repeat_heavy:
             lines.append(f"- أسهم تكررت خسارتها 5 مرات أو أكثر: {len(repeat_heavy)}")
@@ -1860,10 +2050,12 @@ def build_loss_analysis_report(
         "ok": True,
         "week_key": week_key,
         "raw_count": len(items),
+        "all_tracked_count_for_denominator": len(all_rows),
         "grouped_count": len(grouped),
         "stage_counts": stage_counts,
         "bucket_counts": bucket_counts,
         "loss_reason_counts": tag_counts,
+        "risk_factor_base_rates": risk_base_rates,
         "grouped_items": grouped[:int(limit or 500)],
         "raw_items_sample": items[:80],
     }
