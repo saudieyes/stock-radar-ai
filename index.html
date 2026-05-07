@@ -2126,6 +2126,10 @@
       </div>
     </div>
 
+    <div id="sourceDiscoveryPanel" class="small-note" style="margin-bottom:16px;">
+      <b>مسح السوق الكامل:</b> جاري تحميل حالة المنبع...
+    </div>
+
     <div id="marketMoodSection" class="market-mood-card scroll-anchor">
       <div class="market-mood-top">
         <div>
@@ -2339,6 +2343,14 @@
     function safeText(value) {
       if (value === null || value === undefined || value === "") return "";
       return escapeHtml(String(value));
+    }
+
+    function formatDurationShort(sec) {
+      const n = Math.max(0, Number(sec || 0));
+      if (!Number.isFinite(n)) return '—';
+      if (n < 60) return `${Math.round(n)}ث`;
+      if (n < 3600) return `${Math.floor(n / 60)}د ${Math.round(n % 60)}ث`;
+      return `${Math.floor(n / 3600)}س ${Math.round((n % 3600) / 60)}د`;
     }
 
 
@@ -3607,6 +3619,62 @@
       `;
     }
 
+
+    function currentScanUpdatedAt() {
+      return String(window.__scanData?.analysis_updated_at || window.__scanData?.full_market_scan_status?.last_scan_at || window.__scanData?.updated_at || '').trim();
+    }
+
+    function renderSourceDiscoveryPanel(payload={}) {
+      const box = document.getElementById('sourceDiscoveryPanel');
+      if (!box) return;
+      const status = payload?.sourceStatus || payload || {};
+      const fromScan = !payload?.sourceStatus;
+      const enabled = Boolean(status.enabled ?? payload?.dynamic_discovery?.enabled ?? payload?.full_market_scan_status?.enabled);
+      const latest = status.latest_snapshot_at || payload?.analysis_updated_at || payload?.full_market_scan_status?.last_scan_at || payload?.updated_at || '—';
+      const ageSec = status.latest_snapshot_age_sec ?? payload?.cache_age_sec;
+      const ageText = Number(ageSec || 0) > 0 ? `منذ ${formatDurationShort(ageSec)}` : (latest && latest !== '—' ? 'حديثة' : '—');
+      const intervalSec = status.interval_sec || payload?.full_market_scan_status?.next_scan_interval_sec || payload?.dynamic_discovery?.next_scan_interval_sec || 0;
+      const nextText = status.next_scan_in_sec !== null && status.next_scan_in_sec !== undefined
+        ? formatDurationShort(status.next_scan_in_sec)
+        : (intervalSec ? formatDurationShort(intervalSec) : 'حسب حالة السوق');
+      const dyn = status.dynamic_discovery || payload?.dynamic_discovery || {};
+      const broad = dyn.broad_market_count || payload?.dynamic_discovery?.broad_market_count || 0;
+      const confirmed = dyn.fmp_confirmed || payload?.dynamic_discovery?.fmp_confirmed || 0;
+      const phaseLabel = status.market_phase_label || payload?.market_phase_label || '—';
+      const running = Boolean(status.scan_running || status?.worker?.active_price_window);
+      const newAvailable = Boolean(status.new_snapshot_available);
+      const headline = enabled ? '✅ مسح السوق الكامل مفعل' : '⚠️ المنبع الديناميكي غير مفعل';
+      const updateButton = newAvailable
+        ? `<button class="ghost" style="margin-top:8px;" onclick="applyLatestDiscoverySnapshot()">عرض نتائج المسح الجديد الآن</button>`
+        : '';
+      box.innerHTML = `
+        <b>${headline}</b><br>
+        القائمة الحالية من آخر مسح شامل: <b>${safeText(latest)}</b> (${safeText(ageText)}) • حالة السوق: ${safeText(phaseLabel)}<br>
+        ${running ? '🔄 السيرفر يراقب ويحدّث في الخلفية' : '⏳ بانتظار نافذة المسح التالية'} • المسح القادم تقريبًا: ${safeText(nextText)}
+        ${broad ? `<br>آخر مسح واسع: ${formatNumber(broad)} رمز • تأكيد FMP للمرشحين: ${formatNumber(confirmed)}` : ''}
+        ${newAvailable ? '<br><b>اكتمل مسح جديد للسوق ولم يتم تطبيقه على الشاشة حتى لا يتغير مكانك أثناء القراءة.</b>' : ''}
+        ${updateButton}
+      `;
+      if (!fromScan) window.__sourceDiscoveryStatus = status;
+    }
+
+    async function pollSourceDiscoveryStatus(silent=true) {
+      try {
+        const client = encodeURIComponent(currentScanUpdatedAt());
+        const res = await apiFetch(`/source-discovery/status?client_updated_at=${client}&_=${Date.now()}`);
+        const data = await res.json();
+        if (data && data.ok) renderSourceDiscoveryPanel({ sourceStatus: data });
+      } catch(e) {
+        const box = document.getElementById('sourceDiscoveryPanel');
+        if (box && !silent) box.innerHTML = '<b>مسح السوق الكامل:</b> تعذر تحميل الحالة الآن';
+      }
+    }
+
+    async function applyLatestDiscoverySnapshot() {
+      await loadScan(false);
+      await pollSourceDiscoveryStatus(true);
+    }
+
     function renderSections(data) {
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
@@ -3647,6 +3715,7 @@
     function renderScanData() {
       if (!window.__scanData) return;
       renderStatusbar(window.__scanData);
+      renderSourceDiscoveryPanel(window.__scanData);
       renderSections(window.__scanData);
       renderOpeningFocus(window.__scanData);
     }
@@ -4607,8 +4676,9 @@
     window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
     window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 30000);
     window.__portfolioLiveTimer = window.setInterval(() => refreshPortfolioLiveQuotes(), 30000);
-    window.__fullScanTimer = window.setInterval(() => periodicFullRadarScan(), 300000);
+    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 30000);
     loadAll();
+    pollSourceDiscoveryStatus(true);
   </script>
 
 
@@ -4913,6 +4983,7 @@
 <!-- fix49: info buttons, show-all anchor, modal scroll reset -->
 </body>
 </html>
+
 
 
 
