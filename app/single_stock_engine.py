@@ -13,6 +13,11 @@ from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
 from app.market_data import get_active_universe
 from app.settings import SCAN_UNIVERSE_TARGET, SCAN_MAX_WORKERS
+try:
+    from app.missed_opportunities import record_missed_source_candidates, record_missed_seen_from_scan
+except Exception:  # Keep radar resilient if diagnostic module is disabled/unavailable.
+    record_missed_source_candidates = None
+    record_missed_seen_from_scan = None
 
 LAST_SCAN_DEBUG = {}
 
@@ -27,6 +32,11 @@ def scan_all(debug: bool = False):
     requested_universe = int(SCAN_UNIVERSE_TARGET or 190)
     raw_symbols = list(get_active_universe(requested_universe) or [])
     source_diag = get_last_source_diagnostics()
+    try:
+        if record_missed_source_candidates is not None:
+            record_missed_source_candidates(raw_symbols, source_diag, source="scan_all_source_universe")
+    except Exception as exc:
+        print(f"MISSED_SOURCE_RECORD_ERROR: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
     source_reasons = (source_diag or {}).get("reasons", {}) if isinstance(source_diag, dict) else {}
     symbols = [s for s in raw_symbols if normalize_symbol_text(s) not in manual_sharia_exclusions]
     rows = []
@@ -198,6 +208,11 @@ def scan_all(debug: bool = False):
     diag["news_with_catalyst"] = len([x for x in rows if bool(x.get("news_is_catalyst", False))])
     diag["news_fetch_skipped"] = len([x for x in rows if bool(x.get("news_fetch_skipped", False))])
     diag["news_negative_or_legal"] = len([x for x in rows if str(x.get("news_sentiment", "") or "") in {"negative", "legal"}])
+    try:
+        if record_missed_seen_from_scan is not None:
+            diag["missed_opportunities"] = record_missed_seen_from_scan(rows, diag, market_phase=str((rows[0] or {}).get("market_phase", "") if rows else ""), source="scan_all_full")
+    except Exception as exc:
+        diag["missed_opportunities"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     diag["scan_elapsed_sec"] = round(time.time() - scan_started_at, 2)
     diag["sample_rows"] = [
         {
@@ -302,5 +317,6 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
+
 
 
