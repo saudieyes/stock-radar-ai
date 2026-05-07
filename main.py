@@ -2614,3 +2614,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
+
