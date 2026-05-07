@@ -2346,11 +2346,18 @@
     }
 
     function formatDurationShort(sec) {
-      const n = Math.max(0, Number(sec || 0));
-      if (!Number.isFinite(n)) return '—';
-      if (n < 60) return `${Math.round(n)}ث`;
-      if (n < 3600) return `${Math.floor(n / 60)}د ${Math.round(n % 60)}ث`;
-      return `${Math.floor(n / 3600)}س ${Math.round((n % 3600) / 60)}د`;
+      const raw = Number(sec || 0);
+      if (!Number.isFinite(raw)) return '—';
+      const n = Math.max(0, Math.floor(raw));
+      if (n < 60) return `${n}ث`;
+      if (n < 3600) {
+        const m = Math.floor(n / 60);
+        const ss = n % 60;
+        return ss ? `${m}د ${ss}ث` : `${m}د`;
+      }
+      const h = Math.floor(n / 3600);
+      const m = Math.floor((n % 3600) / 60);
+      return m ? `${h}س ${m}د` : `${h}س`;
     }
 
 
@@ -3079,6 +3086,12 @@
       return `<div class="level-quick-chip ${safeText(cls)}"><div class="level-quick-label">${safeText(label)}</div><div class="level-quick-value">${safeText(shown)}</div></div>`;
     }
 
+    function livePriceSourceLabel(stock) {
+      const t = String(stock?.last_price_update_label || '').trim();
+      if (t) return /^آخر/.test(t) ? t : `آخر سعر: ${t}`;
+      return String(stock?.price_source_label || stock?.price_freshness_label || '').trim();
+    }
+
     function currentPricePlanItem(stock, displayPrice) {
       const rawChange = stock?.display_change_pct ?? stock?.change_vs_prev_close_pct ?? stock?.change_pct ?? stock?.change_from_open_pct;
       const change = Number(rawChange);
@@ -3086,7 +3099,7 @@
       const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
       const sign = hasChange && change > 0 ? '+' : '';
       const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
-      const source = stock?.price_source_label || stock?.last_price_update_label || '';
+      const source = livePriceSourceLabel(stock);
       return `<div class="price-plan-item live-price-item" data-symbol="${safeText(stock?.symbol || '')}">
         <div class="price-plan-label">السعر الحالي</div>
         <div class="price-plan-value ${cls}">${safeText(formatNumber(displayPrice))}</div>
@@ -3624,25 +3637,87 @@
       return String(window.__scanData?.analysis_updated_at || window.__scanData?.full_market_scan_status?.last_scan_at || window.__scanData?.updated_at || '').trim();
     }
 
+    function normalizeSourceDiscoveryStatus(status={}) {
+      const out = { ...(status || {}) };
+      const now = Date.now();
+      if (!out.__receivedAtMs) out.__receivedAtMs = now;
+      if (out.__baseAgeSec === undefined) {
+        const age = Number(out.latest_snapshot_age_sec ?? out.cache_age_sec ?? 0);
+        out.__baseAgeSec = Number.isFinite(age) ? Math.max(0, age) : 0;
+      }
+      if (out.__baseNextSec === undefined) {
+        const next = Number(out.next_scan_in_sec);
+        out.__baseNextSec = Number.isFinite(next) ? Math.max(0, next) : null;
+      }
+      return out;
+    }
+
+    function liveSourceDiscoveryStatus(status={}) {
+      const out = normalizeSourceDiscoveryStatus(status);
+      const elapsed = Math.max(0, Math.floor((Date.now() - Number(out.__receivedAtMs || Date.now())) / 1000));
+      const baseAge = Number(out.__baseAgeSec || 0);
+      const baseNext = out.__baseNextSec;
+      return {
+        ...out,
+        latest_snapshot_age_sec_live: Math.max(0, baseAge + elapsed),
+        next_scan_in_sec_live: baseNext === null || baseNext === undefined ? null : Math.max(0, baseNext - elapsed)
+      };
+    }
+
+    function ensureSourceDiscoveryNotice() {
+      let el = document.getElementById('sourceDiscoveryNotice');
+      if (el) return el;
+      el = document.createElement('div');
+      el.id = 'sourceDiscoveryNotice';
+      el.style.cssText = 'position:fixed;left:14px;right:14px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:12000;display:none;max-width:560px;margin:0 auto;background:var(--panel-bg);border:1px solid var(--detail-btn-border);border-radius:18px;box-shadow:0 14px 36px rgba(0,0,0,.22);padding:12px;direction:rtl;color:var(--text-main);';
+      document.body.appendChild(el);
+      return el;
+    }
+
+    function hideSourceDiscoveryNotice(snapshotAt='') {
+      const el = document.getElementById('sourceDiscoveryNotice');
+      if (snapshotAt) window.__sourceDiscoveryNoticeDismissedAt = snapshotAt;
+      if (el) el.style.display = 'none';
+    }
+
+    function showSourceDiscoveryNotice(status={}) {
+      const live = liveSourceDiscoveryStatus(status);
+      const snapshotAt = String(live.latest_snapshot_at || '').trim();
+      if (!snapshotAt || window.__sourceDiscoveryNoticeDismissedAt === snapshotAt) return;
+      const el = ensureSourceDiscoveryNotice();
+      el.dataset.snapshotAt = snapshotAt;
+      el.innerHTML = `
+        <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">✅ اكتمل مسح جديد للسوق</div>
+        <div style="font-size:13px;line-height:1.75;color:var(--text-main);">تم تجهيز قائمة محدثة في الخلفية بدون تغيير مكانك أثناء القراءة.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <button class="primary" type="button" onclick="applyLatestDiscoverySnapshot()">عرض النتائج الجديدة الآن</button>
+          <button class="ghost" type="button" onclick="hideSourceDiscoveryNotice('${safeText(snapshotAt)}')">لاحقًا</button>
+        </div>`;
+      el.style.display = 'block';
+    }
+
     function renderSourceDiscoveryPanel(payload={}) {
       const box = document.getElementById('sourceDiscoveryPanel');
       if (!box) return;
-      const status = payload?.sourceStatus || payload || {};
-      const fromScan = !payload?.sourceStatus;
+      const fromStatus = Boolean(payload?.sourceStatus);
+      const fallback = window.__sourceDiscoveryStatus || null;
+      const raw = fromStatus ? payload.sourceStatus : (fallback || payload || {});
+      const status = liveSourceDiscoveryStatus(raw);
       const enabled = Boolean(status.enabled ?? payload?.dynamic_discovery?.enabled ?? payload?.full_market_scan_status?.enabled);
       const latest = status.latest_snapshot_at || payload?.analysis_updated_at || payload?.full_market_scan_status?.last_scan_at || payload?.updated_at || '—';
-      const ageSec = status.latest_snapshot_age_sec ?? payload?.cache_age_sec;
+      const ageSec = status.latest_snapshot_age_sec_live ?? status.latest_snapshot_age_sec ?? payload?.cache_age_sec;
       const ageText = Number(ageSec || 0) > 0 ? `منذ ${formatDurationShort(ageSec)}` : (latest && latest !== '—' ? 'حديثة' : '—');
       const intervalSec = status.interval_sec || payload?.full_market_scan_status?.next_scan_interval_sec || payload?.dynamic_discovery?.next_scan_interval_sec || 0;
-      const nextText = status.next_scan_in_sec !== null && status.next_scan_in_sec !== undefined
-        ? formatDurationShort(status.next_scan_in_sec)
+      const nextLive = status.next_scan_in_sec_live;
+      const nextText = nextLive !== null && nextLive !== undefined
+        ? formatDurationShort(nextLive)
         : (intervalSec ? formatDurationShort(intervalSec) : 'حسب حالة السوق');
       const dyn = status.dynamic_discovery || payload?.dynamic_discovery || {};
       const broad = dyn.broad_market_count || payload?.dynamic_discovery?.broad_market_count || 0;
       const confirmed = dyn.fmp_confirmed || payload?.dynamic_discovery?.fmp_confirmed || 0;
       const phaseLabel = status.market_phase_label || payload?.market_phase_label || '—';
-      const running = Boolean(status.scan_running || status?.worker?.active_price_window);
-      const newAvailable = Boolean(status.new_snapshot_available);
+      const running = Boolean(status.scan_running || status?.worker?.scan_running || status?.worker?.running);
+      const newAvailable = Boolean(status.new_snapshot_available || window.__pendingSourceSnapshotAt);
       const headline = enabled ? '✅ مسح السوق الكامل مفعل' : '⚠️ المنبع الديناميكي غير مفعل';
       const updateButton = newAvailable
         ? `<button class="ghost" style="margin-top:8px;" onclick="applyLatestDiscoverySnapshot()">عرض نتائج المسح الجديد الآن</button>`
@@ -3650,12 +3725,12 @@
       box.innerHTML = `
         <b>${headline}</b><br>
         القائمة الحالية من آخر مسح شامل: <b>${safeText(latest)}</b> (${safeText(ageText)}) • حالة السوق: ${safeText(phaseLabel)}<br>
-        ${running ? '🔄 السيرفر يراقب ويحدّث في الخلفية' : '⏳ بانتظار نافذة المسح التالية'} • المسح القادم تقريبًا: ${safeText(nextText)}
+        ${running ? '🔄 السيرفر يمسح/يراقب السوق في الخلفية' : '⏳ بانتظار نافذة المسح التالية'} • المسح القادم بعد: ${safeText(nextText)}
         ${broad ? `<br>آخر مسح واسع: ${formatNumber(broad)} رمز • تأكيد FMP للمرشحين: ${formatNumber(confirmed)}` : ''}
         ${newAvailable ? '<br><b>اكتمل مسح جديد للسوق ولم يتم تطبيقه على الشاشة حتى لا يتغير مكانك أثناء القراءة.</b>' : ''}
         ${updateButton}
       `;
-      if (!fromScan) window.__sourceDiscoveryStatus = status;
+      if (fromStatus) window.__sourceDiscoveryStatus = normalizeSourceDiscoveryStatus(status);
     }
 
     async function pollSourceDiscoveryStatus(silent=true) {
@@ -3663,7 +3738,15 @@
         const client = encodeURIComponent(currentScanUpdatedAt());
         const res = await apiFetch(`/source-discovery/status?client_updated_at=${client}&_=${Date.now()}`);
         const data = await res.json();
-        if (data && data.ok) renderSourceDiscoveryPanel({ sourceStatus: data });
+        if (data && data.ok) {
+          const normalized = normalizeSourceDiscoveryStatus(data);
+          window.__sourceDiscoveryStatus = normalized;
+          if (data.new_snapshot_available) {
+            window.__pendingSourceSnapshotAt = String(data.latest_snapshot_at || '1');
+            showSourceDiscoveryNotice(normalized);
+          }
+          renderSourceDiscoveryPanel({ sourceStatus: normalized });
+        }
       } catch(e) {
         const box = document.getElementById('sourceDiscoveryPanel');
         if (box && !silent) box.innerHTML = '<b>مسح السوق الكامل:</b> تعذر تحميل الحالة الآن';
@@ -3671,8 +3754,16 @@
     }
 
     async function applyLatestDiscoverySnapshot() {
+      const notice = document.getElementById('sourceDiscoveryNotice');
+      const snap = notice?.dataset?.snapshotAt || window.__pendingSourceSnapshotAt || '';
+      hideSourceDiscoveryNotice(snap);
+      window.__pendingSourceSnapshotAt = '';
       await loadScan(false);
       await pollSourceDiscoveryStatus(true);
+    }
+
+    function tickSourceDiscoveryPanel() {
+      if (window.__sourceDiscoveryStatus) renderSourceDiscoveryPanel({ sourceStatus: window.__sourceDiscoveryStatus });
     }
 
     function renderSections(data) {
@@ -3894,7 +3985,7 @@
       const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
       const sign = hasChange && change > 0 ? '+' : '';
       const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
-      const sourceText = item.last_price_update_label || item.price_source_label || item.price_freshness_label || '';
+      const sourceText = livePriceSourceLabel(item);
       return { displayPrice, cls, changeText, sourceText };
     }
 
@@ -4676,7 +4767,8 @@
     window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
     window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 30000);
     window.__portfolioLiveTimer = window.setInterval(() => refreshPortfolioLiveQuotes(), 30000);
-    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 30000);
+    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 15000);
+    window.__sourceDiscoveryTickTimer = window.setInterval(() => tickSourceDiscoveryPanel(), 1000);
     loadAll();
     pollSourceDiscoveryStatus(true);
   </script>
