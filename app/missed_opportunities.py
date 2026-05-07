@@ -1714,11 +1714,26 @@ def _summarize_loss_groups(items: list[dict]) -> list[dict]:
     return out
 
 
-def build_loss_analysis_report(week_key: str | None = None, format: str = "json", limit: int = 500) -> dict | str:
+def _first_counter_label(items: list[tuple[str, int]], default: str = "غير متوفر") -> str:
+    if not items:
+        return default
+    k, v = items[0]
+    return f"{k}×{v}" if v else str(k)
+
+
+def build_loss_analysis_report(
+    week_key: str | None = None,
+    format: str = "json",
+    limit: int = 500,
+    detail: str = "summary",
+    top: int = 20,
+) -> dict | str:
     """Analyze losing tracked signals without changing tracking logic.
 
-    The brief report is grouped by symbol/plan to avoid huge repetitive output.
-    Raw rows remain available in JSON under raw_items_sample for debugging.
+    Default brief output is intentionally compact: it shows the patterns and the
+    most important grouped symbols, while JSON/full detail remains available for
+    deeper audits. This keeps a full-week report readable without hiding the
+    signals needed to improve the tool.
     """
     week_key, _ws, _we = _week_parts(week_key)
     rows = _tracking_loss_rows(week_key, limit=limit)
@@ -1760,6 +1775,7 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
         }
         item["derived_loss_reasons"] = _loss_reason_tags(item)
         items.append(item)
+
     stage_counts = _count_by(items, "failure_stage")
     bucket_counts = _count_by(items, "bucket")
     tag_counts: dict[str, int] = {}
@@ -1767,45 +1783,79 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
         for t in item.get("derived_loss_reasons") or []:
             tag_counts[str(t)] = int(tag_counts.get(str(t), 0) or 0) + 1
     grouped = _summarize_loss_groups(items)
-    if str(format or "json").lower() in {"brief", "text", "txt"}:
+
+    fmt = str(format or "json").lower()
+    detail_mode = str(detail or "summary").strip().lower()
+    try:
+        top_n = max(5, min(int(top or 20), 80))
+    except Exception:
+        top_n = 20
+    if detail_mode in {"full", "verbose", "raw"}:
+        top_n = max(top_n, 50)
+
+    if fmt in {"brief", "text", "txt"}:
         lines = ["تقرير خسائر الإشارات / لماذا ظهرت ثم فشلت", f"الأسبوع: {week_key}", ""]
         lines.append(f"عدد الإشارات الخاسرة الخام: {len(items)}")
         lines.append(f"عدد الأسهم بعد التجميع: {len(grouped)}")
+        lines.append(f"المعروض في المختصر: أهم {min(top_n, len(grouped))} سهم فقط")
         lines.append("")
-        lines.append("مراحل الفشل:")
-        for k, v in sorted(stage_counts.items(), key=lambda x: x[1], reverse=True):
+
+        lines.append("ملخص مراحل الفشل:")
+        for k, v in sorted(stage_counts.items(), key=lambda x: x[1], reverse=True)[:6]:
             lines.append(f"- {k}: {v}")
+
         if tag_counts:
             lines.append("")
             lines.append("أكثر أسباب الخسارة/الخطر تكرارًا:")
-            for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:12]:
+            for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
                 lines.append(f"- {k}: {v}")
+
+        # Compact interpretation, not a scoring change.
         lines.append("")
-        lines.append("أهم الأسهم المجمعة: سهم واحد = سطر تشخيصي واحد")
-        for g in grouped[:30]:
+        lines.append("قراءة سريعة للتطوير:")
+        top_stage = sorted(stage_counts.items(), key=lambda x: x[1], reverse=True)[0] if stage_counts else ("غير محدد", 0)
+        lines.append(f"- أكثر مرحلة فشل: {top_stage[0]} ({top_stage[1]})")
+        if tag_counts:
+            top_tags = [f"{k} ({v})" for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:4]]
+            lines.append(f"- أكثر الأنماط المتكررة: {'، '.join(top_tags)}")
+        repeat_heavy = [g for g in grouped if int(g.get("signals_count") or 0) >= 5]
+        if repeat_heavy:
+            lines.append(f"- أسهم تكررت خسارتها 5 مرات أو أكثر: {len(repeat_heavy)}")
+
+        lines.append("")
+        lines.append("أهم الأسهم المجمعة:")
+        for idx, g in enumerate(grouped[:top_n], start=1):
+            labels_txt = "، ".join([f"{k}×{v}" for k, v in (g.get("top_labels") or [])[:2]]) or "غير متوفر"
+            plans_txt = "، ".join([f"{k}×{v}" for k, v in (g.get("top_plans") or [])[:2] if k]) or "غير متوفر"
+            reasons = [str(x) for x in (g.get("top_reasons") or [])[:3]]
+            reasons_txt = "؛ ".join(reasons) if reasons else "غير واضح"
             duration_txt = ""
             if g.get("min_minutes_to_stop") is not None:
                 if g.get("min_minutes_to_stop") == g.get("max_minutes_to_stop"):
-                    duration_txt = f" | مدة الوقف تقريبًا {safe_round(g.get('min_minutes_to_stop'),1)}د"
+                    duration_txt = f" | مدة الوقف {safe_round(g.get('min_minutes_to_stop'),1)}د"
                 else:
                     duration_txt = f" | مدة الوقف {safe_round(g.get('min_minutes_to_stop'),1)}–{safe_round(g.get('max_minutes_to_stop'),1)}د"
-            labels_txt = "، ".join([f"{k}×{v}" for k, v in (g.get("top_labels") or [])[:3]]) or "غير متوفر"
-            plans_txt = "، ".join([f"{k}×{v}" for k, v in (g.get("top_plans") or [])[:3] if k]) or "غير متوفر"
             lines.append(
-                f"- {g.get('symbol')} | تكرر {g.get('signals_count')} | "
-                f"تفعيل {g.get('activated_count')} / وقف {g.get('stopped_count')} | "
-                f"المرحلة الغالبة: {g.get('top_failure_stage')}{duration_txt}"
+                f"{idx}. {g.get('symbol')} | تكرر {g.get('signals_count')} | "
+                f"تفعيل/وقف {g.get('activated_count')}/{g.get('stopped_count')} | "
+                f"فشل: {g.get('top_failure_stage')}{duration_txt}"
             )
-            lines.append(f"  • التصنيفات: {labels_txt} | نوع الخطة: {plans_txt}")
             lines.append(
-                f"  • نطاق الدخول {g.get('entry_range')} | الوقف {g.get('stop_range')} | الهدف {g.get('target_range')} | "
-                f"أفضل صعود {safe_round(g.get('best_max_gain_pct'),2)}% | أسوأ هبوط {safe_round(g.get('worst_max_loss_pct'),2)}%"
+                f"   السبب: {reasons_txt} | التصنيف: {labels_txt} | الخطة: {plans_txt} | "
+                f"صعود/هبوط: {safe_round(g.get('best_max_gain_pct'),2)}% / {safe_round(g.get('worst_max_loss_pct'),2)}%"
             )
-            if g.get("top_reasons"):
-                lines.append(f"  • أسباب مرجحة: {'؛ '.join([str(x) for x in g.get('top_reasons')[:5]])}")
-            if g.get("sample_reasons"):
-                lines.append(f"  • لماذا ظهر؟ {g.get('sample_reasons')[0]}")
+            if detail_mode in {"full", "verbose", "raw"}:
+                lines.append(
+                    f"   الدخول {g.get('entry_range')} | الوقف {g.get('stop_range')} | الهدف {g.get('target_range')}"
+                )
+                if g.get("sample_reasons"):
+                    lines.append(f"   لماذا ظهر؟ {g.get('sample_reasons')[0]}")
+
+        if detail_mode not in {"full", "verbose", "raw"}:
+            lines.append("")
+            lines.append("للتفاصيل الكاملة أضف: &detail=full")
         return "\n".join(lines)
+
     return {
         "ok": True,
         "week_key": week_key,
