@@ -96,6 +96,11 @@ from app.tracking_intelligence import (
     export_tracking_json,
     export_tracking_csv,
 )
+from app.source_discovery import (
+    dynamic_discovery_enabled,
+    get_full_market_scan_interval_sec,
+    get_last_dynamic_discovery_status,
+)
 
 app = FastAPI()
 
@@ -178,6 +183,25 @@ def _is_active_market_phase(phase: str | None = None) -> bool:
 def _prefer_price_cache_for_phase(phase: str | None = None) -> bool:
     # User rule: no cached prices while market/pre/after-hours are active.
     return not _is_active_market_phase(phase)
+
+
+def _server_full_market_scan_interval_sec(phase: str | None = None) -> int:
+    """Server-side full-market discovery cadence.
+
+    The source layer performs a broad market discovery scan and the deep radar
+    analyzes only the best shortlist. During active pre/open/after-hours we use
+    the dynamic schedule agreed with the user; if Dynamic Discovery is disabled,
+    we fall back to the legacy interval variable.
+    """
+    try:
+        if dynamic_discovery_enabled():
+            return max(300, int(get_full_market_scan_interval_sec() or LIVE_RADAR_FULL_SCAN_SEC))
+    except Exception:
+        pass
+    try:
+        return max(300, int(LIVE_RADAR_FULL_SCAN_SEC or 300))
+    except Exception:
+        return 300
 
 
 def render_login_page(error_message: str = "") -> HTMLResponse:
@@ -865,15 +889,24 @@ def _live_radar_worker_loop():
             snapshot = get_json("last_trade_scan_snapshot", {}) or {}
             age_sec = _parse_scan_snapshot_age_sec(snapshot) if isinstance(snapshot, dict) else 999999.0
 
-            if (not snapshot.get("rows")) or age_sec >= LIVE_RADAR_FULL_SCAN_SEC or (now_ts - last_full_ts >= LIVE_RADAR_FULL_SCAN_SEC):
+            full_scan_interval_sec = _server_full_market_scan_interval_sec(phase)
+            LIVE_RADAR_WORKER_STATE["full_scan_sec"] = int(full_scan_interval_sec)
+            LIVE_RADAR_WORKER_STATE["dynamic_discovery_enabled"] = bool(dynamic_discovery_enabled())
+            if (not snapshot.get("rows")) or age_sec >= full_scan_interval_sec or (now_ts - last_full_ts >= full_scan_interval_sec):
                 if LIVE_RADAR_FULL_SCAN_LOCK.acquire(blocking=False):
                     try:
-                        # Full scan every ~5 minutes during active sessions.
+                        # Full-market discovery + deep radar scan in the background.
+                        # The UI keeps showing the previous snapshot until the user chooses to view the new one.
+                        LIVE_RADAR_WORKER_STATE["full_scan_in_progress"] = True
+                        _live_radar_worker_save_state(full_scan_in_progress=True)
                         trade_scan(include_all=False, force=True, prefer_cache=False)
                         last_full_ts = time.time()
+                        LIVE_RADAR_WORKER_STATE["full_scan_in_progress"] = False
                         LIVE_RADAR_WORKER_STATE["full_scans"] = int(LIVE_RADAR_WORKER_STATE.get("full_scans", 0) or 0) + 1
                         LIVE_RADAR_WORKER_STATE["last_full_scan_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
                     finally:
+                        LIVE_RADAR_WORKER_STATE["full_scan_in_progress"] = False
+                        _live_radar_worker_save_state(full_scan_in_progress=False)
                         LIVE_RADAR_FULL_SCAN_LOCK.release()
 
             if now_ts - last_live_ts >= LIVE_RADAR_PRICE_REFRESH_SEC:
@@ -914,6 +947,47 @@ def live_radar_worker_status():
     out["market_phase_label"] = market_phase_label(get_market_phase())
     out["rule"] = "fresh_fmp_prices_during_open_pre_after; no sqlite quote cache while active"
     return {"ok": True, "worker": out}
+
+
+def _snapshot_updated_at(snapshot: dict) -> str:
+    try:
+        return str((snapshot or {}).get("updated_at", "") or "").strip()
+    except Exception:
+        return ""
+
+
+@app.get("/source-discovery/status")
+def source_discovery_status(client_updated_at: str = ""):
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    worker_status = get_json("live_radar_worker_status", {}) or {}
+    updated_at = _snapshot_updated_at(snapshot) if isinstance(snapshot, dict) else ""
+    age_sec = _parse_scan_snapshot_age_sec(snapshot) if isinstance(snapshot, dict) else 999999.0
+    phase = get_market_phase()
+    interval_sec = _server_full_market_scan_interval_sec(phase)
+    dynamic_status = get_last_dynamic_discovery_status()
+    new_available = bool(updated_at and str(client_updated_at or "").strip() and updated_at != str(client_updated_at or "").strip())
+    next_scan_in = None
+    try:
+        next_scan_in = max(0, int(interval_sec - age_sec)) if updated_at else 0
+    except Exception:
+        next_scan_in = None
+    return {
+        "ok": True,
+        "enabled": bool(dynamic_discovery_enabled()),
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "latest_snapshot_at": updated_at,
+        "latest_snapshot_age_sec": round(float(age_sec or 0), 1) if updated_at else None,
+        "latest_snapshot_count": int((snapshot or {}).get("count", 0) or 0) if isinstance(snapshot, dict) else 0,
+        "scan_running": bool((worker_status or {}).get("full_scan_in_progress", False)),
+        "worker": worker_status if isinstance(worker_status, dict) else {},
+        "interval_sec": int(interval_sec),
+        "next_scan_in_sec": next_scan_in,
+        "new_snapshot_available": new_available,
+        "client_updated_at": str(client_updated_at or ""),
+        "dynamic_discovery": dynamic_status if isinstance(dynamic_status, dict) else {},
+        "message": "يمسح السيرفر السوق كاملًا في الخلفية ويحفظ آخر قائمة جاهزة؛ الأسعار الحية لا تستخدم كاش أثناء السوق النشط.",
+    }
 
 # Fix20: compact Market Mood / Sentiment layer.
 # Context-only: does not add points to stock scoring and does not promote/demote opportunities.
@@ -1572,6 +1646,10 @@ def _parse_scan_snapshot_age_sec(snapshot: dict) -> float:
 
 def _trade_scan_cache_ttl_sec(phase: str, prefer_cache: bool = False) -> int:
     try:
+        if dynamic_discovery_enabled() and phase in {"open", "pre_market", "after_hours"}:
+            # With server-side full-market discovery, page loads should show the last ready
+            # snapshot immediately and let the background worker prepare the next one.
+            return int(_server_full_market_scan_interval_sec(phase) + 120)
         if prefer_cache:
             if phase in {"open", "pre_market", "after_hours"}:
                 return int(os.getenv("RADAR_FAST_CACHE_TTL_OPEN_SEC", "240") or 240)
@@ -1648,6 +1726,32 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "scan_elapsed_sec": scan_debug.get("scan_elapsed_sec", None),
         "scan_max_workers": scan_debug.get("scan_max_workers", None),
         "scan_requested_universe": scan_debug.get("scan_requested_universe", None),
+        "dynamic_discovery": {
+            "enabled": bool(scan_debug.get("dynamic_discovery_enabled", False)),
+            "mode": scan_debug.get("dynamic_discovery_mode", ""),
+            "phase_detail": scan_debug.get("dynamic_phase_detail", ""),
+            "phase_label": scan_debug.get("dynamic_phase_label", ""),
+            "broad_market_count": int(scan_debug.get("dynamic_broad_market_count", 0) or 0),
+            "reference_count": int(scan_debug.get("dynamic_reference_count", 0) or 0),
+            "candidate_count_before_confirm": int(scan_debug.get("dynamic_candidate_count_before_confirm", 0) or 0),
+            "candidate_count_after_confirm": int(scan_debug.get("dynamic_candidate_count_after_confirm", 0) or 0),
+            "fmp_confirm_requested": int(scan_debug.get("dynamic_fmp_confirm_requested", 0) or 0),
+            "fmp_confirmed": int(scan_debug.get("dynamic_fmp_confirmed", 0) or 0),
+            "fmp_extended_confirmed": int(scan_debug.get("dynamic_fmp_extended_confirmed", 0) or 0),
+            "fmp_movers_count": int(scan_debug.get("dynamic_fmp_movers_count", 0) or 0),
+            "next_scan_interval_sec": int(scan_debug.get("dynamic_next_scan_interval_sec", 0) or 0),
+            "source_bucket_counts": scan_debug.get("dynamic_source_bucket_counts", {}),
+            "price_under_2_deprioritized": int(scan_debug.get("dynamic_price_under_2_deprioritized", 0) or 0),
+            "price_under_2_exception": int(scan_debug.get("dynamic_price_under_2_exception", 0) or 0),
+            "price_over_300_deprioritized": int(scan_debug.get("dynamic_price_over_300_deprioritized", 0) or 0),
+            "elapsed_sec": scan_debug.get("dynamic_discovery_elapsed_sec", None),
+        },
+        "full_market_scan_status": {
+            "enabled": bool(dynamic_discovery_enabled()),
+            "last_scan_at": scan_debug.get("updated_at", "") or scan_debug.get("scan_updated_at", ""),
+            "next_scan_interval_sec": _server_full_market_scan_interval_sec(phase),
+            "source": "server_background_worker_and_snapshot",
+        },
     }
 
     # Tracking Intelligence V1 is intentionally passive: full-scan snapshots only,
@@ -2431,6 +2535,7 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
 
 
