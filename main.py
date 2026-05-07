@@ -101,6 +101,10 @@ from app.missed_opportunities import (
     missed_status,
     build_missed_weekly_report,
     build_missed_weekly_brief,
+    build_symbol_timeline_report,
+    build_symbol_timeline_brief,
+    build_late_promotions_report,
+    build_loss_analysis_report,
     export_missed_json,
     export_missed_csv,
 )
@@ -2495,6 +2499,36 @@ def missed_opportunities_weekly(week_key: str = "", threshold: float = 20.0, inc
     return build_missed_weekly_report(week_key=week_key or None, threshold=threshold, include_items=include_items)
 
 
+
+
+@app.get("/missed-opportunities/symbol/{symbol}")
+def missed_opportunities_symbol(symbol: str, week_key: str = "", threshold: float = 10.0, format: str = "json"):
+    fmt = str(format or "json").strip().lower()
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(
+            build_symbol_timeline_brief(symbol, week_key=week_key or None, threshold=threshold),
+            media_type="text/plain; charset=utf-8",
+        )
+    return build_symbol_timeline_report(symbol, week_key=week_key or None, threshold=threshold)
+
+
+@app.get("/missed-opportunities/late-promotions")
+def missed_opportunities_late_promotions(week_key: str = "", threshold: float = 10.0, format: str = "json"):
+    fmt = str(format or "json").strip().lower()
+    result = build_late_promotions_report(week_key=week_key or None, threshold=threshold, format=fmt)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/missed-opportunities/loss-analysis")
+def missed_opportunities_loss_analysis(week_key: str = "", format: str = "json", limit: int = 500):
+    fmt = str(format or "json").strip().lower()
+    result = build_loss_analysis_report(week_key=week_key or None, format=fmt, limit=limit)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
 @app.get("/missed-opportunities/export.json")
 def missed_opportunities_export_json(week_key: str = "", threshold: float = 20.0, include_items: bool = True, limit: int = 5000):
     return export_missed_json(week_key=week_key or None, threshold=threshold, include_items=include_items, limit=limit)
@@ -2580,6 +2614,7 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
 
 
