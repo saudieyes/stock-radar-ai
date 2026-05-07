@@ -1541,72 +1541,150 @@ def _loss_reason_tags(item: dict) -> list[str]:
 
 
 def _loss_group_key(item: dict) -> tuple:
-    return (
-        str(item.get("symbol") or ""),
-        str(item.get("bucket") or ""),
-        str(item.get("label") or ""),
-        str(item.get("plan_family") or ""),
-        round(_safe_float(item.get("entry_price"), 0.0), 3),
-        round(_safe_float(item.get("stop_loss"), 0.0), 3),
-        round(_safe_float(item.get("target_price"), 0.0), 3),
-    )
+    """Group loss-analysis by symbol for the brief report.
+
+    Previous versions grouped by symbol + label + plan + entry/stop/target. That
+    preserved detail, but it made the weekly report nearly as long as the raw
+    rows. For the brief diagnostic report we need one row per symbol, then show
+    the important ranges and counts inside that row.
+    """
+    return (str(item.get("symbol") or "").upper(),)
+
+
+def _merge_counter(dst: dict, key: Any, inc: int = 1) -> None:
+    text = str(key or "").strip()
+    if not text:
+        return
+    dst[text] = int(dst.get(text, 0) or 0) + int(inc or 1)
+
+
+def _append_unique_limited(dst: list, value: Any, limit: int = 8) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    if text not in dst and len(dst) < limit:
+        dst.append(text)
+
+
+def _sorted_counter_items(counter: dict, limit: int = 6) -> list[tuple[str, int]]:
+    return [(str(k), int(v)) for k, v in sorted((counter or {}).items(), key=lambda x: x[1], reverse=True)[:limit]]
+
+
+def _range_text(values: list[float], digits: int = 2) -> str:
+    nums = [float(v) for v in values if _safe_float(v, 0.0) > 0]
+    if not nums:
+        return "غير متوفر"
+    lo, hi = min(nums), max(nums)
+    if abs(lo - hi) < 0.0001:
+        return str(safe_round(lo, digits))
+    return f"{safe_round(lo, digits)}–{safe_round(hi, digits)}"
 
 
 def _summarize_loss_groups(items: list[dict]) -> list[dict]:
+    """Summarize loss rows into one practical diagnostic row per symbol.
+
+    The goal is not to hide detail, but to compress repeated appearances of the
+    same ticker so the weekly report shows patterns that can improve the tool:
+    which symbols repeatedly failed, at which stage, and which reasons recur.
+    """
     groups: dict[tuple, dict] = {}
     for item in items:
         key = _loss_group_key(item)
+        symbol = str(item.get("symbol") or "").upper()
+        if not symbol:
+            continue
         g = groups.get(key)
         if not g:
             g = {
-                "symbol": item.get("symbol"),
-                "bucket": item.get("bucket"),
-                "label": item.get("label"),
-                "plan_family": item.get("plan_family"),
-                "entry_price": item.get("entry_price"),
-                "stop_loss": item.get("stop_loss"),
-                "target_price": item.get("target_price"),
+                "symbol": symbol,
                 "signals_count": 0,
-                "first_seen_at": item.get("first_seen_at") or "",
-                "last_seen_at": item.get("first_seen_at") or "",
+                "first_seen_at": "",
+                "last_seen_at": "",
                 "activated_count": 0,
                 "stopped_count": 0,
+                "pre_activation_fail_count": 0,
+                "post_activation_fail_count": 0,
+                "not_activated_count": 0,
+                "bucket_counts": {},
+                "label_counts": {},
+                "plan_counts": {},
                 "stage_counts": {},
                 "reason_counts": {},
+                "entry_prices": [],
+                "stop_prices": [],
+                "target_prices": [],
                 "best_max_gain_pct": -9999.0,
                 "worst_max_loss_pct": 9999.0,
                 "min_minutes_to_stop": None,
                 "max_minutes_to_stop": None,
+                "min_minutes_to_activation": None,
+                "max_minutes_to_activation": None,
                 "sample_reasons": [],
                 "sample_notes": [],
+                "risk_examples": [],
             }
             groups[key] = g
+
         g["signals_count"] += 1
         fs = str(item.get("first_seen_at") or "")
         if fs and (not g["first_seen_at"] or fs < g["first_seen_at"]):
             g["first_seen_at"] = fs
         if fs and (not g["last_seen_at"] or fs > g["last_seen_at"]):
             g["last_seen_at"] = fs
-        if str(item.get("activated_at") or "").strip():
+
+        activated = bool(str(item.get("activated_at") or "").strip())
+        stopped = bool(str(item.get("stopped_at") or "").strip())
+        if activated:
             g["activated_count"] += 1
-        if str(item.get("stopped_at") or "").strip():
+        if stopped:
             g["stopped_count"] += 1
+
         stage = str(item.get("failure_stage") or "غير محدد")
-        g["stage_counts"][stage] = int(g["stage_counts"].get(stage, 0) or 0) + 1
+        _merge_counter(g["stage_counts"], stage)
+        if "بعد التفعيل" in stage:
+            g["post_activation_fail_count"] += 1
+        elif "قبل التفعيل" in stage:
+            g["pre_activation_fail_count"] += 1
+        elif "لم يتفعل" in stage:
+            g["not_activated_count"] += 1
+
+        _merge_counter(g["bucket_counts"], item.get("bucket"))
+        _merge_counter(g["label_counts"], item.get("label"))
+        _merge_counter(g["plan_counts"], item.get("plan_family"))
+
+        ep = _safe_float(item.get("entry_price"), 0.0)
+        sp = _safe_float(item.get("stop_loss"), 0.0)
+        tp = _safe_float(item.get("target_price"), 0.0)
+        if ep > 0:
+            g["entry_prices"].append(ep)
+        if sp > 0:
+            g["stop_prices"].append(sp)
+        if tp > 0:
+            g["target_prices"].append(tp)
+
         for reason in _loss_reason_tags(item):
-            g["reason_counts"][reason] = int(g["reason_counts"].get(reason, 0) or 0) + 1
+            _merge_counter(g["reason_counts"], reason)
+            _append_unique_limited(g["risk_examples"], reason, limit=8)
+
         g["best_max_gain_pct"] = max(g["best_max_gain_pct"], _safe_float(item.get("max_gain_pct"), -9999.0))
         g["worst_max_loss_pct"] = min(g["worst_max_loss_pct"], _safe_float(item.get("max_loss_pct"), 9999.0))
+
         mts = _safe_float(item.get("minutes_to_stop"), 0.0)
         if mts > 0:
             g["min_minutes_to_stop"] = mts if g["min_minutes_to_stop"] is None else min(g["min_minutes_to_stop"], mts)
             g["max_minutes_to_stop"] = mts if g["max_minutes_to_stop"] is None else max(g["max_minutes_to_stop"], mts)
+        mta = _safe_float(item.get("minutes_to_activation"), 0.0)
+        if mta > 0:
+            g["min_minutes_to_activation"] = mta if g["min_minutes_to_activation"] is None else min(g["min_minutes_to_activation"], mta)
+            g["max_minutes_to_activation"] = mta if g["max_minutes_to_activation"] is None else max(g["max_minutes_to_activation"], mta)
+
         sr = str(item.get("signal_reason") or "").strip()
-        if sr and sr not in g["sample_reasons"] and len(g["sample_reasons"]) < 3:
-            g["sample_reasons"].append(sr[:220])
+        if sr:
+            _append_unique_limited(g["sample_reasons"], sr[:220], limit=3)
         sn = str(item.get("snapshot_note") or "").strip()
-        if sn and sn not in g["sample_notes"] and len(g["sample_notes"]) < 2:
-            g["sample_notes"].append(sn[:220])
+        if sn:
+            _append_unique_limited(g["sample_notes"], sn[:220], limit=2)
+
     out = []
     for g in groups.values():
         if g["best_max_gain_pct"] <= -9999:
@@ -1614,9 +1692,25 @@ def _summarize_loss_groups(items: list[dict]) -> list[dict]:
         if g["worst_max_loss_pct"] >= 9999:
             g["worst_max_loss_pct"] = 0.0
         g["top_failure_stage"] = max(g["stage_counts"].items(), key=lambda x: x[1])[0] if g["stage_counts"] else "غير محدد"
-        g["top_reasons"] = [k for k, _v in sorted(g["reason_counts"].items(), key=lambda x: x[1], reverse=True)[:5]]
+        g["top_reasons"] = [k for k, _v in _sorted_counter_items(g["reason_counts"], limit=6)]
+        g["top_labels"] = _sorted_counter_items(g["label_counts"], limit=5)
+        g["top_buckets"] = _sorted_counter_items(g["bucket_counts"], limit=5)
+        g["top_plans"] = _sorted_counter_items(g["plan_counts"], limit=5)
+        g["entry_range"] = _range_text(g.get("entry_prices") or [], digits=4)
+        g["stop_range"] = _range_text(g.get("stop_prices") or [], digits=4)
+        g["target_range"] = _range_text(g.get("target_prices") or [], digits=4)
+
+        # A simple severity score for ordering the brief report: repeated failures,
+        # real stops after activation, and larger adverse move matter most.
+        g["severity_score"] = (
+            int(g.get("signals_count") or 0) * 2
+            + int(g.get("stopped_count") or 0) * 3
+            + int(g.get("post_activation_fail_count") or 0) * 4
+            + abs(_safe_float(g.get("worst_max_loss_pct"), 0.0))
+        )
         out.append(g)
-    out.sort(key=lambda x: (int(x.get("signals_count") or 0), int(x.get("stopped_count") or 0), abs(_safe_float(x.get("worst_max_loss_pct"), 0.0))), reverse=True)
+
+    out.sort(key=lambda x: (_safe_float(x.get("severity_score"), 0.0), int(x.get("signals_count") or 0)), reverse=True)
     return out
 
 
@@ -1676,7 +1770,7 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
     if str(format or "json").lower() in {"brief", "text", "txt"}:
         lines = ["تقرير خسائر الإشارات / لماذا ظهرت ثم فشلت", f"الأسبوع: {week_key}", ""]
         lines.append(f"عدد الإشارات الخاسرة الخام: {len(items)}")
-        lines.append(f"عدد الأسهم/الخطط بعد التجميع: {len(grouped)}")
+        lines.append(f"عدد الأسهم بعد التجميع: {len(grouped)}")
         lines.append("")
         lines.append("مراحل الفشل:")
         for k, v in sorted(stage_counts.items(), key=lambda x: x[1], reverse=True):
@@ -1687,7 +1781,7 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
             for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:12]:
                 lines.append(f"- {k}: {v}")
         lines.append("")
-        lines.append("أهم الحالات المجمعة:")
+        lines.append("أهم الأسهم المجمعة: سهم واحد = سطر تشخيصي واحد")
         for g in grouped[:30]:
             duration_txt = ""
             if g.get("min_minutes_to_stop") is not None:
@@ -1695,13 +1789,16 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
                     duration_txt = f" | مدة الوقف تقريبًا {safe_round(g.get('min_minutes_to_stop'),1)}د"
                 else:
                     duration_txt = f" | مدة الوقف {safe_round(g.get('min_minutes_to_stop'),1)}–{safe_round(g.get('max_minutes_to_stop'),1)}د"
+            labels_txt = "، ".join([f"{k}×{v}" for k, v in (g.get("top_labels") or [])[:3]]) or "غير متوفر"
+            plans_txt = "، ".join([f"{k}×{v}" for k, v in (g.get("top_plans") or [])[:3] if k]) or "غير متوفر"
             lines.append(
-                f"- {g.get('symbol')} | {g.get('label')} | تكرر {g.get('signals_count')} | "
+                f"- {g.get('symbol')} | تكرر {g.get('signals_count')} | "
                 f"تفعيل {g.get('activated_count')} / وقف {g.get('stopped_count')} | "
                 f"المرحلة الغالبة: {g.get('top_failure_stage')}{duration_txt}"
             )
+            lines.append(f"  • التصنيفات: {labels_txt} | نوع الخطة: {plans_txt}")
             lines.append(
-                f"  • الدخول {g.get('entry_price')} | الوقف {g.get('stop_loss')} | الهدف {g.get('target_price')} | "
+                f"  • نطاق الدخول {g.get('entry_range')} | الوقف {g.get('stop_range')} | الهدف {g.get('target_range')} | "
                 f"أفضل صعود {safe_round(g.get('best_max_gain_pct'),2)}% | أسوأ هبوط {safe_round(g.get('worst_max_loss_pct'),2)}%"
             )
             if g.get("top_reasons"):
