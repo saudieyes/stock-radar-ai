@@ -2522,9 +2522,9 @@ def missed_opportunities_late_promotions(week_key: str = "", threshold: float = 
 
 
 @app.get("/missed-opportunities/loss-analysis")
-def missed_opportunities_loss_analysis(week_key: str = "", format: str = "json", limit: int = 500):
+def missed_opportunities_loss_analysis(week_key: str = "", format: str = "json", limit: int = 500, detail: str = "summary", top: int = 20):
     fmt = str(format or "json").strip().lower()
-    result = build_loss_analysis_report(week_key=week_key or None, format=fmt, limit=limit)
+    result = build_loss_analysis_report(week_key=week_key or None, format=fmt, limit=limit, detail=detail, top=top)
     if fmt in {"brief", "text", "txt", "chatgpt"}:
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
     return result
@@ -2614,10 +2614,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
-
-
-
-
-
 
