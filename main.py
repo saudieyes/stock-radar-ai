@@ -96,6 +96,14 @@ from app.tracking_intelligence import (
     export_tracking_json,
     export_tracking_csv,
 )
+from app.missed_opportunities import (
+    init_missed_opportunities_db,
+    missed_status,
+    build_missed_weekly_report,
+    build_missed_weekly_brief,
+    export_missed_json,
+    export_missed_csv,
+)
 from app.source_discovery import (
     dynamic_discovery_enabled,
     get_full_market_scan_interval_sec,
@@ -113,6 +121,11 @@ try:
     init_tracking_intelligence_db()
 except Exception as exc:
     print(f"TRACKING_INTELLIGENCE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+
+try:
+    init_missed_opportunities_db()
+except Exception as exc:
+    print(f"MISSED_OPPORTUNITIES_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
 
 
@@ -2468,6 +2481,38 @@ def tracking_intelligence_status():
     return tracking_status()
 
 
+@app.get("/missed-opportunities")
+@app.get("/missed-opportunities/weekly")
+def missed_opportunities_weekly(week_key: str = "", threshold: float = 20.0, include_items: bool = False, format: str = "json"):
+    # Computed on demand only. This diagnostic report does not alter radar scoring,
+    # Sharia filtering, live prices, or displayed opportunities.
+    fmt = str(format or "json").strip().lower()
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(
+            build_missed_weekly_brief(week_key=week_key or None, threshold=threshold, include_items=True),
+            media_type="text/plain; charset=utf-8",
+        )
+    return build_missed_weekly_report(week_key=week_key or None, threshold=threshold, include_items=include_items)
+
+
+@app.get("/missed-opportunities/export.json")
+def missed_opportunities_export_json(week_key: str = "", threshold: float = 20.0, include_items: bool = True, limit: int = 5000):
+    return export_missed_json(week_key=week_key or None, threshold=threshold, include_items=include_items, limit=limit)
+
+
+@app.get("/missed-opportunities/export.csv")
+def missed_opportunities_export_csv(week_key: str = "", threshold: float = 20.0, limit: int = 5000):
+    csv_text = "﻿" + export_missed_csv(week_key=week_key or None, threshold=threshold, limit=limit)
+    filename_week = str(week_key or "current").strip() or "current"
+    headers = {"Content-Disposition": f'attachment; filename="missed_opportunities_{filename_week}.csv"'}
+    return Response(content=csv_text, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/missed-opportunities/status")
+def missed_opportunities_status():
+    return missed_status()
+
+
 @app.get("/performance")
 def performance_get():
     store = rollover_performance_store_if_needed(load_performance_store())
@@ -2535,6 +2580,7 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
 
 
