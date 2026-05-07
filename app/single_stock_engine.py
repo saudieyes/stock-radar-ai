@@ -31,6 +31,7 @@ def scan_all(debug: bool = False):
     symbols = [s for s in raw_symbols if normalize_symbol_text(s) not in manual_sharia_exclusions]
     rows = []
     diag = {
+        "scan_updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "raw_count": len(raw_symbols),
         "after_manual_exclusion": len(symbols),
         "rows": 0,
@@ -46,6 +47,24 @@ def scan_all(debug: bool = False):
         "source_engine_version": str((source_diag or {}).get("engine_version", "") or ""),
         "source_mode": str((source_diag or {}).get("source_mode", "") or ""),
         "source_market_mode": str((source_diag or {}).get("market_activity_mode", "") or ""),
+        "dynamic_discovery_enabled": bool((source_diag or {}).get("dynamic_discovery_enabled", False)),
+        "dynamic_discovery_mode": str((source_diag or {}).get("dynamic_discovery_mode", "") or ""),
+        "dynamic_phase_detail": str((source_diag or {}).get("phase_detail", "") or ""),
+        "dynamic_phase_label": str((source_diag or {}).get("phase_label", "") or ""),
+        "dynamic_broad_market_count": int((source_diag or {}).get("broad_market_count", 0) or 0),
+        "dynamic_reference_count": int((source_diag or {}).get("reference_count", 0) or 0),
+        "dynamic_candidate_count_before_confirm": int((source_diag or {}).get("candidate_count_before_confirm", 0) or 0),
+        "dynamic_candidate_count_after_confirm": int((source_diag or {}).get("candidate_count_after_confirm", 0) or 0),
+        "dynamic_fmp_confirm_requested": int((source_diag or {}).get("fmp_confirm_requested", 0) or 0),
+        "dynamic_fmp_confirmed": int((source_diag or {}).get("fmp_confirmed", 0) or 0),
+        "dynamic_fmp_extended_confirmed": int((source_diag or {}).get("fmp_extended_confirmed", 0) or 0),
+        "dynamic_fmp_movers_count": int((source_diag or {}).get("fmp_movers_count", 0) or 0),
+        "dynamic_next_scan_interval_sec": int((source_diag or {}).get("next_scan_interval_sec", 0) or 0),
+        "dynamic_source_bucket_counts": (source_diag or {}).get("source_bucket_counts", {}),
+        "dynamic_price_under_2_deprioritized": int((source_diag or {}).get("price_under_2_deprioritized", 0) or 0),
+        "dynamic_price_under_2_exception": int((source_diag or {}).get("price_under_2_exception", 0) or 0),
+        "dynamic_price_over_300_deprioritized": int((source_diag or {}).get("price_over_300_deprioritized", 0) or 0),
+        "dynamic_discovery_elapsed_sec": (source_diag or {}).get("elapsed_sec", None),
         "scan_requested_universe": int(requested_universe),
         "manual_priority_count": int((source_diag or {}).get("manual_priority_count", 0) or 0),
         "sharia_source_filter_version": str((source_diag or {}).get("sharia_source_filter_version", "") or ""),
@@ -283,4 +302,5 @@ def build_single_stock_response(symbol: str):
         "overview_error": overview_error,
         "trade_error": trade_error,
     }
+
 
