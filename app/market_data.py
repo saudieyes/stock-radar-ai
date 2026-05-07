@@ -2,6 +2,11 @@ import time
 from datetime import datetime, timedelta
 
 from scanner import get_scan_universe, get_dynamic_universe_target, record_active_universe_diagnostics
+from app.source_discovery import (
+    dynamic_discovery_enabled,
+    build_dynamic_universe,
+    get_recommended_deep_scan_target,
+)
 
 from .settings import (
     HISTORY_CACHE, HTTP_SESSION, INTRADAY_CACHE, INTRADAY_CACHE_TTL_CLOSED, INTRADAY_CACHE_TTL_OPEN,
@@ -124,10 +129,15 @@ def get_active_universe(max_symbols: int = 60):
         max_symbols = 60
     max_symbols = max(40, min(max_symbols, 300))
 
-    # Dynamic final target: quiet ≈120, normal ≈150, active/rotation ≈190.
-    if 120 <= max_symbols <= 180:
+    # Dynamic final target. With Dynamic Discovery enabled, this target reflects
+    # the agreed full-market scan schedule (quiet/normal/hot sessions) while
+    # remaining bounded so the deep radar analysis stays fast and selective.
+    if 120 <= max_symbols <= 260:
         try:
-            max_symbols = max(100, min(200, int(get_dynamic_universe_target(default=max_symbols) or max_symbols)))
+            if dynamic_discovery_enabled():
+                max_symbols = max(120, min(260, int(get_recommended_deep_scan_target(default=max_symbols) or max_symbols)))
+            elif max_symbols <= 180:
+                max_symbols = max(100, min(200, int(get_dynamic_universe_target(default=max_symbols) or max_symbols)))
         except Exception:
             pass
 
@@ -142,7 +152,10 @@ def get_active_universe(max_symbols: int = 60):
     reserve_size = min(int(SHARIA_SOURCE_REFILL_MAX_RESERVE or 700), reserve_size)
     reserve_size = max(max_symbols, reserve_size)
 
-    base = get_scan_universe(max_symbols=reserve_size) or []
+    if dynamic_discovery_enabled():
+        base = build_dynamic_universe(max_symbols=reserve_size) or []
+    else:
+        base = get_scan_universe(max_symbols=reserve_size) or []
 
     sharia_blocked = []
     sharia_gray = []
@@ -237,6 +250,7 @@ def get_active_universe(max_symbols: int = 60):
         gray_set = set(sharia_gray)
         clean_set = set(sharia_allowed)
         diag["sharia_source_filter_version"] = "sharia_v2_refill14c_balanced_buckets"
+        diag["dynamic_discovery_active_in_source"] = bool(dynamic_discovery_enabled())
         diag["sharia_refill_reserve_size"] = int(reserve_size)
         diag["sharia_prefilter_candidates"] = len(seen_candidates)
         diag["sharia_prefilter_blocked"] = len(sharia_blocked)
@@ -990,4 +1004,5 @@ def get_effective_volume_ratio(volume_ratio: float, intraday: dict) -> float:
         return clamp(effective, 0.2, 8.0)
     except:
         return float(volume_ratio or 0)
+
 
