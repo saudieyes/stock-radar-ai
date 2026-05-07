@@ -482,6 +482,21 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             sym: list((reason_map.get(sym, {}) or {}).get("sources", []) or [])[:8]
             for sym in final[:220]
         },
+        # Compact top-candidate snapshot for Missed Opportunities Review.
+        # Diagnostic-only; it does not change the returned universe or scoring.
+        "ranked_candidates": [
+            {
+                "symbol": r.get("symbol"),
+                "score": r.get("score", 0),
+                "sources": list(r.get("sources") or [])[:8],
+                "reasons": list(r.get("reasons") or [])[:8],
+                "metrics": {
+                    k: v for k, v in (r.get("metrics") or {}).items()
+                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct"}
+                },
+            }
+            for r in ranked[:max_symbols]
+        ],
     }
     _LAST_DYNAMIC_DISCOVERY_STATUS = dict(diag)
     try:
@@ -489,3 +504,4 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     except Exception:
         pass
     return final
+
