@@ -31,6 +31,9 @@ MISSED_DEEP_CAUSE_LIMIT = int(float(os.getenv("MISSED_DEEP_CAUSE_LIMIT", "60") o
 MISSED_NEWS_LOOKUP_LIMIT = int(float(os.getenv("MISSED_NEWS_LOOKUP_LIMIT", "35") or 35))
 MISSED_MIN_BASELINE_PRICE = float(os.getenv("MISSED_MIN_BASELINE_PRICE", "0.75") or 0.75)
 MISSED_MIN_DOLLAR_VOLUME = float(os.getenv("MISSED_MIN_DOLLAR_VOLUME", "250000") or 250000)
+MISSED_LATE_PROMOTION_PCT = float(os.getenv("MISSED_LATE_PROMOTION_PCT", "12") or 12)
+MISSED_BIG_MOVE_PCT = float(os.getenv("MISSED_BIG_MOVE_PCT", "20") or 20)
+MISSED_TIMELINE_ITEM_LIMIT = int(float(os.getenv("MISSED_TIMELINE_ITEM_LIMIT", "120") or 120))
 
 _LOCK = threading.RLock()
 _INITIALIZED = False
@@ -143,6 +146,101 @@ def _first_text(row: dict, keys: list[str], default: str = "", limit: int = 500)
     return _clean_text(default, limit)
 
 
+def _normalize_pct_value(value: Any) -> float:
+    """Normalize percent fields that may arrive as 12.3 or 0.123."""
+    val = _safe_float(value, 0.0)
+    if val == 0:
+        return 0.0
+    # Some internal metrics store day_change_pct as a decimal fraction.
+    if abs(val) <= 1.5:
+        return val * 100.0
+    return val
+
+
+def _first_pct(row: dict, keys: list[str], default: float = 0.0) -> float:
+    for key in keys:
+        if key in (row or {}):
+            val = _normalize_pct_value((row or {}).get(key))
+            if val != 0:
+                return val
+    return default
+
+
+def _timeline_event_type_for_category(category_key: str, label: str = "") -> str:
+    key = str(category_key or "").lower()
+    text = str(label or "")
+    if "strong" in key or "دخول قوي" in text:
+        return "strong"
+    if "cautious" in key or "بحذر" in text:
+        return "cautious"
+    if "gray" in key or "غير محسوم" in text or "رمادي" in text:
+        return "gray"
+    if "watch" in key or "مراقبة" in text:
+        return "watch"
+    return "display_other"
+
+
+def _record_timeline_event(
+    conn: sqlite3.Connection,
+    week_key: str,
+    symbol: str,
+    event_type: str,
+    *,
+    seen_at: str,
+    price: float = 0.0,
+    gain_pct: float = 0.0,
+    rank: int = 0,
+    category: str = "",
+    category_key: str = "",
+    market_phase: str = "",
+    source_reasons: list | None = None,
+    metrics: dict | None = None,
+    updated_ts: float | None = None,
+) -> None:
+    """Persist first/last timeline points for source → watch/cautious/strong promotion analysis."""
+    sym = _clean_symbol(symbol)
+    if not sym or not event_type:
+        return
+    now_ts = _safe_float(updated_ts, _now_ts())
+    rank_i = _safe_int(rank, 0)
+    price_f = _safe_float(price, 0.0)
+    gain_f = _safe_float(gain_pct, 0.0)
+    conn.execute(
+        """
+        INSERT INTO missed_symbol_timeline(
+            week_key, symbol, event_type, first_seen_at, last_seen_at, times_seen,
+            first_price, last_price, first_gain_pct, last_gain_pct, max_gain_pct,
+            first_rank, best_rank, category, category_key, market_phase,
+            source_reasons_json, metrics_json, updated_ts
+        ) VALUES(?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(week_key, symbol, event_type) DO UPDATE SET
+            last_seen_at=excluded.last_seen_at,
+            times_seen=missed_symbol_timeline.times_seen + 1,
+            last_price=CASE WHEN excluded.last_price>0 THEN excluded.last_price ELSE missed_symbol_timeline.last_price END,
+            last_gain_pct=CASE WHEN excluded.last_gain_pct!=0 THEN excluded.last_gain_pct ELSE missed_symbol_timeline.last_gain_pct END,
+            max_gain_pct=MAX(missed_symbol_timeline.max_gain_pct, excluded.max_gain_pct),
+            best_rank=CASE
+                WHEN missed_symbol_timeline.best_rank=0 THEN excluded.best_rank
+                WHEN excluded.best_rank=0 THEN missed_symbol_timeline.best_rank
+                WHEN excluded.best_rank < missed_symbol_timeline.best_rank THEN excluded.best_rank
+                ELSE missed_symbol_timeline.best_rank
+            END,
+            category=CASE WHEN excluded.category!='' THEN excluded.category ELSE missed_symbol_timeline.category END,
+            category_key=CASE WHEN excluded.category_key!='' THEN excluded.category_key ELSE missed_symbol_timeline.category_key END,
+            market_phase=CASE WHEN excluded.market_phase!='' THEN excluded.market_phase ELSE missed_symbol_timeline.market_phase END,
+            source_reasons_json=CASE WHEN excluded.source_reasons_json!='[]' THEN excluded.source_reasons_json ELSE missed_symbol_timeline.source_reasons_json END,
+            metrics_json=CASE WHEN excluded.metrics_json!='{}' THEN excluded.metrics_json ELSE missed_symbol_timeline.metrics_json END,
+            updated_ts=excluded.updated_ts
+        """,
+        (
+            week_key, sym, str(event_type), seen_at, seen_at,
+            price_f, price_f, gain_f, gain_f, gain_f,
+            rank_i, rank_i, _clean_text(category, 120), _clean_text(category_key, 80), _clean_text(market_phase, 120),
+            _json_dumps(source_reasons or []), _json_dumps(metrics or {}), now_ts,
+        ),
+    )
+
+
 def init_missed_opportunities_db() -> bool:
     """Create Missed Opportunities tables without touching existing app tables."""
     global _INITIALIZED
@@ -214,6 +312,32 @@ def init_missed_opportunities_db() -> bool:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS missed_symbol_timeline (
+                    week_key TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL DEFAULT '',
+                    last_seen_at TEXT NOT NULL DEFAULT '',
+                    times_seen INTEGER NOT NULL DEFAULT 0,
+                    first_price REAL NOT NULL DEFAULT 0,
+                    last_price REAL NOT NULL DEFAULT 0,
+                    first_gain_pct REAL NOT NULL DEFAULT 0,
+                    last_gain_pct REAL NOT NULL DEFAULT 0,
+                    max_gain_pct REAL NOT NULL DEFAULT 0,
+                    first_rank INTEGER NOT NULL DEFAULT 0,
+                    best_rank INTEGER NOT NULL DEFAULT 0,
+                    category TEXT NOT NULL DEFAULT '',
+                    category_key TEXT NOT NULL DEFAULT '',
+                    market_phase TEXT NOT NULL DEFAULT '',
+                    source_reasons_json TEXT NOT NULL DEFAULT '[]',
+                    metrics_json TEXT NOT NULL DEFAULT '{}',
+                    updated_ts REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY (week_key, symbol, event_type)
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS missed_weekly_movers (
                     week_key TEXT NOT NULL,
                     symbol TEXT NOT NULL,
@@ -249,6 +373,8 @@ def init_missed_opportunities_db() -> bool:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_seen_week ON missed_seen_symbols(week_key)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_source_week ON missed_source_candidates(week_key)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_movers_week ON missed_weekly_movers(week_key, max_gain_pct DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_timeline_week_symbol ON missed_symbol_timeline(week_key, symbol)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_timeline_event ON missed_symbol_timeline(week_key, event_type)")
             conn.commit()
         _INITIALIZED = True
     return True
@@ -293,7 +419,7 @@ def record_missed_seen_from_scan(rows: list[dict], diagnostics: dict | None = No
     recorded = 0
     with _LOCK:
         with _connect() as conn:
-            for row in rows or []:
+            for idx, row in enumerate(rows or []):
                 try:
                     sym = _clean_symbol((row or {}).get("symbol", ""))
                     if not sym:
@@ -305,6 +431,8 @@ def record_missed_seen_from_scan(rows: list[dict], diagnostics: dict | None = No
                     quality = _safe_float((row or {}).get("quality_score"))
                     execution = _safe_float((row or {}).get("execution_readiness_score"))
                     display_rank = _safe_float((row or {}).get("display_rank_score"))
+                    list_rank = _safe_int((row or {}).get("display_rank") or (row or {}).get("rank") or (idx + 1), idx + 1)
+                    gain_pct = _first_pct(row, ["display_change_pct", "current_change_pct", "current_change_pct_live", "change_pct", "day_change_pct", "live_change_pct", "fmp_change_pct"], 0.0)
                     source_reasons = (row or {}).get("source_reason_tags") or []
                     if not source_reasons and (row or {}).get("source_reason"):
                         source_reasons = [str((row or {}).get("source_reason"))]
@@ -354,6 +482,19 @@ def record_missed_seen_from_scan(rows: list[dict], diagnostics: dict | None = No
                             str(market_phase or (row or {}).get("market_phase", "") or ""),
                             now_ts,
                         ),
+                    )
+                    event_type = _timeline_event_type_for_category(key, decision)
+                    _record_timeline_event(
+                        conn, week_key, sym, "display_any",
+                        seen_at=now_text, price=price, gain_pct=gain_pct, rank=list_rank,
+                        category=decision, category_key=key, market_phase=str(market_phase or (row or {}).get("market_phase", "") or ""),
+                        source_reasons=source_reasons, metrics={"quality": quality, "execution": execution, "display_rank_score": display_rank}, updated_ts=now_ts,
+                    )
+                    _record_timeline_event(
+                        conn, week_key, sym, event_type,
+                        seen_at=now_text, price=price, gain_pct=gain_pct, rank=list_rank,
+                        category=decision, category_key=key, market_phase=str(market_phase or (row or {}).get("market_phase", "") or ""),
+                        source_reasons=source_reasons, metrics={"quality": quality, "execution": execution, "display_rank_score": display_rank}, updated_ts=now_ts,
                     )
                     recorded += 1
                 except Exception:
@@ -447,6 +588,28 @@ def record_missed_source_candidates(symbols: list[str] | None = None, diagnostic
     recorded = 0
     with _LOCK:
         with _connect() as conn:
+            # Timeline keeps both raw discovery-source and final deep-universe appearances.
+            for trow in rows:
+                try:
+                    tsym = _clean_symbol(trow.get("symbol"))
+                    if not tsym:
+                        continue
+                    timeline_event = "deep_universe" if str(trow.get("candidate_stage") or "") == "deep_universe" else "source"
+                    _record_timeline_event(
+                        conn, week_key, tsym, timeline_event,
+                        seen_at=now_text,
+                        price=_safe_float(trow.get("price")),
+                        gain_pct=_safe_float(trow.get("change_pct")),
+                        rank=_safe_int(trow.get("discovery_rank")),
+                        category=str(trow.get("candidate_stage") or ""),
+                        category_key=str(trow.get("candidate_stage") or ""),
+                        market_phase=str((diagnostics or {}).get("market_phase", "") or (diagnostics or {}).get("phase_detail", "") or ""),
+                        source_reasons=trow.get("source_reasons") or [],
+                        metrics=trow.get("metrics") or {},
+                        updated_ts=now_ts,
+                    )
+                except Exception:
+                    continue
             for sym, row in dedup.items():
                 try:
                     # Keep source-candidate recording extremely light: Sharia is
@@ -714,6 +877,150 @@ def _seen_and_source_maps(week_key: str) -> tuple[dict, dict]:
     return seen, source
 
 
+
+
+def _timeline_maps(week_key: str) -> dict[str, dict[str, dict]]:
+    out: dict[str, dict[str, dict]] = {}
+    if not _enabled():
+        return out
+    try:
+        init_missed_opportunities_db()
+        with _connect() as conn:
+            rows = conn.execute("SELECT * FROM missed_symbol_timeline WHERE week_key=?", (week_key,)).fetchall()
+        for r in rows:
+            d = dict(r)
+            sym = str(d.get("symbol") or "")
+            et = str(d.get("event_type") or "")
+            if not sym or not et:
+                continue
+            d["source_reasons"] = _json_loads(d.get("source_reasons_json"), []) or []
+            d["metrics"] = _json_loads(d.get("metrics_json"), {}) or {}
+            out.setdefault(sym, {})[et] = d
+    except Exception:
+        return out
+    return out
+
+
+def _timeline_for_symbol(week_key: str, symbol: str) -> dict[str, dict]:
+    return _timeline_maps(week_key).get(_clean_symbol(symbol), {})
+
+
+def _timeline_event_summary(row: dict | None) -> dict:
+    if not row:
+        return {}
+    return {
+        "first_seen_at": row.get("first_seen_at", ""),
+        "last_seen_at": row.get("last_seen_at", ""),
+        "times_seen": _safe_int(row.get("times_seen")),
+        "first_price": safe_round(row.get("first_price"), 4),
+        "last_price": safe_round(row.get("last_price"), 4),
+        "first_gain_pct": safe_round(row.get("first_gain_pct"), 2),
+        "last_gain_pct": safe_round(row.get("last_gain_pct"), 2),
+        "max_gain_pct_seen": safe_round(row.get("max_gain_pct"), 2),
+        "first_rank": _safe_int(row.get("first_rank")),
+        "best_rank": _safe_int(row.get("best_rank")),
+        "category": row.get("category", ""),
+        "category_key": row.get("category_key", ""),
+        "market_phase": row.get("market_phase", ""),
+        "source_reasons": row.get("source_reasons") or _json_loads(row.get("source_reasons_json"), []) or [],
+    }
+
+
+def _timeline_summary(timeline: dict[str, dict], mover: dict | None = None) -> dict:
+    order = ["source", "deep_universe", "display_any", "watch", "gray", "cautious", "strong"]
+    events = {k: _timeline_event_summary(timeline.get(k)) for k in order if timeline.get(k)}
+    first_source = events.get("source") or {}
+    first_deep = events.get("deep_universe") or {}
+    first_display = events.get("display_any") or {}
+    first_watch = events.get("watch") or {}
+    first_cautious = events.get("cautious") or {}
+    first_strong = events.get("strong") or {}
+
+    # Classify timing/promotion quality.
+    late_threshold = float(MISSED_LATE_PROMOTION_PCT)
+    big_threshold = float(MISSED_BIG_MOVE_PCT)
+    first_entry = first_strong or first_cautious
+    first_entry_gain = _safe_float(first_entry.get("first_gain_pct"), 0.0) if first_entry else 0.0
+    first_source_gain = _safe_float(first_source.get("first_gain_pct"), 0.0) if first_source else 0.0
+    first_display_gain = _safe_float(first_display.get("first_gain_pct"), 0.0) if first_display else 0.0
+
+    timing_status = "no_timeline"
+    timing_label = "لا يوجد خط زمني محفوظ بعد"
+    if first_entry:
+        if first_entry_gain >= big_threshold:
+            timing_status = "very_late_entry"
+            timing_label = f"ظهر كفرصة دخول بعد حركة كبيرة جدًا (+{safe_round(first_entry_gain,1)}%)"
+        elif first_entry_gain >= late_threshold:
+            timing_status = "late_entry"
+            timing_label = f"ظهر كفرصة دخول بعد ارتفاع كبير نسبيًا (+{safe_round(first_entry_gain,1)}%)"
+        else:
+            timing_status = "early_or_reasonable_entry"
+            timing_label = f"ظهر كفرصة دخول عند ارتفاع مبكر/معقول (+{safe_round(first_entry_gain,1)}%)"
+    elif first_watch:
+        watch_gain = _safe_float(first_watch.get("first_gain_pct"), 0.0)
+        if watch_gain >= big_threshold:
+            timing_status = "late_watch_only"
+            timing_label = f"ظهر في المراقبة بعد حركة كبيرة (+{safe_round(watch_gain,1)}%)"
+        else:
+            timing_status = "watch_only_not_promoted"
+            timing_label = f"ظهر في المراقبة ولم يترقَّ؛ أول مراقبة عند +{safe_round(watch_gain,1)}%"
+    elif first_display:
+        timing_status = "displayed_other"
+        timing_label = "ظهر في الأداة لكن خارج التصنيفات الرئيسية المحفوظة"
+    elif first_deep:
+        timing_status = "deep_not_displayed"
+        timing_label = "دخل التحليل العميق لكنه لم يظهر في القوائم"
+    elif first_source:
+        timing_status = "source_not_promoted"
+        timing_label = f"دخل المنبع عند +{safe_round(first_source_gain,1)}% ولم يترقَّ للقوائم"
+
+    promotion_issue = ""
+    if first_source and first_entry and first_source_gain < 8 and first_entry_gain >= late_threshold:
+        promotion_issue = "كان معروفًا للمنبع مبكرًا لكنه ترقّى متأخرًا"
+    elif first_watch and first_entry and _safe_float(first_watch.get("first_gain_pct"),0) < 8 and first_entry_gain >= late_threshold:
+        promotion_issue = "ظهر مراقبة مبكرًا لكنه لم يتحول لدخول إلا بعد ارتفاع كبير"
+    elif first_source and not first_display:
+        promotion_issue = "مشكلة انتقاء/ترقية من المنبع إلى القوائم"
+    elif first_deep and not first_display:
+        promotion_issue = "دخل التحليل العميق لكنه لم ينتج فرصة ظاهرة"
+
+    return {
+        "events": events,
+        "first_source_seen_at": first_source.get("first_seen_at", ""),
+        "first_source_gain_pct": safe_round(first_source_gain, 2),
+        "first_display_seen_at": first_display.get("first_seen_at", ""),
+        "first_display_gain_pct": safe_round(first_display_gain, 2),
+        "first_entry_seen_at": first_entry.get("first_seen_at", "") if first_entry else "",
+        "first_entry_gain_pct": safe_round(first_entry_gain, 2),
+        "first_entry_type": "strong" if first_strong and (not first_cautious or (first_strong.get("first_seen_at","") <= first_cautious.get("first_seen_at",""))) else ("cautious" if first_cautious else ""),
+        "timing_status": timing_status,
+        "timing_label": timing_label,
+        "promotion_issue": promotion_issue,
+    }
+
+
+def _timeline_brief_lines(symbol: str, summary: dict) -> list[str]:
+    ev = summary.get("events") or {}
+    labels = [
+        ("source", "المنبع"),
+        ("deep_universe", "التحليل العميق"),
+        ("watch", "المراقبة"),
+        ("cautious", "دخول بحذر"),
+        ("strong", "دخول قوي"),
+        ("gray", "رمادي/غير محسوم"),
+    ]
+    lines = []
+    for key, ar in labels:
+        row = ev.get(key) or {}
+        if not row:
+            continue
+        lines.append(
+            f"  - {ar}: أول ظهور {row.get('first_seen_at') or '؟'} | صعود وقتها {safe_round(row.get('first_gain_pct'),1)}% | "
+            f"أفضل ترتيب #{row.get('best_rank') or row.get('first_rank') or '؟'} | مرات الظهور {row.get('times_seen') or 0}"
+        )
+    if not lines:
+        lines.append("  - لا يوجد خط زمني محفوظ لهذا السهم بعد.")
+    return lines
 def _match_status(symbol: str, seen: dict, source: dict, sharia: dict) -> tuple[str, str, str]:
     if bool(sharia.get("should_block", False)):
         # Still report it transparently, but do not count as a clean missed opportunity.
@@ -751,6 +1058,7 @@ def build_missed_weekly_report(week_key: str | None = None, threshold: float | N
     init_ok = init_missed_opportunities_db() if _enabled() else False
     baseline_date, baseline_map, week_maps, end_date, end_map = _select_week_maps(week_start, week_end)
     seen, source = _seen_and_source_maps(week_key)
+    timeline_by_symbol = _timeline_maps(week_key)
 
     if not baseline_map or not week_maps:
         return {
@@ -821,6 +1129,7 @@ def build_missed_weekly_report(week_key: str | None = None, threshold: float | N
         sym = mover["symbol"]
         sh = _sharia_for_symbol(sym)
         status, reason, group = _match_status(sym, seen, source, sh)
+        timeline_summary = _timeline_summary(timeline_by_symbol.get(sym, {}), mover)
         path = _analyze_mover_path(sym, float(mover.get("baseline_price", 0) or 0), week_start, end_date) if idx < MISSED_DEEP_CAUSE_LIMIT else {}
         news = {}
         if include_news and idx < MISSED_NEWS_LOOKUP_LIMIT:
@@ -843,6 +1152,13 @@ def build_missed_weekly_report(week_key: str | None = None, threshold: float | N
             "appeared_status": status,
             "appeared_reason": reason,
             "opportunity_group": group,
+            "promotion_timeline": timeline_summary,
+            "timing_status": timeline_summary.get("timing_status", ""),
+            "timing_label": timeline_summary.get("timing_label", ""),
+            "promotion_issue": timeline_summary.get("promotion_issue", ""),
+            "first_source_gain_pct": timeline_summary.get("first_source_gain_pct", 0),
+            "first_display_gain_pct": timeline_summary.get("first_display_gain_pct", 0),
+            "first_entry_gain_pct": timeline_summary.get("first_entry_gain_pct", 0),
             "sharia_status": str(sh.get("status", "") or ""),
             "sharia_label": str(sh.get("label", "") or ""),
             "sharia_reason": str(sh.get("reason", "") or "")[:500],
@@ -940,6 +1256,8 @@ def build_missed_weekly_report(week_key: str | None = None, threshold: float | N
         "opportunity_group_counts": _count_by(enriched, "opportunity_group"),
         "sharia_counts": _count_by(enriched, "sharia_label"),
         "likely_driver_counts": _count_by(enriched, "likely_driver"),
+        "timing_status_counts": _count_by(enriched, "timing_status"),
+        "promotion_issue_counts": _count_by([x for x in enriched if x.get("promotion_issue")], "promotion_issue"),
         "important_missed_count": len(clean_missed),
         "summary_note": "تقرير تشخيصي فقط: لا يغير التصنيف أو الفلتر الشرعي أو السعر الحي.",
     }
@@ -976,6 +1294,15 @@ def build_missed_weekly_brief(week_key: str | None = None, threshold: float | No
     for k, v in sorted((r.get("likely_driver_counts") or {}).items(), key=lambda x: x[1], reverse=True)[:8]:
         lines.append(f"- {k}: {v}")
     lines.append("")
+    lines.append("حالة التوقيت والترقية:")
+    for k, v in sorted((r.get("timing_status_counts") or {}).items(), key=lambda x: x[1], reverse=True)[:10]:
+        lines.append(f"- {k}: {v}")
+    issues = r.get("promotion_issue_counts") or {}
+    if issues:
+        lines.append("مشاكل الترقية المتكررة:")
+        for k, v in sorted(issues.items(), key=lambda x: x[1], reverse=True)[:8]:
+            lines.append(f"- {k}: {v}")
+    lines.append("")
     lines.append("أهم الفرص الفائتة أو غير الملتقطة:")
     important = r.get("important_missed") or r.get("important_missed_sample") or []
     if not important:
@@ -986,13 +1313,208 @@ def build_missed_weekly_brief(week_key: str | None = None, threshold: float | No
         lines.append(
             f"- {item.get('symbol')} | أعلى صعود: {safe_round(item.get('max_gain_pct'), 1)}% | "
             f"الإغلاق الأسبوعي: {safe_round(item.get('weekly_gain_pct'), 1)}% | "
-            f"الحالة: {item.get('appeared_reason')} | الشرعية: {item.get('sharia_label') or item.get('sharia_status') or 'غير معروف'} | "
+            f"الحالة: {item.get('appeared_reason')} | التوقيت: {item.get('timing_label') or 'غير متوفر'} | "
+            f"الشرعية: {item.get('sharia_label') or item.get('sharia_status') or 'غير معروف'} | "
             f"السبب المرجح: {item.get('likely_driver')} ({item.get('driver_confidence')}) - {reason_text}"
         )
     lines.append("")
     lines.append("ملاحظة: السبب المعروض مرجح آليًا من السعر/الحجم/الأخبار المتاحة، وليس سببًا مؤكدًا إلا عند وجود محفز واضح.")
     return "\n".join(lines)
 
+
+
+
+def build_symbol_timeline_report(symbol: str, week_key: str | None = None, threshold: float | None = None) -> dict:
+    """Return a compact, single-symbol diagnostic timeline."""
+    sym = _clean_symbol(symbol)
+    week_key, _ws, _we = _week_parts(week_key)
+    if not sym:
+        return {"ok": False, "error": "missing_symbol"}
+    init_missed_opportunities_db()
+    seen, source = _seen_and_source_maps(week_key)
+    timeline = _timeline_for_symbol(week_key, sym)
+    timeline_summary = _timeline_summary(timeline)
+    mover = None
+    try:
+        report = build_missed_weekly_report(week_key=week_key, threshold=threshold or 10.0, include_items=True, include_news=True, limit=1000)
+        for item in report.get("items", []) if isinstance(report, dict) else []:
+            if str(item.get("symbol") or "").upper() == sym:
+                mover = item
+                break
+    except Exception as exc:
+        mover = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    return {
+        "ok": True,
+        "version": "missed_opportunities_timeline_v1",
+        "symbol": sym,
+        "week_key": week_key,
+        "seen_summary": seen.get(sym, {}),
+        "source_summary": source.get(sym, {}),
+        "promotion_timeline": timeline_summary,
+        "weekly_mover_match": mover or {},
+        "brief": build_symbol_timeline_brief(sym, week_key=week_key, threshold=threshold),
+    }
+
+
+def build_symbol_timeline_brief(symbol: str, week_key: str | None = None, threshold: float | None = None) -> str:
+    sym = _clean_symbol(symbol)
+    week_key, _ws, _we = _week_parts(week_key)
+    timeline = _timeline_for_symbol(week_key, sym)
+    summary = _timeline_summary(timeline)
+    lines = [f"تقرير خط زمني للسهم {sym}", f"الأسبوع: {week_key}", ""]
+    lines.append(f"حكم التوقيت: {summary.get('timing_label') or 'غير متوفر'}")
+    if summary.get("promotion_issue"):
+        lines.append(f"ملاحظة ترقية: {summary.get('promotion_issue')}")
+    lines.append("")
+    lines.append("خط الظهور:")
+    lines.extend(_timeline_brief_lines(sym, summary))
+    try:
+        r = build_missed_weekly_report(week_key=week_key, threshold=threshold or 10.0, include_items=True, include_news=True, limit=1000)
+        match = None
+        for item in r.get("items", []) if isinstance(r, dict) else []:
+            if str(item.get("symbol") or "").upper() == sym:
+                match = item
+                break
+        if match:
+            lines.append("")
+            lines.append("حركة الأسبوع:")
+            lines.append(f"- أعلى صعود: {safe_round(match.get('max_gain_pct'),1)}% | الإغلاق الأسبوعي: {safe_round(match.get('weekly_gain_pct'),1)}%")
+            lines.append(f"- سبب الصعود المرجح: {match.get('likely_driver')} ({match.get('driver_confidence')})")
+            reasons = match.get("driver_reasons") or []
+            for rr in reasons[:5]:
+                lines.append(f"  • {rr}")
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
+def build_late_promotions_report(week_key: str | None = None, threshold: float | None = None, format: str = "json") -> dict | str:
+    """List movers that were promoted/displayed after a large move or were stuck in watch/source."""
+    r = build_missed_weekly_report(week_key=week_key, threshold=threshold or 10.0, include_items=True, include_news=True, limit=1000)
+    if not isinstance(r, dict) or not r.get("ok"):
+        return r if str(format).lower() == "json" else "تقرير الترقية المتأخرة غير جاهز\n" + json.dumps(r, ensure_ascii=False, indent=2)
+    rows = []
+    for item in r.get("items", []) or []:
+        st = str(item.get("timing_status") or "")
+        issue = str(item.get("promotion_issue") or "")
+        if st in {"very_late_entry", "late_entry", "late_watch_only", "watch_only_not_promoted", "source_not_promoted", "deep_not_displayed"} or issue:
+            rows.append(item)
+    rows.sort(key=lambda x: (float(x.get("first_entry_gain_pct") or 0), float(x.get("max_gain_pct") or 0)), reverse=True)
+    if str(format or "json").lower() in {"brief", "text", "txt"}:
+        lines = ["تقرير الترقية المتأخرة / الفرص التي ظهرت بعد الحركة", f"الأسبوع: {r.get('week_key')}", ""]
+        lines.append(f"عدد الحالات المهمة: {len(rows)}")
+        lines.append("")
+        for item in rows[:40]:
+            lines.append(f"- {item.get('symbol')} | أعلى صعود {safe_round(item.get('max_gain_pct'),1)}% | {item.get('timing_label')}")
+            if item.get("promotion_issue"):
+                lines.append(f"  • {item.get('promotion_issue')}")
+            timeline = item.get("promotion_timeline") or {}
+            for line in _timeline_brief_lines(str(item.get("symbol")), timeline)[:4]:
+                lines.append(line)
+            lines.append(f"  • سبب الصعود المرجح: {item.get('likely_driver')} ({item.get('driver_confidence')})")
+        return "\n".join(lines)
+    return {"ok": True, "week_key": r.get("week_key"), "count": len(rows), "items": rows[:200], "timing_status_counts": r.get("timing_status_counts"), "promotion_issue_counts": r.get("promotion_issue_counts")}
+
+
+def _tracking_loss_rows(week_key: str, limit: int = 5000) -> list[dict]:
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tracking_signals
+                WHERE week_key=? AND (outcome_group IN ('loss','stopped','failed') OR status IN ('stopped','broken_before_activation') OR stopped_at!='')
+                ORDER BY updated_at_ts DESC
+                LIMIT ?
+                """,
+                (week_key, int(limit or 5000)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _loss_stage(row: dict) -> tuple[str, str]:
+    activated = bool(str(row.get("activated_at") or "").strip())
+    stopped = bool(str(row.get("stopped_at") or "").strip())
+    minutes_to_stop = _safe_float(row.get("minutes_to_stop"), 0.0)
+    minutes_to_activation = _safe_float(row.get("minutes_to_activation"), 0.0)
+    if stopped and activated:
+        duration = max(minutes_to_stop - minutes_to_activation, 0.0)
+        candles_5m = int(round(duration / 5.0)) if duration > 0 else 0
+        return "بعد التفعيل/بعد الاختراق", f"ضرب الوقف بعد التفعيل؛ استمر تقريبًا {safe_round(duration,1)} دقيقة (~{candles_5m} شموع 5د تقريبًا)"
+    if stopped and not activated:
+        return "قبل التفعيل", "كسر الخطة أو الوقف قبل تأكيد الدخول"
+    if not activated:
+        return "لم يتفعل", "لم يصل إلى نقطة الدخول أو اختفى قبل التفعيل"
+    return "غير محدد", "الخسارة مسجلة لكن مرحلة الفشل غير واضحة"
+
+
+def build_loss_analysis_report(week_key: str | None = None, format: str = "json", limit: int = 500) -> dict | str:
+    """Analyze losing tracked signals without changing tracking logic."""
+    week_key, _ws, _we = _week_parts(week_key)
+    rows = _tracking_loss_rows(week_key, limit=limit)
+    items = []
+    for r in rows:
+        stage, stage_note = _loss_stage(r)
+        risk_tags = _json_loads(r.get("risk_tags_json"), []) or []
+        snapshot = _json_loads(r.get("snapshot_json"), {}) or {}
+        items.append({
+            "symbol": r.get("symbol"),
+            "bucket": r.get("signal_bucket"),
+            "label": r.get("signal_label"),
+            "status": r.get("status"),
+            "status_label": r.get("status_label"),
+            "outcome_group": r.get("outcome_group"),
+            "first_seen_at": r.get("first_seen_at"),
+            "activated_at": r.get("activated_at"),
+            "stopped_at": r.get("stopped_at"),
+            "entry_price": safe_round(r.get("entry_price"), 4),
+            "stop_loss": safe_round(r.get("stop_loss"), 4),
+            "target_price": safe_round(r.get("target_price"), 4),
+            "max_gain_pct": safe_round(r.get("max_gain_pct"), 2),
+            "max_loss_pct": safe_round(r.get("max_loss_pct"), 2),
+            "minutes_to_activation": safe_round(r.get("minutes_to_activation"), 1),
+            "minutes_to_stop": safe_round(r.get("minutes_to_stop"), 1),
+            "failure_stage": stage,
+            "failure_stage_note": stage_note,
+            "risk_tags": risk_tags,
+            "plan_family": r.get("plan_family", ""),
+            "signal_reason": r.get("signal_reason", ""),
+            "nearest_resistance_distance_pct": safe_round(r.get("nearest_resistance_distance_pct"), 2),
+            "nearest_resistance_strength": r.get("nearest_resistance_strength", ""),
+            "market_support_label": r.get("market_support_label", ""),
+            "sector_support_label": r.get("sector_support_label", ""),
+            "entry_distance_pct": safe_round(r.get("entry_distance_pct"), 2),
+            "is_late_above_entry": bool(r.get("is_late_above_entry")),
+            "is_entry_far": bool(r.get("is_entry_far")),
+            "snapshot_note": snapshot.get("quick_explainer") or snapshot.get("ai_summary") or "",
+        })
+    stage_counts = _count_by(items, "failure_stage")
+    bucket_counts = _count_by(items, "bucket")
+    # Count repeated risk tags.
+    tag_counts: dict[str, int] = {}
+    for item in items:
+        for t in item.get("risk_tags") or []:
+            tag_counts[str(t)] = int(tag_counts.get(str(t), 0) or 0) + 1
+    if str(format or "json").lower() in {"brief", "text", "txt"}:
+        lines = ["تقرير خسائر الإشارات / لماذا ظهرت ثم فشلت", f"الأسبوع: {week_key}", ""]
+        lines.append(f"عدد الإشارات الخاسرة المسجلة: {len(items)}")
+        lines.append("مراحل الفشل:")
+        for k, v in sorted(stage_counts.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"- {k}: {v}")
+        if tag_counts:
+            lines.append("أكثر وسوم الخطر تكرارًا:")
+            for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:12]:
+                lines.append(f"- {k}: {v}")
+        lines.append("")
+        lines.append("أمثلة مهمة:")
+        for item in items[:40]:
+            lines.append(f"- {item.get('symbol')} | {item.get('label')} | {item.get('failure_stage')} | {item.get('failure_stage_note')}")
+            if item.get("risk_tags"):
+                lines.append(f"  • مخاطر: {'؛ '.join([str(x) for x in item.get('risk_tags')[:4]])}")
+            lines.append(f"  • سبب الظهور: {str(item.get('signal_reason') or '')[:180]}")
+        return "\n".join(lines)
+    return {"ok": True, "week_key": week_key, "count": len(items), "stage_counts": stage_counts, "bucket_counts": bucket_counts, "risk_tag_counts": tag_counts, "items": items[:int(limit or 500)]}
 
 def missed_status() -> dict:
     out = {
@@ -1029,6 +1551,7 @@ def export_missed_csv(week_key: str | None = None, threshold: float | None = Non
     writer = csv.writer(output)
     writer.writerow([
         "symbol", "max_gain_pct", "weekly_gain_pct", "baseline_price", "end_price", "appeared_status", "appeared_reason", "opportunity_group",
+        "timing_status", "timing_label", "promotion_issue", "first_source_gain_pct", "first_display_gain_pct", "first_entry_gain_pct",
         "sharia_label", "sharia_status", "likely_driver", "driver_confidence", "driver_reasons", "trigger_date", "trigger_gap_pct", "trigger_day_change_pct",
         "trigger_volume_multiple", "news_title", "news_sentiment", "news_age_label",
     ])
@@ -1036,6 +1559,7 @@ def export_missed_csv(week_key: str | None = None, threshold: float | None = Non
         writer.writerow([
             item.get("symbol", ""), item.get("max_gain_pct", 0), item.get("weekly_gain_pct", 0), item.get("baseline_price", 0), item.get("end_price", 0),
             item.get("appeared_status", ""), item.get("appeared_reason", ""), item.get("opportunity_group", ""),
+            item.get("timing_status", ""), item.get("timing_label", ""), item.get("promotion_issue", ""), item.get("first_source_gain_pct", 0), item.get("first_display_gain_pct", 0), item.get("first_entry_gain_pct", 0),
             item.get("sharia_label", ""), item.get("sharia_status", ""), item.get("likely_driver", ""), item.get("driver_confidence", ""),
             " | ".join([str(x) for x in (item.get("driver_reasons") or [])]), item.get("trigger_date", ""), item.get("trigger_gap_pct", 0), item.get("trigger_day_change_pct", 0),
             item.get("trigger_volume_multiple", 0), item.get("news_title", ""), item.get("news_sentiment", ""), item.get("news_age_label", ""),
