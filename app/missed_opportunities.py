@@ -147,14 +147,53 @@ def _first_text(row: dict, keys: list[str], default: str = "", limit: int = 500)
 
 
 def _normalize_pct_value(value: Any) -> float:
-    """Normalize percent fields that may arrive as 12.3 or 0.123."""
-    val = _safe_float(value, 0.0)
-    if val == 0:
+    """Return percentage-like values without aggressive scaling.
+
+    Earlier versions multiplied every value between -1.5 and +1.5 by 100 to
+    handle decimal fractions.  After Dynamic Discovery started storing several
+    fields already as real percentages, that rule could turn +117.8% into
+    impossible +11776% through mixed source metrics.  For reporting, it is safer
+    to preserve the value and mark impossible numbers as unknown later.
+    """
+    return _safe_float(value, 0.0)
+
+
+def _sanitize_timeline_gain_pct(value: Any) -> float:
+    """Return a safe percentage for timeline storage.
+
+    Source diagnostics sometimes mix decimal percentages and full percentages.
+    If a bad multiplier slips through, one symbol can appear as +11776% while
+    the confirmed weekly mover is near +116%.  Such values are not useful for
+    promotion timing, so we store them as unknown (0) rather than misleading the report.
+    """
+    val = _normalize_pct_value(value)
+    try:
+        if val != val or val in (float("inf"), float("-inf")):
+            return 0.0
+    except Exception:
         return 0.0
-    # Some internal metrics store day_change_pct as a decimal fraction.
-    if abs(val) <= 1.5:
-        return val * 100.0
+    if abs(val) > 1000:
+        return 0.0
     return val
+
+
+def _timeline_gain_or_none(value: Any, price: Any = None) -> float | None:
+    """Return timeline gain as a number, or None when it is unavailable/untrusted."""
+    val = _safe_float(value, 0.0)
+    if abs(val) > 1000:
+        return None
+    # When both price and percent are zero, this usually means we only knew the
+    # symbol was in the deep universe, not its live move at that exact stage.
+    if abs(val) < 0.00001 and _safe_float(price, 0.0) <= 0:
+        return None
+    return val
+
+
+def _format_pct_or_na(value: Any, digits: int = 1) -> str:
+    val = _safe_float(value, 0.0) if value is not None else None
+    if val is None:
+        return "غير متوفر"
+    return f"{safe_round(val, digits)}%"
 
 
 def _first_pct(row: dict, keys: list[str], default: float = 0.0) -> float:
@@ -204,7 +243,7 @@ def _record_timeline_event(
     now_ts = _safe_float(updated_ts, _now_ts())
     rank_i = _safe_int(rank, 0)
     price_f = _safe_float(price, 0.0)
-    gain_f = _safe_float(gain_pct, 0.0)
+    gain_f = _sanitize_timeline_gain_pct(gain_pct)
     conn.execute(
         """
         INSERT INTO missed_symbol_timeline(
@@ -543,7 +582,7 @@ def record_missed_source_candidates(symbols: list[str] | None = None, diagnostic
                 "source_tags": item.get("sources") or [],
                 "metrics": metrics,
                 "price": _safe_float(metrics.get("price") or metrics.get("live_price") or metrics.get("fmp_price")),
-                "change_pct": _safe_float(metrics.get("live_change_pct") or metrics.get("fmp_change_pct") or metrics.get("day_change_pct")) * (100 if abs(_safe_float(metrics.get("day_change_pct"))) <= 1.5 and metrics.get("day_change_pct") is not None else 1),
+                "change_pct": _first_pct(metrics, ["live_change_pct", "fmp_change_pct", "day_change_pct", "change_pct", "current_change_pct"], 0.0),
                 "volume": _safe_float(metrics.get("volume") or metrics.get("live_volume") or metrics.get("fmp_volume")),
                 "dollar_volume": _safe_float(metrics.get("dollar_volume")),
             })
@@ -908,15 +947,20 @@ def _timeline_for_symbol(week_key: str, symbol: str) -> dict[str, dict]:
 def _timeline_event_summary(row: dict | None) -> dict:
     if not row:
         return {}
+    first_price = _safe_float(row.get("first_price"), 0.0)
+    last_price = _safe_float(row.get("last_price"), 0.0)
+    first_gain = _timeline_gain_or_none(row.get("first_gain_pct"), first_price)
+    last_gain = _timeline_gain_or_none(row.get("last_gain_pct"), last_price)
+    max_gain = _timeline_gain_or_none(row.get("max_gain_pct"), first_price or last_price)
     return {
         "first_seen_at": row.get("first_seen_at", ""),
         "last_seen_at": row.get("last_seen_at", ""),
         "times_seen": _safe_int(row.get("times_seen")),
-        "first_price": safe_round(row.get("first_price"), 4),
-        "last_price": safe_round(row.get("last_price"), 4),
-        "first_gain_pct": safe_round(row.get("first_gain_pct"), 2),
-        "last_gain_pct": safe_round(row.get("last_gain_pct"), 2),
-        "max_gain_pct_seen": safe_round(row.get("max_gain_pct"), 2),
+        "first_price": safe_round(first_price, 4),
+        "last_price": safe_round(last_price, 4),
+        "first_gain_pct": safe_round(first_gain, 2) if first_gain is not None else None,
+        "last_gain_pct": safe_round(last_gain, 2) if last_gain is not None else None,
+        "max_gain_pct_seen": safe_round(max_gain, 2) if max_gain is not None else None,
         "first_rank": _safe_int(row.get("first_rank")),
         "best_rank": _safe_int(row.get("best_rank")),
         "category": row.get("category", ""),
@@ -940,14 +984,20 @@ def _timeline_summary(timeline: dict[str, dict], mover: dict | None = None) -> d
     late_threshold = float(MISSED_LATE_PROMOTION_PCT)
     big_threshold = float(MISSED_BIG_MOVE_PCT)
     first_entry = first_strong or first_cautious
-    first_entry_gain = _safe_float(first_entry.get("first_gain_pct"), 0.0) if first_entry else 0.0
-    first_source_gain = _safe_float(first_source.get("first_gain_pct"), 0.0) if first_source else 0.0
-    first_display_gain = _safe_float(first_display.get("first_gain_pct"), 0.0) if first_display else 0.0
+    first_entry_gain_raw = first_entry.get("first_gain_pct") if first_entry else None
+    first_source_gain_raw = first_source.get("first_gain_pct") if first_source else None
+    first_display_gain_raw = first_display.get("first_gain_pct") if first_display else None
+    first_entry_gain = _safe_float(first_entry_gain_raw, 0.0) if first_entry_gain_raw is not None else 0.0
+    first_source_gain = _safe_float(first_source_gain_raw, 0.0) if first_source_gain_raw is not None else 0.0
+    first_display_gain = _safe_float(first_display_gain_raw, 0.0) if first_display_gain_raw is not None else 0.0
 
     timing_status = "no_timeline"
     timing_label = "لا يوجد خط زمني محفوظ بعد"
     if first_entry:
-        if first_entry_gain >= big_threshold:
+        if first_entry_gain_raw is None:
+            timing_status = "entry_gain_unknown"
+            timing_label = "ظهر كفرصة دخول لكن نسبة الصعود وقتها غير متوفرة"
+        elif first_entry_gain >= big_threshold:
             timing_status = "very_late_entry"
             timing_label = f"ظهر كفرصة دخول بعد حركة كبيرة جدًا (+{safe_round(first_entry_gain,1)}%)"
         elif first_entry_gain >= late_threshold:
@@ -957,8 +1007,12 @@ def _timeline_summary(timeline: dict[str, dict], mover: dict | None = None) -> d
             timing_status = "early_or_reasonable_entry"
             timing_label = f"ظهر كفرصة دخول عند ارتفاع مبكر/معقول (+{safe_round(first_entry_gain,1)}%)"
     elif first_watch:
-        watch_gain = _safe_float(first_watch.get("first_gain_pct"), 0.0)
-        if watch_gain >= big_threshold:
+        watch_gain_raw = first_watch.get("first_gain_pct")
+        watch_gain = _safe_float(watch_gain_raw, 0.0) if watch_gain_raw is not None else 0.0
+        if watch_gain_raw is None:
+            timing_status = "watch_gain_unknown"
+            timing_label = "ظهر في المراقبة لكن نسبة الصعود وقتها غير متوفرة"
+        elif watch_gain >= big_threshold:
             timing_status = "late_watch_only"
             timing_label = f"ظهر في المراقبة بعد حركة كبيرة (+{safe_round(watch_gain,1)}%)"
         else:
@@ -972,12 +1026,15 @@ def _timeline_summary(timeline: dict[str, dict], mover: dict | None = None) -> d
         timing_label = "دخل التحليل العميق لكنه لم يظهر في القوائم"
     elif first_source:
         timing_status = "source_not_promoted"
-        timing_label = f"دخل المنبع عند +{safe_round(first_source_gain,1)}% ولم يترقَّ للقوائم"
+        if first_source_gain_raw is None:
+            timing_label = "دخل المنبع لكن نسبة الصعود وقتها غير متوفرة ولم يترقَّ للقوائم"
+        else:
+            timing_label = f"دخل المنبع عند +{safe_round(first_source_gain,1)}% ولم يترقَّ للقوائم"
 
     promotion_issue = ""
-    if first_source and first_entry and first_source_gain < 8 and first_entry_gain >= late_threshold:
+    if first_source and first_entry and first_source_gain_raw is not None and first_entry_gain_raw is not None and first_source_gain < 8 and first_entry_gain >= late_threshold:
         promotion_issue = "كان معروفًا للمنبع مبكرًا لكنه ترقّى متأخرًا"
-    elif first_watch and first_entry and _safe_float(first_watch.get("first_gain_pct"),0) < 8 and first_entry_gain >= late_threshold:
+    elif first_watch and first_entry and first_entry_gain_raw is not None and first_watch.get("first_gain_pct") is not None and _safe_float(first_watch.get("first_gain_pct"),0) < 8 and first_entry_gain >= late_threshold:
         promotion_issue = "ظهر مراقبة مبكرًا لكنه لم يتحول لدخول إلا بعد ارتفاع كبير"
     elif first_source and not first_display:
         promotion_issue = "مشكلة انتقاء/ترقية من المنبع إلى القوائم"
@@ -1014,8 +1071,9 @@ def _timeline_brief_lines(symbol: str, summary: dict) -> list[str]:
         row = ev.get(key) or {}
         if not row:
             continue
+        gain_txt = _format_pct_or_na(row.get('first_gain_pct'), 1)
         lines.append(
-            f"  - {ar}: أول ظهور {row.get('first_seen_at') or '؟'} | صعود وقتها {safe_round(row.get('first_gain_pct'),1)}% | "
+            f"  - {ar}: أول ظهور {row.get('first_seen_at') or '؟'} | صعود وقتها {gain_txt} | "
             f"أفضل ترتيب #{row.get('best_rank') or row.get('first_rank') or '؟'} | مرات الظهور {row.get('times_seen') or 0}"
         )
     if not lines:
@@ -1449,8 +1507,125 @@ def _loss_stage(row: dict) -> tuple[str, str]:
     return "غير محدد", "الخسارة مسجلة لكن مرحلة الفشل غير واضحة"
 
 
+def _loss_reason_tags(item: dict) -> list[str]:
+    """Build practical loss-reason tags from existing tracking fields only."""
+    tags = [str(x) for x in (item.get("risk_tags") or []) if str(x).strip()]
+    out: list[str] = []
+    for tag in tags:
+        if tag not in out:
+            out.append(tag)
+    res_dist = _safe_float(item.get("nearest_resistance_distance_pct"), 999.0)
+    res_strength = str(item.get("nearest_resistance_strength") or "")
+    if res_dist <= 1.25 and any(x in res_strength for x in ["قوي", "strong", "very"]):
+        out.append("قريب من مقاومة قوية")
+    elif res_dist <= 1.0:
+        out.append("قريب من مقاومة")
+    if bool(item.get("is_late_above_entry")):
+        out.append("دخول متأخر فوق نقطة الدخول")
+    if bool(item.get("is_entry_far")) or _safe_float(item.get("entry_distance_pct"), 0.0) >= 3.0:
+        out.append("نقطة الدخول بعيدة")
+    market = str(item.get("market_support_label") or "")
+    sector = str(item.get("sector_support_label") or "")
+    if any(x in market for x in ["غير داعم", "ضعيف", "سلبي", "هبوط"]):
+        out.append("السوق غير داعم")
+    if any(x in sector for x in ["غير داعم", "ضعيف", "سلبي", "هبوط"]):
+        out.append("القطاع غير داعم")
+    if "بعد التفعيل" in str(item.get("failure_stage") or "") and _safe_float(item.get("max_gain_pct"), 0.0) <= 0.5:
+        out.append("فشل سريع بعد التفعيل")
+    # Preserve order while removing duplicates.
+    clean: list[str] = []
+    for tag in out:
+        if tag and tag not in clean:
+            clean.append(tag)
+    return clean[:8]
+
+
+def _loss_group_key(item: dict) -> tuple:
+    return (
+        str(item.get("symbol") or ""),
+        str(item.get("bucket") or ""),
+        str(item.get("label") or ""),
+        str(item.get("plan_family") or ""),
+        round(_safe_float(item.get("entry_price"), 0.0), 3),
+        round(_safe_float(item.get("stop_loss"), 0.0), 3),
+        round(_safe_float(item.get("target_price"), 0.0), 3),
+    )
+
+
+def _summarize_loss_groups(items: list[dict]) -> list[dict]:
+    groups: dict[tuple, dict] = {}
+    for item in items:
+        key = _loss_group_key(item)
+        g = groups.get(key)
+        if not g:
+            g = {
+                "symbol": item.get("symbol"),
+                "bucket": item.get("bucket"),
+                "label": item.get("label"),
+                "plan_family": item.get("plan_family"),
+                "entry_price": item.get("entry_price"),
+                "stop_loss": item.get("stop_loss"),
+                "target_price": item.get("target_price"),
+                "signals_count": 0,
+                "first_seen_at": item.get("first_seen_at") or "",
+                "last_seen_at": item.get("first_seen_at") or "",
+                "activated_count": 0,
+                "stopped_count": 0,
+                "stage_counts": {},
+                "reason_counts": {},
+                "best_max_gain_pct": -9999.0,
+                "worst_max_loss_pct": 9999.0,
+                "min_minutes_to_stop": None,
+                "max_minutes_to_stop": None,
+                "sample_reasons": [],
+                "sample_notes": [],
+            }
+            groups[key] = g
+        g["signals_count"] += 1
+        fs = str(item.get("first_seen_at") or "")
+        if fs and (not g["first_seen_at"] or fs < g["first_seen_at"]):
+            g["first_seen_at"] = fs
+        if fs and (not g["last_seen_at"] or fs > g["last_seen_at"]):
+            g["last_seen_at"] = fs
+        if str(item.get("activated_at") or "").strip():
+            g["activated_count"] += 1
+        if str(item.get("stopped_at") or "").strip():
+            g["stopped_count"] += 1
+        stage = str(item.get("failure_stage") or "غير محدد")
+        g["stage_counts"][stage] = int(g["stage_counts"].get(stage, 0) or 0) + 1
+        for reason in _loss_reason_tags(item):
+            g["reason_counts"][reason] = int(g["reason_counts"].get(reason, 0) or 0) + 1
+        g["best_max_gain_pct"] = max(g["best_max_gain_pct"], _safe_float(item.get("max_gain_pct"), -9999.0))
+        g["worst_max_loss_pct"] = min(g["worst_max_loss_pct"], _safe_float(item.get("max_loss_pct"), 9999.0))
+        mts = _safe_float(item.get("minutes_to_stop"), 0.0)
+        if mts > 0:
+            g["min_minutes_to_stop"] = mts if g["min_minutes_to_stop"] is None else min(g["min_minutes_to_stop"], mts)
+            g["max_minutes_to_stop"] = mts if g["max_minutes_to_stop"] is None else max(g["max_minutes_to_stop"], mts)
+        sr = str(item.get("signal_reason") or "").strip()
+        if sr and sr not in g["sample_reasons"] and len(g["sample_reasons"]) < 3:
+            g["sample_reasons"].append(sr[:220])
+        sn = str(item.get("snapshot_note") or "").strip()
+        if sn and sn not in g["sample_notes"] and len(g["sample_notes"]) < 2:
+            g["sample_notes"].append(sn[:220])
+    out = []
+    for g in groups.values():
+        if g["best_max_gain_pct"] <= -9999:
+            g["best_max_gain_pct"] = 0.0
+        if g["worst_max_loss_pct"] >= 9999:
+            g["worst_max_loss_pct"] = 0.0
+        g["top_failure_stage"] = max(g["stage_counts"].items(), key=lambda x: x[1])[0] if g["stage_counts"] else "غير محدد"
+        g["top_reasons"] = [k for k, _v in sorted(g["reason_counts"].items(), key=lambda x: x[1], reverse=True)[:5]]
+        out.append(g)
+    out.sort(key=lambda x: (int(x.get("signals_count") or 0), int(x.get("stopped_count") or 0), abs(_safe_float(x.get("worst_max_loss_pct"), 0.0))), reverse=True)
+    return out
+
+
 def build_loss_analysis_report(week_key: str | None = None, format: str = "json", limit: int = 500) -> dict | str:
-    """Analyze losing tracked signals without changing tracking logic."""
+    """Analyze losing tracked signals without changing tracking logic.
+
+    The brief report is grouped by symbol/plan to avoid huge repetitive output.
+    Raw rows remain available in JSON under raw_items_sample for debugging.
+    """
     week_key, _ws, _we = _week_parts(week_key)
     rows = _tracking_loss_rows(week_key, limit=limit)
     items = []
@@ -1458,7 +1633,7 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
         stage, stage_note = _loss_stage(r)
         risk_tags = _json_loads(r.get("risk_tags_json"), []) or []
         snapshot = _json_loads(r.get("snapshot_json"), {}) or {}
-        items.append({
+        item = {
             "symbol": r.get("symbol"),
             "bucket": r.get("signal_bucket"),
             "label": r.get("signal_label"),
@@ -1488,33 +1663,63 @@ def build_loss_analysis_report(week_key: str | None = None, format: str = "json"
             "is_late_above_entry": bool(r.get("is_late_above_entry")),
             "is_entry_far": bool(r.get("is_entry_far")),
             "snapshot_note": snapshot.get("quick_explainer") or snapshot.get("ai_summary") or "",
-        })
+        }
+        item["derived_loss_reasons"] = _loss_reason_tags(item)
+        items.append(item)
     stage_counts = _count_by(items, "failure_stage")
     bucket_counts = _count_by(items, "bucket")
-    # Count repeated risk tags.
     tag_counts: dict[str, int] = {}
     for item in items:
-        for t in item.get("risk_tags") or []:
+        for t in item.get("derived_loss_reasons") or []:
             tag_counts[str(t)] = int(tag_counts.get(str(t), 0) or 0) + 1
+    grouped = _summarize_loss_groups(items)
     if str(format or "json").lower() in {"brief", "text", "txt"}:
         lines = ["تقرير خسائر الإشارات / لماذا ظهرت ثم فشلت", f"الأسبوع: {week_key}", ""]
-        lines.append(f"عدد الإشارات الخاسرة المسجلة: {len(items)}")
+        lines.append(f"عدد الإشارات الخاسرة الخام: {len(items)}")
+        lines.append(f"عدد الأسهم/الخطط بعد التجميع: {len(grouped)}")
+        lines.append("")
         lines.append("مراحل الفشل:")
         for k, v in sorted(stage_counts.items(), key=lambda x: x[1], reverse=True):
             lines.append(f"- {k}: {v}")
         if tag_counts:
-            lines.append("أكثر وسوم الخطر تكرارًا:")
+            lines.append("")
+            lines.append("أكثر أسباب الخسارة/الخطر تكرارًا:")
             for k, v in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:12]:
                 lines.append(f"- {k}: {v}")
         lines.append("")
-        lines.append("أمثلة مهمة:")
-        for item in items[:40]:
-            lines.append(f"- {item.get('symbol')} | {item.get('label')} | {item.get('failure_stage')} | {item.get('failure_stage_note')}")
-            if item.get("risk_tags"):
-                lines.append(f"  • مخاطر: {'؛ '.join([str(x) for x in item.get('risk_tags')[:4]])}")
-            lines.append(f"  • سبب الظهور: {str(item.get('signal_reason') or '')[:180]}")
+        lines.append("أهم الحالات المجمعة:")
+        for g in grouped[:30]:
+            duration_txt = ""
+            if g.get("min_minutes_to_stop") is not None:
+                if g.get("min_minutes_to_stop") == g.get("max_minutes_to_stop"):
+                    duration_txt = f" | مدة الوقف تقريبًا {safe_round(g.get('min_minutes_to_stop'),1)}د"
+                else:
+                    duration_txt = f" | مدة الوقف {safe_round(g.get('min_minutes_to_stop'),1)}–{safe_round(g.get('max_minutes_to_stop'),1)}د"
+            lines.append(
+                f"- {g.get('symbol')} | {g.get('label')} | تكرر {g.get('signals_count')} | "
+                f"تفعيل {g.get('activated_count')} / وقف {g.get('stopped_count')} | "
+                f"المرحلة الغالبة: {g.get('top_failure_stage')}{duration_txt}"
+            )
+            lines.append(
+                f"  • الدخول {g.get('entry_price')} | الوقف {g.get('stop_loss')} | الهدف {g.get('target_price')} | "
+                f"أفضل صعود {safe_round(g.get('best_max_gain_pct'),2)}% | أسوأ هبوط {safe_round(g.get('worst_max_loss_pct'),2)}%"
+            )
+            if g.get("top_reasons"):
+                lines.append(f"  • أسباب مرجحة: {'؛ '.join([str(x) for x in g.get('top_reasons')[:5]])}")
+            if g.get("sample_reasons"):
+                lines.append(f"  • لماذا ظهر؟ {g.get('sample_reasons')[0]}")
         return "\n".join(lines)
-    return {"ok": True, "week_key": week_key, "count": len(items), "stage_counts": stage_counts, "bucket_counts": bucket_counts, "risk_tag_counts": tag_counts, "items": items[:int(limit or 500)]}
+    return {
+        "ok": True,
+        "week_key": week_key,
+        "raw_count": len(items),
+        "grouped_count": len(grouped),
+        "stage_counts": stage_counts,
+        "bucket_counts": bucket_counts,
+        "loss_reason_counts": tag_counts,
+        "grouped_items": grouped[:int(limit or 500)],
+        "raw_items_sample": items[:80],
+    }
 
 def missed_status() -> dict:
     out = {
