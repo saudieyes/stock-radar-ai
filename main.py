@@ -104,6 +104,7 @@ from app.missed_opportunities import (
     build_symbol_timeline_report,
     build_symbol_timeline_brief,
     build_late_promotions_report,
+    build_pre_move_evidence_report,
     build_loss_analysis_report,
     export_missed_json,
     export_missed_csv,
@@ -2521,6 +2522,15 @@ def missed_opportunities_late_promotions(week_key: str = "", threshold: float = 
     return result
 
 
+@app.get("/missed-opportunities/pre-move-analysis")
+def missed_opportunities_pre_move_analysis(week_key: str = "", threshold: float = 10.0, format: str = "json", limit: int = 120):
+    fmt = str(format or "json").strip().lower()
+    result = build_pre_move_evidence_report(week_key=week_key or None, threshold=threshold, format=fmt, limit=limit)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
 @app.get("/missed-opportunities/loss-analysis")
 def missed_opportunities_loss_analysis(week_key: str = "", format: str = "json", limit: int = 500, detail: str = "summary", top: int = 20):
     fmt = str(format or "json").strip().lower()
@@ -2614,4 +2624,3 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
-
