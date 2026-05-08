@@ -35,6 +35,15 @@ MISSED_LATE_PROMOTION_PCT = float(os.getenv("MISSED_LATE_PROMOTION_PCT", "12") o
 MISSED_BIG_MOVE_PCT = float(os.getenv("MISSED_BIG_MOVE_PCT", "20") or 20)
 MISSED_TIMELINE_ITEM_LIMIT = int(float(os.getenv("MISSED_TIMELINE_ITEM_LIMIT", "120") or 120))
 
+# Pre-Move Evidence is intentionally light. It stores only first snapshots per
+# symbol/event/milestone for the active week so Railway SQLite does not grow
+# from every live refresh or every scan repetition. It is diagnostic-only and
+# never changes radar scoring, Sharia filtering, or displayed opportunities.
+MISSED_EVIDENCE_ENABLED = str(os.getenv("MISSED_EVIDENCE_ENABLED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+MISSED_EVIDENCE_SOURCE_RANK_LIMIT = int(float(os.getenv("MISSED_EVIDENCE_SOURCE_RANK_LIMIT", "500") or 500))
+MISSED_EVIDENCE_DEEP_RANK_LIMIT = int(float(os.getenv("MISSED_EVIDENCE_DEEP_RANK_LIMIT", "280") or 280))
+MISSED_EVIDENCE_MILESTONES = [3, 5, 10, 15, 20, 30, 50, 100]
+
 _LOCK = threading.RLock()
 _INITIALIZED = False
 NY_TZ = ZoneInfo("America/New_York")
@@ -278,6 +287,200 @@ def _record_timeline_event(
             _json_dumps(source_reasons or []), _json_dumps(metrics or {}), now_ts,
         ),
     )
+    try:
+        _record_pre_move_evidence(
+            conn, week_key, sym, str(event_type),
+            seen_at=seen_at, price=price_f, gain_pct=gain_f, rank=rank_i,
+            category=category, category_key=category_key, market_phase=market_phase,
+            source_reasons=source_reasons or [], metrics=metrics or {}, updated_ts=now_ts,
+        )
+    except Exception:
+        pass
+
+
+# --- Pre-Move Evidence snapshots -------------------------------------------------
+# These helpers are read-only diagnostics. They intentionally record first
+# occurrences and gain milestones only, so Railway SQLite is not burdened by
+# every scan/live-refresh repetition.
+
+def _snapshot_metric_pack(row: dict | None, metrics: dict | None = None) -> dict:
+    row = row or {}
+    metrics = metrics or {}
+    merged = {}
+    try:
+        if isinstance(metrics, dict):
+            merged.update(metrics)
+        if isinstance(row, dict):
+            merged.update(row)
+    except Exception:
+        merged = row or metrics or {}
+
+    def f(keys: list[str], default: float = 0.0) -> float:
+        return _first_float(merged, keys, default=default)
+
+    def t(keys: list[str], default: str = "", limit: int = 140) -> str:
+        return _first_text(merged, keys, default=default, limit=limit)
+
+    return {
+        "quality": f(["quality_score", "quality", "core_quality", "quality_core_score"]),
+        "execution": f(["execution_readiness_score", "execution", "execution_score", "execution_layer_score"]),
+        "display_rank_score": f(["display_rank_score", "rank_score"]),
+        "volume": f(["volume", "live_volume", "fmp_volume", "current_volume"]),
+        "volume_ratio": f(["volume_ratio", "relative_volume", "rel_volume", "rv_ratio"]),
+        "effective_volume_ratio": f(["effective_volume_ratio", "intraday_volume_ratio", "projected_volume_ratio"]),
+        "dollar_volume": f(["dollar_volume", "dollar_vol", "liquidity_dollar_volume"]),
+        "vwap_proxy": f(["vwap_proxy", "vwap", "current_vwap"]),
+        "entry_price": f(["entry_price", "entry", "planned_entry", "buy_above"]),
+        "stop_loss": f(["stop_loss", "stop", "stop_price"]),
+        "target_price": f(["target_price", "target", "target_1", "tp1"]),
+        "risk_pct": f(["risk_pct", "plan_risk_pct"]),
+        "rr_1": f(["rr_1", "risk_reward", "reward_risk", "rr"]),
+        "nearest_support": f(["nearest_support", "support", "support_price"]),
+        "nearest_support_strength": t(["nearest_support_strength", "support_strength"], limit=80),
+        "nearest_support_distance_pct": f(["nearest_support_distance_pct", "support_distance_pct", "distance_to_support_pct"]),
+        "nearest_resistance": f(["nearest_resistance", "resistance", "resistance_price"]),
+        "nearest_resistance_strength": t(["nearest_resistance_strength", "resistance_strength"], limit=80),
+        "nearest_resistance_distance_pct": f(["nearest_resistance_distance_pct", "resistance_distance_pct", "distance_to_resistance_pct"]),
+        "distance_to_52w_high_pct": f(["distance_to_52w_high_pct", "near_52w_high_pct", "distance_52w_high_pct"]),
+        "distance_to_ath_pct": f(["distance_to_ath_pct", "near_ath_pct", "distance_ath_pct"]),
+        "breakout_quality": t(["breakout_quality", "breakout_quality_label"], limit=80),
+        "plan_family": t(["plan_family", "setup_type", "plan_type"], limit=80),
+        "risk_tags": merged.get("risk_tags") or merged.get("risk_tags_json") or [],
+    }
+
+
+def _hot_source_tags(source_reasons: list | None, metrics: dict | None = None) -> bool:
+    text = " ".join([str(x) for x in (source_reasons or [])]) + " " + json.dumps(metrics or {}, ensure_ascii=False)[:1000]
+    needles = ["fmp", "top", "mover", "volume", "runner", "near_high", "gap", "live", "spike", "اختراق", "سيولة", "حجم", "متحرك"]
+    low = text.lower()
+    return any(n.lower() in low for n in needles)
+
+
+def _should_store_evidence(event_type: str, gain_pct: float, rank: int, source_reasons: list | None, metrics: dict | None) -> bool:
+    if not MISSED_EVIDENCE_ENABLED:
+        return False
+    et = str(event_type or "")
+    gain = _safe_float(gain_pct, 0.0)
+    rank_i = _safe_int(rank, 0)
+    if et == "source":
+        return bool((rank_i and rank_i <= MISSED_EVIDENCE_SOURCE_RANK_LIMIT) or gain >= 3 or _hot_source_tags(source_reasons, metrics))
+    if et == "deep_universe":
+        return bool((rank_i and rank_i <= MISSED_EVIDENCE_DEEP_RANK_LIMIT) or gain >= 3)
+    return True
+
+
+def _record_pre_move_snapshot(
+    conn: sqlite3.Connection,
+    week_key: str,
+    symbol: str,
+    snapshot_key: str,
+    snapshot_type: str,
+    *,
+    seen_at: str,
+    price: float = 0.0,
+    gain_pct: float = 0.0,
+    rank: int = 0,
+    category: str = "",
+    category_key: str = "",
+    market_phase: str = "",
+    source_reasons: list | None = None,
+    metrics: dict | None = None,
+    updated_ts: float | None = None,
+) -> None:
+    sym = _clean_symbol(symbol)
+    key = _clean_text(snapshot_key, 80)
+    if not sym or not key:
+        return
+    pack = _snapshot_metric_pack({"price": price, "gain_pct": gain_pct, "rank": rank}, metrics or {})
+    now_ts = _safe_float(updated_ts, _now_ts())
+    gain_f = _sanitize_timeline_gain_pct(gain_pct)
+    reasons = source_reasons or []
+    risk_tags = pack.get("risk_tags") or []
+    conn.execute(
+        """
+        INSERT INTO missed_pre_move_snapshots(
+            week_key, symbol, snapshot_key, snapshot_type, first_seen_at, last_seen_at, times_seen,
+            price, gain_pct, rank, category, category_key, market_phase,
+            quality, execution, display_rank_score, volume, volume_ratio, effective_volume_ratio,
+            dollar_volume, vwap_proxy, entry_price, stop_loss, target_price, risk_pct, rr_1,
+            nearest_support, nearest_support_strength, nearest_support_distance_pct,
+            nearest_resistance, nearest_resistance_strength, nearest_resistance_distance_pct,
+            distance_to_52w_high_pct, distance_to_ath_pct, breakout_quality, plan_family,
+            source_reasons_json, risk_tags_json, metrics_json, updated_ts
+        ) VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(week_key, symbol, snapshot_key) DO UPDATE SET
+            last_seen_at=excluded.last_seen_at,
+            times_seen=missed_pre_move_snapshots.times_seen + 1,
+            price=CASE WHEN missed_pre_move_snapshots.price<=0 AND excluded.price>0 THEN excluded.price ELSE missed_pre_move_snapshots.price END,
+            gain_pct=CASE WHEN missed_pre_move_snapshots.gain_pct=0 AND excluded.gain_pct!=0 THEN excluded.gain_pct ELSE missed_pre_move_snapshots.gain_pct END,
+            rank=CASE
+                WHEN missed_pre_move_snapshots.rank=0 THEN excluded.rank
+                WHEN excluded.rank=0 THEN missed_pre_move_snapshots.rank
+                WHEN excluded.rank < missed_pre_move_snapshots.rank THEN excluded.rank
+                ELSE missed_pre_move_snapshots.rank
+            END,
+            category=CASE WHEN missed_pre_move_snapshots.category='' THEN excluded.category ELSE missed_pre_move_snapshots.category END,
+            category_key=CASE WHEN missed_pre_move_snapshots.category_key='' THEN excluded.category_key ELSE missed_pre_move_snapshots.category_key END,
+            market_phase=CASE WHEN excluded.market_phase!='' THEN excluded.market_phase ELSE missed_pre_move_snapshots.market_phase END,
+            quality=MAX(missed_pre_move_snapshots.quality, excluded.quality),
+            execution=MAX(missed_pre_move_snapshots.execution, excluded.execution),
+            display_rank_score=MAX(missed_pre_move_snapshots.display_rank_score, excluded.display_rank_score),
+            source_reasons_json=CASE WHEN missed_pre_move_snapshots.source_reasons_json='[]' THEN excluded.source_reasons_json ELSE missed_pre_move_snapshots.source_reasons_json END,
+            risk_tags_json=CASE WHEN missed_pre_move_snapshots.risk_tags_json='[]' THEN excluded.risk_tags_json ELSE missed_pre_move_snapshots.risk_tags_json END,
+            metrics_json=CASE WHEN missed_pre_move_snapshots.metrics_json='{}' THEN excluded.metrics_json ELSE missed_pre_move_snapshots.metrics_json END,
+            updated_ts=excluded.updated_ts
+        """,
+        (
+            week_key, sym, key, _clean_text(snapshot_type, 80), seen_at, seen_at,
+            _safe_float(price), gain_f, _safe_int(rank, 0), _clean_text(category, 120), _clean_text(category_key, 80), _clean_text(market_phase, 120),
+            pack["quality"], pack["execution"], pack["display_rank_score"], pack["volume"], pack["volume_ratio"], pack["effective_volume_ratio"],
+            pack["dollar_volume"], pack["vwap_proxy"], pack["entry_price"], pack["stop_loss"], pack["target_price"], pack["risk_pct"], pack["rr_1"],
+            pack["nearest_support"], pack["nearest_support_strength"], pack["nearest_support_distance_pct"],
+            pack["nearest_resistance"], pack["nearest_resistance_strength"], pack["nearest_resistance_distance_pct"],
+            pack["distance_to_52w_high_pct"], pack["distance_to_ath_pct"], pack["breakout_quality"], pack["plan_family"],
+            _json_dumps(reasons), _json_dumps(risk_tags), _json_dumps(metrics or {}), now_ts,
+        ),
+    )
+
+
+def _record_pre_move_evidence(
+    conn: sqlite3.Connection,
+    week_key: str,
+    symbol: str,
+    event_type: str,
+    *,
+    seen_at: str,
+    price: float = 0.0,
+    gain_pct: float = 0.0,
+    rank: int = 0,
+    category: str = "",
+    category_key: str = "",
+    market_phase: str = "",
+    source_reasons: list | None = None,
+    metrics: dict | None = None,
+    updated_ts: float | None = None,
+) -> None:
+    if not _enabled() or not MISSED_EVIDENCE_ENABLED:
+        return
+    gain_f = _sanitize_timeline_gain_pct(gain_pct)
+    rank_i = _safe_int(rank, 0)
+    if not _should_store_evidence(event_type, gain_f, rank_i, source_reasons, metrics):
+        return
+    base_key = f"first_{_clean_text(event_type, 60)}"
+    _record_pre_move_snapshot(
+        conn, week_key, symbol, base_key, str(event_type), seen_at=seen_at,
+        price=price, gain_pct=gain_f, rank=rank_i, category=category, category_key=category_key,
+        market_phase=market_phase, source_reasons=source_reasons, metrics=metrics, updated_ts=updated_ts,
+    )
+    if gain_f > 0:
+        for milestone in MISSED_EVIDENCE_MILESTONES:
+            if gain_f >= milestone:
+                _record_pre_move_snapshot(
+                    conn, week_key, symbol, f"first_at_{milestone}pct", f"first_at_{milestone}pct",
+                    seen_at=seen_at, price=price, gain_pct=gain_f, rank=rank_i,
+                    category=category, category_key=category_key, market_phase=market_phase,
+                    source_reasons=source_reasons, metrics=metrics, updated_ts=updated_ts,
+                )
 
 
 def init_missed_opportunities_db() -> bool:
@@ -377,6 +580,53 @@ def init_missed_opportunities_db() -> bool:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS missed_pre_move_snapshots (
+                    week_key TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    snapshot_key TEXT NOT NULL,
+                    snapshot_type TEXT NOT NULL DEFAULT '',
+                    first_seen_at TEXT NOT NULL DEFAULT '',
+                    last_seen_at TEXT NOT NULL DEFAULT '',
+                    times_seen INTEGER NOT NULL DEFAULT 0,
+                    price REAL NOT NULL DEFAULT 0,
+                    gain_pct REAL NOT NULL DEFAULT 0,
+                    rank INTEGER NOT NULL DEFAULT 0,
+                    category TEXT NOT NULL DEFAULT '',
+                    category_key TEXT NOT NULL DEFAULT '',
+                    market_phase TEXT NOT NULL DEFAULT '',
+                    quality REAL NOT NULL DEFAULT 0,
+                    execution REAL NOT NULL DEFAULT 0,
+                    display_rank_score REAL NOT NULL DEFAULT 0,
+                    volume REAL NOT NULL DEFAULT 0,
+                    volume_ratio REAL NOT NULL DEFAULT 0,
+                    effective_volume_ratio REAL NOT NULL DEFAULT 0,
+                    dollar_volume REAL NOT NULL DEFAULT 0,
+                    vwap_proxy REAL NOT NULL DEFAULT 0,
+                    entry_price REAL NOT NULL DEFAULT 0,
+                    stop_loss REAL NOT NULL DEFAULT 0,
+                    target_price REAL NOT NULL DEFAULT 0,
+                    risk_pct REAL NOT NULL DEFAULT 0,
+                    rr_1 REAL NOT NULL DEFAULT 0,
+                    nearest_support REAL NOT NULL DEFAULT 0,
+                    nearest_support_strength TEXT NOT NULL DEFAULT '',
+                    nearest_support_distance_pct REAL NOT NULL DEFAULT 0,
+                    nearest_resistance REAL NOT NULL DEFAULT 0,
+                    nearest_resistance_strength TEXT NOT NULL DEFAULT '',
+                    nearest_resistance_distance_pct REAL NOT NULL DEFAULT 0,
+                    distance_to_52w_high_pct REAL NOT NULL DEFAULT 0,
+                    distance_to_ath_pct REAL NOT NULL DEFAULT 0,
+                    breakout_quality TEXT NOT NULL DEFAULT '',
+                    plan_family TEXT NOT NULL DEFAULT '',
+                    source_reasons_json TEXT NOT NULL DEFAULT '[]',
+                    risk_tags_json TEXT NOT NULL DEFAULT '[]',
+                    metrics_json TEXT NOT NULL DEFAULT '{}',
+                    updated_ts REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY (week_key, symbol, snapshot_key)
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS missed_weekly_movers (
                     week_key TEXT NOT NULL,
                     symbol TEXT NOT NULL,
@@ -414,6 +664,8 @@ def init_missed_opportunities_db() -> bool:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_movers_week ON missed_weekly_movers(week_key, max_gain_pct DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_timeline_week_symbol ON missed_symbol_timeline(week_key, symbol)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_timeline_event ON missed_symbol_timeline(week_key, event_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_premove_week_symbol ON missed_pre_move_snapshots(week_key, symbol)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missed_premove_week_key ON missed_pre_move_snapshots(week_key, snapshot_key)")
             conn.commit()
         _INITIALIZED = True
     return True
@@ -1079,6 +1331,130 @@ def _timeline_brief_lines(symbol: str, summary: dict) -> list[str]:
     if not lines:
         lines.append("  - لا يوجد خط زمني محفوظ لهذا السهم بعد.")
     return lines
+
+
+def _pre_move_snapshots_for_symbol(week_key: str, symbol: str) -> list[dict]:
+    sym = _clean_symbol(symbol)
+    if not _enabled() or not sym:
+        return []
+    init_missed_opportunities_db()
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM missed_pre_move_snapshots
+                WHERE week_key=? AND symbol=?
+                ORDER BY
+                    CASE
+                        WHEN snapshot_key='first_source' THEN 1
+                        WHEN snapshot_key='first_deep_universe' THEN 2
+                        WHEN snapshot_key='first_watch' THEN 3
+                        WHEN snapshot_key='first_cautious' THEN 4
+                        WHEN snapshot_key='first_strong' THEN 5
+                        WHEN snapshot_key LIKE 'first_at_%' THEN 20
+                        ELSE 30
+                    END,
+                    gain_pct ASC, first_seen_at ASC
+                """,
+                (week_key, sym),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _pre_move_snapshots_map(week_key: str, limit: int = 20000) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    if not _enabled():
+        return out
+    init_missed_opportunities_db()
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM missed_pre_move_snapshots
+                WHERE week_key=?
+                ORDER BY symbol, first_seen_at ASC
+                LIMIT ?
+                """,
+                (week_key, int(limit or 20000)),
+            ).fetchall()
+        for r in rows:
+            d = dict(r)
+            out.setdefault(str(d.get('symbol') or ''), []).append(d)
+    except Exception:
+        pass
+    return out
+
+
+def _snapshot_line(row: dict) -> str:
+    if not row:
+        return ""
+    key = str(row.get('snapshot_key') or row.get('snapshot_type') or '')
+    ar_key = {
+        'first_source': 'أول منبع',
+        'first_deep_universe': 'أول تحليل عميق',
+        'first_watch': 'أول مراقبة',
+        'first_cautious': 'أول بحذر',
+        'first_strong': 'أول قوي',
+        'first_gray': 'أول رمادي',
+        'first_display_any': 'أول ظهور',
+    }.get(key, key.replace('first_at_', 'أول ظهور عند +').replace('pct', '%'))
+    bits = [f"{ar_key}: {row.get('first_seen_at') or '؟'}"]
+    gp = _timeline_gain_or_none(row.get('gain_pct'), row.get('price'))
+    bits.append(f"صعود { _format_pct_or_na(gp, 1) }")
+    if _safe_int(row.get('rank'), 0):
+        bits.append(f"ترتيب #{_safe_int(row.get('rank'),0)}")
+    if _safe_float(row.get('volume_ratio'), 0) > 0:
+        bits.append(f"حجم {safe_round(row.get('volume_ratio'),1)}x")
+    elif _safe_float(row.get('effective_volume_ratio'), 0) > 0:
+        bits.append(f"حجم فعلي {safe_round(row.get('effective_volume_ratio'),1)}x")
+    if _safe_float(row.get('nearest_resistance_distance_pct'), 0) > 0:
+        bits.append(f"بعد المقاومة {safe_round(row.get('nearest_resistance_distance_pct'),1)}%")
+    if _safe_float(row.get('quality'), 0) > 0 or _safe_float(row.get('execution'), 0) > 0:
+        bits.append(f"جودة/جاهزية {safe_round(row.get('quality'),0)}/{safe_round(row.get('execution'),0)}")
+    return " | ".join(bits)
+
+
+def _early_evidence_summary(snapshots: list[dict]) -> dict:
+    if not snapshots:
+        return {"has_snapshots": False}
+    first_source = next((x for x in snapshots if x.get('snapshot_key') == 'first_source'), None)
+    first_watch = next((x for x in snapshots if x.get('snapshot_key') == 'first_watch'), None)
+    first_entry = next((x for x in snapshots if x.get('snapshot_key') in {'first_cautious', 'first_strong'}), None)
+    first_3 = next((x for x in snapshots if x.get('snapshot_key') == 'first_at_3pct'), None)
+    first_5 = next((x for x in snapshots if x.get('snapshot_key') == 'first_at_5pct'), None)
+    first_10 = next((x for x in snapshots if x.get('snapshot_key') == 'first_at_10pct'), None)
+
+    early_rows = []
+    for r in [first_source, first_3, first_5, first_watch, first_10, first_entry]:
+        if r and r not in early_rows:
+            early_rows.append(r)
+
+    has_before_5 = any((_timeline_gain_or_none(r.get('gain_pct'), r.get('price')) is not None and _safe_float(r.get('gain_pct'), 0) <= 5.0) for r in snapshots)
+    has_before_10 = any((_timeline_gain_or_none(r.get('gain_pct'), r.get('price')) is not None and _safe_float(r.get('gain_pct'), 0) <= 10.0) for r in snapshots)
+    first_entry_gain = _timeline_gain_or_none(first_entry.get('gain_pct'), first_entry.get('price')) if first_entry else None
+    status = "لا توجد لقطات مبكرة كافية"
+    if has_before_5:
+        status = "كانت هناك إشارة محفوظة قبل/حول +5%"
+    elif has_before_10:
+        status = "كانت هناك إشارة محفوظة قبل/حول +10%"
+    elif first_entry_gain is not None and first_entry_gain >= MISSED_LATE_PROMOTION_PCT:
+        status = f"أول دخول جاء متأخرًا عند +{safe_round(first_entry_gain,1)}%"
+    elif first_source:
+        status = "دخل المنبع لكن لا توجد لقطة مبكرة واضحة قبل الحركة"
+
+    return {
+        "has_snapshots": True,
+        "status": status,
+        "has_before_5pct": bool(has_before_5),
+        "has_before_10pct": bool(has_before_10),
+        "first_source": first_source or {},
+        "first_watch": first_watch or {},
+        "first_entry": first_entry or {},
+        "key_snapshots": early_rows[:8],
+    }
+
 def _match_status(symbol: str, seen: dict, source: dict, sharia: dict) -> tuple[str, str, str]:
     if bool(sharia.get("should_block", False)):
         # Still report it transparently, but do not count as a clean missed opportunity.
@@ -1409,6 +1785,8 @@ def build_symbol_timeline_report(symbol: str, week_key: str | None = None, thres
         "seen_summary": seen.get(sym, {}),
         "source_summary": source.get(sym, {}),
         "promotion_timeline": timeline_summary,
+        "pre_move_evidence": _pre_move_snapshots_for_symbol(week_key, sym),
+        "pre_move_summary": _early_evidence_summary(_pre_move_snapshots_for_symbol(week_key, sym)),
         "weekly_mover_match": mover or {},
         "brief": build_symbol_timeline_brief(sym, week_key=week_key, threshold=threshold),
     }
@@ -1426,6 +1804,16 @@ def build_symbol_timeline_brief(symbol: str, week_key: str | None = None, thresh
     lines.append("")
     lines.append("خط الظهور:")
     lines.extend(_timeline_brief_lines(sym, summary))
+    evidence = _pre_move_snapshots_for_symbol(week_key, sym)
+    ev_summary = _early_evidence_summary(evidence)
+    if evidence:
+        lines.append("")
+        lines.append("لقطات ما قبل/أثناء الحركة:")
+        lines.append(f"- الحكم: {ev_summary.get('status')}")
+        for snap in (ev_summary.get('key_snapshots') or [])[:6]:
+            line = _snapshot_line(snap)
+            if line:
+                lines.append(f"  • {line}")
     try:
         r = build_missed_weekly_report(week_key=week_key, threshold=threshold or 10.0, include_items=True, include_news=True, limit=1000)
         match = None
@@ -1444,6 +1832,96 @@ def build_symbol_timeline_brief(symbol: str, week_key: str | None = None, thresh
     except Exception:
         pass
     return "\n".join(lines)
+
+
+
+def build_pre_move_evidence_report(
+    week_key: str | None = None,
+    threshold: float | None = None,
+    format: str = "json",
+    limit: int = 120,
+) -> dict | str:
+    """Review what the tool knew before/around the first move.
+
+    This report is intentionally diagnostic. It does not fetch live quotes, does
+    not call AI, and does not change radar results. It combines weekly movers
+    with the light evidence snapshots saved during source/display events.
+    """
+    week_key, _ws, _we = _week_parts(week_key)
+    threshold = float(threshold or 10.0)
+    # Reuse the existing mover computation/cache. Keep items bounded.
+    weekly = build_missed_weekly_report(week_key=week_key, threshold=threshold, include_items=True, include_news=False, limit=min(max(int(limit or 120), 20), 1000))
+    if not isinstance(weekly, dict) or not weekly.get("ok"):
+        return weekly if str(format).lower() == "json" else "تقرير Pre-Move Evidence غير جاهز\n" + json.dumps(weekly, ensure_ascii=False, indent=2)
+    snap_map = _pre_move_snapshots_map(week_key)
+    items = []
+    counts = {
+        "with_snapshots": 0,
+        "before_5pct": 0,
+        "before_10pct": 0,
+        "late_first_entry": 0,
+        "source_but_no_early_evidence": 0,
+        "no_snapshots": 0,
+    }
+    for item in (weekly.get("items") or [])[: int(limit or 120)]:
+        sym = str(item.get("symbol") or "").upper()
+        snaps = snap_map.get(sym, [])
+        evs = _early_evidence_summary(snaps)
+        if evs.get("has_snapshots"):
+            counts["with_snapshots"] += 1
+        else:
+            counts["no_snapshots"] += 1
+        if evs.get("has_before_5pct"):
+            counts["before_5pct"] += 1
+        if evs.get("has_before_10pct"):
+            counts["before_10pct"] += 1
+        first_entry = evs.get("first_entry") or {}
+        entry_gain = _timeline_gain_or_none(first_entry.get("gain_pct"), first_entry.get("price")) if first_entry else None
+        if entry_gain is not None and entry_gain >= MISSED_LATE_PROMOTION_PCT:
+            counts["late_first_entry"] += 1
+        if item.get("appeared_status") in {"source_not_deep", "deep_universe_not_displayed"} and not evs.get("has_before_5pct"):
+            counts["source_but_no_early_evidence"] += 1
+        items.append({
+            "symbol": sym,
+            "max_gain_pct": item.get("max_gain_pct"),
+            "weekly_gain_pct": item.get("weekly_gain_pct"),
+            "appeared_status": item.get("appeared_status"),
+            "timing_status": item.get("timing_status"),
+            "timing_label": item.get("timing_label"),
+            "likely_driver": item.get("likely_driver"),
+            "driver_confidence": item.get("driver_confidence"),
+            "driver_reasons": item.get("driver_reasons") or [],
+            "evidence_status": evs.get("status"),
+            "has_before_5pct": evs.get("has_before_5pct", False),
+            "has_before_10pct": evs.get("has_before_10pct", False),
+            "key_snapshots": evs.get("key_snapshots") or [],
+        })
+    if str(format or "json").lower() in {"brief", "text", "txt"}:
+        lines = ["تقرير Pre-Move Evidence / ماذا عرفنا قبل الصعود؟", f"الأسبوع: {week_key}", f"حد الصعود: +{safe_round(threshold,1)}%", ""]
+        lines.append("الملخص:")
+        lines.append(f"- عدد الأسهم/الحركات المفحوصة: {len(items)}")
+        lines.append(f"- لديها لقطات محفوظة: {counts['with_snapshots']}")
+        lines.append(f"- ظهرت لها إشارة محفوظة قبل/حول +5%: {counts['before_5pct']}")
+        lines.append(f"- ظهرت لها إشارة محفوظة قبل/حول +10%: {counts['before_10pct']}")
+        lines.append(f"- أول دخول جاء متأخرًا بعد +{safe_round(MISSED_LATE_PROMOTION_PCT,1)}%: {counts['late_first_entry']}")
+        lines.append(f"- دخلت المنبع/التحليل بلا لقطة مبكرة كافية: {counts['source_but_no_early_evidence']}")
+        lines.append("")
+        lines.append("أهم الحالات:")
+        # Prioritize late entries and big movers first.
+        def sort_key(x: dict):
+            late = 1 if str(x.get("evidence_status") or "").startswith("أول دخول جاء متأخر") else 0
+            return (late, float(x.get("max_gain_pct") or 0))
+        for item in sorted(items, key=sort_key, reverse=True)[:30]:
+            lines.append(f"- {item.get('symbol')} | أعلى صعود {safe_round(item.get('max_gain_pct'),1)}% | {item.get('evidence_status') or 'لا توجد لقطات'}")
+            lines.append(f"  • التوقيت: {item.get('timing_label') or 'غير متوفر'} | السبب المرجح: {item.get('likely_driver')} ({item.get('driver_confidence')})")
+            for snap in (item.get("key_snapshots") or [])[:4]:
+                line = _snapshot_line(snap)
+                if line:
+                    lines.append(f"  • {line}")
+        lines.append("")
+        lines.append("ملاحظة: هذا التقرير للتعلم فقط. لا يغير التصنيف ولا يطلب AI ولا يحفظ كل تكرار؛ يحفظ أول لقطة لكل حدث/مرحلة.")
+        return "\n".join(lines)
+    return {"ok": True, "week_key": week_key, "threshold_pct": threshold, "counts": counts, "items": items[: int(limit or 120)]}
 
 
 def build_late_promotions_report(week_key: str | None = None, threshold: float | None = None, format: str = "json") -> dict | str:
@@ -2079,7 +2557,8 @@ def missed_status() -> dict:
             seen = conn.execute("SELECT COUNT(*) AS c FROM missed_seen_symbols WHERE week_key=?", (week_key,)).fetchone()
             source = conn.execute("SELECT COUNT(*) AS c FROM missed_source_candidates WHERE week_key=?", (week_key,)).fetchone()
             movers = conn.execute("SELECT COUNT(*) AS c FROM missed_weekly_movers WHERE week_key=?", (week_key,)).fetchone()
-        out.update({"ok": True, "initialized": True, "seen_symbols": int(seen["c"] if seen else 0), "source_symbols": int(source["c"] if source else 0), "cached_weekly_movers": int(movers["c"] if movers else 0)})
+            evidence = conn.execute("SELECT COUNT(*) AS c FROM missed_pre_move_snapshots WHERE week_key=?", (week_key,)).fetchone()
+        out.update({"ok": True, "initialized": True, "seen_symbols": int(seen["c"] if seen else 0), "source_symbols": int(source["c"] if source else 0), "cached_weekly_movers": int(movers["c"] if movers else 0), "pre_move_snapshots": int(evidence["c"] if evidence else 0)})
     except Exception as exc:
         out["error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
     return out
