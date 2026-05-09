@@ -71,6 +71,14 @@
     "symbol": "APA",
     "updated_at": "2026-05-04 14:20:28"
   },
+  "APT": {
+    "excluded_at": "2026-05-07 14:51:50",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "APT",
+    "updated_at": "2026-05-07 14:51:50"
+  },
   "ARKO": {
     "excluded_at": "2026-05-01 14:55:34",
     "note": "استبعاد يدوي شرعي",
@@ -359,6 +367,14 @@
     "symbol": "DINO",
     "updated_at": "2026-04-29 22:01:29"
   },
+  "DIS": {
+    "excluded_at": "2026-05-07 09:54:39",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DIS",
+    "updated_at": "2026-05-07 09:54:39"
+  },
   "DJT": {
     "excluded_at": "2026-04-27 12:42:34",
     "note": "",
@@ -559,6 +575,14 @@
     "symbol": "HIMX",
     "updated_at": "2026-04-27 05:46:46"
   },
+  "HNST": {
+    "excluded_at": "2026-05-08 10:32:01",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "HNST",
+    "updated_at": "2026-05-08 10:32:01"
+  },
   "HP": {
     "excluded_at": "2026-04-24 11:46:11",
     "note": "",
@@ -598,6 +622,14 @@
     "source": "manual",
     "symbol": "HUN",
     "updated_at": "2026-05-01 06:38:30"
+  },
+  "IART": {
+    "excluded_at": "2026-05-06 18:12:10",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "IART",
+    "updated_at": "2026-05-06 18:12:10"
   },
   "IHRT": {
     "excluded_at": "2026-04-27 10:02:05",
@@ -662,6 +694,14 @@
     "source": "manual",
     "symbol": "LAC",
     "updated_at": "2026-04-27 10:04:52"
+  },
+  "LCUT": {
+    "excluded_at": "2026-05-07 09:51:56",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LCUT",
+    "updated_at": "2026-05-07 09:51:56"
   },
   "LEA": {
     "excluded_at": "2026-05-01 17:02:13",
