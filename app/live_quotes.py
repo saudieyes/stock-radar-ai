@@ -122,6 +122,15 @@ def _normalize_fmp_regular_row(row: dict) -> dict | None:
                 prev = maybe_prev
         if not change_pct and price > 0 and prev > 0:
             change_pct = ((price - prev) / prev) * 100
+        # Do not let a missing/unknown percent change overwrite a previously good UI value as 0.00%.
+        # FMP quote-short may return only price/change without enough baseline for some symbols.
+        change_pct_reliable = bool(
+            prev > 0
+            or row.get("changesPercentage") is not None
+            or row.get("changePercentage") is not None
+            or row.get("change_pct") is not None
+            or absolute_change
+        )
         volume = _first_number(row, ["volume", "avgVolume", "dayVolume"])
         if price <= 0:
             return None
@@ -137,6 +146,7 @@ def _normalize_fmp_regular_row(row: dict) -> dict | None:
             "regular_session_close": safe_round(price, 4),
             "regular_previous_close": safe_round(prev, 4),
             "change_pct": safe_round(change_pct, 2),
+            "change_pct_reliable": bool(change_pct_reliable),
             "volume": safe_round(volume),
             "source": "fmp_rest",
             "source_label": "FMP Live/REST",
