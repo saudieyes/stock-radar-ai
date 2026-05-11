@@ -4198,8 +4198,20 @@
           if (!q || !Number(q.price || 0)) return;
           item.current_price_live = Number(q.price || 0);
           item.display_price = Number(q.price || 0);
-          item.display_change_pct = Number(q.change_pct || 0);
-          item.change_vs_prev_close_pct = Number(q.change_pct || 0);
+
+          // Extended-hours quotes can return a valid bid/ask price without a reliable percent-change
+          // baseline. Do not overwrite a good saved percentage with 0.00% in that case.
+          const rawQuoteChange = q.change_pct ?? q.changesPercentage ?? q.changePercentage;
+          const quoteChange = Number(rawQuoteChange);
+          const quoteChangeReliable = Number.isFinite(quoteChange) && q.change_pct_reliable !== false;
+          if (quoteChangeReliable) {
+            item.display_change_pct = quoteChange;
+            item.change_vs_prev_close_pct = quoteChange;
+            item.live_change_pct_reliable = true;
+          } else {
+            item.live_change_pct_reliable = false;
+          }
+
           item.price_source = q.source || item.price_source;
           item.price_source_label = q.source_label || item.price_source_label || 'FMP Live/REST';
           item.live_price_available = true;
@@ -5075,6 +5087,7 @@
 <!-- fix49: info buttons, show-all anchor, modal scroll reset -->
 </body>
 </html>
+
 
 
 
