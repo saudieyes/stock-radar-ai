@@ -3096,9 +3096,11 @@
       const rawChange = stock?.display_change_pct ?? stock?.change_vs_prev_close_pct ?? stock?.change_pct ?? stock?.change_from_open_pct;
       const change = Number(rawChange);
       const hasChange = Number.isFinite(change);
-      const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
-      const sign = hasChange && change > 0 ? '+' : '';
-      const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
+      const explicitlyUnreliable = stock?.live_change_pct_reliable === false || stock?.change_pct_reliable === false;
+      const changeReliable = hasChange && !explicitlyUnreliable;
+      const cls = changeReliable ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
+      const sign = changeReliable && change > 0 ? '+' : '';
+      const changeText = changeReliable ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
       const source = livePriceSourceLabel(stock);
       return `<div class="price-plan-item live-price-item" data-symbol="${safeText(stock?.symbol || '')}">
         <div class="price-plan-label">السعر الحالي</div>
@@ -3977,16 +3979,58 @@
 
     function livePricePresentationFromItem(item) {
       if (!item) return null;
-      const displayPrice = Number(item.current_price_live || item.display_price || item.current_price || item.price || 0);
+      const displayPrice = Number(item.current_price_live || item.live_price || item.display_price || item.current_price || item.price || 0);
       if (!Number.isFinite(displayPrice) || displayPrice <= 0) return null;
       const rawChange = item.display_change_pct ?? item.change_vs_prev_close_pct ?? item.change_pct ?? item.change_from_open_pct;
       const change = Number(rawChange);
       const hasChange = Number.isFinite(change);
-      const cls = hasChange ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
-      const sign = hasChange && change > 0 ? '+' : '';
-      const changeText = hasChange ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
+      // Extended-hours FMP can give us a valid price while percent change is not trustworthy.
+      // In that case, update the price but do NOT replace a previously colored change with 0.00%.
+      const explicitlyUnreliable = item.live_change_pct_reliable === false || item.change_pct_reliable === false;
+      const changeReliable = hasChange && !explicitlyUnreliable;
+      const cls = changeReliable ? (change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat') : 'price-flat';
+      const sign = changeReliable && change > 0 ? '+' : '';
+      const changeText = changeReliable ? `${sign}${change.toFixed(2)}%` : 'التغير غير متوفر';
       const sourceText = livePriceSourceLabel(item);
-      return { displayPrice, cls, changeText, sourceText };
+      return { displayPrice, cls, changeText, sourceText, changeReliable };
+    }
+
+    function setDetailBoxValue(root, labelMatcher, value) {
+      if (!root || value === undefined || value === null || value === '') return false;
+      const boxes = Array.from(root.querySelectorAll('.detail-box'));
+      for (const box of boxes) {
+        const label = (box.querySelector('.detail-label')?.textContent || '').trim();
+        if (!labelMatcher(label)) continue;
+        const valEl = box.querySelector('.detail-value');
+        if (!valEl) continue;
+        valEl.textContent = String(value);
+        return true;
+      }
+      return false;
+    }
+
+    function updateModernDetailLiveFields(symbol, item, root=null) {
+      const p = livePricePresentationFromItem(item);
+      if (!p) return false;
+      const overlay = document.getElementById('modernDetailOverlay');
+      const currentSym = String(document.getElementById('modernDetailSymbol')?.textContent || '').toUpperCase().trim();
+      const s = String(symbol || item?.symbol || '').toUpperCase().trim();
+      if (overlay && overlay.classList.contains('open') && currentSym && s && currentSym === s) {
+        const priceEl = document.getElementById('modernDetailPrice');
+        const chgEl = document.getElementById('modernDetailChange');
+        if (priceEl) priceEl.textContent = formatNumber(p.displayPrice);
+        if (chgEl && p.changeReliable) {
+          chgEl.textContent = p.changeText;
+          chgEl.className = 'md-change ' + (p.cls === 'price-up' ? 'green' : p.cls === 'price-down' ? 'red' : '');
+        }
+      }
+      const body = root || document.getElementById('modernDetailBody');
+      if (body) {
+        setDetailBoxValue(body, label => label === 'سعر السهم' || label.includes('سعر السهم'), formatNumber(p.displayPrice));
+        if (p.sourceText) setDetailBoxValue(body, label => label.includes('مصدر السعر'), p.sourceText);
+        if (item?.last_price_update_label) setDetailBoxValue(body, label => label.includes('حداثة السعر'), `آخر سعر: ${item.last_price_update_label}`);
+      }
+      return true;
     }
 
     function applyLivePriceToBox(box, item) {
@@ -3998,9 +4042,11 @@
       if (valueEl) {
         valueEl.textContent = formatNumber(p.displayPrice);
         valueEl.classList.remove('price-up','price-down','price-flat');
-        valueEl.classList.add(p.cls);
+        if (p.changeReliable) valueEl.classList.add(p.cls);
       }
-      if (changeEl) {
+      // Keep the previous non-zero/colored percent change when the new live quote
+      // has no reliable percentage baseline. This prevents the sudden black 0.00% flicker.
+      if (changeEl && p.changeReliable) {
         changeEl.textContent = p.changeText;
         changeEl.classList.remove('price-up','price-down','price-flat');
         changeEl.classList.add(p.cls);
@@ -4031,19 +4077,12 @@
         if (applyLivePriceToBox(box, item)) changed += 1;
       });
 
-      // Keep the modern details sheet header aligned with the currently opened card.
+      // Keep the modern details sheet header and cloned detail fields aligned with the live card.
       const overlay = document.getElementById('modernDetailOverlay');
       const symEl = document.getElementById('modernDetailSymbol');
       if (overlay && overlay.classList.contains('open') && symEl) {
         const s = String(symEl.textContent || '').toUpperCase().trim();
-        const p = livePricePresentationFromItem(bySymbol[s]);
-        const priceEl = document.getElementById('modernDetailPrice');
-        const chgEl = document.getElementById('modernDetailChange');
-        if (p && priceEl) priceEl.textContent = formatNumber(p.displayPrice);
-        if (p && chgEl) {
-          chgEl.textContent = p.changeText;
-          chgEl.className = 'md-change ' + (p.cls === 'price-up' ? 'green' : p.cls === 'price-down' ? 'red' : '');
-        }
+        if (bySymbol[s]) updateModernDetailLiveFields(s, bySymbol[s]);
       }
       return changed;
     }
@@ -4964,6 +5003,11 @@
     body.appendChild(cloned);
     prepareModernAnalystPlaceholders(cloned, symbol);
 
+    const liveItem = (typeof latestStockBySymbolFromScanData === 'function')
+      ? (latestStockBySymbolFromScanData()[String(symbol || '').toUpperCase().trim()] || null)
+      : null;
+    const livePresentation = livePricePresentationFromItem(liveItem);
+
     const symEl = document.getElementById('modernDetailSymbol');
     const coEl = document.getElementById('modernDetailCompany');
     const priceEl = document.getElementById('modernDetailPrice');
@@ -4971,11 +5015,17 @@
     const metaEl = document.getElementById('modernDetailMeta');
     if (symEl) symEl.textContent = symbol;
     if (coEl) coEl.textContent = company;
-    if (priceEl) priceEl.textContent = price;
+    if (priceEl) priceEl.textContent = livePresentation ? formatNumber(livePresentation.displayPrice) : price;
     if (chgEl) {
-      chgEl.textContent = change || 'آخر تحديث السعر ظاهر في التفاصيل';
-      chgEl.className = 'md-change ' + colorChangeClass(change);
+      if (livePresentation && livePresentation.changeReliable) {
+        chgEl.textContent = livePresentation.changeText;
+        chgEl.className = 'md-change ' + (livePresentation.cls === 'price-up' ? 'green' : livePresentation.cls === 'price-down' ? 'red' : '');
+      } else {
+        chgEl.textContent = change || 'آخر تحديث السعر ظاهر في التفاصيل';
+        chgEl.className = 'md-change ' + colorChangeClass(change);
+      }
     }
+    if (liveItem) updateModernDetailLiveFields(symbol, liveItem, cloned);
     if (metaEl) {
       const chips = qa('.badges .badge', card).slice(0, 4).map(b => `<span class="modern-detail-chip">${b.textContent.trim()}</span>`).join('');
       metaEl.innerHTML = chips || '<span class="modern-detail-chip">تحليل شامل</span>';
