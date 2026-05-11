@@ -25,6 +25,9 @@ FMP_BASE_URL = str(os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com"
 LIVE_QUOTES_ENABLED = str(os.getenv("LIVE_QUOTES_ENABLED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
 LIVE_QUOTES_CACHE_MAX_AGE_SEC = int(float(os.getenv("LIVE_QUOTES_CACHE_MAX_AGE_SEC", "45") or 45))
 LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
+# Safety cap for last-resort single-symbol FMP fallback calls.
+# Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
+FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
 
 NY_TZ = ZoneInfo("America/New_York")
@@ -110,6 +113,13 @@ def _normalize_fmp_regular_row(row: dict) -> dict | None:
         price = _first_number(row, ["price", "lastSalePrice", "last", "lp", "close"])
         prev = _first_number(row, ["previousClose", "previous_close", "prevClose", "previous_close_price"])
         change_pct = to_float(row.get("changesPercentage") or row.get("changePercentage") or row.get("change_pct"))
+        # FMP stable/quote-short often returns absolute change instead of percentage.
+        # Reconstruct previous close and percentage so live confirmation is useful.
+        absolute_change = to_float(row.get("change") or row.get("changes"))
+        if prev <= 0 and price > 0 and absolute_change:
+            maybe_prev = price - absolute_change
+            if maybe_prev > 0:
+                prev = maybe_prev
         if not change_pct and price > 0 and prev > 0:
             change_pct = ((price - prev) / prev) * 100
         volume = _first_number(row, ["volume", "avgVolume", "dayVolume"])
@@ -284,6 +294,10 @@ def _fetch_fmp_regular_quotes(symbols: list[str]) -> dict[str, dict]:
         return {}
     csv_symbols = ",".join(symbols)
     endpoints = [
+        # Newer FMP stable endpoints used by the user's plan.
+        f"{FMP_BASE_URL}/stable/quote?symbol={csv_symbols}&apikey={FMP_API_KEY}",
+        f"{FMP_BASE_URL}/stable/quote-short?symbol={csv_symbols}&apikey={FMP_API_KEY}",
+        # Older/batch fallbacks.
         f"{FMP_BASE_URL}/stable/batch-quote?symbols={csv_symbols}&apikey={FMP_API_KEY}",
         f"{FMP_BASE_URL}/api/v3/quote/{csv_symbols}?apikey={FMP_API_KEY}",
     ]
@@ -296,7 +310,24 @@ def _fetch_fmp_regular_quotes(symbols: list[str]) -> dict[str, dict]:
                 out[norm["symbol"]] = norm
         if out:
             return out
-    return {}
+
+    # Last-resort fallback for plans/endpoints that only accept one symbol per request.
+    # Keep this capped so Railway/API usage does not explode during frequent UI refreshes.
+    out = {}
+    for sym in symbols[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
+        for url in [
+            f"{FMP_BASE_URL}/stable/quote?symbol={sym}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/quote-short?symbol={sym}&apikey={FMP_API_KEY}",
+        ]:
+            rows = _fetch_json_rows(url)
+            for row in rows:
+                norm = _normalize_fmp_regular_row(row)
+                if norm:
+                    out[norm["symbol"]] = norm
+                    break
+            if sym in out:
+                break
+    return out
 
 
 def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dict] | None = None) -> dict[str, dict]:
@@ -308,7 +339,10 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
     out: dict[str, dict] = {}
 
     # First preference: last extended trade because it is closest to a traded price.
+    # The user's FMP plan returns /stable/aftermarket-trade?symbol=AAPL, while some
+    # previous code expected batch-aftermarket-trade. Try both before falling back.
     trade_urls = [
+        f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={csv_symbols}&apikey={FMP_API_KEY}",
         f"{FMP_BASE_URL}/stable/batch-aftermarket-trade?symbols={csv_symbols}&apikey={FMP_API_KEY}",
     ]
     for url in trade_urls:
@@ -322,10 +356,23 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
         if out:
             break
 
+    # Last-resort single-symbol extended trade fallback, capped for API safety.
+    if not out:
+        for sym in symbols[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
+            rows = _fetch_json_rows(f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={sym}&apikey={FMP_API_KEY}")
+            for row in rows:
+                reg = regular_quotes.get(sym)
+                norm = _normalize_fmp_extended_trade_row(row, reg)
+                if norm:
+                    out[norm["symbol"]] = norm
+                    break
+
     missing = [s for s in symbols if s not in out]
     if missing:
         csv_missing = ",".join(missing)
         quote_urls = [
+            # Newer FMP stable endpoint that returned bidPrice/askPrice in live testing.
+            f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={csv_missing}&apikey={FMP_API_KEY}",
             f"{FMP_BASE_URL}/stable/batch-aftermarket-quote?symbols={csv_missing}&apikey={FMP_API_KEY}",
         ]
         for url in quote_urls:
@@ -338,6 +385,18 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
                     out[norm["symbol"]] = norm
             if any(s in out for s in missing):
                 break
+
+        # Last-resort single-symbol extended quote fallback, capped for API/Railway safety.
+        still_missing = [s for s in missing if s not in out]
+        if still_missing:
+            for sym in still_missing[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
+                rows = _fetch_json_rows(f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={sym}&apikey={FMP_API_KEY}")
+                for row in rows:
+                    reg = regular_quotes.get(sym)
+                    norm = _normalize_fmp_extended_quote_row(row, reg)
+                    if norm:
+                        out[norm["symbol"]] = norm
+                        break
 
     if out:
         upsert_live_quotes(list(out.values()))
@@ -458,4 +517,5 @@ def get_live_quotes(symbols, prefer_cache: bool = True, allow_fallback: bool = T
         diagnostics["source"] = "sqlite_cache"
 
     return {"ok": True, "quotes": quotes, "diagnostics": diagnostics}
+
 
