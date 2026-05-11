@@ -528,7 +528,20 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
         return out
 
     prev_close = safe_round(quote.get("previous_close", 0))
-    change_pct = safe_round(quote.get("change_pct", 0), 2)
+    quote_change_raw = quote.get("change_pct", None)
+    quote_change_is_number = quote_change_raw is not None and str(quote_change_raw).strip() != ""
+    quote_change_reliable = bool(quote_change_is_number and quote.get("change_pct_reliable", True) is not False)
+    if quote_change_reliable:
+        change_pct = safe_round(quote_change_raw, 2)
+    else:
+        # Keep the saved/scan percentage instead of turning the card black at 0.00%
+        # when an extended-hours quote has price but no reliable previous-close baseline.
+        change_pct = safe_round(
+            out.get("display_change_pct",
+                    out.get("change_vs_prev_close_pct",
+                            out.get("change_pct", out.get("change_from_open_pct", 0)))),
+            2,
+        )
     volume = safe_round(quote.get("volume", 0))
     source_label = str(quote.get("source_label", "") or quote.get("source", "FMP/Live"))
     updated_label = str(quote.get("updated_label", "") or "")
@@ -601,6 +614,8 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
         "current_price_live": live_price,
         "display_price": live_price,
         "display_change_pct": change_pct,
+        "change_vs_prev_close_pct": change_pct,
+        "live_change_pct_reliable": bool(quote_change_reliable),
         "previous_close_live": prev_close,
         "volume_live": volume,
         "price_source": str(quote.get("source", "live_overlay") or "live_overlay"),
@@ -2624,3 +2639,4 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
