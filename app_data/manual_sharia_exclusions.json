@@ -759,6 +759,14 @@
     "symbol": "MARA",
     "updated_at": "2026-05-01 09:44:03"
   },
+  "MEC": {
+    "excluded_at": "2026-05-11 09:11:42",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "MEC",
+    "updated_at": "2026-05-11 09:11:42"
+  },
   "MEI": {
     "excluded_at": "2026-04-27 05:48:14",
     "note": "",
@@ -998,5 +1006,13 @@
     "source": "manual",
     "symbol": "SHIM",
     "updated_at": "2026-04-27 17:54:55"
+  },
+  "UIS": {
+    "excluded_at": "2026-05-12 15:00:57",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "UIS",
+    "updated_at": "2026-05-12 15:00:57"
   }
 }
