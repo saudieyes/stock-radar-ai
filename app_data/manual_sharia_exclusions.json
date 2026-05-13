@@ -327,6 +327,14 @@
     "symbol": "CVE",
     "updated_at": "2026-05-01 12:47:49"
   },
+  "CVS": {
+    "excluded_at": "2026-05-13 10:08:33",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CVS",
+    "updated_at": "2026-05-13 10:08:33"
+  },
   "CX": {
     "excluded_at": "2026-04-24 11:45:40",
     "note": "",
@@ -1014,5 +1022,13 @@
     "source": "manual",
     "symbol": "UIS",
     "updated_at": "2026-05-12 15:00:57"
+  },
+  "VSH": {
+    "excluded_at": "2026-05-13 13:28:46",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "VSH",
+    "updated_at": "2026-05-13 13:28:46"
   }
 }
