@@ -50,6 +50,8 @@ from app.settings import (
     FMP_API_KEY,
     FMP_WEBSOCKET_ENABLED,
     LIVE_QUOTES_ENABLED,
+    WEEKLY_ARCHIVE_TOKEN,
+    WEEKLY_ARCHIVE_PRUNE_AFTER_SUCCESS,
 )
 from app.auth_session import build_auth_cookie_value, read_auth_cookie
 from app.utils import *
@@ -109,6 +111,14 @@ from app.missed_opportunities import (
     export_missed_json,
     export_missed_csv,
 )
+from app.opportunity_intelligence import enrich_opportunity_intelligence_bulk, enrich_opportunity_intelligence
+from app.learning_reports import (
+    build_pattern_learning_report,
+    build_failure_patterns_report,
+    build_winner_patterns_report,
+    build_promotion_funnel_report,
+)
+from app.weekly_archive import archive_weekly_tracking, weekly_archive_status
 from app.source_discovery import (
     dynamic_discovery_enabled,
     get_full_market_scan_interval_sec,
@@ -796,6 +806,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         overlaid.append(_apply_live_quote_overlay(row, quotes.get(sym)))
     # Manual Sharia decisions must override the saved scan snapshot immediately.
     overlaid = _apply_manual_sharia_overrides(overlaid)
+    try:
+        overlaid = enrich_opportunity_intelligence_bulk(overlaid)
+    except Exception:
+        pass
 
     strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
     gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
@@ -1696,6 +1710,10 @@ def _trade_scan_cache_ttl_sec(phase: str, prefer_cache: bool = False) -> int:
 
 def _build_trade_scan_response(results, scan_debug, include_all: bool = False, cache_hit: bool = False, cache_age_sec=None, payload_note: str = ""):
     results = _apply_manual_sharia_overrides(list(results or []))
+    try:
+        results = enrich_opportunity_intelligence_bulk(results)
+    except Exception:
+        pass
     scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
@@ -2572,6 +2590,60 @@ def missed_opportunities_status():
     return missed_status()
 
 
+
+
+@app.get("/learning/patterns/weekly")
+def learning_patterns_weekly(week_key: str = "", format: str = "json"):
+    fmt = str(format or "json").strip().lower()
+    result = build_pattern_learning_report(week_key=week_key or None, format=fmt)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/learning/failure-patterns")
+def learning_failure_patterns(week_key: str = "", format: str = "json"):
+    fmt = str(format or "json").strip().lower()
+    result = build_failure_patterns_report(week_key=week_key or None, format=fmt)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/learning/winner-patterns")
+def learning_winner_patterns(week_key: str = "", format: str = "json"):
+    fmt = str(format or "json").strip().lower()
+    result = build_winner_patterns_report(week_key=week_key or None, format=fmt)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/diagnostics/promotion-funnel")
+def diagnostics_promotion_funnel(week_key: str = "", format: str = "json"):
+    fmt = str(format or "json").strip().lower()
+    result = build_promotion_funnel_report(week_key=week_key or None, format=fmt)
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.post("/admin/archive-weekly-tracking")
+@app.get("/admin/archive-weekly-tracking")
+def admin_archive_weekly_tracking(token: str = "", week_key: str = "", prune: bool | None = None):
+    expected = str(WEEKLY_ARCHIVE_TOKEN or APP_SESSION_SECRET or "").strip()
+    if expected and str(token or "").strip() != expected:
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    if prune is None:
+        prune = bool(WEEKLY_ARCHIVE_PRUNE_AFTER_SUCCESS)
+    return archive_weekly_tracking(week_key=week_key or None, prune=bool(prune), include_items=True)
+
+
+@app.get("/admin/archive-weekly-tracking/status")
+def admin_archive_weekly_tracking_status(week_key: str = ""):
+    return weekly_archive_status(week_key=week_key or None)
+
+
 @app.get("/performance")
 def performance_get():
     store = rollover_performance_store_if_needed(load_performance_store())
@@ -2639,4 +2711,5 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
