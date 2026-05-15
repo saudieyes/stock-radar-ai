@@ -439,6 +439,14 @@
     "symbol": "DOW",
     "updated_at": "2026-05-04 12:10:35"
   },
+  "DWSN": {
+    "excluded_at": "2026-05-15 09:39:17",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DWSN",
+    "updated_at": "2026-05-15 09:39:17"
+  },
   "DX": {
     "excluded_at": "2026-04-20 21:44:52",
     "note": "",
