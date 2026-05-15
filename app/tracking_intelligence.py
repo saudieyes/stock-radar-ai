@@ -346,6 +346,9 @@ def _extract_snapshot(row: dict, bucket: str, market_phase: str = "") -> dict:
         "nearest_resistance_strength", "nearest_resistance_distance_pct", "year_high", "ath_high",
         "market_support_label", "sector_support_label", "market_sector_score", "market_sector_live_label",
         "sector_etf_symbol", "strategy_label", "display_plan_family", "type", "quick_explainer",
+        "strong_entry_tier", "strong_entry_tier_label", "pattern_risk_score", "pattern_risk_label",
+        "liquidity_persistence_score", "liquidity_persistence_label", "post_activation_guard_score",
+        "post_activation_guard_label", "no_chase_guard_status", "no_chase_guard_label",
     ]
     compact_snapshot = {key: row.get(key) for key in compact_snapshot_keys if key in row}
 

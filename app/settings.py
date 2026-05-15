@@ -206,6 +206,14 @@ AI_NEWS_MAX_CLASSIFY_PER_SYMBOL = int(_env_float("AI_NEWS_MAX_CLASSIFY_PER_SYMBO
 POSITIVE_NEWS_MAX_SESSIONS = 3
 NEGATIVE_NEWS_MAX_SESSIONS = 5
 
+
+# Weekly archive / retention controls. Safe by default: archive can run on demand; pruning requires explicit env/param.
+GITHUB_WEEKLY_ARCHIVE_PATH = str(os.getenv("GITHUB_WEEKLY_ARCHIVE_PATH", "app_data/weekly_tracking_archive") or "app_data/weekly_tracking_archive").strip().strip("/")
+WEEKLY_ARCHIVE_ENABLED = _env_bool("WEEKLY_ARCHIVE_ENABLED", True)
+WEEKLY_ARCHIVE_TOKEN = str(os.getenv("WEEKLY_ARCHIVE_TOKEN", "") or "").strip()
+WEEKLY_ARCHIVE_PRUNE_AFTER_SUCCESS = _env_bool("WEEKLY_ARCHIVE_PRUNE_AFTER_SUCCESS", False)
+WEEKLY_ARCHIVE_RETENTION_WEEKS = int(_env_float("WEEKLY_ARCHIVE_RETENTION_WEEKS", 2.0))
+
 NEWS_SCOPE_LABELS = {
     "company": "خبر شركة",
     "sector": "خبر قطاع",

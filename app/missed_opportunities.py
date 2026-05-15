@@ -345,6 +345,16 @@ def _snapshot_metric_pack(row: dict | None, metrics: dict | None = None) -> dict
         "distance_to_ath_pct": f(["distance_to_ath_pct", "near_ath_pct", "distance_ath_pct"]),
         "breakout_quality": t(["breakout_quality", "breakout_quality_label"], limit=80),
         "plan_family": t(["plan_family", "setup_type", "plan_type"], limit=80),
+        "strong_entry_tier": t(["strong_entry_tier"], limit=80),
+        "strong_entry_tier_label": t(["strong_entry_tier_label"], limit=120),
+        "pattern_risk_score": f(["pattern_risk_score"]),
+        "pattern_risk_label": t(["pattern_risk_label"], limit=140),
+        "liquidity_persistence_score": f(["liquidity_persistence_score"]),
+        "liquidity_persistence_label": t(["liquidity_persistence_label"], limit=140),
+        "post_activation_guard_score": f(["post_activation_guard_score"]),
+        "post_activation_guard_label": t(["post_activation_guard_label"], limit=140),
+        "no_chase_guard_status": t(["no_chase_guard_status"], limit=80),
+        "no_chase_guard_label": t(["no_chase_guard_label"], limit=140),
         "risk_tags": merged.get("risk_tags") or merged.get("risk_tags_json") or [],
     }
 

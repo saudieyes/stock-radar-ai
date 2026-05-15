@@ -8,6 +8,7 @@ from app.sharia_filter import get_financials, assess_sharia
 from app.market_data import get_history_levels, get_trend, get_intraday_snapshot, get_volume_ratio, build_live_price_block
 from app.news_engine import get_news_bundle, news_scope_label
 from app.display_contract import enrich_display_meta, display_rank_score
+from app.opportunity_intelligence import enrich_opportunity_intelligence
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
@@ -145,6 +146,10 @@ def scan_all(debug: bool = False):
                         p["decision"] = "مراقبة"
                         p["signal_strength_label"] = "مراقبة"
                         p["signal_strength_bucket"] = -1
+            except Exception:
+                pass
+            try:
+                p = enrich_opportunity_intelligence(p)
             except Exception:
                 pass
             return {"kind": "row", "symbol": s, "row": p}
@@ -307,6 +312,10 @@ def build_single_stock_response(symbol: str):
             if not trade_plan.get("price_reliable_for_execution", True) and trade_plan.get("market_phase") in {"open", "pre_market", "after_hours"}:
                 trade_plan.setdefault("risk_flags", []).append("السعر اللحظي غير موثوق")
             trade_plan = enrich_display_meta(trade_plan)
+            try:
+                trade_plan = enrich_opportunity_intelligence(trade_plan)
+            except Exception:
+                pass
     except Exception as e:
         trade_error = str(e)
 

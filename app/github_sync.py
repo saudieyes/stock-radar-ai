@@ -93,3 +93,57 @@ def push_json_file(path: str, data, message: str = "Sync Stock Radar data") -> d
         }
     except Exception as exc:
         return {"ok": False, "configured": True, "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
+
+
+def fetch_text_file(path: str) -> dict:
+    """Fetch a UTF-8 text file from GitHub. Missing file returns ok=True with content=None."""
+    if not is_github_sync_configured():
+        return {"ok": False, "configured": False, "error": "github_sync_not_configured"}
+    try:
+        url = _content_url(path)
+        r = HTTP_SESSION.get(
+            url,
+            headers=_headers(),
+            params={"ref": GITHUB_SYNC_BRANCH or "main"},
+            timeout=float(GITHUB_SYNC_TIMEOUT_SEC or 12),
+        )
+        if r.status_code == 404:
+            return {"ok": True, "configured": True, "exists": False, "content": None, "sha": ""}
+        r.raise_for_status()
+        payload = r.json() or {}
+        raw_b64 = payload.get("content", "") or ""
+        raw = base64.b64decode(raw_b64).decode("utf-8") if raw_b64 else ""
+        return {"ok": True, "configured": True, "exists": True, "content": raw, "sha": payload.get("sha", "") or ""}
+    except Exception as exc:
+        return {"ok": False, "configured": True, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+
+def push_text_file(path: str, content: str, message: str = "Sync Stock Radar text data") -> dict:
+    """Create/update a UTF-8 text/CSV file in GitHub using the contents API."""
+    if not is_github_sync_configured():
+        return {"ok": False, "configured": False, "error": "github_sync_not_configured"}
+    try:
+        current = fetch_text_file(path)
+        sha = current.get("sha") if current.get("ok") and current.get("exists") else ""
+        raw = str(content or "")
+        body = {
+            "message": message,
+            "content": base64.b64encode(raw.encode("utf-8")).decode("ascii"),
+            "branch": GITHUB_SYNC_BRANCH or "main",
+        }
+        if sha:
+            body["sha"] = sha
+        url = _content_url(path)
+        r = HTTP_SESSION.put(url, headers=_headers(), json=body, timeout=float(GITHUB_SYNC_TIMEOUT_SEC or 12))
+        r.raise_for_status()
+        payload = r.json() or {}
+        return {
+            "ok": True,
+            "configured": True,
+            "path": path,
+            "branch": GITHUB_SYNC_BRANCH or "main",
+            "commit_sha": ((payload.get("commit") or {}).get("sha") or ""),
+            "synced_at": datetime.now(ZoneInfo("America/New_York")).isoformat(),
+        }
+    except Exception as exc:
+        return {"ok": False, "configured": True, "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
