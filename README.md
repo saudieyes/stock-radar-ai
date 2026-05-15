@@ -2,7 +2,7 @@
 
 AI-powered stock market radar that scans US equities, applies a Shariah-compliant filter, and detects high-probability trading opportunities using price action, volume, momentum, and news.
 
----
+----
 
 ## 📊 Features
 
