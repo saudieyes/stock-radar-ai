@@ -2729,6 +2729,25 @@
     }
 
 
+
+
+    function intelligenceBadge(stock) {
+      const tier = String(stock.strong_entry_tier_label || '').trim();
+      const risk = String(stock.pattern_risk_label || '').trim();
+      const noChase = String(stock.no_chase_guard_label || '').trim();
+      if (tier) return `<span class="badge badge-stage">${safeText(tier)}</span>`;
+      if (String(stock.no_chase_guard_status || '') === 'no_chase') return `<span class="badge badge-news-neg">${safeText(noChase || '🔴 لا تطارد')}</span>`;
+      if (String(stock.pattern_risk_status || '') === 'high') return `<span class="badge badge-news-neg">${safeText(risk || '🔴 نمط خطر')}</span>`;
+      if (String(stock.pattern_risk_status || '') === 'medium') return `<span class="badge badge-cautious">${safeText(risk || '⚠️ مخاطرة')}</span>`;
+      return '';
+    }
+
+    function renderReasonsList(value) {
+      const arr = Array.isArray(value) ? value : [];
+      if (!arr.length) return '';
+      return `<ul class="flags">${arr.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`;
+    }
+
     function grayTechnicalLabel(stock) {
       const d = String(stock?.decision || '');
       const orig = String(stock?.original_decision || '').trim();
@@ -3372,6 +3391,13 @@
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
       details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
       details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
+      details.push(detailBox('تصنيف دخول قوي', safeText(stock.strong_entry_tier_label || '')));
+      details.push(detailBox('خطر النمط', `${safeText(stock.pattern_risk_label || '')}${stock.pattern_risk_score !== undefined ? ' (' + formatNumber(stock.pattern_risk_score) + ')' : ''}<br>${renderReasonsList(stock.pattern_risk_reasons)}`, true));
+      details.push(detailBox('استمرار السيولة', `${safeText(stock.liquidity_persistence_label || '')}${stock.liquidity_persistence_score !== undefined ? ' (' + formatNumber(stock.liquidity_persistence_score) + ')' : ''}<br>${renderReasonsList(stock.liquidity_persistence_reasons)}`, true));
+      details.push(detailBox('حارس ما بعد التفعيل', `${safeText(stock.post_activation_guard_label || '')}${stock.post_activation_guard_score !== undefined ? ' (' + formatNumber(stock.post_activation_guard_score) + ')' : ''}<br>${renderReasonsList(stock.post_activation_guard_reasons)}`, true));
+      details.push(detailBox('حارس عدم المطاردة', `${safeText(stock.no_chase_guard_label || '')}<br>${renderReasonsList(stock.no_chase_guard_reasons)}`, true));
+      details.push(detailBox('الدعم/المقاومة كحارس', `${safeText(stock.support_guard_label || '')}<br>${safeText(stock.resistance_guard_label || '')}<br>${renderReasonsList(stock.structure_guard_reasons)}`, true));
+      details.push(detailBox('تعديل ترتيب الذكاء', stock.intelligence_rank_adjustment !== undefined ? formatNumber(stock.intelligence_rank_adjustment) : ''));
       details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
       details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('العائد/المخاطرة', joinMetric(formatNumber(stock.rr_1), stock.metric_rr)));
@@ -3483,6 +3509,7 @@
               ${badgeDecision(stock.decision)}
               ${phaseBadge(stock.market_phase_label)}
               ${strengthBadge(stock)}
+              ${intelligenceBadge(stock)}
               ${planBadge(stock)}
               ${stageBadge(stock)}
             </div>
@@ -3583,7 +3610,9 @@
       const hist = Number(item?.historical_behavior_score || 50);
       const histCtx = Number(item?.historical_context_score || 50);
       const strength = Number(item?.signal_strength_score || 0);
-      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08) + ((hist - 50) * 0.16) + ((histCtx - 50) * 0.14) + (strength * 0.12);
+      const patternRisk = Number(item?.pattern_risk_score || 0);
+      const tierBonus = String(item?.strong_entry_tier || '') === 'excellent' ? 8 : (String(item?.strong_entry_tier || '') === 'late_no_chase' ? -20 : String(item?.strong_entry_tier || '') === 'high_risk' ? -12 : 0);
+      return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08) + ((hist - 50) * 0.16) + ((histCtx - 50) * 0.14) + (strength * 0.12) - Math.min(patternRisk * 0.18, 18) + tierBonus;
     }
 
     function sortDisplayItems(items) {
@@ -5137,6 +5166,7 @@
 <!-- fix49: info buttons, show-all anchor, modal scroll reset -->
 </body>
 </html>
+
 
 
 
