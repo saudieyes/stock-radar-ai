@@ -1,0 +1,63 @@
+{
+  "notes": {
+    "next_weekend_use": "تحليل ما سبق الرابحين والخاسرين وتحديد الأنماط المتكررة.",
+    "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف."
+  },
+  "ok": true,
+  "sessions": [
+    {
+      "c": 5,
+      "session": "closed_weekend",
+      "symbols": 5
+    }
+  ],
+  "summary": {
+    "avg_change_pct": 5.39,
+    "avg_dollar_volume": 916078691.8,
+    "big_mover_snapshots": 0,
+    "no_chase_count": 1,
+    "reconfirm_count": 5,
+    "snapshots": 5,
+    "symbols": 5,
+    "tool_snapshots": 5
+  },
+  "top_movers_observed": [
+    {
+      "in_big_movers": 0,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 22.93,
+      "observations": 1,
+      "symbol": "SEDG"
+    },
+    {
+      "in_big_movers": 0,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 1.94,
+      "observations": 1,
+      "symbol": "PANW"
+    },
+    {
+      "in_big_movers": 0,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 1.51,
+      "observations": 1,
+      "symbol": "KNX"
+    },
+    {
+      "in_big_movers": 0,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 1.08,
+      "observations": 1,
+      "symbol": "NXT"
+    },
+    {
+      "in_big_movers": 0,
+      "in_tool_snapshot": 1,
+      "max_change_pct": -0.51,
+      "observations": 1,
+      "symbol": "UCTT"
+    }
+  ],
+  "version": "evidence_collection_v1_passive",
+  "week_key": "2026-05-18_2026-05-22"
+}
