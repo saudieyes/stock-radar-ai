@@ -1,4 +1,4 @@
-"""Evidence Collection Layer V1 for Stock Radar AI.
+"""Evidence Collection Layer V2 for Stock Radar AI.
 
 Purpose
 -------
@@ -73,6 +73,13 @@ EVIDENCE_MAX_TOOL_SYMBOLS = _env_int("EVIDENCE_MAX_TOOL_SYMBOLS", 220)
 EVIDENCE_MAX_BIG_MOVERS = _env_int("EVIDENCE_MAX_BIG_MOVERS", 120)
 EVIDENCE_MAX_SYMBOLS_PER_RUN = _env_int("EVIDENCE_MAX_SYMBOLS_PER_RUN", 260)
 EVIDENCE_POLYGON_SYMBOL_LIMIT = _env_int("EVIDENCE_POLYGON_SYMBOL_LIMIT", 45)
+# V2: deeper evidence collection for next-week pattern mining.
+EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED = _env_bool("EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED", True)
+EVIDENCE_BIG_WINNER_BACKFILL_ENABLED = _env_bool("EVIDENCE_BIG_WINNER_BACKFILL_ENABLED", True)
+EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT = _env_int("EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT", 180)
+EVIDENCE_INTRADAY_BAR_STORE_ENABLED = _env_bool("EVIDENCE_INTRADAY_BAR_STORE_ENABLED", True)
+EVIDENCE_INTRADAY_BAR_SYMBOL_LIMIT = _env_int("EVIDENCE_INTRADAY_BAR_SYMBOL_LIMIT", 90)
+EVIDENCE_MIN_WINNER_DOLLAR_VOLUME = _env_float("EVIDENCE_MIN_WINNER_DOLLAR_VOLUME", 0.0)
 EVIDENCE_INTERVAL_PREMARKET_SEC = _env_int("EVIDENCE_INTERVAL_PREMARKET_SEC", 600)
 EVIDENCE_INTERVAL_OPEN_SEC = _env_int("EVIDENCE_INTERVAL_OPEN_SEC", 900)
 EVIDENCE_INTERVAL_AFTERHOURS_SEC = _env_int("EVIDENCE_INTERVAL_AFTERHOURS_SEC", 1800)
@@ -236,6 +243,76 @@ def init_evidence_db() -> bool:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS evidence_intraday_bars (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    week_key TEXT NOT NULL DEFAULT '',
+                    trade_date TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    bar_ts INTEGER NOT NULL,
+                    bar_time_text TEXT NOT NULL DEFAULT '',
+                    session TEXT NOT NULL DEFAULT '',
+                    open REAL NOT NULL DEFAULT 0,
+                    high REAL NOT NULL DEFAULT 0,
+                    low REAL NOT NULL DEFAULT 0,
+                    close REAL NOT NULL DEFAULT 0,
+                    volume REAL NOT NULL DEFAULT 0,
+                    dollar_volume REAL NOT NULL DEFAULT 0,
+                    source TEXT NOT NULL DEFAULT 'polygon_5m',
+                    run_id TEXT NOT NULL DEFAULT '',
+                    raw_json TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(trade_date, symbol, bar_ts)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS evidence_winner_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    week_key TEXT NOT NULL DEFAULT '',
+                    trade_date TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    winner_rank INTEGER NOT NULL DEFAULT 0,
+                    winner_change_pct REAL NOT NULL DEFAULT 0,
+                    previous_close REAL NOT NULL DEFAULT 0,
+                    day_open REAL NOT NULL DEFAULT 0,
+                    day_high REAL NOT NULL DEFAULT 0,
+                    day_low REAL NOT NULL DEFAULT 0,
+                    day_close REAL NOT NULL DEFAULT 0,
+                    day_volume REAL NOT NULL DEFAULT 0,
+                    day_dollar_volume REAL NOT NULL DEFAULT 0,
+                    gap_pct REAL NOT NULL DEFAULT 0,
+                    open_to_high_pct REAL NOT NULL DEFAULT 0,
+                    close_vs_open_pct REAL NOT NULL DEFAULT 0,
+                    pre_market_move_pct REAL NOT NULL DEFAULT 0,
+                    pre_market_volume REAL NOT NULL DEFAULT 0,
+                    first_15m_gain_pct REAL NOT NULL DEFAULT 0,
+                    first_30m_gain_pct REAL NOT NULL DEFAULT 0,
+                    first_60m_gain_pct REAL NOT NULL DEFAULT 0,
+                    first_30m_volume REAL NOT NULL DEFAULT 0,
+                    first_60m_volume REAL NOT NULL DEFAULT 0,
+                    last_30m_volume REAL NOT NULL DEFAULT 0,
+                    volume_fade_flag INTEGER NOT NULL DEFAULT 0,
+                    liquidity_acceleration_score REAL NOT NULL DEFAULT 0,
+                    liquidity_persistence_score REAL NOT NULL DEFAULT 0,
+                    gap_followthrough_label TEXT NOT NULL DEFAULT '',
+                    move_quality_label TEXT NOT NULL DEFAULT '',
+                    likely_pattern TEXT NOT NULL DEFAULT '',
+                    tool_seen INTEGER NOT NULL DEFAULT 0,
+                    tool_stage TEXT NOT NULL DEFAULT '',
+                    tool_first_seen_at TEXT NOT NULL DEFAULT '',
+                    tool_first_seen_change_pct REAL NOT NULL DEFAULT 0,
+                    source_seen INTEGER NOT NULL DEFAULT 0,
+                    data_quality TEXT NOT NULL DEFAULT '',
+                    profile_json TEXT NOT NULL DEFAULT '{}',
+                    created_at REAL NOT NULL DEFAULT 0,
+                    updated_at REAL NOT NULL DEFAULT 0,
+                    UNIQUE(trade_date, symbol)
+                )
+                """
+            )
+
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS evidence_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL UNIQUE,
@@ -260,6 +337,9 @@ def init_evidence_db() -> bool:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_snapshots_date_symbol ON evidence_snapshots(trade_date, symbol, captured_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_big_movers_date ON daily_big_movers(trade_date, change_pct DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_runs_week ON evidence_runs(week_key, started_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_bars_symbol_date ON evidence_intraday_bars(trade_date, symbol, bar_ts)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_winner_profiles_week ON evidence_winner_profiles(week_key, winner_change_pct DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_winner_profiles_date ON evidence_winner_profiles(trade_date, winner_change_pct DESC)")
             conn.commit()
         _INITIALIZED = True
         return True
@@ -408,11 +488,271 @@ def _fetch_fmp_big_movers(threshold_pct: float | None = None, limit: int | None 
     return {"ok": False, "configured": True, "items": [], "error": "; ".join(errors[-3:])}
 
 
-def _fetch_polygon_intraday_summary(symbol: str, trade_date: str | None = None) -> dict:
-    """Small 5-minute candle summary. Used for evidence only, with strict caps."""
+def _dt_from_polygon_ms(ms: Any) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(float(ms) / 1000.0, tz=NY_TZ)
+    except Exception:
+        return None
+
+
+def _bar_session_from_dt(dt: datetime | None) -> str:
+    if not dt:
+        return "unknown"
+    t = dt.time()
+    if dt_time(4, 0) <= t < dt_time(9, 30):
+        return "pre_market"
+    if dt_time(9, 30) <= t < dt_time(16, 0):
+        return "regular"
+    if dt_time(16, 0) <= t < dt_time(20, 0):
+        return "after_hours"
+    return "closed"
+
+
+def _bar_value(bar: dict, key: str) -> float:
+    if not isinstance(bar, dict):
+        return 0.0
+    return _safe_float(bar.get(key), 0.0)
+
+
+def _bars_between(bars: list[dict], start_h: int, start_m: int, end_h: int, end_m: int) -> list[dict]:
+    out = []
+    start_t = dt_time(start_h, start_m)
+    end_t = dt_time(end_h, end_m)
+    for bar in bars or []:
+        dt = _dt_from_polygon_ms((bar or {}).get("t"))
+        if not dt:
+            continue
+        t = dt.time()
+        if start_t <= t < end_t:
+            out.append(bar)
+    return out
+
+
+def _bar_open(bars: list[dict]) -> float:
+    for bar in bars or []:
+        val = _bar_value(bar, "o")
+        if val > 0:
+            return val
+    return 0.0
+
+
+def _bar_close(bars: list[dict]) -> float:
+    for bar in reversed(bars or []):
+        val = _bar_value(bar, "c")
+        if val > 0:
+            return val
+    return 0.0
+
+
+def _bars_high(bars: list[dict]) -> float:
+    vals = [_bar_value(x, "h") for x in bars or [] if _bar_value(x, "h") > 0]
+    return max(vals or [0.0])
+
+
+def _bars_low(bars: list[dict]) -> float:
+    vals = [_bar_value(x, "l") for x in bars or [] if _bar_value(x, "l") > 0]
+    return min(vals or [0.0])
+
+
+def _bars_volume(bars: list[dict]) -> float:
+    return sum(_bar_value(x, "v") for x in bars or [])
+
+
+def _bars_dollar_volume(bars: list[dict]) -> float:
+    total = 0.0
+    for b in bars or []:
+        close = _bar_value(b, "c") or _bar_value(b, "vw") or _bar_value(b, "o")
+        total += close * _bar_value(b, "v")
+    return total
+
+
+def _pct_change(a: float, b: float) -> float:
+    try:
+        a = float(a or 0)
+        b = float(b or 0)
+        if a <= 0 or b <= 0:
+            return 0.0
+        return safe_round(((a - b) / b) * 100.0, 2)
+    except Exception:
+        return 0.0
+
+
+def _store_intraday_bars(symbol: str, trade_date: str, bars: list[dict], run_id: str = "", week_key: str | None = None, source: str = "polygon_5m") -> int:
+    if not (SQLITE_ENABLED and EVIDENCE_INTRADAY_BAR_STORE_ENABLED and bars):
+        return 0
+    sym = _clean_symbol(symbol)
+    if not sym:
+        return 0
+    wk = str(week_key or _current_week_key() or "")
+    count = 0
+    init_evidence_db()
+    with _LOCK:
+        with _connect() as conn:
+            for b in bars or []:
+                if not isinstance(b, dict):
+                    continue
+                ts = _safe_int(b.get("t"), 0)
+                if ts <= 0:
+                    continue
+                dt = _dt_from_polygon_ms(ts)
+                close = _bar_value(b, "c")
+                vol = _bar_value(b, "v")
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO evidence_intraday_bars(
+                        week_key, trade_date, symbol, bar_ts, bar_time_text, session, open, high, low, close, volume, dollar_volume, source, run_id, raw_json
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        wk, trade_date, sym, ts, dt.strftime("%Y-%m-%d %H:%M:%S") if dt else "", _bar_session_from_dt(dt),
+                        _bar_value(b, "o"), _bar_value(b, "h"), _bar_value(b, "l"), close, vol, close * vol if close > 0 and vol > 0 else 0,
+                        source, str(run_id or ""), _json_dumps(b),
+                    ),
+                )
+                count += 1
+            conn.commit()
+    return count
+
+
+def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previous_close: float = 0.0, day_open: float = 0.0) -> dict:
+    sym = _clean_symbol(symbol)
+    d = str(trade_date or _today_text())[:10]
+    bars = [b for b in (bars or []) if isinstance(b, dict)]
+    bars = sorted(bars, key=lambda x: _safe_int(x.get("t"), 0))
+    if not bars:
+        return {"ok": True, "symbol": sym, "trade_date": d, "bars": 0}
+
+    pre_bars = _bars_between(bars, 4, 0, 9, 30)
+    regular_bars = _bars_between(bars, 9, 30, 16, 0)
+    after_bars = _bars_between(bars, 16, 0, 20, 0)
+    first_15 = _bars_between(bars, 9, 30, 9, 45)
+    first_30 = _bars_between(bars, 9, 30, 10, 0)
+    first_60 = _bars_between(bars, 9, 30, 10, 30)
+    last_30 = regular_bars[-6:] if len(regular_bars) >= 6 else regular_bars
+
+    open_px = float(day_open or 0) or _bar_open(regular_bars) or _bar_open(bars)
+    close_px = _bar_close(regular_bars) or _bar_close(bars)
+    high_px = _bars_high(regular_bars) or _bars_high(bars)
+    low_px = _bars_low(regular_bars) or _bars_low(bars)
+    pre_open = _bar_open(pre_bars)
+    pre_close = _bar_close(pre_bars)
+    first_15_high = _bars_high(first_15)
+    first_30_high = _bars_high(first_30)
+    first_60_high = _bars_high(first_60)
+    first_30_close = _bar_close(first_30)
+    first_60_close = _bar_close(first_60)
+    prev = float(previous_close or 0)
+
+    pre_market_move_pct = _pct_change(pre_close, prev) if prev > 0 and pre_close > 0 else _pct_change(pre_close, pre_open)
+    gap_pct = _pct_change(open_px, prev) if prev > 0 and open_px > 0 else 0.0
+    first_15_gain_pct = _pct_change(first_15_high, open_px)
+    first_30_gain_pct = _pct_change(first_30_high, open_px)
+    first_60_gain_pct = _pct_change(first_60_high, open_px)
+    first_30_close_pct = _pct_change(first_30_close, open_px)
+    first_60_close_pct = _pct_change(first_60_close, open_px)
+    open_to_high_pct = _pct_change(high_px, open_px)
+    close_vs_open_pct = _pct_change(close_px, open_px)
+
+    pre_vol = _bars_volume(pre_bars)
+    first_15_vol = _bars_volume(first_15)
+    first_30_vol = _bars_volume(first_30)
+    first_60_vol = _bars_volume(first_60)
+    last_30_vol = _bars_volume(last_30)
+    total_vol = _bars_volume(regular_bars) or _bars_volume(bars)
+    avg_5m_vol = total_vol / max(1, len(regular_bars or bars))
+    first_30_vs_avg = first_30_vol / max(1.0, avg_5m_vol * max(1, len(first_30))) if avg_5m_vol > 0 else 0.0
+    last_30_vs_first_30 = last_30_vol / max(1.0, first_30_vol) if first_30_vol > 0 else 0.0
+    volume_fade_flag = 1 if first_30_vol > 0 and last_30_vol > 0 and last_30_vs_first_30 < 0.35 else 0
+
+    liquidity_accel = min(100.0, max(0.0, first_30_vs_avg * 35.0)) if first_30_vs_avg else 0.0
+    # Persistence rewards first push + holding/continued volume later.
+    persistence = 0.0
+    if first_30_vol > 0:
+        persistence += min(45.0, last_30_vs_first_30 * 55.0)
+    if close_vs_open_pct > 0:
+        persistence += min(25.0, close_vs_open_pct * 3.0)
+    if first_60_close_pct > 0:
+        persistence += min(20.0, first_60_close_pct * 4.0)
+    if volume_fade_flag:
+        persistence -= 20.0
+    persistence = safe_round(max(0.0, min(100.0, persistence)), 2)
+    liquidity_accel = safe_round(liquidity_accel, 2)
+
+    if gap_pct >= 12 and close_vs_open_pct < 0:
+        gap_label = "gap_failed_or_chased"
+    elif gap_pct >= 5 and first_30_close_pct > 0 and close_vs_open_pct >= 0:
+        gap_label = "gap_followthrough"
+    elif gap_pct >= 5:
+        gap_label = "gap_needs_confirmation"
+    elif pre_market_move_pct >= 5:
+        gap_label = "pre_market_build_then_open"
+    else:
+        gap_label = "no_major_gap"
+
+    if liquidity_accel >= 70 and persistence >= 55 and close_vs_open_pct > 0:
+        quality = "strong_real_move_candidate"
+    elif gap_label == "gap_failed_or_chased" or volume_fade_flag:
+        quality = "unreliable_or_chase_risk"
+    elif liquidity_accel >= 45 or first_30_gain_pct >= 4:
+        quality = "active_needs_followthrough"
+    else:
+        quality = "weak_or_unclear"
+
+    if pre_vol > 0 and gap_pct >= 5:
+        likely_pattern = "pre_gap_activity_plus_gap"
+    elif gap_pct >= 8:
+        likely_pattern = "large_open_gap"
+    elif liquidity_accel >= 60 and gap_pct < 5:
+        likely_pattern = "intraday_liquidity_acceleration"
+    elif close_vs_open_pct > 3 and persistence >= 45:
+        likely_pattern = "steady_followthrough"
+    else:
+        likely_pattern = "unclassified"
+
+    return {
+        "ok": True,
+        "version": "intraday_evidence_v2",
+        "symbol": sym,
+        "trade_date": d,
+        "bars": len(bars),
+        "pre_market_bars": len(pre_bars),
+        "regular_bars": len(regular_bars),
+        "after_hours_bars": len(after_bars),
+        "open": safe_round(open_px, 4),
+        "last_close": safe_round(close_px, 4),
+        "high": safe_round(high_px, 4),
+        "low": safe_round(low_px, 4),
+        "total_volume": safe_round(total_vol, 0),
+        "pre_market_move_pct": safe_round(pre_market_move_pct, 2),
+        "pre_market_volume": safe_round(pre_vol, 0),
+        "gap_pct": safe_round(gap_pct, 2),
+        "open_to_high_pct": safe_round(open_to_high_pct, 2),
+        "close_vs_open_pct": safe_round(close_vs_open_pct, 2),
+        "first_15m_gain_pct": safe_round(first_15_gain_pct, 2),
+        "first_30m_gain_pct": safe_round(first_30_gain_pct, 2),
+        "first_60m_gain_pct": safe_round(first_60_gain_pct, 2),
+        "first_30m_close_pct": safe_round(first_30_close_pct, 2),
+        "first_60m_close_pct": safe_round(first_60_close_pct, 2),
+        "first_15m_volume": safe_round(first_15_vol, 0),
+        "first_30m_volume": safe_round(first_30_vol, 0),
+        "first_60m_volume": safe_round(first_60_vol, 0),
+        "last_30m_volume": safe_round(last_30_vol, 0),
+        "avg_5m_volume": safe_round(avg_5m_vol, 0),
+        "first_30m_volume_vs_avg": safe_round(first_30_vs_avg, 2),
+        "last_30m_vs_first_30m_volume": safe_round(last_30_vs_first_30, 2),
+        "volume_fade_flag": int(volume_fade_flag),
+        "liquidity_acceleration_score": liquidity_accel,
+        "liquidity_persistence_score": persistence,
+        "gap_followthrough_label": gap_label,
+        "move_quality_label": quality,
+        "likely_pattern": likely_pattern,
+    }
+
+
+def _fetch_polygon_bars(symbol: str, trade_date: str | None = None) -> dict:
     sym = _clean_symbol(symbol)
     if not (EVIDENCE_POLYGON_ENABLED and POLYGON_API_KEY and sym):
-        return {"ok": False, "enabled": bool(EVIDENCE_POLYGON_ENABLED), "configured": bool(POLYGON_API_KEY)}
+        return {"ok": False, "enabled": bool(EVIDENCE_POLYGON_ENABLED), "configured": bool(POLYGON_API_KEY), "bars": []}
     d = str(trade_date or _today_text())[:10]
     try:
         url = f"https://api.polygon.io/v2/aggs/ticker/{sym}/range/5/minute/{d}/{d}"
@@ -422,43 +762,33 @@ def _fetch_polygon_intraday_summary(symbol: str, trade_date: str | None = None) 
             timeout=float(EVIDENCE_HTTP_TIMEOUT_SEC),
         )
         if r.status_code >= 400:
-            return {"ok": False, "symbol": sym, "status_code": r.status_code}
+            return {"ok": False, "symbol": sym, "trade_date": d, "status_code": r.status_code, "bars": []}
         payload = r.json() or {}
         bars = payload.get("results") or []
-        if not bars:
-            return {"ok": True, "symbol": sym, "trade_date": d, "bars": 0}
-        first = bars[0] or {}
-        last = bars[-1] or {}
-        total_vol = sum(_safe_float(x.get("v"), 0) for x in bars if isinstance(x, dict))
-        high = max([_safe_float(x.get("h"), 0) for x in bars if isinstance(x, dict)] or [0])
-        low_vals = [_safe_float(x.get("l"), 0) for x in bars if isinstance(x, dict) and _safe_float(x.get("l"), 0) > 0]
-        low = min(low_vals or [0])
-        open_px = _safe_float(first.get("o"), 0)
-        close_px = _safe_float(last.get("c"), 0)
-        last_3 = bars[-3:] if len(bars) >= 3 else bars
-        last_6 = bars[-6:] if len(bars) >= 6 else bars
-        vol_15 = sum(_safe_float(x.get("v"), 0) for x in last_3 if isinstance(x, dict))
-        vol_30 = sum(_safe_float(x.get("v"), 0) for x in last_6 if isinstance(x, dict))
-        first_6 = bars[:6]
-        first_30_high = max([_safe_float(x.get("h"), 0) for x in first_6 if isinstance(x, dict)] or [0])
-        first_30_gain = ((first_30_high - open_px) / open_px * 100.0) if open_px > 0 and first_30_high > 0 else 0.0
-        return {
-            "ok": True,
-            "symbol": sym,
-            "trade_date": d,
-            "bars": len(bars),
-            "open": safe_round(open_px, 4),
-            "last_close": safe_round(close_px, 4),
-            "high": safe_round(high, 4),
-            "low": safe_round(low, 4),
-            "total_volume": safe_round(total_vol, 0),
-            "last_15m_volume": safe_round(vol_15, 0),
-            "last_30m_volume": safe_round(vol_30, 0),
-            "first_30m_gain_pct": safe_round(first_30_gain, 2),
-        }
+        return {"ok": True, "symbol": sym, "trade_date": d, "bars": bars if isinstance(bars, list) else []}
     except Exception as exc:
-        return {"ok": False, "symbol": sym, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        return {"ok": False, "symbol": sym, "trade_date": d, "error": f"{type(exc).__name__}: {str(exc)[:160]}", "bars": []}
 
+
+def _fetch_polygon_intraday_summary(symbol: str, trade_date: str | None = None, previous_close: float = 0.0, day_open: float = 0.0, *, run_id: str = "", store_bars: bool = True) -> dict:
+    """Enhanced 5-minute candle summary for evidence V2.
+
+    It stores raw 5m bars for limited symbols so next weekend we can study pre-gap,
+    gap follow-through, liquidity acceleration, and fade behavior.
+    """
+    sym = _clean_symbol(symbol)
+    d = str(trade_date or _today_text())[:10]
+    bundle = _fetch_polygon_bars(sym, d)
+    if not bundle.get("ok"):
+        return {k: v for k, v in bundle.items() if k != "bars"}
+    bars = bundle.get("bars") or []
+    if store_bars:
+        stored = _store_intraday_bars(sym, d, bars, run_id=run_id, week_key=_current_week_key())
+    else:
+        stored = 0
+    summary = _analyze_intraday_bars(sym, d, bars, previous_close=previous_close, day_open=day_open)
+    summary["bars_stored"] = stored
+    return summary
 
 def _row_bucket(row: dict) -> str:
     decision = str((row or {}).get("decision") or "").strip()
@@ -647,6 +977,430 @@ def _record_run(run: dict) -> None:
         pass
 
 
+def _parse_date(value: str | None) -> date | None:
+    try:
+        txt = str(value or "").strip()[:10]
+        if not txt:
+            return None
+        return datetime.strptime(txt, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _date_range_list(start_date: str | None = None, end_date: str | None = None, days_back: int = 5) -> list[str]:
+    end = _parse_date(end_date) or _now_dt().date()
+    start = _parse_date(start_date)
+    if start is None:
+        start = end
+        # Walk back calendar days; market holidays with no data are skipped later.
+        for _ in range(max(0, int(days_back or 0)) - 1):
+            start = date.fromordinal(start.toordinal() - 1)
+    if start > end:
+        start, end = end, start
+    out = []
+    cur = start
+    while cur <= end:
+        if cur.weekday() < 5:
+            out.append(cur.strftime("%Y-%m-%d"))
+        cur = date.fromordinal(cur.toordinal() + 1)
+    return out
+
+
+def _previous_calendar_days(d: str, max_days: int = 10) -> list[str]:
+    base = _parse_date(d) or _now_dt().date()
+    out = []
+    cur = date.fromordinal(base.toordinal() - 1)
+    while len(out) < max_days:
+        if cur.weekday() < 5:
+            out.append(cur.strftime("%Y-%m-%d"))
+        cur = date.fromordinal(cur.toordinal() - 1)
+    return out
+
+
+def _fetch_polygon_grouped_daily(trade_date: str) -> dict:
+    d = str(trade_date or _today_text())[:10]
+    if not (POLYGON_API_KEY and EVIDENCE_POLYGON_ENABLED):
+        return {"ok": False, "configured": bool(POLYGON_API_KEY), "enabled": bool(EVIDENCE_POLYGON_ENABLED), "items": []}
+    try:
+        url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{d}"
+        r = HTTP_SESSION.get(url, params={"adjusted": "true", "apiKey": POLYGON_API_KEY}, timeout=float(EVIDENCE_HTTP_TIMEOUT_SEC))
+        if r.status_code >= 400:
+            return {"ok": False, "trade_date": d, "status_code": r.status_code, "items": []}
+        payload = r.json() or {}
+        results = payload.get("results") or []
+        return {"ok": True, "trade_date": d, "count": len(results), "items": results if isinstance(results, list) else []}
+    except Exception as exc:
+        return {"ok": False, "trade_date": d, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "items": []}
+
+
+def _previous_close_map_for_date(trade_date: str) -> tuple[str, dict[str, float]]:
+    for prev_d in _previous_calendar_days(trade_date, max_days=10):
+        data = _fetch_polygon_grouped_daily(prev_d)
+        items = data.get("items") or []
+        if data.get("ok") and items:
+            out = {}
+            for raw in items:
+                if not isinstance(raw, dict):
+                    continue
+                sym = _clean_symbol(raw.get("T") or raw.get("symbol"))
+                c = _safe_float(raw.get("c"), 0)
+                if sym and c > 0:
+                    out[sym] = c
+            if out:
+                return prev_d, out
+    return "", {}
+
+
+def _visibility_from_current_tool(sym: str) -> dict:
+    symbol = _clean_symbol(sym)
+    rows = _last_trade_scan_rows()
+    best = {}
+    for row in rows or []:
+        if _clean_symbol((row or {}).get("symbol")) == symbol:
+            best = row or {}
+            break
+    if best:
+        return {
+            "tool_seen": True,
+            "tool_stage": _row_bucket(best),
+            "decision": _first_text(best, ["decision", "signal_label"]),
+            "first_seen_at": _first_text(best, ["first_seen_at", "appeared_at", "created_at"]),
+            "first_seen_change_pct": _safe_float(best.get("first_seen_change_pct") or best.get("change_pct_at_first_seen"), 0),
+            "source": "last_trade_scan_snapshot",
+        }
+    return {"tool_seen": False, "tool_stage": "not_in_current_tool_snapshot", "source": "last_trade_scan_snapshot"}
+
+
+def _visibility_from_evidence(sym: str, trade_date: str | None = None) -> dict:
+    symbol = _clean_symbol(sym)
+    if not (SQLITE_ENABLED and symbol):
+        return _visibility_from_current_tool(symbol)
+    init_evidence_db()
+    where = "symbol=?"
+    args: list[Any] = [symbol]
+    if trade_date:
+        where += " AND trade_date=?"
+        args.append(str(trade_date)[:10])
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT * FROM evidence_snapshots WHERE {where} ORDER BY captured_at ASC LIMIT 1",
+            tuple(args),
+        ).fetchone()
+    if row:
+        d = dict(row)
+        return {
+            "tool_seen": bool(int(d.get("in_tool_snapshot") or 0)),
+            "source_seen": bool(d.get("source_group") in {"tool_signal", "tool_and_big_mover"}),
+            "tool_stage": d.get("signal_bucket") or ("tool_snapshot" if int(d.get("in_tool_snapshot") or 0) else "not_in_tool_snapshot"),
+            "decision": d.get("decision") or "",
+            "first_seen_at": d.get("captured_at_text") or "",
+            "first_seen_change_pct": _safe_float(d.get("change_pct"), 0),
+            "source": "evidence_snapshots",
+        }
+    return _visibility_from_current_tool(symbol)
+
+
+def _classify_winner_profile(row: dict, intraday: dict) -> tuple[str, str, str]:
+    gap = _safe_float(row.get("gap_pct"), 0)
+    change = _safe_float(row.get("winner_change_pct"), 0)
+    first30 = _safe_float(intraday.get("first_30m_gain_pct"), 0)
+    persistence = _safe_float(intraday.get("liquidity_persistence_score"), 0)
+    accel = _safe_float(intraday.get("liquidity_acceleration_score"), 0)
+    fade = int(intraday.get("volume_fade_flag") or 0)
+    gap_label = str(intraday.get("gap_followthrough_label") or "")
+    if gap >= 12 and (fade or persistence < 35):
+        quality = "gap_chase_risk"
+    elif change >= 10 and persistence >= 55 and accel >= 45:
+        quality = "high_quality_followthrough"
+    elif change >= 10 and gap_label == "gap_followthrough":
+        quality = "gap_followthrough_candidate"
+    elif first30 >= 4 and accel >= 45:
+        quality = "early_intraday_acceleration"
+    elif change >= 10:
+        quality = "winner_needs_more_context"
+    else:
+        quality = "not_big_winner"
+
+    if gap >= 8 and _safe_float(intraday.get("pre_market_volume"), 0) > 0:
+        pattern = "pre_market_gap_then_followthrough"
+    elif gap >= 8:
+        pattern = "open_gap_big_mover"
+    elif first30 >= 4 and accel >= 50:
+        pattern = "first_hour_liquidity_acceleration"
+    elif persistence >= 60 and _safe_float(intraday.get("close_vs_open_pct"), 0) > 0:
+        pattern = "steady_liquidity_followthrough"
+    else:
+        pattern = "unclassified_winner"
+
+    # The label intentionally stays cautious until we have a larger sample.
+    if quality in {"high_quality_followthrough", "gap_followthrough_candidate", "early_intraday_acceleration"}:
+        label = "candidate_real_move"
+    elif quality == "gap_chase_risk":
+        label = "unreliable_gap_or_chase"
+    else:
+        label = "needs_sample_confirmation"
+    return quality, pattern, label
+
+
+def _upsert_winner_profile(profile: dict) -> None:
+    init_evidence_db()
+    now = _now_ts()
+    profile.setdefault("created_at", now)
+    profile["updated_at"] = now
+    cols = [
+        "week_key", "trade_date", "symbol", "winner_rank", "winner_change_pct", "previous_close", "day_open", "day_high", "day_low", "day_close",
+        "day_volume", "day_dollar_volume", "gap_pct", "open_to_high_pct", "close_vs_open_pct", "pre_market_move_pct", "pre_market_volume",
+        "first_15m_gain_pct", "first_30m_gain_pct", "first_60m_gain_pct", "first_30m_volume", "first_60m_volume", "last_30m_volume",
+        "volume_fade_flag", "liquidity_acceleration_score", "liquidity_persistence_score", "gap_followthrough_label", "move_quality_label", "likely_pattern",
+        "tool_seen", "tool_stage", "tool_first_seen_at", "tool_first_seen_change_pct", "source_seen", "data_quality", "profile_json", "created_at", "updated_at"
+    ]
+    placeholders = ",".join(["?"] * len(cols))
+    updates = ",".join([f"{c}=excluded.{c}" for c in cols if c not in {"week_key", "trade_date", "symbol", "created_at"}])
+    with _LOCK:
+        with _connect() as conn:
+            conn.execute(
+                f"""
+                INSERT INTO evidence_winner_profiles({','.join(cols)}) VALUES({placeholders})
+                ON CONFLICT(trade_date, symbol) DO UPDATE SET {updates}
+                """,
+                tuple(profile.get(c) for c in cols),
+            )
+            conn.commit()
+
+
+def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str | None = None, days_back: int = 5, threshold_pct: float | None = None, limit_per_day: int | None = None, store_bars: bool = True) -> dict:
+    """Backfill big-winner profiles from Polygon grouped daily data.
+
+    This is the V2 layer needed before next week: it studies winners regardless of
+    whether they entered the tool, then stores intraday candle behavior for pattern mining.
+    """
+    if not (SQLITE_ENABLED and EVIDENCE_BIG_WINNER_BACKFILL_ENABLED):
+        return {"ok": False, "enabled": bool(EVIDENCE_BIG_WINNER_BACKFILL_ENABLED), "error": "sqlite_or_backfill_disabled"}
+    threshold = float(threshold_pct if threshold_pct is not None else EVIDENCE_BIG_MOVER_THRESHOLD_PCT)
+    lim = max(5, min(int(limit_per_day or EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT), 500))
+    dates = _date_range_list(start_date=start_date, end_date=end_date, days_back=int(days_back or 5))
+    wk = _current_week_key()
+    run_id = uuid.uuid4().hex[:12]
+    out = {
+        "ok": True,
+        "version": "evidence_winner_backfill_v2",
+        "run_id": run_id,
+        "week_key": wk,
+        "dates": dates,
+        "threshold_pct": threshold,
+        "limit_per_day": lim,
+        "days": [],
+        "profiles_upserted": 0,
+        "bars_stored": 0,
+        "notes": "Backfill studies winners > threshold even if they never entered the tool. No scoring changes.",
+    }
+    init_evidence_db()
+    for d in dates:
+        day = {"trade_date": d, "ok": False, "winners": 0, "profiles": 0, "bars_stored": 0}
+        prev_d, prev_map = _previous_close_map_for_date(d)
+        grouped = _fetch_polygon_grouped_daily(d)
+        if not grouped.get("ok"):
+            day["error"] = grouped.get("error") or grouped.get("status_code") or "polygon_grouped_failed"
+            out["days"].append(day)
+            continue
+        candidates = []
+        for raw in grouped.get("items") or []:
+            if not isinstance(raw, dict):
+                continue
+            sym = _clean_symbol(raw.get("T") or raw.get("symbol"))
+            if not sym:
+                continue
+            o = _safe_float(raw.get("o"), 0)
+            h = _safe_float(raw.get("h"), 0)
+            l = _safe_float(raw.get("l"), 0)
+            c = _safe_float(raw.get("c"), 0)
+            v = _safe_float(raw.get("v"), 0)
+            prev = _safe_float(prev_map.get(sym), 0)
+            if prev <= 0 or c <= 0:
+                continue
+            chg = _pct_change(c, prev)
+            dollar_vol = c * v if c > 0 and v > 0 else 0
+            if chg < threshold:
+                continue
+            if EVIDENCE_MIN_WINNER_DOLLAR_VOLUME > 0 and dollar_vol < EVIDENCE_MIN_WINNER_DOLLAR_VOLUME:
+                continue
+            candidates.append({"symbol": sym, "raw": raw, "previous_close": prev, "change_pct": chg, "dollar_volume": dollar_vol, "open": o, "high": h, "low": l, "close": c, "volume": v})
+        candidates = sorted(candidates, key=lambda x: _safe_float(x.get("change_pct"), 0), reverse=True)[:lim]
+        day["ok"] = True
+        day["previous_trade_date"] = prev_d
+        day["winners"] = len(candidates)
+        for rank, item in enumerate(candidates, start=1):
+            sym = item["symbol"]
+            intraday = _fetch_polygon_intraday_summary(sym, trade_date=d, previous_close=item.get("previous_close", 0), day_open=item.get("open", 0), run_id=run_id, store_bars=bool(store_bars))
+            visibility = _visibility_from_evidence(sym, trade_date=d)
+            base = {
+                "week_key": wk,
+                "trade_date": d,
+                "symbol": sym,
+                "winner_rank": rank,
+                "winner_change_pct": safe_round(item.get("change_pct"), 2),
+                "previous_close": safe_round(item.get("previous_close"), 4),
+                "day_open": safe_round(item.get("open"), 4),
+                "day_high": safe_round(item.get("high"), 4),
+                "day_low": safe_round(item.get("low"), 4),
+                "day_close": safe_round(item.get("close"), 4),
+                "day_volume": safe_round(item.get("volume"), 0),
+                "day_dollar_volume": safe_round(item.get("dollar_volume"), 0),
+                "gap_pct": safe_round(_pct_change(item.get("open"), item.get("previous_close")), 2),
+                "open_to_high_pct": safe_round(_pct_change(item.get("high"), item.get("open")), 2),
+                "close_vs_open_pct": safe_round(_pct_change(item.get("close"), item.get("open")), 2),
+                "pre_market_move_pct": _safe_float(intraday.get("pre_market_move_pct"), 0),
+                "pre_market_volume": _safe_float(intraday.get("pre_market_volume"), 0),
+                "first_15m_gain_pct": _safe_float(intraday.get("first_15m_gain_pct"), 0),
+                "first_30m_gain_pct": _safe_float(intraday.get("first_30m_gain_pct"), 0),
+                "first_60m_gain_pct": _safe_float(intraday.get("first_60m_gain_pct"), 0),
+                "first_30m_volume": _safe_float(intraday.get("first_30m_volume"), 0),
+                "first_60m_volume": _safe_float(intraday.get("first_60m_volume"), 0),
+                "last_30m_volume": _safe_float(intraday.get("last_30m_volume"), 0),
+                "volume_fade_flag": int(intraday.get("volume_fade_flag") or 0),
+                "liquidity_acceleration_score": _safe_float(intraday.get("liquidity_acceleration_score"), 0),
+                "liquidity_persistence_score": _safe_float(intraday.get("liquidity_persistence_score"), 0),
+                "gap_followthrough_label": str(intraday.get("gap_followthrough_label") or ""),
+                "move_quality_label": str(intraday.get("move_quality_label") or ""),
+                "likely_pattern": str(intraday.get("likely_pattern") or ""),
+                "tool_seen": 1 if visibility.get("tool_seen") else 0,
+                "tool_stage": str(visibility.get("tool_stage") or ""),
+                "tool_first_seen_at": str(visibility.get("first_seen_at") or ""),
+                "tool_first_seen_change_pct": _safe_float(visibility.get("first_seen_change_pct"), 0),
+                "source_seen": 1 if visibility.get("source_seen") else 0,
+                "data_quality": "ok" if intraday.get("ok") and intraday.get("bars", 0) else "daily_only_or_no_intraday",
+            }
+            quality, pattern, quality_label = _classify_winner_profile(base, intraday)
+            base["move_quality_label"] = quality
+            base["likely_pattern"] = pattern
+            base["profile_json"] = _json_dumps({"quality_label": quality_label, "polygon_intraday": intraday, "tool_visibility": visibility, "raw_daily": item.get("raw", {})})
+            _upsert_winner_profile(base)
+            day["profiles"] += 1
+            stored = _safe_int(intraday.get("bars_stored"), 0)
+            day["bars_stored"] += stored
+            out["profiles_upserted"] += 1
+            out["bars_stored"] += stored
+        out["days"].append(day)
+    return out
+
+
+def winner_profiles_report(week_key: str | None = None, trade_date: str | None = None, format: str = "json", limit: int = 120) -> dict | str:
+    wk = str(week_key or _current_week_key() or "")
+    d = str(trade_date or "")[:10]
+    init_evidence_db()
+    where = []
+    args: list[Any] = []
+    if wk:
+        where.append("week_key=?")
+        args.append(wk)
+    if d:
+        where.append("trade_date=?")
+        args.append(d)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    lim = max(1, min(int(limit or 120), 1000))
+    with _connect() as conn:
+        rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, lim)).fetchall()
+        pattern_rows = conn.execute(
+            f"SELECT likely_pattern, move_quality_label, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain, AVG(gap_pct) AS avg_gap, AVG(liquidity_acceleration_score) AS avg_liq_accel, AVG(liquidity_persistence_score) AS avg_liq_persist, SUM(tool_seen) AS tool_seen_count FROM evidence_winner_profiles {where_sql} GROUP BY likely_pattern, move_quality_label ORDER BY cases DESC, avg_gain DESC LIMIT 30",
+            tuple(args),
+        ).fetchall()
+    items = _rows_to_dicts(rows)
+    patterns = _rows_to_dicts(pattern_rows)
+    result = {"ok": True, "version": "winner_pattern_profiles_v2", "week_key": wk, "trade_date": d, "count": len(items), "patterns": patterns, "items": items}
+    if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
+        lines = ["تقرير Daily Winner Pattern Mining V2", f"الأسبوع: {wk}", f"التاريخ: {d or 'كل الأسبوع'}", f"عدد ملفات الرابحين: {len(items)}", "", "أبرز الأنماط المرصودة:"]
+        if not patterns:
+            lines.append("لا توجد ملفات رابحين كافية بعد. شغّل backfill-winners للأسبوع السابق أو انتظر جمع الأسبوع القادم.")
+        for ptn in patterns[:12]:
+            lines.append(
+                f"- {ptn.get('likely_pattern') or 'غير مصنف'} / {ptn.get('move_quality_label') or '-'}: حالات {ptn.get('cases')} | متوسط الصعود {safe_round(ptn.get('avg_gain'),2)}% | متوسط القاب {safe_round(ptn.get('avg_gap'),2)}% | شوهد في الأداة {int(ptn.get('tool_seen_count') or 0)}"
+            )
+        lines.append("")
+        lines.append("أكبر الرابحين المحللين:")
+        for x in items[:20]:
+            tool = "ظهر في الأداة" if int(x.get("tool_seen") or 0) else "لم يظهر في الأداة/غير مؤكد"
+            lines.append(f"- {x.get('symbol')}: +{safe_round(x.get('winner_change_pct'),2)}% | gap {safe_round(x.get('gap_pct'),2)}% | {x.get('likely_pattern') or '-'} | {tool}")
+        return "\n".join(lines)
+    return result
+
+
+def pattern_readiness_report(week_key: str | None = None, format: str = "json") -> dict | str:
+    wk = str(week_key or _current_week_key() or "")
+    init_evidence_db()
+    with _connect() as conn:
+        snap = conn.execute("SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_snapshots WHERE week_key=?", (wk,)).fetchone()
+        winners = conn.execute("SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles WHERE week_key=?", (wk,)).fetchone()
+        bars = conn.execute("SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_intraday_bars WHERE week_key=?", (wk,)).fetchone()
+        big = conn.execute("SELECT COUNT(*) AS c FROM daily_big_movers", ()).fetchone()
+        patterns = conn.execute("SELECT likely_pattern, COUNT(*) AS cases FROM evidence_winner_profiles WHERE week_key=? GROUP BY likely_pattern ORDER BY cases DESC LIMIT 12", (wk,)).fetchall()
+    score = 0
+    snap_c = int((snap or {}).get("c", 0) if isinstance(snap, dict) else snap["c"] if snap else 0)
+    winner_c = int((winners or {}).get("c", 0) if isinstance(winners, dict) else winners["c"] if winners else 0)
+    bar_c = int((bars or {}).get("c", 0) if isinstance(bars, dict) else bars["c"] if bars else 0)
+    if snap_c >= 500: score += 25
+    elif snap_c >= 100: score += 15
+    elif snap_c > 0: score += 5
+    if winner_c >= 50: score += 35
+    elif winner_c >= 20: score += 25
+    elif winner_c > 0: score += 10
+    if bar_c >= 2000: score += 30
+    elif bar_c >= 500: score += 20
+    elif bar_c > 0: score += 8
+    if len(patterns or []) >= 3: score += 10
+    readiness = "جاهز لتحليل أولي" if score >= 55 else ("قيد التجميع" if score >= 20 else "غير كافٍ بعد")
+    result = {
+        "ok": True,
+        "version": "pattern_readiness_v2",
+        "week_key": wk,
+        "readiness_score": min(100, score),
+        "readiness_label": readiness,
+        "snapshots": dict(snap) if snap else {},
+        "winner_profiles": dict(winners) if winners else {},
+        "intraday_bars": dict(bars) if bars else {},
+        "daily_big_movers": dict(big) if big else {},
+        "top_winner_patterns": _rows_to_dicts(patterns),
+        "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
+    }
+    if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
+        lines = [
+            "تقرير جاهزية تحليل الأنماط V2",
+            f"الأسبوع: {wk}",
+            f"درجة الجاهزية: {result['readiness_score']}/100 - {readiness}",
+            f"لقطات الأداة: {snap_c}",
+            f"ملفات الرابحين الكبار: {winner_c}",
+            f"شموع/لقطات Polygon المحفوظة: {bar_c}",
+            "",
+            "أبرز أنماط الرابحين حتى الآن:",
+        ]
+        for ptn in result["top_winner_patterns"]:
+            lines.append(f"- {ptn.get('likely_pattern') or 'غير مصنف'}: {ptn.get('cases')} حالات")
+        if score < 55:
+            lines.append("")
+            lines.append("ملاحظة: لا نعتمد هذه الأنماط في السكور بعد؛ نحتاج أسبوع جمع كامل أو backfill أوسع.")
+        return "\n".join(lines)
+    return result
+
+
+def _daily_winner_backfill_due(session: str) -> bool:
+    if not (EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED and EVIDENCE_BIG_WINNER_BACKFILL_ENABLED):
+        return False
+    now = _now_dt()
+    if session not in {"after_hours", "closed"}:
+        return False
+    if session == "after_hours" and now.time() < dt_time(20, 10):
+        return False
+    key = f"evidence_winner_backfilled_{_today_text()}"
+    done = get_json(key, {})
+    return not (isinstance(done, dict) and done.get("ok"))
+
+
+def _mark_daily_winner_backfill(result: dict) -> None:
+    try:
+        set_json(f"evidence_winner_backfilled_{_today_text()}", result)
+    except Exception:
+        pass
+
+
 def collect_evidence_snapshot(mode: str = "manual", include_big_movers: bool = True, sync_to_github: bool = False, max_symbols: int | None = None) -> dict:
     """Collect one passive evidence snapshot.
 
@@ -705,7 +1459,18 @@ def collect_evidence_snapshot(mode: str = "manual", include_big_movers: bool = T
             if len(polygon_symbols) >= polygon_limit:
                 break
         for sym in polygon_symbols:
-            polygon_summaries[sym] = _fetch_polygon_intraday_summary(sym, trade_date=trade_date)
+            row = tool_ctx.get(sym, {})
+            mover = mover_map.get(sym, {})
+            prev_hint = _first_positive(row, ["previous_close", "regular_close", "regular_session_close"])
+            open_hint = _first_positive(row, ["open", "day_open", "regular_open"])
+            polygon_summaries[sym] = _fetch_polygon_intraday_summary(
+                sym,
+                trade_date=trade_date,
+                previous_close=prev_hint,
+                day_open=open_hint,
+                run_id=run_id,
+                store_bars=True,
+            )
 
         snapshot_rows = []
         for sym in symbols:
@@ -808,7 +1573,7 @@ def daily_winners_report(trade_date: str | None = None, format: str = "json", li
     items = _rows_to_dicts(rows)
     result = {"ok": True, "trade_date": d, "count": len(items), "items": items}
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
-        lines = ["تقرير Daily Winner Pattern Mining V1", f"التاريخ: {d}", f"عدد الرابحين المحفوظين: {len(items)}", ""]
+        lines = ["تقرير Daily Winner Pattern Mining V2", f"التاريخ: {d}", f"عدد الرابحين المحفوظين: {len(items)}", ""]
         if not items:
             lines.append("لا توجد قائمة رابحين محفوظة بعد. ستبدأ بالظهور بعد أول جمع أثناء السوق.")
         for x in items[:25]:
@@ -845,12 +1610,18 @@ def weekly_evidence_summary(week_key: str | None = None, format: str = "json", l
             "SELECT session, COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_snapshots WHERE week_key=? GROUP BY session ORDER BY c DESC",
             (wk,),
         ).fetchall()
+        winner_profile_count = conn.execute("SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles WHERE week_key=?", (wk,)).fetchone()
+        intraday_bar_count = conn.execute("SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_intraday_bars WHERE week_key=?", (wk,)).fetchone()
+        winner_patterns = conn.execute("SELECT likely_pattern, move_quality_label, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain FROM evidence_winner_profiles WHERE week_key=? GROUP BY likely_pattern, move_quality_label ORDER BY cases DESC, avg_gain DESC LIMIT 12", (wk,)).fetchall()
     result = {
         "ok": True,
-        "version": "evidence_collection_v1_passive",
+        "version": "evidence_collection_v2_passive",
         "week_key": wk,
         "summary": dict(summary) if summary else {},
         "sessions": _rows_to_dicts(session_rows),
+        "winner_profiles": dict(winner_profile_count) if winner_profile_count else {},
+        "intraday_bars": dict(intraday_bar_count) if intraday_bar_count else {},
+        "winner_patterns": _rows_to_dicts(winner_patterns),
         "top_movers_observed": _rows_to_dicts(top_movers),
         "notes": {
             "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف.",
@@ -860,7 +1631,7 @@ def weekly_evidence_summary(week_key: str | None = None, format: str = "json", l
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
         s = result["summary"] or {}
         lines = [
-            "تقرير Evidence Collection V1",
+            "تقرير Evidence Collection V2",
             f"الأسبوع: {wk}",
             f"اللقطات المحفوظة: {int(s.get('snapshots') or 0)}",
             f"الرموز الفريدة: {int(s.get('symbols') or 0)}",
@@ -868,9 +1639,15 @@ def weekly_evidence_summary(week_key: str | None = None, format: str = "json", l
             f"لقطات من داخل الأداة: {int(s.get('tool_snapshots') or 0)}",
             f"تحذيرات لا تطارد: {int(s.get('no_chase_count') or 0)}",
             f"خطط تحتاج إعادة تأكيد: {int(s.get('reconfirm_count') or 0)}",
+            f"ملفات رابحين كبار محللة: {int((result.get('winner_profiles') or {}).get('c') or 0)}",
+            f"شموع/لقطات Polygon محفوظة: {int((result.get('intraday_bars') or {}).get('c') or 0)}",
             "",
-            "أعلى الرموز المرصودة تغيرًا:",
+            "أنماط الرابحين المبدئية:",
         ]
+        for ptn in result.get("winner_patterns", [])[:8]:
+            lines.append(f"- {ptn.get('likely_pattern') or 'غير مصنف'} / {ptn.get('move_quality_label') or '-'}: {ptn.get('cases')} حالات | متوسط الصعود {safe_round(ptn.get('avg_gain'),2)}%")
+        lines.append("")
+        lines.append("أعلى الرموز المرصودة تغيرًا:")
         for x in result["top_movers_observed"][:20]:
             tag = "داخل الأداة" if int(x.get("in_tool_snapshot") or 0) else "خارج الأداة"
             big = " / رابح يومي" if int(x.get("in_big_movers") or 0) else ""
@@ -897,17 +1674,23 @@ def export_evidence_json(week_key: str | None = None, trade_date: str | None = N
         snaps = conn.execute(f"SELECT * FROM evidence_snapshots {where_sql} ORDER BY captured_at DESC LIMIT ?", (*args, lim)).fetchall()
         movers = conn.execute("SELECT * FROM daily_big_movers WHERE trade_date=? ORDER BY change_pct DESC LIMIT ?", (d or _today_text(), 500)).fetchall()
         runs = conn.execute(f"SELECT * FROM evidence_runs {where_sql} ORDER BY started_at DESC LIMIT 100", tuple(args)).fetchall() if where_sql else conn.execute("SELECT * FROM evidence_runs ORDER BY started_at DESC LIMIT 100").fetchall()
+        winners = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, min(lim, 5000))).fetchall() if where_sql else conn.execute("SELECT * FROM evidence_winner_profiles ORDER BY trade_date DESC, winner_change_pct DESC LIMIT ?", (min(lim, 5000),)).fetchall()
+        bars = conn.execute(f"SELECT * FROM evidence_intraday_bars {where_sql} ORDER BY trade_date DESC, symbol, bar_ts LIMIT ?", (*args, min(lim, 20000))).fetchall() if where_sql else conn.execute("SELECT * FROM evidence_intraday_bars ORDER BY trade_date DESC, symbol, bar_ts LIMIT ?", (min(lim, 20000),)).fetchall()
     return {
         "ok": True,
-        "version": "evidence_collection_v1_passive",
+        "version": "evidence_collection_v2_passive",
         "week_key": wk,
         "trade_date": d,
         "exported_at": _now_text(),
         "snapshots_count": len(snaps),
         "daily_big_movers_count": len(movers),
+        "winner_profiles_count": len(winners),
+        "intraday_bars_count": len(bars),
         "runs_count": len(runs),
         "snapshots": _rows_to_dicts(snaps),
         "daily_big_movers": _rows_to_dicts(movers),
+        "winner_profiles": _rows_to_dicts(winners),
+        "intraday_bars": _rows_to_dicts(bars),
         "runs": _rows_to_dicts(runs),
     }
 
@@ -939,13 +1722,17 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     base = f"{EVIDENCE_GITHUB_ARCHIVE_PATH}/{wk}"
     json_path = f"{base}/{d}_evidence.json"
     summary_path = f"{base}/{d}_summary.json"
+    winners_path = f"{base}/{d}_winner_profiles.json"
+    readiness_path = f"{base}/{d}_pattern_readiness.json"
     results = {
         "ok": False,
         "week_key": wk,
         "trade_date": d,
-        "paths": {"json": json_path, "summary": summary_path},
+        "paths": {"json": json_path, "summary": summary_path, "winner_profiles": winners_path, "pattern_readiness": readiness_path},
         "json": push_json_file(json_path, data, message=f"Sync evidence data {wk} {d}"),
         "summary": push_json_file(summary_path, weekly_evidence_summary(week_key=wk, format="json"), message=f"Sync evidence summary {wk} {d}"),
+        "winner_profiles": push_json_file(winners_path, winner_profiles_report(week_key=wk, trade_date=d, format="json"), message=f"Sync winner profiles {wk} {d}"),
+        "pattern_readiness": push_json_file(readiness_path, pattern_readiness_report(week_key=wk, format="json"), message=f"Sync evidence pattern readiness {wk}"),
     }
     if include_csv:
         csv_path = f"{base}/{d}_evidence.csv"
@@ -997,7 +1784,14 @@ def _worker_loop() -> None:
             if session in {"pre_market", "regular", "after_hours"} and now - last_collect_ts >= interval:
                 collect_evidence_snapshot(mode="background", include_big_movers=True, sync_to_github=False)
                 last_collect_ts = now
+            if _daily_winner_backfill_due(session):
+                backfill = backfill_daily_winner_profiles(start_date=_today_text(), end_date=_today_text(), days_back=1, threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT, limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT, store_bars=True)
+                _mark_daily_winner_backfill(backfill)
             if _daily_auto_sync_due(session):
+                # Run a final same-day winner backfill before GitHub sync, but never delete Railway data.
+                if EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED:
+                    backfill = backfill_daily_winner_profiles(start_date=_today_text(), end_date=_today_text(), days_back=1, threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT, limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT, store_bars=True)
+                    _mark_daily_winner_backfill(backfill)
                 sync = sync_evidence_to_github(week_key=_current_week_key(), trade_date=_today_text(), include_csv=True)
                 _mark_daily_auto_sync(sync)
             time.sleep(60)
@@ -1023,3 +1817,4 @@ def start_evidence_background_worker() -> dict:
         return {"ok": True, "started": True, "enabled": True}
     except Exception as exc:
         return {"ok": False, "started": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
