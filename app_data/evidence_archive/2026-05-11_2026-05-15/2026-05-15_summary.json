@@ -1,0 +1,30 @@
+{
+  "intraday_bars": {
+    "c": 0,
+    "symbols": 0
+  },
+  "notes": {
+    "next_weekend_use": "تحليل ما سبق الرابحين والخاسرين وتحديد الأنماط المتكررة.",
+    "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف."
+  },
+  "ok": true,
+  "sessions": [],
+  "summary": {
+    "avg_change_pct": null,
+    "avg_dollar_volume": null,
+    "big_mover_snapshots": null,
+    "no_chase_count": null,
+    "reconfirm_count": null,
+    "snapshots": 0,
+    "symbols": 0,
+    "tool_snapshots": null
+  },
+  "top_movers_observed": [],
+  "version": "evidence_collection_v2_passive",
+  "week_key": "2026-05-11_2026-05-15",
+  "winner_patterns": [],
+  "winner_profiles": {
+    "c": 0,
+    "symbols": 0
+  }
+}
