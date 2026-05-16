@@ -1,0 +1,25 @@
+{
+  "data_gaps": [],
+  "decision": "العينة غير كافية بعد",
+  "gap_quality_groups": [],
+  "generated_at": "2026-05-16 15:36:26",
+  "hypotheses": [],
+  "loss_pattern_groups": [],
+  "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. الغرض التأكد أن جمع الأسبوع القادم يسجل كل ما نحتاجه قبل اعتماد أي نمط.",
+  "ok": true,
+  "summary": {
+    "low_tradability_winners": 0,
+    "missing_historical_visibility": 0,
+    "source_unknown_winners": 0,
+    "tracking_loss_rows": 0,
+    "tracking_rows": 16,
+    "tracking_success_rows": 0,
+    "winner_profiles": 0
+  },
+  "tradability_groups": [],
+  "trade_date": "2026-05-16",
+  "version": "pattern_lab_v1_read_only",
+  "visibility_groups": [],
+  "week_key": "2026-05-18_2026-05-22",
+  "winner_pattern_groups": []
+}
