@@ -146,6 +146,9 @@ from app.evidence_collector import (
     collect_evidence_snapshot,
     daily_winners_report,
     weekly_evidence_summary,
+    backfill_daily_winner_profiles,
+    winner_profiles_report,
+    pattern_readiness_report,
     export_evidence_json,
     export_evidence_csv,
     sync_evidence_to_github,
@@ -2692,6 +2695,35 @@ def evidence_daily_winners_endpoint(trade_date: str = "", format: str = "json", 
 @app.get("/evidence/weekly-summary")
 def evidence_weekly_summary_endpoint(week_key: str = "", format: str = "json", limit: int = 50):
     result = weekly_evidence_summary(week_key=week_key or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.post("/evidence/backfill-winners")
+@app.get("/evidence/backfill-winners")
+def evidence_backfill_winners_endpoint(start_date: str = "", end_date: str = "", days_back: int = 5, threshold_pct: float = 10.0, limit_per_day: int = 120, store_bars: bool = True):
+    return backfill_daily_winner_profiles(
+        start_date=start_date or None,
+        end_date=end_date or None,
+        days_back=days_back,
+        threshold_pct=threshold_pct,
+        limit_per_day=limit_per_day,
+        store_bars=bool(store_bars),
+    )
+
+
+@app.get("/evidence/winner-profiles")
+def evidence_winner_profiles_endpoint(week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 120):
+    result = winner_profiles_report(week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/evidence/pattern-readiness")
+def evidence_pattern_readiness_endpoint(week_key: str = "", format: str = "json"):
+    result = pattern_readiness_report(week_key=week_key or None, format=format)
     if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
     return result
