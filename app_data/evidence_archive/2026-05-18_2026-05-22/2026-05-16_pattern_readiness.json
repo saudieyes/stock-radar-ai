@@ -3,8 +3,8 @@
     "c": 0
   },
   "intraday_bars": {
-    "c": 39125,
-    "symbols": 331
+    "c": 46103,
+    "symbols": 409
   },
   "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
   "ok": true,
@@ -16,30 +16,30 @@
   },
   "top_winner_patterns": [
     {
-      "cases": 134,
-      "likely_pattern": "pre_market_gap_then_followthrough"
-    },
-    {
-      "cases": 118,
+      "cases": 154,
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
-      "cases": 57,
+      "cases": 153,
+      "likely_pattern": "pre_market_gap_then_followthrough"
+    },
+    {
+      "cases": 65,
       "likely_pattern": "open_gap_big_mover"
     },
     {
-      "cases": 51,
+      "cases": 65,
       "likely_pattern": "first_hour_liquidity_acceleration"
     },
     {
-      "cases": 40,
+      "cases": 51,
       "likely_pattern": "unclassified_winner"
     }
   ],
   "version": "pattern_readiness_v2",
   "week_key": "2026-05-18_2026-05-22",
   "winner_profiles": {
-    "c": 400,
-    "symbols": 336
+    "c": 488,
+    "symbols": 414
   }
 }
