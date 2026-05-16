@@ -164,6 +164,19 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+
+
+def _ensure_table_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    """Add missing columns to an existing SQLite table without destructive migrations."""
+    try:
+        existing = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, ddl in (columns or {}).items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    except Exception:
+        # Evidence is passive. A migration hiccup must not break the live radar.
+        pass
+
 def init_evidence_db() -> bool:
     """Create Evidence Collection tables. Safe to call repeatedly."""
     global _INITIALIZED
@@ -311,6 +324,25 @@ def init_evidence_db() -> bool:
                 )
                 """
             )
+
+            _ensure_table_columns(conn, "evidence_winner_profiles", {
+                "tradability_score": "REAL NOT NULL DEFAULT 0",
+                "tradability_bucket": "TEXT NOT NULL DEFAULT ''",
+                "tradability_reasons_json": "TEXT NOT NULL DEFAULT '[]'",
+                "gap_quality_class": "TEXT NOT NULL DEFAULT ''",
+                "gap_quality_reasons_json": "TEXT NOT NULL DEFAULT '[]'",
+                "historical_visibility_json": "TEXT NOT NULL DEFAULT '{}'",
+                "visibility_confidence_label": "TEXT NOT NULL DEFAULT ''",
+                "first_source_seen_at": "TEXT NOT NULL DEFAULT ''",
+                "first_source_gain_pct": "REAL NOT NULL DEFAULT 0",
+                "first_deep_seen_at": "TEXT NOT NULL DEFAULT ''",
+                "first_watch_seen_at": "TEXT NOT NULL DEFAULT ''",
+                "first_cautious_seen_at": "TEXT NOT NULL DEFAULT ''",
+                "first_strong_seen_at": "TEXT NOT NULL DEFAULT ''",
+                "best_tool_stage": "TEXT NOT NULL DEFAULT ''",
+                "promotion_delay_minutes": "REAL NOT NULL DEFAULT 0",
+            })
+
 
             conn.execute(
                 """
@@ -1101,6 +1133,225 @@ def _visibility_from_evidence(sym: str, trade_date: str | None = None) -> dict:
     return _visibility_from_current_tool(symbol)
 
 
+
+
+def _minutes_between_text(a: str, b: str) -> float:
+    try:
+        if not a or not b:
+            return 0.0
+        da = datetime.strptime(str(a)[:19], "%Y-%m-%d %H:%M:%S")
+        db = datetime.strptime(str(b)[:19], "%Y-%m-%d %H:%M:%S")
+        return safe_round((db - da).total_seconds() / 60.0, 1)
+    except Exception:
+        return 0.0
+
+
+def _first_timeline_event(events: list[dict], event_type: str) -> dict:
+    wanted = str(event_type or "")
+    matches = [e for e in events or [] if str(e.get("event_type") or "") == wanted]
+    if not matches:
+        return {}
+    matches.sort(key=lambda x: str(x.get("first_seen_at") or ""))
+    return matches[0]
+
+
+def _historical_visibility_for_symbol(symbol: str, week_key: str = "", trade_date: str = "") -> dict:
+    """Resolve whether a winner was seen in source/tool history, not only the latest snapshot.
+
+    This addresses the user's concern that `tool_seen=0` may only mean not present in the
+    last saved radar snapshot. We read the Missed Opportunities timeline/source tables when
+    available, then fall back to Evidence/current snapshot.
+    """
+    sym = _clean_symbol(symbol)
+    wk = str(week_key or _current_week_key() or "")
+    base = _visibility_from_evidence(sym, trade_date=trade_date or None)
+    result = {
+        "symbol": sym,
+        "week_key": wk,
+        "trade_date": str(trade_date or "")[:10],
+        "tool_seen": bool(base.get("tool_seen")),
+        "source_seen": bool(base.get("source_seen")),
+        "tool_stage": str(base.get("tool_stage") or ""),
+        "best_tool_stage": str(base.get("tool_stage") or ""),
+        "first_seen_at": str(base.get("first_seen_at") or ""),
+        "first_seen_change_pct": _safe_float(base.get("first_seen_change_pct"), 0),
+        "first_source_seen_at": "",
+        "first_source_gain_pct": 0.0,
+        "first_deep_seen_at": "",
+        "first_watch_seen_at": "",
+        "first_cautious_seen_at": "",
+        "first_strong_seen_at": "",
+        "promotion_delay_minutes": 0.0,
+        "visibility_confidence_label": "current_or_evidence_snapshot_only",
+        "timeline_events": {},
+        "source_candidate": {},
+        "seen_summary": {},
+    }
+    if not (SQLITE_ENABLED and sym):
+        return result
+    try:
+        with _connect() as conn:
+            timeline = []
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM missed_symbol_timeline WHERE week_key=? AND symbol=? ORDER BY first_seen_at ASC",
+                    (wk, sym),
+                ).fetchall()
+                timeline = [dict(r) for r in rows or []]
+            except Exception:
+                timeline = []
+            src = {}
+            try:
+                r = conn.execute("SELECT * FROM missed_source_candidates WHERE week_key=? AND symbol=?", (wk, sym)).fetchone()
+                src = dict(r) if r else {}
+            except Exception:
+                src = {}
+            seen = {}
+            try:
+                r = conn.execute("SELECT * FROM missed_seen_symbols WHERE week_key=? AND symbol=?", (wk, sym)).fetchone()
+                seen = dict(r) if r else {}
+            except Exception:
+                seen = {}
+    except Exception:
+        return result
+
+    by_type: dict[str, dict] = {}
+    for ev in timeline or []:
+        et = str(ev.get("event_type") or "")
+        if et and et not in by_type:
+            by_type[et] = ev
+    source_ev = by_type.get("source") or {}
+    deep_ev = by_type.get("deep_universe") or {}
+    watch_ev = by_type.get("watch") or {}
+    cautious_ev = by_type.get("cautious") or {}
+    strong_ev = by_type.get("strong") or {}
+    gray_ev = by_type.get("gray") or {}
+    display_ev = by_type.get("display_any") or {}
+
+    source_seen = bool(source_ev or deep_ev or src)
+    tool_seen = bool(display_ev or strong_ev or cautious_ev or watch_ev or gray_ev or seen or result.get("tool_seen"))
+    stage = "not_seen"
+    if strong_ev:
+        stage = "strong"
+    elif cautious_ev:
+        stage = "cautious"
+    elif watch_ev:
+        stage = "watch"
+    elif gray_ev:
+        stage = "gray"
+    elif display_ev or seen:
+        stage = str((seen or {}).get("best_category_key") or (display_ev or {}).get("category_key") or "displayed")
+    elif deep_ev:
+        stage = "deep_universe"
+    elif source_ev or src:
+        stage = "source_only"
+    elif result.get("tool_stage"):
+        stage = result.get("tool_stage")
+
+    first_tool = strong_ev or cautious_ev or watch_ev or gray_ev or display_ev or {}
+    first_source_at = str((source_ev or deep_ev or src).get("first_seen_at") or "")
+    first_tool_at = str(first_tool.get("first_seen_at") or seen.get("first_seen_at") or result.get("first_seen_at") or "")
+    result.update({
+        "tool_seen": tool_seen,
+        "source_seen": source_seen,
+        "tool_stage": stage,
+        "best_tool_stage": stage,
+        "first_seen_at": first_tool_at,
+        "first_seen_change_pct": _safe_float(first_tool.get("first_gain_pct") or seen.get("first_price") or result.get("first_seen_change_pct"), 0),
+        "first_source_seen_at": first_source_at,
+        "first_source_gain_pct": _safe_float((source_ev or deep_ev or src).get("first_gain_pct") or (source_ev or deep_ev or src).get("change_pct"), 0),
+        "first_deep_seen_at": str(deep_ev.get("first_seen_at") or ""),
+        "first_watch_seen_at": str(watch_ev.get("first_seen_at") or ""),
+        "first_cautious_seen_at": str(cautious_ev.get("first_seen_at") or ""),
+        "first_strong_seen_at": str(strong_ev.get("first_seen_at") or ""),
+        "promotion_delay_minutes": _minutes_between_text(first_source_at, first_tool_at),
+        "visibility_confidence_label": "historical_timeline" if timeline or src or seen else result.get("visibility_confidence_label"),
+        "timeline_events": {k: {"first_seen_at": v.get("first_seen_at"), "first_gain_pct": v.get("first_gain_pct"), "first_rank": v.get("first_rank"), "category": v.get("category")} for k, v in by_type.items()},
+        "source_candidate": {"candidate_stage": src.get("candidate_stage"), "source_score": src.get("source_score"), "discovery_rank": src.get("discovery_rank"), "change_pct": src.get("change_pct"), "dollar_volume": src.get("dollar_volume")} if src else {},
+        "seen_summary": {"best_category": seen.get("best_category"), "best_category_key": seen.get("best_category_key"), "times_seen": seen.get("times_seen"), "max_quality": seen.get("max_quality")} if seen else {},
+    })
+    return result
+
+
+def _classify_tradability(row: dict) -> tuple[float, str, list[str]]:
+    """Separate practical/tradable winners from micro-cap/warrant-like outliers.
+
+    This prevents the future pattern learner from over-learning from 40% moves on
+    tiny, illiquid, or special-ticker symbols that a normal execution plan would avoid.
+    """
+    sym = _clean_symbol(row.get("symbol"))
+    price = _safe_float(row.get("day_close") or row.get("day_open") or row.get("previous_close"), 0)
+    dollar = _safe_float(row.get("day_dollar_volume"), 0)
+    volume = _safe_float(row.get("day_volume"), 0)
+    change = _safe_float(row.get("winner_change_pct"), 0)
+    gap = abs(_safe_float(row.get("gap_pct"), 0))
+    score = 100.0
+    reasons: list[str] = []
+    if price <= 0:
+        score -= 25; reasons.append("لا يوجد سعر كافٍ لتقييم قابلية التداول")
+    elif price < 1:
+        score -= 42; reasons.append("سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر")
+    elif price < 2:
+        score -= 24; reasons.append("سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة")
+    elif price < 5:
+        score -= 10; reasons.append("سعر منخفض نسبيًا")
+    if dollar <= 0:
+        score -= 18; reasons.append("حجم الدولار غير متوفر")
+    elif dollar < 1_000_000:
+        score -= 36; reasons.append("حجم الدولار ضعيف جدًا")
+    elif dollar < 5_000_000:
+        score -= 18; reasons.append("حجم الدولار متوسط/منخفض")
+    if volume and volume < 250_000:
+        score -= 14; reasons.append("حجم الأسهم المتداولة منخفض")
+    # Simple special-symbol heuristic. Do not block, only tag.
+    if sym.endswith(("W", "WS", "WT", "U", "R", "RT")) or ".WS" in sym or ".W" in sym:
+        score -= 25; reasons.append("رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية")
+    if change >= 100:
+        score -= 10; reasons.append("صعود شديد جدًا؛ قد يكون عينة مضاربية غير ممثلة")
+    if gap >= 25:
+        score -= 8; reasons.append("قاب كبير جدًا؛ يحتاج فصل جودة القاب")
+    score = max(0.0, min(100.0, safe_round(score, 1)))
+    if score >= 72:
+        bucket = "tradable_core"
+    elif score >= 48:
+        bucket = "tradable_but_high_risk"
+    else:
+        bucket = "micro_or_special_high_risk"
+    return score, bucket, reasons[:8]
+
+
+def _classify_gap_quality(row: dict, intraday: dict | None = None) -> tuple[str, list[str]]:
+    intraday = intraday or {}
+    gap = _safe_float(row.get("gap_pct"), 0)
+    pre = _safe_float(row.get("pre_market_move_pct"), 0)
+    first15 = _safe_float(row.get("first_15m_gain_pct"), 0)
+    first30 = _safe_float(row.get("first_30m_gain_pct"), 0)
+    first60 = _safe_float(row.get("first_60m_gain_pct"), 0)
+    persist = _safe_float(row.get("liquidity_persistence_score"), 0)
+    accel = _safe_float(row.get("liquidity_acceleration_score"), 0)
+    fade = int(row.get("volume_fade_flag") or 0)
+    reasons: list[str] = []
+    if abs(gap) < 2:
+        if persist >= 55 or first30 >= 3 or accel >= 45:
+            return "no_gap_steady_followthrough", ["لا يوجد قاب كبير؛ الحركة اعتمدت أكثر على استمرار/تسارع داخل الجلسة"]
+        return "no_gap_needs_context", ["لا يوجد قاب كبير لكن المتابعة تحتاج سياقًا إضافيًا"]
+    reasons.append(f"gap {safe_round(gap, 2)}%")
+    if pre >= 3:
+        reasons.append(f"حركة قبل الافتتاح {safe_round(pre, 2)}%")
+    if gap >= 12 and (fade or persist < 45 or first30 <= 0):
+        reasons.append("قاب كبير مع ضعف متابعة/سيولة؛ خطر مطاردة")
+        return "gap_chase_or_failed", reasons
+    if gap >= 5 and (first30 >= 2 or first60 >= 4) and persist >= 50 and not fade:
+        reasons.append("القاب تبعه استمرار وسعر/سيولة مقبولة")
+        return "healthy_gap_followthrough", reasons
+    if gap >= 5 and pre >= 3 and (first15 > 0 or first30 > 0):
+        reasons.append("قاب سبقه نشاط قبل الافتتاح لكنه يحتاج تأكيد استمرار")
+        return "pre_gap_build_needs_confirmation", reasons
+    if gap >= 5:
+        reasons.append("قاب يحتاج تأكيد بعد الافتتاح قبل اعتباره نمطًا قابلًا للدخول")
+        return "gap_needs_confirmation", reasons
+    return "small_gap_or_contextual", reasons or ["قاب صغير/متوسط يحتاج سياق السيولة"]
+
 def _classify_winner_profile(row: dict, intraday: dict) -> tuple[str, str, str]:
     gap = _safe_float(row.get("gap_pct"), 0)
     change = _safe_float(row.get("winner_change_pct"), 0)
@@ -1153,7 +1404,11 @@ def _upsert_winner_profile(profile: dict) -> None:
         "day_volume", "day_dollar_volume", "gap_pct", "open_to_high_pct", "close_vs_open_pct", "pre_market_move_pct", "pre_market_volume",
         "first_15m_gain_pct", "first_30m_gain_pct", "first_60m_gain_pct", "first_30m_volume", "first_60m_volume", "last_30m_volume",
         "volume_fade_flag", "liquidity_acceleration_score", "liquidity_persistence_score", "gap_followthrough_label", "move_quality_label", "likely_pattern",
-        "tool_seen", "tool_stage", "tool_first_seen_at", "tool_first_seen_change_pct", "source_seen", "data_quality", "profile_json", "created_at", "updated_at"
+        "tool_seen", "tool_stage", "tool_first_seen_at", "tool_first_seen_change_pct", "source_seen",
+        "tradability_score", "tradability_bucket", "tradability_reasons_json", "gap_quality_class", "gap_quality_reasons_json",
+        "historical_visibility_json", "visibility_confidence_label", "first_source_seen_at", "first_source_gain_pct", "first_deep_seen_at",
+        "first_watch_seen_at", "first_cautious_seen_at", "first_strong_seen_at", "best_tool_stage", "promotion_delay_minutes",
+        "data_quality", "profile_json", "created_at", "updated_at"
     ]
     placeholders = ",".join(["?"] * len(cols))
     updates = ",".join([f"{c}=excluded.{c}" for c in cols if c not in {"week_key", "trade_date", "symbol", "created_at"}])
@@ -1233,7 +1488,7 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
         for rank, item in enumerate(candidates, start=1):
             sym = item["symbol"]
             intraday = _fetch_polygon_intraday_summary(sym, trade_date=d, previous_close=item.get("previous_close", 0), day_open=item.get("open", 0), run_id=run_id, store_bars=bool(store_bars))
-            visibility = _visibility_from_evidence(sym, trade_date=d)
+            visibility = _historical_visibility_for_symbol(sym, week_key=wk, trade_date=d)
             base = {
                 "week_key": wk,
                 "trade_date": d,
@@ -1269,12 +1524,29 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
                 "tool_first_seen_at": str(visibility.get("first_seen_at") or ""),
                 "tool_first_seen_change_pct": _safe_float(visibility.get("first_seen_change_pct"), 0),
                 "source_seen": 1 if visibility.get("source_seen") else 0,
+                "historical_visibility_json": _json_dumps(visibility),
+                "visibility_confidence_label": str(visibility.get("visibility_confidence_label") or ""),
+                "first_source_seen_at": str(visibility.get("first_source_seen_at") or ""),
+                "first_source_gain_pct": _safe_float(visibility.get("first_source_gain_pct"), 0),
+                "first_deep_seen_at": str(visibility.get("first_deep_seen_at") or ""),
+                "first_watch_seen_at": str(visibility.get("first_watch_seen_at") or ""),
+                "first_cautious_seen_at": str(visibility.get("first_cautious_seen_at") or ""),
+                "first_strong_seen_at": str(visibility.get("first_strong_seen_at") or ""),
+                "best_tool_stage": str(visibility.get("best_tool_stage") or visibility.get("tool_stage") or ""),
+                "promotion_delay_minutes": _safe_float(visibility.get("promotion_delay_minutes"), 0),
                 "data_quality": "ok" if intraday.get("ok") and intraday.get("bars", 0) else "daily_only_or_no_intraday",
             }
             quality, pattern, quality_label = _classify_winner_profile(base, intraday)
             base["move_quality_label"] = quality
             base["likely_pattern"] = pattern
-            base["profile_json"] = _json_dumps({"quality_label": quality_label, "polygon_intraday": intraday, "tool_visibility": visibility, "raw_daily": item.get("raw", {})})
+            tradability_score, tradability_bucket, tradability_reasons = _classify_tradability(base)
+            gap_quality_class, gap_quality_reasons = _classify_gap_quality(base, intraday)
+            base["tradability_score"] = tradability_score
+            base["tradability_bucket"] = tradability_bucket
+            base["tradability_reasons_json"] = _json_dumps(tradability_reasons)
+            base["gap_quality_class"] = gap_quality_class
+            base["gap_quality_reasons_json"] = _json_dumps(gap_quality_reasons)
+            base["profile_json"] = _json_dumps({"quality_label": quality_label, "polygon_intraday": intraday, "tool_visibility": visibility, "tradability": {"score": tradability_score, "bucket": tradability_bucket, "reasons": tradability_reasons}, "gap_quality": {"class": gap_quality_class, "reasons": gap_quality_reasons}, "raw_daily": item.get("raw", {})})
             _upsert_winner_profile(base)
             day["profiles"] += 1
             stored = _safe_int(intraday.get("bars_stored"), 0)
@@ -1320,7 +1592,7 @@ def winner_profiles_report(week_key: str | None = None, trade_date: str | None =
         lines.append("أكبر الرابحين المحللين:")
         for x in items[:20]:
             tool = "ظهر في الأداة" if int(x.get("tool_seen") or 0) else "لم يظهر في الأداة/غير مؤكد"
-            lines.append(f"- {x.get('symbol')}: +{safe_round(x.get('winner_change_pct'),2)}% | gap {safe_round(x.get('gap_pct'),2)}% | {x.get('likely_pattern') or '-'} | {tool}")
+            lines.append(f"- {x.get('symbol')}: +{safe_round(x.get('winner_change_pct'),2)}% | gap {safe_round(x.get('gap_pct'),2)}% | {x.get('likely_pattern') or '-'} | {x.get('gap_quality_class') or '-'} | {x.get('tradability_bucket') or '-'} | {tool}")
         return "\n".join(lines)
     return result
 
@@ -1941,6 +2213,228 @@ def export_evidence_csv(week_key: str | None = None, trade_date: str | None = No
     return output.getvalue()
 
 
+
+
+def _query_tracking_rows_for_pattern_lab(week_key: str) -> list[dict]:
+    if not SQLITE_ENABLED:
+        return []
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM tracking_signals WHERE week_key=? ORDER BY first_seen_at DESC LIMIT 5000",
+                (str(week_key or ""),),
+            ).fetchall()
+        return _rows_to_dicts(rows)
+    except Exception:
+        return []
+
+
+def _tracking_loss_signature(row: dict) -> str:
+    tags = _json_loads(row.get("risk_tags_json"), []) or []
+    if not isinstance(tags, list):
+        tags = []
+    plan = str(row.get("plan_family") or "unknown")
+    parts = [plan]
+    if _safe_float(row.get("nearest_resistance_distance_pct"), 0) and _safe_float(row.get("nearest_resistance_distance_pct"), 0) <= 1.5:
+        parts.append("near_resistance")
+    if _safe_float(row.get("distance_to_52w_high_pct"), 0) and abs(_safe_float(row.get("distance_to_52w_high_pct"), 0)) <= 3:
+        parts.append("near_52w_high")
+    if any("السيولة" in str(t) and ("لم تستمر" in str(t) or "ضعف" in str(t)) for t in tags):
+        parts.append("liquidity_not_persistent")
+    if any("كسر الدعم" in str(t) for t in tags):
+        parts.append("support_break")
+    if _safe_float(row.get("volatility_pct"), 0) >= 5:
+        parts.append("high_volatility")
+    return " | ".join(parts)
+
+
+def _winner_signature(row: dict) -> str:
+    return " | ".join([
+        str(row.get("likely_pattern") or "unclassified_winner"),
+        str(row.get("gap_quality_class") or "gap_unknown"),
+        str(row.get("tradability_bucket") or "tradability_unknown"),
+    ])
+
+
+def pattern_lab_report(week_key: str | None = None, trade_date: str | None = None, format: str = "json", limit: int = 40) -> dict | str:
+    """Exploratory Pattern Lab report.
+
+    Read-only. It does not change scoring/ranking. It tells us whether the current
+    Evidence reports are rich enough to support next-week pattern decisions and lists
+    the missing data before we rely on any pattern.
+    """
+    wk = str(week_key or _current_week_key() or "")
+    td = str(trade_date or "")[:10]
+    init_evidence_db()
+    where = []
+    args: list[Any] = []
+    if wk:
+        where.append("week_key=?")
+        args.append(wk)
+    if td:
+        where.append("trade_date=?")
+        args.append(td)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    lim = max(5, min(int(limit or 40), 200))
+    with _connect() as conn:
+        winners = _rows_to_dicts(conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT 5000", tuple(args)).fetchall())
+        pattern_rows = _rows_to_dicts(conn.execute(
+            f"""
+            SELECT likely_pattern, gap_quality_class, tradability_bucket,
+                   COUNT(*) AS cases,
+                   AVG(winner_change_pct) AS avg_gain,
+                   AVG(gap_pct) AS avg_gap,
+                   AVG(first_30m_gain_pct) AS avg_first30,
+                   AVG(liquidity_acceleration_score) AS avg_liq_accel,
+                   AVG(liquidity_persistence_score) AS avg_liq_persist,
+                   SUM(tool_seen) AS tool_seen_count,
+                   SUM(source_seen) AS source_seen_count
+            FROM evidence_winner_profiles {where_sql}
+            GROUP BY likely_pattern, gap_quality_class, tradability_bucket
+            ORDER BY cases DESC, avg_gain DESC
+            LIMIT 30
+            """,
+            tuple(args),
+        ).fetchall())
+        tradability_rows = _rows_to_dicts(conn.execute(
+            f"SELECT tradability_bucket, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain, AVG(day_dollar_volume) AS avg_dollar_volume FROM evidence_winner_profiles {where_sql} GROUP BY tradability_bucket ORDER BY cases DESC",
+            tuple(args),
+        ).fetchall())
+        gap_rows = _rows_to_dicts(conn.execute(
+            f"SELECT gap_quality_class, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain, AVG(gap_pct) AS avg_gap, AVG(first_30m_gain_pct) AS avg_first30, AVG(liquidity_persistence_score) AS avg_liq_persist FROM evidence_winner_profiles {where_sql} GROUP BY gap_quality_class ORDER BY cases DESC",
+            tuple(args),
+        ).fetchall())
+        visibility_rows = _rows_to_dicts(conn.execute(
+            f"SELECT visibility_confidence_label, best_tool_stage, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain FROM evidence_winner_profiles {where_sql} GROUP BY visibility_confidence_label, best_tool_stage ORDER BY cases DESC LIMIT 30",
+            tuple(args),
+        ).fetchall())
+    tracking = _query_tracking_rows_for_pattern_lab(wk)
+    losses = [r for r in tracking if str(r.get("outcome_group") or "").lower() == "loss" or str(r.get("status") or "") in {"stopped"}]
+    successes = [r for r in tracking if str(r.get("outcome_group") or "").lower() == "success" or str(r.get("status") or "") in {"target_hit", "above_target"}]
+    loss_groups: dict[str, dict] = {}
+    for r in losses:
+        sig = _tracking_loss_signature(r)
+        item = loss_groups.setdefault(sig, {"signature": sig, "cases": 0, "symbols": set(), "avg_max_loss_pct": 0.0, "avg_max_gain_pct": 0.0})
+        item["cases"] += 1
+        item["symbols"].add(str(r.get("symbol") or ""))
+        item["avg_max_loss_pct"] += _safe_float(r.get("max_loss_pct"), 0)
+        item["avg_max_gain_pct"] += _safe_float(r.get("max_gain_pct"), 0)
+    loss_summary = []
+    for item in loss_groups.values():
+        cases = max(1, int(item["cases"]))
+        loss_summary.append({
+            "signature": item["signature"],
+            "cases": cases,
+            "unique_symbols": len([s for s in item["symbols"] if s]),
+            "avg_max_loss_pct": safe_round(item["avg_max_loss_pct"] / cases, 2),
+            "avg_max_gain_pct": safe_round(item["avg_max_gain_pct"] / cases, 2),
+        })
+    loss_summary = sorted(loss_summary, key=lambda x: x["cases"], reverse=True)[:20]
+
+    # Data completeness / missing items.
+    total = len(winners)
+    missing_historical_visibility = len([w for w in winners if str(w.get("visibility_confidence_label") or "") != "historical_timeline"])
+    low_tradability = len([w for w in winners if str(w.get("tradability_bucket") or "") == "micro_or_special_high_risk"])
+    gap_unknown = len([w for w in winners if not str(w.get("gap_quality_class") or "")])
+    source_unknown = len([w for w in winners if not int(w.get("source_seen") or 0) and not str(w.get("first_source_seen_at") or "")])
+    data_gaps = []
+    if missing_historical_visibility:
+        data_gaps.append(f"{missing_historical_visibility} رابحًا لا يملك ربطًا تاريخيًا مؤكدًا مع المنبع/الظهور؛ نحتاج first_source/watch/cautious/strong خلال الأسبوع.")
+    if low_tradability:
+        data_gaps.append(f"{low_tradability} رابحًا من عينة عالية المخاطر/منخفضة السيولة أو رموز خاصة؛ يجب فصلها عن الأنماط النظيفة.")
+    if gap_unknown:
+        data_gaps.append(f"{gap_unknown} رابحًا لا يملك تصنيف جودة قاب واضح بعد.")
+    if source_unknown:
+        data_gaps.append(f"{source_unknown} رابحًا غير مؤكد هل دخل المنبع تاريخيًا أم لا؛ لا تعتمد على آخر snapshot فقط.")
+    if not tracking:
+        data_gaps.append("لا توجد بيانات Tracking كافية للمقارنة مع الخاسرين في نفس الأسبوع.")
+
+    hypotheses = []
+    for p in pattern_rows[:10]:
+        pattern = str(p.get("likely_pattern") or "unclassified_winner")
+        gap_cls = str(p.get("gap_quality_class") or "gap_unknown")
+        trad = str(p.get("tradability_bucket") or "tradability_unknown")
+        cases = int(p.get("cases") or 0)
+        if cases < 3:
+            continue
+        label = "فرضية تحتاج تأكيد"
+        if trad == "tradable_core" and gap_cls in {"no_gap_steady_followthrough", "healthy_gap_followthrough"} and _safe_float(p.get("avg_liq_persist"), 0) >= 50:
+            label = "فرضية رابحة أولية قابلة للدراسة"
+        if gap_cls == "gap_chase_or_failed" or trad == "micro_or_special_high_risk":
+            label = "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين"
+        hypotheses.append({
+            "pattern": pattern,
+            "gap_quality_class": gap_cls,
+            "tradability_bucket": trad,
+            "cases": cases,
+            "avg_gain": safe_round(p.get("avg_gain"), 2),
+            "avg_gap": safe_round(p.get("avg_gap"), 2),
+            "avg_first30": safe_round(p.get("avg_first30"), 2),
+            "avg_liq_persist": safe_round(p.get("avg_liq_persist"), 1),
+            "tool_seen_count": int(p.get("tool_seen_count") or 0),
+            "source_seen_count": int(p.get("source_seen_count") or 0),
+            "label": label,
+        })
+
+    result = {
+        "ok": True,
+        "version": "pattern_lab_v1_read_only",
+        "week_key": wk,
+        "trade_date": td,
+        "generated_at": _now_text(),
+        "summary": {
+            "winner_profiles": total,
+            "tracking_rows": len(tracking),
+            "tracking_success_rows": len(successes),
+            "tracking_loss_rows": len(losses),
+            "missing_historical_visibility": missing_historical_visibility,
+            "low_tradability_winners": low_tradability,
+            "source_unknown_winners": source_unknown,
+        },
+        "winner_pattern_groups": pattern_rows[:lim],
+        "tradability_groups": tradability_rows,
+        "gap_quality_groups": gap_rows,
+        "visibility_groups": visibility_rows,
+        "loss_pattern_groups": loss_summary,
+        "hypotheses": hypotheses[:lim],
+        "data_gaps": data_gaps,
+        "decision": "جاهز لتحليل فرضيات أولية فقط" if total >= 50 else "العينة غير كافية بعد",
+        "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. الغرض التأكد أن جمع الأسبوع القادم يسجل كل ما نحتاجه قبل اعتماد أي نمط.",
+    }
+    if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
+        lines = [
+            "تقرير Pattern Lab V1 — فرضيات فقط، بلا تغيير في السكور",
+            f"الأسبوع: {wk} | التاريخ: {td or 'كل الأسبوع'}",
+            f"ملفات الرابحين: {total} | إشارات Tracking: {len(tracking)} | خسائر Tracking: {len(losses)} | نجاحات Tracking: {len(successes)}",
+            "",
+            "أقوى فرضيات الرابحين الأولية:",
+        ]
+        if not hypotheses:
+            lines.append("لا توجد فرضيات قوية كافية بعد؛ نحتاج جمع الأسبوع القادم.")
+        for h in hypotheses[:12]:
+            lines.append(f"- {h['pattern']} / {h['gap_quality_class']} / {h['tradability_bucket']}: {h['cases']} حالة | متوسط الصعود {h['avg_gain']}% | سيولة {h['avg_liq_persist']}/100 | {h['label']}")
+        lines.append("")
+        lines.append("جودة القاب:")
+        for g in gap_rows[:10]:
+            lines.append(f"- {g.get('gap_quality_class') or 'غير مصنف'}: {g.get('cases')} حالة | متوسط الصعود {safe_round(g.get('avg_gain'),2)}% | متوسط القاب {safe_round(g.get('avg_gap'),2)}%")
+        lines.append("")
+        lines.append("قابلية التداول:")
+        for t in tradability_rows:
+            lines.append(f"- {t.get('tradability_bucket') or 'غير مصنف'}: {t.get('cases')} حالة | متوسط الصعود {safe_round(t.get('avg_gain'),2)}% | متوسط حجم الدولار {safe_round(t.get('avg_dollar_volume'),0)}")
+        if loss_summary:
+            lines.append("")
+            lines.append("أبرز أنماط الخسائر للمقارنة:")
+            for l in loss_summary[:8]:
+                lines.append(f"- {l['signature']}: {l['cases']} حالة | متوسط خسارة {l['avg_max_loss_pct']}%")
+        lines.append("")
+        lines.append("نواقص البيانات قبل اعتماد أي نمط:")
+        if not data_gaps:
+            lines.append("- لا توجد نواقص حرجة واضحة الآن، لكن نحتاج أسبوع جمع حي للتأكيد.")
+        for gap in data_gaps[:8]:
+            lines.append(f"- {gap}")
+        return "\n".join(lines)
+    return result
+
 def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool = True) -> dict:
     wk = str(week_key or _current_week_key() or "current")
     d = str(trade_date or _today_text())[:10]
@@ -1952,15 +2446,17 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     summary_path = f"{base}/{d}_summary.json"
     winners_path = f"{base}/{d}_winner_profiles.json"
     readiness_path = f"{base}/{d}_pattern_readiness.json"
+    pattern_lab_path = f"{base}/{d}_pattern_lab.json"
     results = {
         "ok": False,
         "week_key": wk,
         "trade_date": d,
-        "paths": {"json": json_path, "summary": summary_path, "winner_profiles": winners_path, "pattern_readiness": readiness_path},
+        "paths": {"json": json_path, "summary": summary_path, "winner_profiles": winners_path, "pattern_readiness": readiness_path, "pattern_lab": pattern_lab_path},
         "json": push_json_file(json_path, data, message=f"Sync evidence data {wk} {d}"),
         "summary": push_json_file(summary_path, weekly_evidence_summary(week_key=wk, format="json"), message=f"Sync evidence summary {wk} {d}"),
         "winner_profiles": push_json_file(winners_path, winner_profiles_report(week_key=wk, trade_date=d, format="json"), message=f"Sync winner profiles {wk} {d}"),
         "pattern_readiness": push_json_file(readiness_path, pattern_readiness_report(week_key=wk, format="json"), message=f"Sync evidence pattern readiness {wk}"),
+        "pattern_lab": push_json_file(pattern_lab_path, pattern_lab_report(week_key=wk, trade_date=d, format="json"), message=f"Sync evidence pattern lab {wk} {d}"),
     }
     if include_csv:
         csv_path = f"{base}/{d}_evidence.csv"
