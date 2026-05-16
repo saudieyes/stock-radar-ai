@@ -186,11 +186,17 @@ def compute_structure_guards(stock: dict) -> dict:
         score_penalty += 10
         reasons.append("السهم قريب من قمة سنوية")
 
+    close_resistance_flag = bool((0 < resistance_dist <= 1.5) or "قريب من مقاومة قوية" in risk_tags or "قريب من مقاومة" in risk_tags)
+    near_high_flag = bool("قرب من قمة تاريخية" in risk_tags or "قرب من قمة سنوية" in risk_tags or (dist_ath and abs(dist_ath) <= 3.0) or (dist_52 and abs(dist_52) <= 3.0))
     return {
         "support_label": support_label,
         "resistance_label": resistance_label,
         "score_penalty": round(score_penalty, 1),
         "reasons": reasons[:7],
+        "support_distance_pct": round(support_dist, 2),
+        "resistance_distance_pct": round(resistance_dist, 2),
+        "close_resistance_flag": close_resistance_flag,
+        "near_high_flag": near_high_flag,
     }
 
 
@@ -286,7 +292,7 @@ def compute_post_activation_guard(stock: dict, liquidity: dict, pattern: dict) -
     return {"score": score, "label": label, "status": status, "reasons": reasons[:6]}
 
 
-def compute_strong_entry_tier(stock: dict, pattern: dict, liquidity: dict, no_chase: dict, post_activation: dict) -> dict:
+def compute_strong_entry_tier(stock: dict, pattern: dict, liquidity: dict, no_chase: dict, post_activation: dict, structure: dict) -> dict:
     decision = _s(stock.get("decision"))
     quality = _f(stock.get("quality_score", 0))
     readiness = _f(stock.get("execution_readiness_score", 0))
@@ -297,10 +303,28 @@ def compute_strong_entry_tier(stock: dict, pattern: dict, liquidity: dict, no_ch
 
     reasons: list[str] = []
     if str(no_chase.get("status")) == "no_chase":
-        return {"tier": "late_no_chase", "label": "🔴 دخول قوي متأخر / لا تطارد", "rank_bonus": -36.0, "reasons": no_chase.get("reasons", [])}
-    if str(pattern.get("status")) == "high" or str(post_activation.get("status")) in {"weak", "broken"}:
-        return {"tier": "high_risk", "label": "⚠️ دخول قوي عالي المخاطرة", "rank_bonus": -22.0, "reasons": (pattern.get("reasons", []) or [])[:5]}
-    if quality >= 84 and readiness >= 62 and rr >= 1.15 and str(liquidity.get("status")) == "confirmed" and str(pattern.get("status")) in {"low", "watch"}:
+        return {"tier": "late_no_chase", "label": "🔴 دخول قوي متأخر / لا تطارد", "rank_bonus": -42.0, "reasons": no_chase.get("reasons", [])}
+    liquidity_status = str(liquidity.get("status"))
+    close_resistance = bool(structure.get("close_resistance_flag"))
+    near_high = bool(structure.get("near_high_flag"))
+    if (
+        str(pattern.get("status")) == "high"
+        or str(post_activation.get("status")) in {"weak", "broken"}
+        or liquidity_status in {"weak", "fade"}
+        or (close_resistance and near_high and liquidity_status != "confirmed")
+    ):
+        risk_reasons = []
+        risk_reasons.extend(pattern.get("reasons", []) or [])
+        if liquidity_status in {"weak", "fade"}:
+            risk_reasons.append("السيولة غير مؤكدة أو ضعفت")
+        if close_resistance:
+            risk_reasons.append("مقاومة قريبة تحتاج اختراقًا واضحًا")
+        if near_high:
+            risk_reasons.append("قرب من قمة سنوية/تاريخية يحتاج تأكيدًا أقوى")
+        if str(post_activation.get("status")) in {"weak", "broken"}:
+            risk_reasons.append("حارس ما بعد التفعيل ضعيف")
+        return {"tier": "high_risk", "label": "⚠️ دخول قوي عالي المخاطرة / يحتاج تأكيد", "rank_bonus": -34.0, "reasons": risk_reasons[:7]}
+    if quality >= 84 and readiness >= 62 and rr >= 1.15 and str(liquidity.get("status")) == "confirmed" and str(pattern.get("status")) in {"low", "watch"} and not (close_resistance and near_high):
         reasons.append("جودة عالية + جاهزية جيدة + سيولة مستمرة + لا يظهر نمط خسارة قوي")
         return {"tier": "excellent", "label": "🚀 دخول قوي ممتاز", "rank_bonus": 12.0, "reasons": reasons}
     return {"tier": "normal", "label": "✅ دخول قوي عادي", "rank_bonus": 0.0, "reasons": ["فرصة قوية لكن ليست في فئة الممتاز بعد"]}
@@ -316,7 +340,7 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
     structure = compute_structure_guards(out)
     pattern = compute_pattern_risk(out, liquidity, no_chase, structure)
     post_activation = compute_post_activation_guard(out, liquidity, pattern)
-    tier = compute_strong_entry_tier(out, pattern, liquidity, no_chase, post_activation)
+    tier = compute_strong_entry_tier(out, pattern, liquidity, no_chase, post_activation, structure)
 
     out.update({
         "intelligence_layer_version": "pattern_learning_v1_guard_only",
@@ -330,6 +354,10 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
         "support_guard_label": structure["support_label"],
         "resistance_guard_label": structure["resistance_label"],
         "structure_guard_reasons": structure.get("reasons", []),
+        "structure_resistance_distance_pct": structure.get("resistance_distance_pct", 0),
+        "structure_support_distance_pct": structure.get("support_distance_pct", 0),
+        "near_high_guard_flag": bool(structure.get("near_high_flag")),
+        "close_resistance_guard_flag": bool(structure.get("close_resistance_flag")),
         "pattern_risk_score": pattern["score"],
         "pattern_risk_label": pattern["label"],
         "pattern_risk_status": pattern["status"],
@@ -345,9 +373,13 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
 
     # Conservative display re-ranking only. No core score/classification rewrite.
     base_rank = _f(out.get("display_rank_score", out.get("quality_score", 0)), 0)
-    penalty = _f(no_chase.get("score_penalty"), 0) + min(_f(pattern.get("score"), 0) * 0.22, 22) + min(_f(structure.get("score_penalty"), 0) * 0.7, 18)
+    penalty = _f(no_chase.get("score_penalty"), 0) + min(_f(pattern.get("score"), 0) * 0.30, 30) + min(_f(structure.get("score_penalty"), 0) * 0.95, 26)
+    if str(liquidity.get("status")) in {"weak", "fade"}:
+        penalty += 14
+    if bool(structure.get("close_resistance_flag")) and bool(structure.get("near_high_flag")):
+        penalty += 16
     if str(post_activation.get("status")) in {"weak", "broken"}:
-        penalty += 8
+        penalty += 14
     adjusted = max(0.0, base_rank + _f(tier.get("rank_bonus"), 0) - penalty)
     out["display_rank_score_raw"] = round(base_rank, 2)
     out["display_rank_score"] = round(adjusted, 2)
@@ -374,6 +406,24 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
         out["owner_action"] = f"{note}: انتظر تأكيد السيولة والثبات قبل الدخول. {existing}".strip()
         if tier.get("tier") == "late_no_chase":
             out["execution_mode"] = "مراقبة إعادة دخول 👀"
+
+
+    # Clear execution guidance for non-expert users. This is display guidance only.
+    if str(liquidity.get("status")) == "confirmed" and not bool(structure.get("close_resistance_flag")) and str(post_activation.get("status")) in {"ok", "watch"}:
+        out["execution_gate_label"] = "✅ قابل للتنفيذ إذا ثبت السعر فوق الدخول"
+        out["execution_gate_status"] = "ready_with_plan"
+    elif str(liquidity.get("status")) in {"weak", "fade"}:
+        out["execution_gate_label"] = "⏳ انتظر تأكيد السيولة قبل الدخول"
+        out["execution_gate_status"] = "wait_liquidity"
+    elif bool(structure.get("close_resistance_flag")):
+        out["execution_gate_label"] = "⏳ انتظر اختراق المقاومة القريبة والثبات فوقها"
+        out["execution_gate_status"] = "wait_resistance_break"
+    elif tier.get("tier") in {"high_risk", "late_no_chase"}:
+        out["execution_gate_label"] = "⚠️ قوي فنيًا لكنه يحتاج تأكيدًا إضافيًا"
+        out["execution_gate_status"] = "needs_confirmation"
+    else:
+        out["execution_gate_label"] = "🟡 يحتاج متابعة قبل التنفيذ"
+        out["execution_gate_status"] = "watch"
 
     return out
 

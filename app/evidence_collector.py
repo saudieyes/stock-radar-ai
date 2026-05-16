@@ -39,6 +39,7 @@ from .sqlite_store import SQLITE_DB_PATH, SQLITE_ENABLED, get_json, set_json
 from .utils import safe_round, to_float
 
 NY_TZ = ZoneInfo("America/New_York")
+RIYADH_TZ = ZoneInfo("Asia/Riyadh")
 _LOCK = threading.RLock()
 _INITIALIZED = False
 _WORKER_THREAD: threading.Thread | None = None
@@ -1381,6 +1382,198 @@ def pattern_readiness_report(week_key: str | None = None, format: str = "json") 
     return result
 
 
+
+def _riyadh_dt() -> datetime:
+    return datetime.now(RIYADH_TZ)
+
+
+def _week_key_for_trade_date(trade_date: str) -> str:
+    """Return Monday-Friday week key for a specific US trade date.
+
+    This avoids the weekend behavior of get_performance_week_key(), which can
+    move Saturday/Sunday to the upcoming week while we may be syncing Friday.
+    """
+    d = _parse_date(str(trade_date or "")[:10]) or _now_dt().date()
+    monday = date.fromordinal(d.toordinal() - d.weekday())
+    friday = date.fromordinal(monday.toordinal() + 4)
+    return f"{monday.isoformat()}_{friday.isoformat()}"
+
+
+def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, str, str]:
+    """Return whether a 5 AM Riyadh sync should run and the US trade date.
+
+    Schedule requested by the user:
+    - Saturday 05:00 Asia/Riyadh syncs Friday trading.
+    - Sunday and Monday do not sync because Saturday/Sunday are closed.
+    - Tuesday syncs Monday, Wednesday syncs Tuesday, Thursday syncs Wednesday,
+      Friday syncs Thursday.
+    """
+    now_r = now_riyadh or _riyadh_dt()
+    wd = now_r.weekday()  # Monday=0 ... Sunday=6
+    if wd in {6, 0}:  # Sunday, Monday
+        return False, "", "skip_non_trading_previous_day"
+    # Tue-Sat only, after 5:00 AM Riyadh.
+    if now_r.time() < dt_time(5, 0):
+        return False, "", "before_5am_riyadh"
+    prev = date.fromordinal(now_r.date().toordinal() - 1)
+    # Tue->Mon, Wed->Tue, Thu->Wed, Fri->Thu, Sat->Fri. All are weekdays.
+    return True, prev.isoformat(), "due_after_trading_day"
+
+
+def evidence_auto_sync_status() -> dict:
+    due, trade_date, reason = _riyadh_sync_trade_date()
+    key = f"evidence_auto_github_synced_{trade_date}" if trade_date else ""
+    done = get_json(key, {}) if key else {}
+    last = get_json("evidence_last_auto_sync", {})
+    return {
+        "ok": True,
+        "version": "evidence_auto_sync_v1_riyadh_5am",
+        "enabled": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED),
+        "github_configured": bool(is_github_sync_configured()),
+        "now_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
+        "schedule": "Tue/Wed/Thu/Fri/Sat 05:00 Asia/Riyadh; skips Sunday and Monday; never deletes Railway data.",
+        "due_now": bool(due and not (isinstance(done, dict) and done.get("ok"))),
+        "planned_trade_date": trade_date,
+        "skip_reason": reason if not due else ("already_synced" if isinstance(done, dict) and done.get("ok") else ""),
+        "already_synced_for_trade_date": bool(isinstance(done, dict) and done.get("ok")),
+        "last_auto_sync": last if isinstance(last, dict) else {},
+        "railway_prune_enabled": False,
+        "notes": "Daily Evidence sync exports to GitHub only. Railway deletion/pruning remains disabled and separate.",
+    }
+
+
+def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_csv: bool = True) -> dict:
+    due, trade_date, reason = _riyadh_sync_trade_date()
+    if force and not trade_date:
+        # When forced on Sunday/Monday, use the most recent weekday so manual testing is possible.
+        cur = _riyadh_dt().date()
+        prev = date.fromordinal(cur.toordinal() - 1)
+        while prev.weekday() >= 5:
+            prev = date.fromordinal(prev.toordinal() - 1)
+        trade_date = prev.isoformat()
+        due = True
+        reason = "forced_manual_recent_trading_day"
+    key = f"evidence_auto_github_synced_{trade_date}" if trade_date else ""
+    done = get_json(key, {}) if key else {}
+    if not force and isinstance(done, dict) and done.get("ok"):
+        return {"ok": True, "skipped": True, "reason": "already_synced", "trade_date": trade_date, "previous_result": done}
+    if not (due or force):
+        return {"ok": True, "skipped": True, "reason": reason, "trade_date": trade_date, "status": evidence_auto_sync_status()}
+    if dry_run:
+        return {"ok": True, "dry_run": True, "trade_date": trade_date, "week_key": _week_key_for_trade_date(trade_date), "reason": reason, "would_sync_github": True, "would_prune_railway": False}
+    wk = _week_key_for_trade_date(trade_date)
+    # Run a final winner-profile backfill for the trade date before syncing. This is passive and safe.
+    backfill = {}
+    if EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED and EVIDENCE_BIG_WINNER_BACKFILL_ENABLED:
+        backfill = backfill_daily_winner_profiles(
+            start_date=trade_date,
+            end_date=trade_date,
+            days_back=1,
+            threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT,
+            limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT,
+            store_bars=True,
+        )
+    sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=bool(include_csv))
+    result = {
+        "ok": bool(sync.get("ok")),
+        "version": "evidence_daily_auto_sync_v1",
+        "trade_date": trade_date,
+        "week_key": wk,
+        "ran_at_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
+        "reason": reason,
+        "backfill": backfill,
+        "sync": sync,
+        "pruned_railway": False,
+        "notes": "GitHub sync only. No Railway deletion is performed by daily auto-sync.",
+    }
+    try:
+        if key:
+            set_json(key, result)
+        set_json("evidence_last_auto_sync", result)
+    except Exception:
+        pass
+    return result
+
+
+def liquidity_confirmation_check(symbol: str, trade_date: str | None = None, store_bars: bool = False) -> dict:
+    """On-demand liquidity check for one symbol.
+
+    This is for execution support: when price reaches entry, the user can press
+    "تحديث السيولة" and get a simple answer: continuing / uncertain / fading.
+    """
+    sym = _clean_symbol(symbol)
+    if not sym:
+        return {"ok": False, "error": "invalid_symbol"}
+    quote_bundle = get_live_quotes([sym]) if EVIDENCE_COLLECTION_ENABLED else {}
+    quote = quote_bundle.get(sym) or quote_bundle.get(sym.upper()) or {}
+    price = _safe_float(quote.get("price"), 0)
+    prev = _safe_float(quote.get("previous_close"), 0)
+    d = str(trade_date or _today_text())[:10]
+    poly = _fetch_polygon_intraday_summary(sym, d, previous_close=prev, day_open=0.0, run_id="liquidity_check", store_bars=bool(store_bars))
+    score = _safe_float(poly.get("liquidity_persistence_score"), 0)
+    accel = _safe_float(poly.get("liquidity_acceleration_score"), 0)
+    fade = int(poly.get("volume_fade_flag") or 0)
+    if not score:
+        # Fallback if Polygon is unavailable. This is intentionally conservative.
+        vol = _safe_float(quote.get("volume"), 0)
+        dollar = vol * price if price > 0 and vol > 0 else 0
+        if dollar >= 25_000_000:
+            score = 62
+        elif dollar >= 5_000_000:
+            score = 52
+        elif dollar > 0:
+            score = 40
+        else:
+            score = 35
+    if fade:
+        score = min(score, 45)
+    if accel >= 55 and score >= 55:
+        score = min(100, score + 6)
+    score = max(0.0, min(100.0, safe_round(score, 1)))
+    if score >= 70 and not fade:
+        status = "continuing"
+        label = "✅ السيولة مستمرة"
+        guidance = "يمكن اعتبار السيولة داعمة إذا كان السعر ثابتًا فوق نقطة الدخول/الدعم ولا توجد مقاومة مباشرة."
+    elif score >= 52 and not fade:
+        status = "uncertain"
+        label = "⏳ السيولة مقبولة لكنها تحتاج تأكيد"
+        guidance = "انتظر ثبات السعر فوق الدخول مع تحسن السيولة، أو ادخل بحجم أصغر إذا قبلت المخاطرة."
+    elif score >= 38:
+        status = "weak"
+        label = "⚠️ السيولة غير مؤكدة"
+        guidance = "لا تعتمد على لمس نقطة الدخول وحده؛ انتظر شموع/حجم يؤكد استمرار الحركة."
+    else:
+        status = "fading"
+        label = "🔴 السيولة ضعفت — لا تدخل الآن"
+        guidance = "تجنب الدخول حتى تعود السيولة ويثبت السعر فوق مستوى الدخول/الاختراق."
+    return {
+        "ok": True,
+        "version": "liquidity_confirmation_v1",
+        "symbol": sym,
+        "trade_date": d,
+        "checked_at": _now_text(),
+        "session": _market_session(),
+        "status": status,
+        "label": label,
+        "score": score,
+        "source": "polygon_5m+fmp_quote" if poly.get("ok") else "fmp_quote_fallback",
+        "price": safe_round(price, 4),
+        "change_pct": quote.get("change_pct", 0),
+        "quote_source": quote.get("source_label") or quote.get("source") or "",
+        "volume": quote.get("volume", 0),
+        "dollar_volume": safe_round(price * _safe_float(quote.get("volume"), 0), 0) if price > 0 else 0,
+        "liquidity_acceleration_score": accel,
+        "volume_fade_flag": int(fade),
+        "first_30m_volume": poly.get("first_30m_volume", 0),
+        "last_30m_volume": poly.get("last_30m_volume", 0),
+        "first_30m_volume_vs_avg": poly.get("first_30m_volume_vs_avg", 0),
+        "last_30m_vs_first_30m_volume": poly.get("last_30m_vs_first_30m_volume", 0),
+        "gap_followthrough_label": poly.get("gap_followthrough_label", ""),
+        "guidance": guidance,
+        "polygon": {k: poly.get(k) for k in ["ok", "bars_stored", "likely_pattern", "move_quality_label", "gap_pct", "pre_market_volume", "first_15m_gain_pct", "first_30m_gain_pct", "first_60m_gain_pct"] if k in poly},
+        "notes": "هذا فحص تنفيذ عند الطلب فقط؛ لا يغير السكور أو الفلتر الشرعي أو التصنيف.",
+    }
+
 def _daily_winner_backfill_due(session: str) -> bool:
     if not (EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED and EVIDENCE_BIG_WINNER_BACKFILL_ENABLED):
         return False
@@ -1748,24 +1941,22 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
 
 
 def _daily_auto_sync_due(session: str) -> bool:
-    if not EVIDENCE_GITHUB_AUTO_SYNC_ENABLED or not is_github_sync_configured():
-        return False
-    now = _now_dt()
-    # Sync once after the regular/after-hours evidence has had time to collect.
-    if session not in {"after_hours", "closed"}:
-        return False
-    if session == "after_hours" and now.time() < dt_time(20, 25):
-        return False
-    key = f"evidence_github_synced_{_today_text()}"
-    done = get_json(key, {})
-    if isinstance(done, dict) and done.get("ok"):
-        return False
-    return True
+    """Compatibility wrapper used by the background worker.
+
+    The real schedule is Riyadh 5 AM after US trading days only. We keep the
+    session argument for backward compatibility but do not use it as the primary
+    decision, because 5 AM Riyadh occurs while New York is closed.
+    """
+    status = evidence_auto_sync_status()
+    return bool(status.get("due_now"))
 
 
 def _mark_daily_auto_sync(result: dict) -> None:
     try:
-        set_json(f"evidence_github_synced_{_today_text()}", result)
+        trade_date = str((result or {}).get("trade_date") or "")[:10]
+        if trade_date:
+            set_json(f"evidence_auto_github_synced_{trade_date}", result)
+        set_json("evidence_last_auto_sync", result)
     except Exception:
         pass
 
@@ -1780,19 +1971,24 @@ def _worker_loop() -> None:
             session = _market_session()
             interval = _interval_for_session(session)
             now = _now_ts()
-            # Only collect in actionable sessions. Weekend/closed checks only handle export.
+            # Collect only during actionable sessions. This is passive evidence and never changes decisions.
             if session in {"pre_market", "regular", "after_hours"} and now - last_collect_ts >= interval:
                 collect_evidence_snapshot(mode="background", include_big_movers=True, sync_to_github=False)
                 last_collect_ts = now
+            # Same-day winner backfill after the market has enough data. This prepares profiles for next-week analysis.
             if _daily_winner_backfill_due(session):
-                backfill = backfill_daily_winner_profiles(start_date=_today_text(), end_date=_today_text(), days_back=1, threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT, limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT, store_bars=True)
+                backfill = backfill_daily_winner_profiles(
+                    start_date=_today_text(),
+                    end_date=_today_text(),
+                    days_back=1,
+                    threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT,
+                    limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT,
+                    store_bars=True,
+                )
                 _mark_daily_winner_backfill(backfill)
+            # GitHub sync follows the user-defined Riyadh schedule: Tue-Sat 05:00 only, never Sunday/Monday.
             if _daily_auto_sync_due(session):
-                # Run a final same-day winner backfill before GitHub sync, but never delete Railway data.
-                if EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED:
-                    backfill = backfill_daily_winner_profiles(start_date=_today_text(), end_date=_today_text(), days_back=1, threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT, limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT, store_bars=True)
-                    _mark_daily_winner_backfill(backfill)
-                sync = sync_evidence_to_github(week_key=_current_week_key(), trade_date=_today_text(), include_csv=True)
+                sync = run_evidence_auto_sync(force=False, dry_run=False, include_csv=True)
                 _mark_daily_auto_sync(sync)
             time.sleep(60)
         except Exception as exc:
