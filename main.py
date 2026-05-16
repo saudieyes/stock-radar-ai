@@ -155,6 +155,7 @@ from app.evidence_collector import (
     backfill_daily_winner_profiles,
     winner_profiles_report,
     pattern_readiness_report,
+    pattern_lab_report,
     export_evidence_json,
     export_evidence_csv,
     sync_evidence_to_github,
@@ -2737,6 +2738,15 @@ def evidence_pattern_readiness_endpoint(week_key: str = "", format: str = "json"
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
     return result
 
+
+
+
+@app.get("/evidence/pattern-lab")
+def evidence_pattern_lab_endpoint(week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 40):
+    result = pattern_lab_report(week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
 
 @app.get("/evidence/export.json")
 def evidence_export_json_endpoint(week_key: str = "", trade_date: str = "", limit: int = 10000):
