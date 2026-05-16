@@ -2071,7 +2071,9 @@
     .liquidity-check-box{border:1px solid rgba(96,165,250,.35);background:rgba(15,23,42,.05);border-radius:14px;padding:10px;margin-top:8px}
     .liquidity-check-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
     .liquidity-check-result{font-size:.88rem;line-height:1.7;margin-top:8px;white-space:normal}
-    .liquidity-check-result.good{color:#0f766e}.liquidity-check-result.warn{color:#b45309}.liquidity-check-result.bad{color:#b91c1c}
+    .liquidity-check-result.good{color:#0f766e}.liquidity-check-result.warn{color:#b45309}.liquidity-check-result.bad{color:#b91c1c}.liquidity-check-result.neutral{color:#475569}
+    .card-liquidity-inline{width:100%;padding:8px 10px;border-radius:12px;background:rgba(148,163,184,.10);border:1px solid rgba(148,163,184,.25)}
+    .card-liquidity-inline:empty{display:none}
 
   </style>
 </head>
@@ -2380,28 +2382,45 @@
       return 'liquidity-check-' + String(symbol || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
     }
 
+    function liquidityResultNodes(symbol) {
+      const sym = String(symbol || '').toUpperCase().trim();
+      const nodes = [];
+      const byId = document.getElementById(liquidityResultId(sym));
+      if (byId) nodes.push(byId);
+      document.querySelectorAll(`[data-liquidity-result="${sym}"]`).forEach(el => { if (!nodes.includes(el)) nodes.push(el); });
+      return nodes;
+    }
+
+    function setLiquidityResult(symbol, html, tone = '') {
+      const nodes = liquidityResultNodes(symbol);
+      nodes.forEach(box => {
+        box.className = ('liquidity-check-result ' + (box.classList.contains('card-liquidity-inline') ? 'card-liquidity-inline ' : '') + tone).trim();
+        box.innerHTML = html;
+      });
+    }
+
     async function refreshLiquidityCheck(symbol) {
       const sym = String(symbol || '').toUpperCase().trim();
       if (!sym) return;
-      const box = document.getElementById(liquidityResultId(sym));
-      if (box) { box.className = 'liquidity-check-result'; box.innerHTML = '⏳ جاري تحديث السيولة...'; }
+      setLiquidityResult(sym, '⏳ جاري تحديث السيولة...', 'neutral');
       try {
         const res = await apiFetch('/evidence/liquidity-check?symbol=' + encodeURIComponent(sym));
         const data = await res.json();
         if (!data || data.ok === false) throw new Error(data?.error || 'liquidity_check_failed');
-        const score = Number(data.score || 0);
+        const rawScore = data.score;
+        const scoreText = (rawScore === null || rawScore === undefined || rawScore === '') ? 'غير متاح' : (formatNumber(Number(rawScore || 0)) + '/100');
         const status = String(data.status || '');
-        const tone = status === 'continuing' ? 'good' : (status === 'fading' || status === 'weak' ? 'bad' : 'warn');
+        const tone = status === 'continuing' ? 'good' : (status === 'fading' || status === 'weak' ? 'bad' : (status === 'market_closed' ? 'neutral' : 'warn'));
         const lines = [];
-        lines.push(`<b>${safeText(data.label || '')}</b> — ${formatNumber(score)}/100`);
+        lines.push(`<b>${safeText(data.label || '')}</b> — ${scoreText}`);
         lines.push(`آخر تحديث: ${safeText(data.checked_at || '')} | المصدر: ${safeText(data.source || data.quote_source || '')}`);
-        if (data.liquidity_acceleration_score !== undefined) lines.push(`تسارع السيولة: ${formatNumber(data.liquidity_acceleration_score)}/100`);
+        if (data.liquidity_acceleration_score !== undefined && data.liquidity_acceleration_score !== null) lines.push(`تسارع السيولة: ${formatNumber(data.liquidity_acceleration_score)}/100`);
         if (data.volume_fade_flag) lines.push('🔴 يوجد مؤشر ضعف/تلاشي في الحجم');
         if (data.first_30m_volume || data.last_30m_volume) lines.push(`حجم أول 30د: ${formatNumber(data.first_30m_volume)} | آخر 30د: ${formatNumber(data.last_30m_volume)}`);
         lines.push(`<b>التوجيه:</b> ${safeText(data.guidance || '')}`);
-        if (box) { box.className = 'liquidity-check-result ' + tone; box.innerHTML = lines.join('<br>'); }
+        setLiquidityResult(sym, lines.join('<br>'), tone);
       } catch (e) {
-        if (box) { box.className = 'liquidity-check-result bad'; box.innerHTML = 'تعذر تحديث السيولة الآن. لا تعتبر السيولة مؤكدة قبل إعادة المحاولة.'; }
+        setLiquidityResult(sym, 'تعذر تحديث السيولة الآن. لا تعتبر السيولة مؤكدة قبل إعادة المحاولة.', 'bad');
       }
     }
 
@@ -2413,7 +2432,7 @@
         <div class="liquidity-check-actions">
           <button class="soft-primary" onclick="refreshLiquidityCheck('${sym}')">🔄 تحديث السيولة الآن</button>
         </div>
-        <div id="${liquidityResultId(sym)}" class="liquidity-check-result">لم يتم تحديث السيولة بعد.</div>
+        <div id="${liquidityResultId(sym)}" data-liquidity-result="${sym}" class="liquidity-check-result">لم يتم تحديث السيولة بعد.</div>
       </div>`;
     }
 
@@ -3587,6 +3606,7 @@
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button class="ghost" onclick="refreshLiquidityCheck('${safeText(stock.symbol)}')">🔄 تحديث السيولة</button>
+            <div class="liquidity-check-result card-liquidity-inline" data-liquidity-result="${safeText(stock.symbol)}"></div>
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
           </div>

@@ -143,6 +143,7 @@ from app.source_promotion_audit import (
     build_source_entry_audit,
     build_promotion_audit,
     build_clean_alternatives,
+    build_source_discovery_coverage,
 )
 from app.evidence_collector import (
     init_evidence_db,
@@ -2797,6 +2798,16 @@ def diagnostics_clean_alternatives(symbol: str = "", week_key: str = "", trade_d
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
     return result
 
+
+
+
+@app.get("/diagnostics/source-discovery-coverage")
+@app.get("/diagnostics/source-freshness")
+def diagnostics_source_discovery_coverage(week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 40):
+    result = build_source_discovery_coverage(week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
 
 @app.post("/admin/archive-weekly-tracking")
 @app.get("/admin/archive-weekly-tracking")
