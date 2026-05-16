@@ -2067,7 +2067,13 @@
       .symbol, .compact-modern .symbol { font-size: 32px !important; }
       .live-price-item .price-plan-value { font-size: 31px !important; }
     }
-</style>
+
+    .liquidity-check-box{border:1px solid rgba(96,165,250,.35);background:rgba(15,23,42,.05);border-radius:14px;padding:10px;margin-top:8px}
+    .liquidity-check-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+    .liquidity-check-result{font-size:.88rem;line-height:1.7;margin-top:8px;white-space:normal}
+    .liquidity-check-result.good{color:#0f766e}.liquidity-check-result.warn{color:#b45309}.liquidity-check-result.bad{color:#b91c1c}
+
+  </style>
 </head>
 <body>
   <div class="container">
@@ -2368,6 +2374,47 @@
         throw new Error('auth_required');
       }
       return response;
+    }
+
+    function liquidityResultId(symbol) {
+      return 'liquidity-check-' + String(symbol || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+    }
+
+    async function refreshLiquidityCheck(symbol) {
+      const sym = String(symbol || '').toUpperCase().trim();
+      if (!sym) return;
+      const box = document.getElementById(liquidityResultId(sym));
+      if (box) { box.className = 'liquidity-check-result'; box.innerHTML = '⏳ جاري تحديث السيولة...'; }
+      try {
+        const res = await apiFetch('/evidence/liquidity-check?symbol=' + encodeURIComponent(sym));
+        const data = await res.json();
+        if (!data || data.ok === false) throw new Error(data?.error || 'liquidity_check_failed');
+        const score = Number(data.score || 0);
+        const status = String(data.status || '');
+        const tone = status === 'continuing' ? 'good' : (status === 'fading' || status === 'weak' ? 'bad' : 'warn');
+        const lines = [];
+        lines.push(`<b>${safeText(data.label || '')}</b> — ${formatNumber(score)}/100`);
+        lines.push(`آخر تحديث: ${safeText(data.checked_at || '')} | المصدر: ${safeText(data.source || data.quote_source || '')}`);
+        if (data.liquidity_acceleration_score !== undefined) lines.push(`تسارع السيولة: ${formatNumber(data.liquidity_acceleration_score)}/100`);
+        if (data.volume_fade_flag) lines.push('🔴 يوجد مؤشر ضعف/تلاشي في الحجم');
+        if (data.first_30m_volume || data.last_30m_volume) lines.push(`حجم أول 30د: ${formatNumber(data.first_30m_volume)} | آخر 30د: ${formatNumber(data.last_30m_volume)}`);
+        lines.push(`<b>التوجيه:</b> ${safeText(data.guidance || '')}`);
+        if (box) { box.className = 'liquidity-check-result ' + tone; box.innerHTML = lines.join('<br>'); }
+      } catch (e) {
+        if (box) { box.className = 'liquidity-check-result bad'; box.innerHTML = 'تعذر تحديث السيولة الآن. لا تعتبر السيولة مؤكدة قبل إعادة المحاولة.'; }
+      }
+    }
+
+    function liquidityCheckBlock(symbol) {
+      const sym = safeText(symbol || '');
+      return `<div class="liquidity-check-box">
+        <b>تأكيد السيولة عند التنفيذ</b><br>
+        اضغط الزر عندما يصل السهم إلى نقطة الدخول أو يثبت فوقها. النتيجة لا تغيّر السكور، لكنها تساعدك على قرار الدخول.
+        <div class="liquidity-check-actions">
+          <button class="soft-primary" onclick="refreshLiquidityCheck('${sym}')">🔄 تحديث السيولة الآن</button>
+        </div>
+        <div id="${liquidityResultId(sym)}" class="liquidity-check-result">لم يتم تحديث السيولة بعد.</div>
+      </div>`;
     }
 
     async function logoutSession() {
@@ -3392,12 +3439,14 @@
       details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
       details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
       details.push(detailBox('تصنيف دخول قوي', safeText(stock.strong_entry_tier_label || '')));
-      details.push(detailBox('خطر النمط', `${safeText(stock.pattern_risk_label || '')}${stock.pattern_risk_score !== undefined ? ' (' + formatNumber(stock.pattern_risk_score) + ')' : ''}<br>${renderReasonsList(stock.pattern_risk_reasons)}`, true));
-      details.push(detailBox('استمرار السيولة', `${safeText(stock.liquidity_persistence_label || '')}${stock.liquidity_persistence_score !== undefined ? ' (' + formatNumber(stock.liquidity_persistence_score) + ')' : ''}<br>${renderReasonsList(stock.liquidity_persistence_reasons)}`, true));
-      details.push(detailBox('حارس ما بعد التفعيل', `${safeText(stock.post_activation_guard_label || '')}${stock.post_activation_guard_score !== undefined ? ' (' + formatNumber(stock.post_activation_guard_score) + ')' : ''}<br>${renderReasonsList(stock.post_activation_guard_reasons)}`, true));
+      details.push(detailBox('خطر النمط', `${safeText(stock.pattern_risk_label || '')}${stock.pattern_risk_score !== undefined ? ' — ' + formatNumber(stock.pattern_risk_score) + '/100' : ''}<br>${renderReasonsList(stock.pattern_risk_reasons)}`, true));
+      details.push(detailBox('استمرار السيولة', `${safeText(stock.liquidity_persistence_label || '')}${stock.liquidity_persistence_score !== undefined ? ' — ' + formatNumber(stock.liquidity_persistence_score) + '/100' : ''}<br>${renderReasonsList(stock.liquidity_persistence_reasons)}`, true));
+      details.push(detailBox('تحديث السيولة عند نقطة الدخول', liquidityCheckBlock(stock.symbol), true));
+      details.push(detailBox('حارس ما بعد التفعيل', `${safeText(stock.post_activation_guard_label || '')}${stock.post_activation_guard_score !== undefined ? ' — ' + formatNumber(stock.post_activation_guard_score) + '/100' : ''}<br>${renderReasonsList(stock.post_activation_guard_reasons)}`, true));
       details.push(detailBox('حارس عدم المطاردة', `${safeText(stock.no_chase_guard_label || '')}<br>${renderReasonsList(stock.no_chase_guard_reasons)}`, true));
       details.push(detailBox('الدعم/المقاومة كحارس', `${safeText(stock.support_guard_label || '')}<br>${safeText(stock.resistance_guard_label || '')}<br>${renderReasonsList(stock.structure_guard_reasons)}`, true));
-      details.push(detailBox('تعديل ترتيب الذكاء', stock.intelligence_rank_adjustment !== undefined ? formatNumber(stock.intelligence_rank_adjustment) : ''));
+      details.push(detailBox('قرار التنفيذ الآن', safeText(stock.execution_gate_label || '—'), false));
+      details.push(detailBox('تعديل ترتيب الذكاء', stock.intelligence_rank_adjustment !== undefined ? `${formatNumber(stock.intelligence_rank_adjustment)}<br><small>الرقم السالب يعني أن طبقة الذكاء خفّضت ترتيب السهم بسبب مخاطر مثل سيولة غير مؤكدة أو مقاومة/قمة قريبة.</small>` : '', true));
       details.push(detailBox('وضع التنفيذ', safeText(stock.execution_mode)));
       details.push(detailBox('نوع الخطة', safeText(stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('العائد/المخاطرة', joinMetric(formatNumber(stock.rr_1), stock.metric_rr)));
@@ -3537,6 +3586,7 @@
           <div class="card-actions">
             <button class="soft-primary" onclick="addCardToPortfolio('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">💼 للمحفظة</button>
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
+            <button class="ghost" onclick="refreshLiquidityCheck('${safeText(stock.symbol)}')">🔄 تحديث السيولة</button>
             ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}')">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}')">🚫 استبعاد شرعي</button>`}
             ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}')">✅ اعتماده شرعيًا</button>` : ''}
           </div>
@@ -3615,12 +3665,27 @@
       return quality + (readiness * 0.45) + (Math.min(Math.max(rr, -4), 3) * 7) + (continuation * 0.10) + (runner * 0.08) + (alignment * 0.08) + ((hist - 50) * 0.16) + ((histCtx - 50) * 0.14) + (strength * 0.12) - Math.min(patternRisk * 0.18, 18) + tierBonus;
     }
 
+    function displayRiskBucket(item) {
+      let risk = 0;
+      const tier = String(item?.strong_entry_tier || '');
+      const liq = String(item?.liquidity_persistence_status || '');
+      const pat = String(item?.pattern_risk_status || '');
+      if (tier === 'late_no_chase' || String(item?.no_chase_guard_status || '') === 'no_chase') risk += 40;
+      if (tier === 'high_risk') risk += 28;
+      if (liq === 'fade' || liq === 'weak') risk += 22;
+      if (pat === 'high') risk += 18;
+      if (item?.close_resistance_guard_flag) risk += 12;
+      if (item?.near_high_guard_flag) risk += 10;
+      return risk;
+    }
+
     function sortDisplayItems(items) {
       return [...(items || [])].sort((a, b) => {
         return (
+          displayRiskBucket(a) - displayRiskBucket(b) ||
+          displaySortScore(b) - displaySortScore(a) ||
           Number(b?.signal_strength_bucket || -1) - Number(a?.signal_strength_bucket || -1) ||
           Number(b?.signal_strength_score || 0) - Number(a?.signal_strength_score || 0) ||
-          displaySortScore(b) - displaySortScore(a) ||
           Number(b?.quality_score || 0) - Number(a?.quality_score || 0) ||
           Number(b?.execution_readiness_score || 0) - Number(a?.execution_readiness_score || 0) ||
           Number(b?.rr_1 || 0) - Number(a?.rr_1 || 0)

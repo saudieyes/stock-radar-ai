@@ -139,6 +139,11 @@ from app.learning_reports import (
     build_promotion_funnel_report,
 )
 from app.weekly_archive import archive_weekly_tracking, weekly_archive_status
+from app.source_promotion_audit import (
+    build_source_entry_audit,
+    build_promotion_audit,
+    build_clean_alternatives,
+)
 from app.evidence_collector import (
     init_evidence_db,
     start_evidence_background_worker,
@@ -152,6 +157,9 @@ from app.evidence_collector import (
     export_evidence_json,
     export_evidence_csv,
     sync_evidence_to_github,
+    evidence_auto_sync_status,
+    run_evidence_auto_sync,
+    liquidity_confirmation_check,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -2747,6 +2755,47 @@ def evidence_export_csv_endpoint(week_key: str = "", trade_date: str = "", limit
 @app.get("/evidence/sync-github")
 def evidence_sync_github_endpoint(week_key: str = "", trade_date: str = "", include_csv: bool = True):
     return sync_evidence_to_github(week_key=week_key or None, trade_date=trade_date or None, include_csv=bool(include_csv))
+
+
+@app.get("/evidence/auto-sync/status")
+@app.get("/evidence/auto-status")
+def evidence_auto_sync_status_endpoint():
+    return evidence_auto_sync_status()
+
+
+@app.post("/evidence/auto-sync/run")
+@app.get("/evidence/auto-sync/run")
+def evidence_auto_sync_run_endpoint(force: bool = False, dry_run: bool = False, include_csv: bool = True):
+    return run_evidence_auto_sync(force=bool(force), dry_run=bool(dry_run), include_csv=bool(include_csv))
+
+
+@app.get("/evidence/liquidity-check")
+def evidence_liquidity_check_endpoint(symbol: str, trade_date: str = "", store_bars: bool = False):
+    return liquidity_confirmation_check(symbol=symbol, trade_date=trade_date or None, store_bars=bool(store_bars))
+
+
+@app.get("/diagnostics/source-entry-audit")
+def diagnostics_source_entry_audit(week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 80):
+    result = build_source_entry_audit(week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/diagnostics/promotion-audit")
+def diagnostics_promotion_audit(week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 120):
+    result = build_promotion_audit(week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/diagnostics/clean-alternatives")
+def diagnostics_clean_alternatives(symbol: str = "", week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 30):
+    result = build_clean_alternatives(symbol=symbol, week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
 
 
 @app.post("/admin/archive-weekly-tracking")
