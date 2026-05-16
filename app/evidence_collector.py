@@ -1557,6 +1557,116 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
     return out
 
 
+
+def _enrich_winner_profile_row(row: dict, week_key: str = "", refresh_visibility: bool = True) -> dict:
+    """Return a winner-profile row with safe fallback classifications.
+
+    V4 introduced columns such as gap_quality_class and tradability_bucket. Rows
+    that were backfilled before that migration may still have blank values. This
+    helper computes read-time fallbacks so Pattern Lab does not report everything
+    as gap_unknown / tradability_unknown and so we do not need to re-run heavy
+    Polygon backfills just to classify existing rows.
+    """
+    d = dict(row or {})
+
+    # Tradability fallback.
+    trad = str(d.get("tradability_bucket") or "").strip()
+    if not trad or trad in {"unknown", "tradability_unknown", "غير مصنف"}:
+        try:
+            score, bucket, reasons = _classify_tradability(d)
+            d["tradability_score"] = score
+            d["tradability_bucket"] = bucket
+            if not str(d.get("tradability_reasons_json") or "").strip():
+                d["tradability_reasons_json"] = _json_dumps(reasons)
+        except Exception:
+            d["tradability_bucket"] = "tradability_unknown"
+
+    # Gap-quality fallback. Prefer profile_json if already calculated, otherwise
+    # recompute from numeric fields available on the winner profile row.
+    gap_cls = str(d.get("gap_quality_class") or "").strip()
+    if not gap_cls or gap_cls in {"unknown", "gap_unknown", "غير مصنف"}:
+        reasons = []
+        try:
+            prof = _json_loads(d.get("profile_json"), {}) or {}
+            if isinstance(prof, dict):
+                gap_info = prof.get("gap_quality") or {}
+                if isinstance(gap_info, dict):
+                    gap_cls = str(gap_info.get("class") or "").strip()
+                    reasons = gap_info.get("reasons") or []
+        except Exception:
+            gap_cls = ""
+            reasons = []
+        if not gap_cls:
+            try:
+                gap_cls, reasons = _classify_gap_quality(d)
+            except Exception:
+                gap_cls, reasons = "gap_unknown", []
+        d["gap_quality_class"] = gap_cls or "gap_unknown"
+        if not str(d.get("gap_quality_reasons_json") or "").strip():
+            d["gap_quality_reasons_json"] = _json_dumps(reasons if isinstance(reasons, list) else [str(reasons)])
+
+    # Historical visibility fallback. This is intentionally read-only and only
+    # enriches the report output. It lets old backfilled rows benefit from the
+    # missed-opportunities/source tables when available.
+    if refresh_visibility:
+        conf = str(d.get("visibility_confidence_label") or "").strip()
+        needs_visibility = (not conf) or conf in {"unknown", "current_or_evidence_snapshot_only"}
+        has_no_first_source = not str(d.get("first_source_seen_at") or "").strip()
+        if needs_visibility or has_no_first_source:
+            try:
+                vis = _historical_visibility_for_symbol(str(d.get("symbol") or ""), week_key=week_key or str(d.get("week_key") or ""), trade_date=str(d.get("trade_date") or ""))
+                if isinstance(vis, dict) and vis:
+                    for key in [
+                        "tool_seen", "source_seen", "tool_stage", "best_tool_stage", "tool_first_seen_at", "tool_first_seen_change_pct",
+                        "first_source_seen_at", "first_source_gain_pct", "first_deep_seen_at", "first_watch_seen_at",
+                        "first_cautious_seen_at", "first_strong_seen_at", "promotion_delay_minutes", "visibility_confidence_label",
+                    ]:
+                        if key in vis and (key in {"tool_seen", "source_seen"} or not str(d.get(key) or "").strip()):
+                            d[key] = vis.get(key)
+                    if not str(d.get("historical_visibility_json") or "").strip():
+                        d["historical_visibility_json"] = _json_dumps(vis)
+            except Exception:
+                pass
+    return d
+
+
+def _aggregate_winner_rows(rows: list[dict], key_fields: list[str], limit: int = 30) -> list[dict]:
+    groups: dict[tuple, dict] = {}
+    for r in rows or []:
+        key = tuple(str(r.get(k) or "") for k in key_fields)
+        item = groups.setdefault(key, {**{k: key[i] for i, k in enumerate(key_fields)}, "cases": 0, "symbols": set(), "sum_gain": 0.0, "sum_gap": 0.0, "sum_first30": 0.0, "sum_liq_accel": 0.0, "sum_liq_persist": 0.0, "sum_dollar": 0.0, "tool_seen_count": 0, "source_seen_count": 0})
+        item["cases"] += 1
+        if str(r.get("symbol") or ""):
+            item["symbols"].add(str(r.get("symbol")))
+        item["sum_gain"] += _safe_float(r.get("winner_change_pct"), 0)
+        item["sum_gap"] += _safe_float(r.get("gap_pct"), 0)
+        item["sum_first30"] += _safe_float(r.get("first_30m_gain_pct"), 0)
+        item["sum_liq_accel"] += _safe_float(r.get("liquidity_acceleration_score"), 0)
+        item["sum_liq_persist"] += _safe_float(r.get("liquidity_persistence_score"), 0)
+        item["sum_dollar"] += _safe_float(r.get("day_dollar_volume"), 0)
+        item["tool_seen_count"] += 1 if int(r.get("tool_seen") or 0) else 0
+        item["source_seen_count"] += 1 if int(r.get("source_seen") or 0) else 0
+    out = []
+    for item in groups.values():
+        cases = max(1, int(item["cases"]))
+        row = {k: item.get(k) for k in key_fields}
+        row.update({
+            "cases": cases,
+            "unique_symbols": len(item["symbols"]),
+            "avg_gain": safe_round(item["sum_gain"] / cases, 2),
+            "avg_gap": safe_round(item["sum_gap"] / cases, 2),
+            "avg_first30": safe_round(item["sum_first30"] / cases, 2),
+            "avg_liq_accel": safe_round(item["sum_liq_accel"] / cases, 1),
+            "avg_liq_persist": safe_round(item["sum_liq_persist"] / cases, 1),
+            "avg_dollar_volume": safe_round(item["sum_dollar"] / cases, 0),
+            "tool_seen_count": item["tool_seen_count"],
+            "source_seen_count": item["source_seen_count"],
+        })
+        out.append(row)
+    out.sort(key=lambda x: (int(x.get("cases") or 0), _safe_float(x.get("avg_gain"), 0)), reverse=True)
+    return out[:limit]
+
+
 def winner_profiles_report(week_key: str | None = None, trade_date: str | None = None, format: str = "json", limit: int = 120) -> dict | str:
     wk = str(week_key or _current_week_key() or "")
     d = str(trade_date or "")[:10]
@@ -1572,16 +1682,15 @@ def winner_profiles_report(week_key: str | None = None, trade_date: str | None =
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     lim = max(1, min(int(limit or 120), 1000))
     with _connect() as conn:
+        total_row = conn.execute(f"SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles {where_sql}", tuple(args)).fetchone()
         rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, lim)).fetchall()
-        pattern_rows = conn.execute(
-            f"SELECT likely_pattern, move_quality_label, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain, AVG(gap_pct) AS avg_gap, AVG(liquidity_acceleration_score) AS avg_liq_accel, AVG(liquidity_persistence_score) AS avg_liq_persist, SUM(tool_seen) AS tool_seen_count FROM evidence_winner_profiles {where_sql} GROUP BY likely_pattern, move_quality_label ORDER BY cases DESC, avg_gain DESC LIMIT 30",
-            tuple(args),
-        ).fetchall()
-    items = _rows_to_dicts(rows)
-    patterns = _rows_to_dicts(pattern_rows)
-    result = {"ok": True, "version": "winner_pattern_profiles_v2", "week_key": wk, "trade_date": d, "count": len(items), "patterns": patterns, "items": items}
+    items = [_enrich_winner_profile_row(r, week_key=wk, refresh_visibility=False) for r in _rows_to_dicts(rows)]
+    total_count = int((dict(total_row).get("c") if total_row else 0) or 0)
+    total_symbols = int((dict(total_row).get("symbols") if total_row else 0) or 0)
+    patterns = _aggregate_winner_rows(items, ["likely_pattern", "move_quality_label"], limit=30)
+    result = {"ok": True, "version": "winner_pattern_profiles_v2a", "week_key": wk, "trade_date": d, "count": len(items), "total_count": total_count, "total_symbols": total_symbols, "patterns": patterns, "items": items}
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
-        lines = ["تقرير Daily Winner Pattern Mining V2", f"الأسبوع: {wk}", f"التاريخ: {d or 'كل الأسبوع'}", f"عدد ملفات الرابحين: {len(items)}", "", "أبرز الأنماط المرصودة:"]
+        lines = ["تقرير Daily Winner Pattern Mining V2a", f"الأسبوع: {wk}", f"التاريخ: {d or 'كل الأسبوع'}", f"عدد ملفات الرابحين: {total_count} إجماليًا | المعروض الآن: {len(items)} | رموز فريدة: {total_symbols}", "", "أبرز الأنماط المرصودة:"]
         if not patterns:
             lines.append("لا توجد ملفات رابحين كافية بعد. شغّل backfill-winners للأسبوع السابق أو انتظر جمع الأسبوع القادم.")
         for ptn in patterns[:12]:
@@ -1595,7 +1704,6 @@ def winner_profiles_report(week_key: str | None = None, trade_date: str | None =
             lines.append(f"- {x.get('symbol')}: +{safe_round(x.get('winner_change_pct'),2)}% | gap {safe_round(x.get('gap_pct'),2)}% | {x.get('likely_pattern') or '-'} | {x.get('gap_quality_class') or '-'} | {x.get('tradability_bucket') or '-'} | {tool}")
         return "\n".join(lines)
     return result
-
 
 def pattern_readiness_report(week_key: str | None = None, format: str = "json") -> dict | str:
     wk = str(week_key or _current_week_key() or "")
@@ -2248,20 +2356,50 @@ def _tracking_loss_signature(row: dict) -> str:
     return " | ".join(parts)
 
 
+
 def _winner_signature(row: dict) -> str:
+    d = _enrich_winner_profile_row(row, week_key=str(row.get("week_key") or ""), refresh_visibility=False)
     return " | ".join([
-        str(row.get("likely_pattern") or "unclassified_winner"),
-        str(row.get("gap_quality_class") or "gap_unknown"),
-        str(row.get("tradability_bucket") or "tradability_unknown"),
+        str(d.get("likely_pattern") or "unclassified_winner"),
+        str(d.get("gap_quality_class") or "gap_unknown"),
+        str(d.get("tradability_bucket") or "tradability_unknown"),
     ])
 
 
-def pattern_lab_report(week_key: str | None = None, trade_date: str | None = None, format: str = "json", limit: int = 40) -> dict | str:
-    """Exploratory Pattern Lab report.
+def _visibility_summary_from_rows(rows: list[dict]) -> list[dict]:
+    groups: dict[tuple, dict] = {}
+    for r in rows or []:
+        conf = str(r.get("visibility_confidence_label") or "unknown")
+        stage = str(r.get("best_tool_stage") or r.get("tool_stage") or "unknown")
+        key = (conf, stage)
+        item = groups.setdefault(key, {"visibility_confidence_label": conf, "best_tool_stage": stage, "cases": 0, "sum_gain": 0.0, "tool_seen_count": 0, "source_seen_count": 0})
+        item["cases"] += 1
+        item["sum_gain"] += _safe_float(r.get("winner_change_pct"), 0)
+        item["tool_seen_count"] += 1 if int(r.get("tool_seen") or 0) else 0
+        item["source_seen_count"] += 1 if int(r.get("source_seen") or 0) else 0
+    out = []
+    for item in groups.values():
+        cases = max(1, int(item["cases"]))
+        out.append({
+            "visibility_confidence_label": item["visibility_confidence_label"],
+            "best_tool_stage": item["best_tool_stage"],
+            "cases": cases,
+            "avg_gain": safe_round(item["sum_gain"] / cases, 2),
+            "tool_seen_count": item["tool_seen_count"],
+            "source_seen_count": item["source_seen_count"],
+        })
+    out.sort(key=lambda x: int(x.get("cases") or 0), reverse=True)
+    return out
 
-    Read-only. It does not change scoring/ranking. It tells us whether the current
-    Evidence reports are rich enough to support next-week pattern decisions and lists
-    the missing data before we rely on any pattern.
+
+def pattern_lab_report(week_key: str | None = None, trade_date: str | None = None, format: str = "json", limit: int = 40) -> dict | str:
+    """Exploratory Pattern Lab report V4a.
+
+    Read-only. It does not change scoring/ranking. V4a fixes the previous
+    report weakness where existing rows showed gap_unknown/tradability_unknown
+    even when the raw winner profile already contained enough data to classify
+    them. It computes safe read-time fallbacks and tries to link each winner to
+    historical source/promotion visibility where those tables exist.
     """
     wk = str(week_key or _current_week_key() or "")
     td = str(trade_date or "")[:10]
@@ -2277,37 +2415,16 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     lim = max(5, min(int(limit or 40), 200))
     with _connect() as conn:
-        winners = _rows_to_dicts(conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT 5000", tuple(args)).fetchall())
-        pattern_rows = _rows_to_dicts(conn.execute(
-            f"""
-            SELECT likely_pattern, gap_quality_class, tradability_bucket,
-                   COUNT(*) AS cases,
-                   AVG(winner_change_pct) AS avg_gain,
-                   AVG(gap_pct) AS avg_gap,
-                   AVG(first_30m_gain_pct) AS avg_first30,
-                   AVG(liquidity_acceleration_score) AS avg_liq_accel,
-                   AVG(liquidity_persistence_score) AS avg_liq_persist,
-                   SUM(tool_seen) AS tool_seen_count,
-                   SUM(source_seen) AS source_seen_count
-            FROM evidence_winner_profiles {where_sql}
-            GROUP BY likely_pattern, gap_quality_class, tradability_bucket
-            ORDER BY cases DESC, avg_gain DESC
-            LIMIT 30
-            """,
-            tuple(args),
-        ).fetchall())
-        tradability_rows = _rows_to_dicts(conn.execute(
-            f"SELECT tradability_bucket, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain, AVG(day_dollar_volume) AS avg_dollar_volume FROM evidence_winner_profiles {where_sql} GROUP BY tradability_bucket ORDER BY cases DESC",
-            tuple(args),
-        ).fetchall())
-        gap_rows = _rows_to_dicts(conn.execute(
-            f"SELECT gap_quality_class, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain, AVG(gap_pct) AS avg_gap, AVG(first_30m_gain_pct) AS avg_first30, AVG(liquidity_persistence_score) AS avg_liq_persist FROM evidence_winner_profiles {where_sql} GROUP BY gap_quality_class ORDER BY cases DESC",
-            tuple(args),
-        ).fetchall())
-        visibility_rows = _rows_to_dicts(conn.execute(
-            f"SELECT visibility_confidence_label, best_tool_stage, COUNT(*) AS cases, AVG(winner_change_pct) AS avg_gain FROM evidence_winner_profiles {where_sql} GROUP BY visibility_confidence_label, best_tool_stage ORDER BY cases DESC LIMIT 30",
-            tuple(args),
-        ).fetchall())
+        raw_winners = _rows_to_dicts(conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT 5000", tuple(args)).fetchall())
+
+    # Enrich in Python so old backfilled rows get gap/tradability classifications
+    # without requiring another heavy backfill.
+    winners = [_enrich_winner_profile_row(w, week_key=wk, refresh_visibility=True) for w in raw_winners]
+    pattern_rows = _aggregate_winner_rows(winners, ["likely_pattern", "gap_quality_class", "tradability_bucket"], limit=30)
+    tradability_rows = _aggregate_winner_rows(winners, ["tradability_bucket"], limit=20)
+    gap_rows = _aggregate_winner_rows(winners, ["gap_quality_class"], limit=20)
+    visibility_rows = _visibility_summary_from_rows(winners)[:30]
+
     tracking = _query_tracking_rows_for_pattern_lab(wk)
     losses = [r for r in tracking if str(r.get("outcome_group") or "").lower() == "loss" or str(r.get("status") or "") in {"stopped"}]
     successes = [r for r in tracking if str(r.get("outcome_group") or "").lower() == "success" or str(r.get("status") or "") in {"target_hit", "above_target"}]
@@ -2331,54 +2448,66 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
         })
     loss_summary = sorted(loss_summary, key=lambda x: x["cases"], reverse=True)[:20]
 
-    # Data completeness / missing items.
     total = len(winners)
-    missing_historical_visibility = len([w for w in winners if str(w.get("visibility_confidence_label") or "") != "historical_timeline"])
+    historical_visibility = len([w for w in winners if str(w.get("visibility_confidence_label") or "") == "historical_timeline"])
+    snapshot_visibility = len([w for w in winners if str(w.get("visibility_confidence_label") or "") == "current_or_evidence_snapshot_only"])
+    missing_historical_visibility = max(0, total - historical_visibility)
     low_tradability = len([w for w in winners if str(w.get("tradability_bucket") or "") == "micro_or_special_high_risk"])
-    gap_unknown = len([w for w in winners if not str(w.get("gap_quality_class") or "")])
+    gap_unknown = len([w for w in winners if not str(w.get("gap_quality_class") or "") or str(w.get("gap_quality_class") or "") in {"gap_unknown", "unknown"}])
+    tradability_unknown = len([w for w in winners if not str(w.get("tradability_bucket") or "") or str(w.get("tradability_bucket") or "") in {"tradability_unknown", "unknown"}])
     source_unknown = len([w for w in winners if not int(w.get("source_seen") or 0) and not str(w.get("first_source_seen_at") or "")])
+
     data_gaps = []
     if missing_historical_visibility:
-        data_gaps.append(f"{missing_historical_visibility} رابحًا لا يملك ربطًا تاريخيًا مؤكدًا مع المنبع/الظهور؛ نحتاج first_source/watch/cautious/strong خلال الأسبوع.")
+        if historical_visibility:
+            data_gaps.append(f"{missing_historical_visibility} رابحًا لم يرتبط بعد بسجل منبع/ظهور تاريخي مؤكد، بينما {historical_visibility} لديهم ربط تاريخي. نحتاج استمرار جمع first_source/watch/cautious/strong خلال الأسبوع.")
+        else:
+            data_gaps.append(f"{missing_historical_visibility} رابحًا لا يملك ربطًا تاريخيًا مؤكدًا مع المنبع/الظهور؛ نحتاج first_source/watch/cautious/strong خلال الأسبوع.")
     if low_tradability:
         data_gaps.append(f"{low_tradability} رابحًا من عينة عالية المخاطر/منخفضة السيولة أو رموز خاصة؛ يجب فصلها عن الأنماط النظيفة.")
     if gap_unknown:
-        data_gaps.append(f"{gap_unknown} رابحًا لا يملك تصنيف جودة قاب واضح بعد.")
+        data_gaps.append(f"{gap_unknown} رابحًا لا يملك تصنيف جودة قاب واضح حتى بعد fallback؛ راجع حقول القاب/الشموع.")
+    if tradability_unknown:
+        data_gaps.append(f"{tradability_unknown} رابحًا لا يملك تصنيف قابلية تداول واضح حتى بعد fallback.")
     if source_unknown:
         data_gaps.append(f"{source_unknown} رابحًا غير مؤكد هل دخل المنبع تاريخيًا أم لا؛ لا تعتمد على آخر snapshot فقط.")
     if not tracking:
         data_gaps.append("لا توجد بيانات Tracking كافية للمقارنة مع الخاسرين في نفس الأسبوع.")
 
     hypotheses = []
-    for p in pattern_rows[:10]:
-        pattern = str(p.get("likely_pattern") or "unclassified_winner")
-        gap_cls = str(p.get("gap_quality_class") or "gap_unknown")
-        trad = str(p.get("tradability_bucket") or "tradability_unknown")
-        cases = int(p.get("cases") or 0)
+    for ptn in pattern_rows[:20]:
+        pattern = str(ptn.get("likely_pattern") or "unclassified_winner")
+        gap_cls = str(ptn.get("gap_quality_class") or "gap_unknown")
+        trad = str(ptn.get("tradability_bucket") or "tradability_unknown")
+        cases = int(ptn.get("cases") or 0)
         if cases < 3:
             continue
         label = "فرضية تحتاج تأكيد"
-        if trad == "tradable_core" and gap_cls in {"no_gap_steady_followthrough", "healthy_gap_followthrough"} and _safe_float(p.get("avg_liq_persist"), 0) >= 50:
+        if trad == "tradable_core" and gap_cls in {"no_gap_steady_followthrough", "healthy_gap_followthrough"} and _safe_float(ptn.get("avg_liq_persist"), 0) >= 50:
             label = "فرضية رابحة أولية قابلة للدراسة"
-        if gap_cls == "gap_chase_or_failed" or trad == "micro_or_special_high_risk":
+        if gap_cls in {"gap_chase_or_failed"} or trad == "micro_or_special_high_risk":
             label = "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين"
+        if pattern == "first_hour_liquidity_acceleration" and trad != "micro_or_special_high_risk" and _safe_float(ptn.get("avg_liq_accel"), 0) >= 45:
+            label = "فرضية التقاط مبكر تستحق مراقبة الاثنين"
         hypotheses.append({
             "pattern": pattern,
             "gap_quality_class": gap_cls,
             "tradability_bucket": trad,
             "cases": cases,
-            "avg_gain": safe_round(p.get("avg_gain"), 2),
-            "avg_gap": safe_round(p.get("avg_gap"), 2),
-            "avg_first30": safe_round(p.get("avg_first30"), 2),
-            "avg_liq_persist": safe_round(p.get("avg_liq_persist"), 1),
-            "tool_seen_count": int(p.get("tool_seen_count") or 0),
-            "source_seen_count": int(p.get("source_seen_count") or 0),
+            "unique_symbols": int(ptn.get("unique_symbols") or 0),
+            "avg_gain": safe_round(ptn.get("avg_gain"), 2),
+            "avg_gap": safe_round(ptn.get("avg_gap"), 2),
+            "avg_first30": safe_round(ptn.get("avg_first30"), 2),
+            "avg_liq_accel": safe_round(ptn.get("avg_liq_accel"), 1),
+            "avg_liq_persist": safe_round(ptn.get("avg_liq_persist"), 1),
+            "tool_seen_count": int(ptn.get("tool_seen_count") or 0),
+            "source_seen_count": int(ptn.get("source_seen_count") or 0),
             "label": label,
         })
 
     result = {
         "ok": True,
-        "version": "pattern_lab_v1_read_only",
+        "version": "pattern_lab_v4a_read_only",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -2387,9 +2516,13 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
             "tracking_rows": len(tracking),
             "tracking_success_rows": len(successes),
             "tracking_loss_rows": len(losses),
+            "historical_visibility_winners": historical_visibility,
+            "snapshot_only_visibility_winners": snapshot_visibility,
             "missing_historical_visibility": missing_historical_visibility,
             "low_tradability_winners": low_tradability,
             "source_unknown_winners": source_unknown,
+            "gap_unknown_winners": gap_unknown,
+            "tradability_unknown_winners": tradability_unknown,
         },
         "winner_pattern_groups": pattern_rows[:lim],
         "tradability_groups": tradability_rows,
@@ -2399,13 +2532,14 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
         "hypotheses": hypotheses[:lim],
         "data_gaps": data_gaps,
         "decision": "جاهز لتحليل فرضيات أولية فقط" if total >= 50 else "العينة غير كافية بعد",
-        "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. الغرض التأكد أن جمع الأسبوع القادم يسجل كل ما نحتاجه قبل اعتماد أي نمط.",
+        "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. V4a يستخدم fallback لتصنيف القاب وقابلية التداول في الصفوف القديمة، ويحتاج أسبوع جمع حي لتأكيد الأنماط.",
     }
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
         lines = [
-            "تقرير Pattern Lab V1 — فرضيات فقط، بلا تغيير في السكور",
+            "تقرير Pattern Lab V4a — فرضيات فقط، بلا تغيير في السكور",
             f"الأسبوع: {wk} | التاريخ: {td or 'كل الأسبوع'}",
             f"ملفات الرابحين: {total} | إشارات Tracking: {len(tracking)} | خسائر Tracking: {len(losses)} | نجاحات Tracking: {len(successes)}",
+            f"ربط تاريخي مؤكد: {historical_visibility} | ربط snapshot فقط/غير مكتمل: {missing_historical_visibility}",
             "",
             "أقوى فرضيات الرابحين الأولية:",
         ]
@@ -2419,8 +2553,13 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
             lines.append(f"- {g.get('gap_quality_class') or 'غير مصنف'}: {g.get('cases')} حالة | متوسط الصعود {safe_round(g.get('avg_gain'),2)}% | متوسط القاب {safe_round(g.get('avg_gap'),2)}%")
         lines.append("")
         lines.append("قابلية التداول:")
-        for t in tradability_rows:
+        for t in tradability_rows[:10]:
             lines.append(f"- {t.get('tradability_bucket') or 'غير مصنف'}: {t.get('cases')} حالة | متوسط الصعود {safe_round(t.get('avg_gain'),2)}% | متوسط حجم الدولار {safe_round(t.get('avg_dollar_volume'),0)}")
+        if visibility_rows:
+            lines.append("")
+            lines.append("ربط الرابحين بالمنبع/الأداة:")
+            for v in visibility_rows[:8]:
+                lines.append(f"- {v.get('visibility_confidence_label') or 'غير معروف'} / {v.get('best_tool_stage') or '-'}: {v.get('cases')} حالة | source_seen {v.get('source_seen_count')} | tool_seen {v.get('tool_seen_count')}")
         if loss_summary:
             lines.append("")
             lines.append("أبرز أنماط الخسائر للمقارنة:")
