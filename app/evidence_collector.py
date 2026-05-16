@@ -1500,15 +1500,49 @@ def liquidity_confirmation_check(symbol: str, trade_date: str | None = None, sto
 
     This is for execution support: when price reaches entry, the user can press
     "تحديث السيولة" and get a simple answer: continuing / uncertain / fading.
+
+    V3a safety: outside live/pre-market/after-hours sessions we do **not** label
+    liquidity as fading just because intraday volume is zero. Closed-market checks
+    should be displayed as "cannot confirm now" so the user does not confuse a
+    weekend/overnight result with true volume failure.
     """
     sym = _clean_symbol(symbol)
     if not sym:
         return {"ok": False, "error": "invalid_symbol"}
+    session = _market_session()
     quote_bundle = get_live_quotes([sym]) if EVIDENCE_COLLECTION_ENABLED else {}
     quote = quote_bundle.get(sym) or quote_bundle.get(sym.upper()) or {}
     price = _safe_float(quote.get("price"), 0)
     prev = _safe_float(quote.get("previous_close"), 0)
     d = str(trade_date or _today_text())[:10]
+
+    if session in {"closed", "closed_weekend"} and not trade_date:
+        return {
+            "ok": True,
+            "version": "liquidity_confirmation_v1_closed_market_safe",
+            "symbol": sym,
+            "trade_date": d,
+            "checked_at": _now_text(),
+            "session": session,
+            "status": "market_closed",
+            "label": "⚪ السوق مغلق — لا يمكن تأكيد استمرار السيولة الآن",
+            "score": None,
+            "source": "closed_market_no_live_liquidity",
+            "price": safe_round(price, 4),
+            "change_pct": quote.get("change_pct", 0),
+            "quote_source": quote.get("source_label") or quote.get("source") or "",
+            "volume": quote.get("volume", 0),
+            "dollar_volume": safe_round(price * _safe_float(quote.get("volume"), 0), 0) if price > 0 else 0,
+            "liquidity_acceleration_score": None,
+            "liquidity_persistence_score": None,
+            "volume_fade_flag": 0,
+            "first_30m_volume": 0,
+            "last_30m_volume": 0,
+            "guidance": "لا تستخدم هذا الفحص كقرار دخول لأن السوق مغلق. أعد التحديث أثناء pre-market أو السوق الرسمي أو بعد الإغلاق النشط.",
+            "polygon": {"ok": False, "skipped": True, "reason": session},
+            "notes": "Closed-market guard: no live liquidity decision was made.",
+        }
+
     poly = _fetch_polygon_intraday_summary(sym, d, previous_close=prev, day_open=0.0, run_id="liquidity_check", store_bars=bool(store_bars))
     score = _safe_float(poly.get("liquidity_persistence_score"), 0)
     accel = _safe_float(poly.get("liquidity_acceleration_score"), 0)
@@ -1563,6 +1597,7 @@ def liquidity_confirmation_check(symbol: str, trade_date: str | None = None, sto
         "volume": quote.get("volume", 0),
         "dollar_volume": safe_round(price * _safe_float(quote.get("volume"), 0), 0) if price > 0 else 0,
         "liquidity_acceleration_score": accel,
+        "liquidity_persistence_score": score,
         "volume_fade_flag": int(fade),
         "first_30m_volume": poly.get("first_30m_volume", 0),
         "last_30m_volume": poly.get("last_30m_volume", 0),

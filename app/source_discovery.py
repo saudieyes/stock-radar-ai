@@ -474,6 +474,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "elapsed_sec": elapsed,
         "updated_at": datetime.now(NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "final_sample": final[:40],
+        "final_symbols": final[:max_symbols],
         "reasons": {
             sym: list((reason_map.get(sym, {}) or {}).get("reasons", []) or [])[:7]
             for sym in final
