@@ -139,6 +139,17 @@ from app.learning_reports import (
     build_promotion_funnel_report,
 )
 from app.weekly_archive import archive_weekly_tracking, weekly_archive_status
+from app.evidence_collector import (
+    init_evidence_db,
+    start_evidence_background_worker,
+    evidence_status,
+    collect_evidence_snapshot,
+    daily_winners_report,
+    weekly_evidence_summary,
+    export_evidence_json,
+    export_evidence_csv,
+    sync_evidence_to_github,
+)
 from app.source_discovery import (
     dynamic_discovery_enabled,
     get_full_market_scan_interval_sec,
@@ -158,10 +169,16 @@ except Exception as exc:
     print(f"TRACKING_INTELLIGENCE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
 try:
-    init_missed_opportunities_db()
+    init_evidence_db()
 except Exception as exc:
-    print(f"MISSED_OPPORTUNITIES_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+    print(f"EVIDENCE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
+try:
+    _evidence_worker_status = start_evidence_background_worker()
+    if not _evidence_worker_status.get("ok", False):
+        print(f"EVIDENCE_WORKER_START_ERROR: {_evidence_worker_status}", flush=True)
+except Exception as exc:
+    print(f"EVIDENCE_WORKER_START_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
 
 @app.middleware("http")
@@ -2648,6 +2665,58 @@ def diagnostics_promotion_funnel(week_key: str = "", format: str = "json"):
     return result
 
 
+@app.get("/evidence/status")
+def evidence_status_endpoint():
+    return evidence_status()
+
+
+@app.post("/evidence/collect")
+@app.get("/evidence/collect")
+def evidence_collect_endpoint(mode: str = "manual", include_big_movers: bool = True, sync_to_github: bool = False, max_symbols: int | None = None):
+    return collect_evidence_snapshot(
+        mode=mode or "manual",
+        include_big_movers=bool(include_big_movers),
+        sync_to_github=bool(sync_to_github),
+        max_symbols=max_symbols,
+    )
+
+
+@app.get("/evidence/daily-winners")
+def evidence_daily_winners_endpoint(trade_date: str = "", format: str = "json", limit: int = 120):
+    result = daily_winners_report(trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/evidence/weekly-summary")
+def evidence_weekly_summary_endpoint(week_key: str = "", format: str = "json", limit: int = 50):
+    result = weekly_evidence_summary(week_key=week_key or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+
+@app.get("/evidence/export.json")
+def evidence_export_json_endpoint(week_key: str = "", trade_date: str = "", limit: int = 10000):
+    return export_evidence_json(week_key=week_key or None, trade_date=trade_date or None, limit=limit)
+
+
+@app.get("/evidence/export.csv")
+def evidence_export_csv_endpoint(week_key: str = "", trade_date: str = "", limit: int = 10000):
+    csv_text = "﻿" + export_evidence_csv(week_key=week_key or None, trade_date=trade_date or None, limit=limit)
+    filename_week = str(week_key or "current").strip() or "current"
+    filename_date = str(trade_date or "all").strip() or "all"
+    headers = {"Content-Disposition": f'attachment; filename="evidence_{filename_week}_{filename_date}.csv"'}
+    return Response(content=csv_text, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.post("/evidence/sync-github")
+@app.get("/evidence/sync-github")
+def evidence_sync_github_endpoint(week_key: str = "", trade_date: str = "", include_csv: bool = True):
+    return sync_evidence_to_github(week_key=week_key or None, trade_date=trade_date or None, include_csv=bool(include_csv))
+
+
 @app.post("/admin/archive-weekly-tracking")
 @app.get("/admin/archive-weekly-tracking")
 def admin_archive_weekly_tracking(token: str = "", week_key: str = "", prune: bool | None = None):
@@ -2731,5 +2800,6 @@ def performance_get():
         "simulation": dashboard["simulation"],
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
+
 
 
