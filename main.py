@@ -103,14 +103,34 @@ from app.missed_opportunities import (
     missed_status,
     build_missed_weekly_report,
     build_missed_weekly_brief,
-    build_symbol_timeline_report,
-    build_symbol_timeline_brief,
     build_late_promotions_report,
     build_pre_move_evidence_report,
     build_loss_analysis_report,
     export_missed_json,
     export_missed_csv,
 )
+
+# Compatibility guard: some running deployments may temporarily have an older
+# app/missed_opportunities.py without the single-symbol timeline helpers.
+# Do not let that optional endpoint crash the whole web app at startup.
+try:
+    from app.missed_opportunities import build_symbol_timeline_report, build_symbol_timeline_brief
+except Exception as _symbol_timeline_import_error:
+    def build_symbol_timeline_report(symbol: str, week_key=None, threshold=None):
+        return {
+            "ok": False,
+            "error": "symbol_timeline_unavailable",
+            "symbol": str(symbol or "").upper(),
+            "detail": str(_symbol_timeline_import_error),
+            "hint": "Update app/missed_opportunities.py to the latest version to enable this optional diagnostic endpoint.",
+        }
+
+    def build_symbol_timeline_brief(symbol: str, week_key=None, threshold=None):
+        return (
+            "Symbol timeline diagnostic is unavailable in the currently loaded "
+            f"missed_opportunities module for {str(symbol or '').upper()}. "
+            f"Reason: {_symbol_timeline_import_error}"
+        )
 from app.opportunity_intelligence import enrich_opportunity_intelligence_bulk, enrich_opportunity_intelligence
 from app.learning_reports import (
     build_pattern_learning_report,
@@ -2712,4 +2732,4 @@ def performance_get():
         "weekly_archive": store.get("weekly_archive", [])[:26],
     }
 
-# deploy trigger - learning v1 after reconnect
+
