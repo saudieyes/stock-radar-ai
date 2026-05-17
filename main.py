@@ -162,6 +162,9 @@ from app.evidence_collector import (
     evidence_auto_sync_status,
     run_evidence_auto_sync,
     liquidity_confirmation_check,
+    evidence_retention_status,
+    evidence_retention_verify_github,
+    evidence_retention_prune_dry_run,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -2783,6 +2786,23 @@ def evidence_auto_sync_run_endpoint(force: bool = False, dry_run: bool = False, 
 @app.get("/evidence/liquidity-check")
 def evidence_liquidity_check_endpoint(symbol: str, trade_date: str = "", store_bars: bool = False):
     return liquidity_confirmation_check(symbol=symbol, trade_date=trade_date or None, store_bars=bool(store_bars))
+
+
+@app.get("/evidence/retention/status")
+def evidence_retention_status_endpoint(week_key: str = "", trade_date: str = ""):
+    return evidence_retention_status(week_key=week_key or None, trade_date=trade_date or None)
+
+
+@app.post("/evidence/retention/verify-github")
+@app.get("/evidence/retention/verify-github")
+def evidence_retention_verify_github_endpoint(week_key: str = "", trade_date: str = "", include_csv: bool = True):
+    return evidence_retention_verify_github(week_key=week_key or None, trade_date=trade_date or None, include_csv=bool(include_csv))
+
+
+@app.post("/evidence/retention/prune-dry-run")
+@app.get("/evidence/retention/prune-dry-run")
+def evidence_retention_prune_dry_run_endpoint(week_key: str = "", trade_date: str = "", keep_days: int | None = None, require_verified: bool = True):
+    return evidence_retention_prune_dry_run(week_key=week_key or None, trade_date=trade_date or None, keep_days=keep_days, require_verified=bool(require_verified))
 
 
 @app.get("/diagnostics/source-entry-audit")
