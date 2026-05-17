@@ -26,7 +26,7 @@ from datetime import datetime, date, time as dt_time
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .github_sync import is_github_sync_configured, push_json_file, push_text_file
+from .github_sync import is_github_sync_configured, push_json_file, push_text_file, fetch_json_file, fetch_text_file
 from .live_quotes import get_live_quotes
 from .performance_tracker import get_performance_week_key, get_performance_week_window
 from .settings import (
@@ -88,6 +88,9 @@ EVIDENCE_INTERVAL_CLOSED_SEC = _env_int("EVIDENCE_INTERVAL_CLOSED_SEC", 21600)
 EVIDENCE_GITHUB_ARCHIVE_PATH = str(os.getenv("GITHUB_EVIDENCE_ARCHIVE_PATH", "app_data/evidence_archive") or "app_data/evidence_archive").strip().strip("/")
 EVIDENCE_FMP_BASE_URL = str(os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com") or "https://financialmodelingprep.com").rstrip("/")
 EVIDENCE_HTTP_TIMEOUT_SEC = _env_float("EVIDENCE_HTTP_TIMEOUT_SEC", 9.0)
+EVIDENCE_RETENTION_KEEP_DAYS = _env_int("EVIDENCE_RETENTION_KEEP_DAYS", 14)
+EVIDENCE_RETENTION_PRUNE_ENABLED = _env_bool("EVIDENCE_RETENTION_PRUNE_ENABLED", False)
+EVIDENCE_RETENTION_REQUIRE_VERIFY = _env_bool("EVIDENCE_RETENTION_REQUIRE_VERIFY", True)
 
 
 def _now_ts() -> float:
@@ -220,6 +223,17 @@ def init_evidence_db() -> bool:
                     distance_from_support_pct REAL NOT NULL DEFAULT 0,
                     distance_from_resistance_pct REAL NOT NULL DEFAULT 0,
                     gap_from_prev_close_pct REAL NOT NULL DEFAULT 0,
+                    pre_market_change_pct REAL NOT NULL DEFAULT 0,
+                    pre_market_volume REAL NOT NULL DEFAULT 0,
+                    pre_market_dollar_volume REAL NOT NULL DEFAULT 0,
+                    after_hours_change_pct REAL NOT NULL DEFAULT 0,
+                    open_gap_pct REAL NOT NULL DEFAULT 0,
+                    first_15m_followthrough REAL NOT NULL DEFAULT 0,
+                    first_30m_followthrough REAL NOT NULL DEFAULT 0,
+                    held_above_open REAL NOT NULL DEFAULT 0,
+                    held_above_vwap_proxy REAL NOT NULL DEFAULT 0,
+                    gap_fade_flag INTEGER NOT NULL DEFAULT 0,
+                    gap_retest_success INTEGER NOT NULL DEFAULT 0,
                     first_seen_change_pct REAL NOT NULL DEFAULT 0,
                     no_chase_flag INTEGER NOT NULL DEFAULT 0,
                     plan_needs_reconfirm INTEGER NOT NULL DEFAULT 0,
@@ -298,7 +312,20 @@ def init_evidence_db() -> bool:
                     open_to_high_pct REAL NOT NULL DEFAULT 0,
                     close_vs_open_pct REAL NOT NULL DEFAULT 0,
                     pre_market_move_pct REAL NOT NULL DEFAULT 0,
+                    pre_market_change_pct REAL NOT NULL DEFAULT 0,
                     pre_market_volume REAL NOT NULL DEFAULT 0,
+                    pre_market_dollar_volume REAL NOT NULL DEFAULT 0,
+                    after_hours_change_pct REAL NOT NULL DEFAULT 0,
+                    previous_close_near_high REAL NOT NULL DEFAULT 0,
+                    close_position_pct REAL NOT NULL DEFAULT 0,
+                    late_day_volume_spike REAL NOT NULL DEFAULT 0,
+                    open_gap_pct REAL NOT NULL DEFAULT 0,
+                    first_15m_followthrough REAL NOT NULL DEFAULT 0,
+                    first_30m_followthrough REAL NOT NULL DEFAULT 0,
+                    held_above_open REAL NOT NULL DEFAULT 0,
+                    held_above_vwap_proxy REAL NOT NULL DEFAULT 0,
+                    gap_fade_flag INTEGER NOT NULL DEFAULT 0,
+                    gap_retest_success INTEGER NOT NULL DEFAULT 0,
                     first_15m_gain_pct REAL NOT NULL DEFAULT 0,
                     first_30m_gain_pct REAL NOT NULL DEFAULT 0,
                     first_60m_gain_pct REAL NOT NULL DEFAULT 0,
@@ -341,6 +368,33 @@ def init_evidence_db() -> bool:
                 "first_strong_seen_at": "TEXT NOT NULL DEFAULT ''",
                 "best_tool_stage": "TEXT NOT NULL DEFAULT ''",
                 "promotion_delay_minutes": "REAL NOT NULL DEFAULT 0",
+                "after_hours_change_pct": "REAL NOT NULL DEFAULT 0",
+                "pre_market_change_pct": "REAL NOT NULL DEFAULT 0",
+                "pre_market_dollar_volume": "REAL NOT NULL DEFAULT 0",
+                "previous_close_near_high": "REAL NOT NULL DEFAULT 0",
+                "close_position_pct": "REAL NOT NULL DEFAULT 0",
+                "late_day_volume_spike": "REAL NOT NULL DEFAULT 0",
+                "open_gap_pct": "REAL NOT NULL DEFAULT 0",
+                "first_15m_followthrough": "REAL NOT NULL DEFAULT 0",
+                "first_30m_followthrough": "REAL NOT NULL DEFAULT 0",
+                "held_above_open": "REAL NOT NULL DEFAULT 0",
+                "held_above_vwap_proxy": "REAL NOT NULL DEFAULT 0",
+                "gap_fade_flag": "INTEGER NOT NULL DEFAULT 0",
+                "gap_retest_success": "INTEGER NOT NULL DEFAULT 0",
+            })
+
+            _ensure_table_columns(conn, "evidence_snapshots", {
+                "pre_market_change_pct": "REAL NOT NULL DEFAULT 0",
+                "pre_market_volume": "REAL NOT NULL DEFAULT 0",
+                "pre_market_dollar_volume": "REAL NOT NULL DEFAULT 0",
+                "after_hours_change_pct": "REAL NOT NULL DEFAULT 0",
+                "open_gap_pct": "REAL NOT NULL DEFAULT 0",
+                "first_15m_followthrough": "REAL NOT NULL DEFAULT 0",
+                "first_30m_followthrough": "REAL NOT NULL DEFAULT 0",
+                "held_above_open": "REAL NOT NULL DEFAULT 0",
+                "held_above_vwap_proxy": "REAL NOT NULL DEFAULT 0",
+                "gap_fade_flag": "INTEGER NOT NULL DEFAULT 0",
+                "gap_retest_success": "INTEGER NOT NULL DEFAULT 0",
             })
 
 
@@ -669,6 +723,8 @@ def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previ
     low_px = _bars_low(regular_bars) or _bars_low(bars)
     pre_open = _bar_open(pre_bars)
     pre_close = _bar_close(pre_bars)
+    after_open = _bar_open(after_bars)
+    after_close = _bar_close(after_bars)
     first_15_high = _bars_high(first_15)
     first_30_high = _bars_high(first_30)
     first_60_high = _bars_high(first_60)
@@ -677,7 +733,9 @@ def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previ
     prev = float(previous_close or 0)
 
     pre_market_move_pct = _pct_change(pre_close, prev) if prev > 0 and pre_close > 0 else _pct_change(pre_close, pre_open)
+    after_hours_change_pct = _pct_change(after_close, close_px) if after_close > 0 and close_px > 0 else _pct_change(after_close, after_open)
     gap_pct = _pct_change(open_px, prev) if prev > 0 and open_px > 0 else 0.0
+    open_gap_pct = gap_pct
     first_15_gain_pct = _pct_change(first_15_high, open_px)
     first_30_gain_pct = _pct_change(first_30_high, open_px)
     first_60_gain_pct = _pct_change(first_60_high, open_px)
@@ -687,6 +745,9 @@ def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previ
     close_vs_open_pct = _pct_change(close_px, open_px)
 
     pre_vol = _bars_volume(pre_bars)
+    pre_dollar_vol = _bars_dollar_volume(pre_bars)
+    after_vol = _bars_volume(after_bars)
+    after_dollar_vol = _bars_dollar_volume(after_bars)
     first_15_vol = _bars_volume(first_15)
     first_30_vol = _bars_volume(first_30)
     first_60_vol = _bars_volume(first_60)
@@ -696,6 +757,16 @@ def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previ
     first_30_vs_avg = first_30_vol / max(1.0, avg_5m_vol * max(1, len(first_30))) if avg_5m_vol > 0 else 0.0
     last_30_vs_first_30 = last_30_vol / max(1.0, first_30_vol) if first_30_vol > 0 else 0.0
     volume_fade_flag = 1 if first_30_vol > 0 and last_30_vol > 0 and last_30_vs_first_30 < 0.35 else 0
+    regular_dollar_volume = _bars_dollar_volume(regular_bars) or _bars_dollar_volume(bars)
+    vwap_proxy = (regular_dollar_volume / total_vol) if total_vol > 0 else 0.0
+    close_position_pct = safe_round(((close_px - low_px) / max(0.000001, high_px - low_px)) * 100.0, 2) if high_px > low_px and close_px > 0 else 0.0
+    late_day_volume_spike = safe_round(last_30_vol / max(1.0, avg_5m_vol * max(1, len(last_30))), 2) if avg_5m_vol > 0 else 0.0
+    first_15_followthrough = 1 if first_15_gain_pct > 0 and (_bar_close(first_15) or 0) >= open_px else 0
+    first_30_followthrough = 1 if first_30_gain_pct > 0 and first_30_close >= open_px else 0
+    held_above_open = 1 if open_px > 0 and close_px >= open_px and (first_30_close <= 0 or first_30_close >= open_px) else 0
+    held_above_vwap_proxy = 1 if vwap_proxy > 0 and close_px >= vwap_proxy and (first_30_close <= 0 or first_30_close >= vwap_proxy * 0.995) else 0
+    gap_fade_flag = 1 if gap_pct >= 5 and (first_30_close_pct < 0 or close_vs_open_pct < 0 or (low_px > 0 and open_px > 0 and low_px < open_px * 0.985)) else 0
+    gap_retest_success = 1 if gap_pct >= 2 and open_px > 0 and low_px > 0 and low_px <= open_px * 1.015 and close_px >= open_px else 0
 
     liquidity_accel = min(100.0, max(0.0, first_30_vs_avg * 35.0)) if first_30_vs_avg else 0.0
     # Persistence rewards first push + holding/continued volume later.
@@ -757,10 +828,18 @@ def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previ
         "low": safe_round(low_px, 4),
         "total_volume": safe_round(total_vol, 0),
         "pre_market_move_pct": safe_round(pre_market_move_pct, 2),
+        "pre_market_change_pct": safe_round(pre_market_move_pct, 2),
         "pre_market_volume": safe_round(pre_vol, 0),
+        "pre_market_dollar_volume": safe_round(pre_dollar_vol, 0),
+        "after_hours_change_pct": safe_round(after_hours_change_pct, 2),
+        "after_hours_volume": safe_round(after_vol, 0),
+        "after_hours_dollar_volume": safe_round(after_dollar_vol, 0),
         "gap_pct": safe_round(gap_pct, 2),
+        "open_gap_pct": safe_round(open_gap_pct, 2),
         "open_to_high_pct": safe_round(open_to_high_pct, 2),
         "close_vs_open_pct": safe_round(close_vs_open_pct, 2),
+        "close_position_pct": safe_round(close_position_pct, 2),
+        "late_day_volume_spike": safe_round(late_day_volume_spike, 2),
         "first_15m_gain_pct": safe_round(first_15_gain_pct, 2),
         "first_30m_gain_pct": safe_round(first_30_gain_pct, 2),
         "first_60m_gain_pct": safe_round(first_60_gain_pct, 2),
@@ -773,6 +852,13 @@ def _analyze_intraday_bars(symbol: str, trade_date: str, bars: list[dict], previ
         "avg_5m_volume": safe_round(avg_5m_vol, 0),
         "first_30m_volume_vs_avg": safe_round(first_30_vs_avg, 2),
         "last_30m_vs_first_30m_volume": safe_round(last_30_vs_first_30, 2),
+        "first_15m_followthrough": int(first_15_followthrough),
+        "first_30m_followthrough": int(first_30_followthrough),
+        "held_above_open": int(held_above_open),
+        "held_above_vwap_proxy": int(held_above_vwap_proxy),
+        "gap_fade_flag": int(gap_fade_flag),
+        "gap_retest_success": int(gap_retest_success),
+        "vwap_proxy": safe_round(vwap_proxy, 4),
         "volume_fade_flag": int(volume_fade_flag),
         "liquidity_acceleration_score": liquidity_accel,
         "liquidity_persistence_score": persistence,
@@ -887,6 +973,17 @@ def _compose_snapshot_row(run_id: str, week_key: str, trade_date: str, session: 
         "distance_from_support_pct": _pct_distance(price, support),
         "distance_from_resistance_pct": _pct_distance(price, resistance),
         "gap_from_prev_close_pct": safe_round(((price - prev) / prev * 100.0), 2) if price > 0 and prev > 0 else 0,
+        "pre_market_change_pct": _safe_float((polygon_summary or {}).get("pre_market_change_pct") or (polygon_summary or {}).get("pre_market_move_pct"), 0),
+        "pre_market_volume": _safe_float((polygon_summary or {}).get("pre_market_volume"), 0),
+        "pre_market_dollar_volume": _safe_float((polygon_summary or {}).get("pre_market_dollar_volume"), 0),
+        "after_hours_change_pct": _safe_float((polygon_summary or {}).get("after_hours_change_pct"), 0),
+        "open_gap_pct": _safe_float((polygon_summary or {}).get("open_gap_pct") or (polygon_summary or {}).get("gap_pct"), 0),
+        "first_15m_followthrough": int((polygon_summary or {}).get("first_15m_followthrough") or 0),
+        "first_30m_followthrough": int((polygon_summary or {}).get("first_30m_followthrough") or 0),
+        "held_above_open": int((polygon_summary or {}).get("held_above_open") or 0),
+        "held_above_vwap_proxy": int((polygon_summary or {}).get("held_above_vwap_proxy") or 0),
+        "gap_fade_flag": int((polygon_summary or {}).get("gap_fade_flag") or 0),
+        "gap_retest_success": int((polygon_summary or {}).get("gap_retest_success") or 0),
         "first_seen_change_pct": _safe_float(row.get("first_seen_change_pct") or row.get("change_pct_at_first_seen"), 0),
         "no_chase_flag": no_chase,
         "plan_needs_reconfirm": plan_needs,
@@ -911,7 +1008,9 @@ def _insert_snapshot_rows(rows: list[dict]) -> int:
         "in_tool_snapshot", "in_big_movers", "signal_bucket", "decision", "sharia_status", "plan_family",
         "price", "previous_close", "change_pct", "volume", "dollar_volume", "entry_price", "target_price", "stop_loss",
         "support_price", "resistance_price", "distance_from_entry_pct", "distance_from_support_pct", "distance_from_resistance_pct",
-        "gap_from_prev_close_pct", "first_seen_change_pct", "no_chase_flag", "plan_needs_reconfirm", "liquidity_score",
+        "gap_from_prev_close_pct", "pre_market_change_pct", "pre_market_volume", "pre_market_dollar_volume", "after_hours_change_pct",
+        "open_gap_pct", "first_15m_followthrough", "first_30m_followthrough", "held_above_open", "held_above_vwap_proxy",
+        "gap_fade_flag", "gap_retest_success", "first_seen_change_pct", "no_chase_flag", "plan_needs_reconfirm", "liquidity_score",
         "momentum_acceleration_score", "pattern_risk_score", "risk_tags_json", "success_tags_json", "quote_source", "price_source",
         "polygon_summary_json", "raw_json",
     ]
@@ -1066,22 +1165,54 @@ def _fetch_polygon_grouped_daily(trade_date: str) -> dict:
         return {"ok": False, "trade_date": d, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "items": []}
 
 
-def _previous_close_map_for_date(trade_date: str) -> tuple[str, dict[str, float]]:
+def _previous_daily_map_for_date(trade_date: str) -> tuple[str, dict[str, dict]]:
+    """Return previous trading day's grouped daily OHLCV by symbol.
+
+    This powers the Gap Candidate / Gap Risk evidence fields without making
+    symbol-by-symbol daily requests. It is read-only and safe: if Polygon data is
+    unavailable, callers simply receive an empty map.
+    """
     for prev_d in _previous_calendar_days(trade_date, max_days=10):
         data = _fetch_polygon_grouped_daily(prev_d)
         items = data.get("items") or []
         if data.get("ok") and items:
-            out = {}
+            out: dict[str, dict] = {}
             for raw in items:
                 if not isinstance(raw, dict):
                     continue
                 sym = _clean_symbol(raw.get("T") or raw.get("symbol"))
                 c = _safe_float(raw.get("c"), 0)
                 if sym and c > 0:
-                    out[sym] = c
+                    out[sym] = {
+                        "open": _safe_float(raw.get("o"), 0),
+                        "high": _safe_float(raw.get("h"), 0),
+                        "low": _safe_float(raw.get("l"), 0),
+                        "close": c,
+                        "volume": _safe_float(raw.get("v"), 0),
+                        "dollar_volume": c * _safe_float(raw.get("v"), 0) if c > 0 else 0,
+                        "raw": raw,
+                    }
             if out:
                 return prev_d, out
     return "", {}
+
+
+def _previous_close_map_for_date(trade_date: str) -> tuple[str, dict[str, float]]:
+    prev_d, daily = _previous_daily_map_for_date(trade_date)
+    return prev_d, {sym: _safe_float(info.get("close"), 0) for sym, info in (daily or {}).items()}
+
+
+def _close_position_pct(close: float, high: float, low: float) -> float:
+    close = _safe_float(close, 0)
+    high = _safe_float(high, 0)
+    low = _safe_float(low, 0)
+    if close <= 0 or high <= low:
+        return 0.0
+    return safe_round(((close - low) / max(0.000001, high - low)) * 100.0, 2)
+
+
+def _near_high_flag(close: float, high: float, low: float, threshold_pct: float = 80.0) -> int:
+    return 1 if _close_position_pct(close, high, low) >= float(threshold_pct or 80.0) else 0
 
 
 def _visibility_from_current_tool(sym: str) -> dict:
@@ -1401,7 +1532,9 @@ def _upsert_winner_profile(profile: dict) -> None:
     profile["updated_at"] = now
     cols = [
         "week_key", "trade_date", "symbol", "winner_rank", "winner_change_pct", "previous_close", "day_open", "day_high", "day_low", "day_close",
-        "day_volume", "day_dollar_volume", "gap_pct", "open_to_high_pct", "close_vs_open_pct", "pre_market_move_pct", "pre_market_volume",
+        "day_volume", "day_dollar_volume", "gap_pct", "open_to_high_pct", "close_vs_open_pct", "pre_market_move_pct", "pre_market_change_pct", "pre_market_volume",
+        "pre_market_dollar_volume", "after_hours_change_pct", "previous_close_near_high", "close_position_pct", "late_day_volume_spike", "open_gap_pct",
+        "first_15m_followthrough", "first_30m_followthrough", "held_above_open", "held_above_vwap_proxy", "gap_fade_flag", "gap_retest_success",
         "first_15m_gain_pct", "first_30m_gain_pct", "first_60m_gain_pct", "first_30m_volume", "first_60m_volume", "last_30m_volume",
         "volume_fade_flag", "liquidity_acceleration_score", "liquidity_persistence_score", "gap_followthrough_label", "move_quality_label", "likely_pattern",
         "tool_seen", "tool_stage", "tool_first_seen_at", "tool_first_seen_change_pct", "source_seen",
@@ -1453,7 +1586,7 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
     init_evidence_db()
     for d in dates:
         day = {"trade_date": d, "ok": False, "winners": 0, "profiles": 0, "bars_stored": 0}
-        prev_d, prev_map = _previous_close_map_for_date(d)
+        prev_d, prev_daily_map = _previous_daily_map_for_date(d)
         grouped = _fetch_polygon_grouped_daily(d)
         if not grouped.get("ok"):
             day["error"] = grouped.get("error") or grouped.get("status_code") or "polygon_grouped_failed"
@@ -1471,7 +1604,8 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
             l = _safe_float(raw.get("l"), 0)
             c = _safe_float(raw.get("c"), 0)
             v = _safe_float(raw.get("v"), 0)
-            prev = _safe_float(prev_map.get(sym), 0)
+            prev_info = (prev_daily_map or {}).get(sym, {})
+            prev = _safe_float((prev_info or {}).get("close"), 0)
             if prev <= 0 or c <= 0:
                 continue
             chg = _pct_change(c, prev)
@@ -1480,7 +1614,7 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
                 continue
             if EVIDENCE_MIN_WINNER_DOLLAR_VOLUME > 0 and dollar_vol < EVIDENCE_MIN_WINNER_DOLLAR_VOLUME:
                 continue
-            candidates.append({"symbol": sym, "raw": raw, "previous_close": prev, "change_pct": chg, "dollar_volume": dollar_vol, "open": o, "high": h, "low": l, "close": c, "volume": v})
+            candidates.append({"symbol": sym, "raw": raw, "previous_daily": prev_info or {}, "previous_close": prev, "change_pct": chg, "dollar_volume": dollar_vol, "open": o, "high": h, "low": l, "close": c, "volume": v})
         candidates = sorted(candidates, key=lambda x: _safe_float(x.get("change_pct"), 0), reverse=True)[:lim]
         day["ok"] = True
         day["previous_trade_date"] = prev_d
@@ -1506,7 +1640,20 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
                 "open_to_high_pct": safe_round(_pct_change(item.get("high"), item.get("open")), 2),
                 "close_vs_open_pct": safe_round(_pct_change(item.get("close"), item.get("open")), 2),
                 "pre_market_move_pct": _safe_float(intraday.get("pre_market_move_pct"), 0),
+                "pre_market_change_pct": _safe_float(intraday.get("pre_market_change_pct") or intraday.get("pre_market_move_pct"), 0),
                 "pre_market_volume": _safe_float(intraday.get("pre_market_volume"), 0),
+                "pre_market_dollar_volume": _safe_float(intraday.get("pre_market_dollar_volume"), 0),
+                "after_hours_change_pct": _safe_float(intraday.get("after_hours_change_pct"), 0),
+                "previous_close_near_high": _near_high_flag((item.get("previous_daily") or {}).get("close"), (item.get("previous_daily") or {}).get("high"), (item.get("previous_daily") or {}).get("low")),
+                "close_position_pct": _close_position_pct(item.get("close"), item.get("high"), item.get("low")),
+                "late_day_volume_spike": _safe_float(intraday.get("late_day_volume_spike"), 0),
+                "open_gap_pct": _safe_float(intraday.get("open_gap_pct") or _pct_change(item.get("open"), item.get("previous_close")), 0),
+                "first_15m_followthrough": int(intraday.get("first_15m_followthrough") or 0),
+                "first_30m_followthrough": int(intraday.get("first_30m_followthrough") or 0),
+                "held_above_open": int(intraday.get("held_above_open") or 0),
+                "held_above_vwap_proxy": int(intraday.get("held_above_vwap_proxy") or 0),
+                "gap_fade_flag": int(intraday.get("gap_fade_flag") or 0),
+                "gap_retest_success": int(intraday.get("gap_retest_success") or 0),
                 "first_15m_gain_pct": _safe_float(intraday.get("first_15m_gain_pct"), 0),
                 "first_30m_gain_pct": _safe_float(intraday.get("first_30m_gain_pct"), 0),
                 "first_60m_gain_pct": _safe_float(intraday.get("first_60m_gain_pct"), 0),
@@ -1546,7 +1693,7 @@ def backfill_daily_winner_profiles(start_date: str | None = None, end_date: str 
             base["tradability_reasons_json"] = _json_dumps(tradability_reasons)
             base["gap_quality_class"] = gap_quality_class
             base["gap_quality_reasons_json"] = _json_dumps(gap_quality_reasons)
-            base["profile_json"] = _json_dumps({"quality_label": quality_label, "polygon_intraday": intraday, "tool_visibility": visibility, "tradability": {"score": tradability_score, "bucket": tradability_bucket, "reasons": tradability_reasons}, "gap_quality": {"class": gap_quality_class, "reasons": gap_quality_reasons}, "raw_daily": item.get("raw", {})})
+            base["profile_json"] = _json_dumps({"quality_label": quality_label, "polygon_intraday": intraday, "tool_visibility": visibility, "tradability": {"score": tradability_score, "bucket": tradability_bucket, "reasons": tradability_reasons}, "gap_quality": {"class": gap_quality_class, "reasons": gap_quality_reasons}, "raw_daily": item.get("raw", {}), "previous_daily": item.get("previous_daily", {})})
             _upsert_winner_profile(base)
             day["profiles"] += 1
             stored = _safe_int(intraday.get("bars_stored"), 0)
@@ -2311,7 +2458,9 @@ def export_evidence_csv(week_key: str | None = None, trade_date: str | None = No
         "captured_at_text", "week_key", "trade_date", "session", "symbol", "source_group", "in_tool_snapshot", "in_big_movers",
         "signal_bucket", "decision", "sharia_status", "plan_family", "price", "change_pct", "volume", "dollar_volume",
         "entry_price", "target_price", "stop_loss", "support_price", "resistance_price", "distance_from_entry_pct",
-        "distance_from_support_pct", "distance_from_resistance_pct", "gap_from_prev_close_pct", "no_chase_flag", "plan_needs_reconfirm",
+        "distance_from_support_pct", "distance_from_resistance_pct", "gap_from_prev_close_pct", "pre_market_change_pct", "pre_market_volume",
+        "pre_market_dollar_volume", "after_hours_change_pct", "open_gap_pct", "first_15m_followthrough", "first_30m_followthrough",
+        "held_above_open", "held_above_vwap_proxy", "gap_fade_flag", "gap_retest_success", "no_chase_flag", "plan_needs_reconfirm",
         "liquidity_score", "momentum_acceleration_score", "pattern_risk_score", "quote_source", "price_source",
     ]
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
@@ -2507,7 +2656,7 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
 
     result = {
         "ok": True,
-        "version": "pattern_lab_v4a_read_only",
+        "version": "pattern_lab_v4b_read_only_gap_evidence",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -2532,11 +2681,12 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
         "hypotheses": hypotheses[:lim],
         "data_gaps": data_gaps,
         "decision": "جاهز لتحليل فرضيات أولية فقط" if total >= 50 else "العينة غير كافية بعد",
-        "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. V4a يستخدم fallback لتصنيف القاب وقابلية التداول في الصفوف القديمة، ويحتاج أسبوع جمع حي لتأكيد الأنماط.",
+        "gap_evidence_fields": ["after_hours_change_pct", "pre_market_change_pct", "pre_market_volume", "pre_market_dollar_volume", "previous_close_near_high", "close_position_pct", "late_day_volume_spike", "open_gap_pct", "first_15m_followthrough", "first_30m_followthrough", "held_above_open", "held_above_vwap_proxy", "gap_fade_flag", "gap_retest_success"],
+        "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. V4b يثبت حقول دراسة القاب/خطر القاب ضمن Evidence ويضيف Retention Guard آمنًا بلا حذف فعلي.",
     }
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
         lines = [
-            "تقرير Pattern Lab V4a — فرضيات فقط، بلا تغيير في السكور",
+            "تقرير Pattern Lab V4b — فرضيات فقط، بلا تغيير في السكور",
             f"الأسبوع: {wk} | التاريخ: {td or 'كل الأسبوع'}",
             f"ملفات الرابحين: {total} | إشارات Tracking: {len(tracking)} | خسائر Tracking: {len(losses)} | نجاحات Tracking: {len(successes)}",
             f"ربط تاريخي مؤكد: {historical_visibility} | ربط snapshot فقط/غير مكتمل: {missing_historical_visibility}",
@@ -2609,6 +2759,216 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
         pass
     return results
 
+
+
+# ---------------------------------------------------------------------------
+# Retention Guard V4b (safe, no deletion by default)
+# ---------------------------------------------------------------------------
+
+def _archive_paths_for(week_key: str | None = None, trade_date: str | None = None) -> dict[str, str]:
+    wk = str(week_key or _current_week_key() or "current")
+    d = str(trade_date or _today_text())[:10]
+    base = f"{EVIDENCE_GITHUB_ARCHIVE_PATH}/{wk}"
+    return {
+        "evidence_json": f"{base}/{d}_evidence.json",
+        "summary_json": f"{base}/{d}_summary.json",
+        "winner_profiles_json": f"{base}/{d}_winner_profiles.json",
+        "pattern_readiness_json": f"{base}/{d}_pattern_readiness.json",
+        "pattern_lab_json": f"{base}/{d}_pattern_lab.json",
+        "evidence_csv": f"{base}/{d}_evidence.csv",
+    }
+
+
+def _sqlite_count(table: str, where_sql: str = "", args: tuple = ()) -> int:
+    try:
+        init_evidence_db()
+        sql = f"SELECT COUNT(*) AS c FROM {table} {where_sql}".strip()
+        with _connect() as conn:
+            row = conn.execute(sql, args).fetchone()
+        return int(row["c"] if row else 0)
+    except Exception:
+        return 0
+
+
+def _retention_cutoff_date(keep_days: int | None = None) -> str:
+    keep = max(1, int(keep_days if keep_days is not None else EVIDENCE_RETENTION_KEEP_DAYS))
+    # Use New York date because all evidence trade_date values are NY market dates.
+    cutoff = date.fromordinal((_now_dt().date()).toordinal() - keep)
+    return cutoff.strftime("%Y-%m-%d")
+
+
+def evidence_retention_status(week_key: str | None = None, trade_date: str | None = None) -> dict:
+    """Return safe retention state. This never deletes Railway data."""
+    wk = str(week_key or _current_week_key() or "current")
+    td = str(trade_date or _today_text())[:10]
+    cutoff = _retention_cutoff_date()
+    paths = _archive_paths_for(wk, td)
+    last_sync = get_json("evidence_last_github_sync", {})
+    last_verify = get_json("evidence_last_retention_verify", {})
+    last_dry = get_json("evidence_last_retention_prune_dry_run", {})
+    counts = {
+        "snapshots_total": _sqlite_count("evidence_snapshots"),
+        "intraday_bars_total": _sqlite_count("evidence_intraday_bars"),
+        "winner_profiles_total": _sqlite_count("evidence_winner_profiles"),
+        "daily_big_movers_total": _sqlite_count("daily_big_movers"),
+        "runs_total": _sqlite_count("evidence_runs"),
+        "snapshots_candidate_old": _sqlite_count("evidence_snapshots", "WHERE trade_date < ?", (cutoff,)),
+        "intraday_bars_candidate_old": _sqlite_count("evidence_intraday_bars", "WHERE trade_date < ?", (cutoff,)),
+        "winner_profiles_candidate_old": _sqlite_count("evidence_winner_profiles", "WHERE trade_date < ?", (cutoff,)),
+        "daily_big_movers_candidate_old": _sqlite_count("daily_big_movers", "WHERE trade_date < ?", (cutoff,)),
+    }
+    return {
+        "ok": True,
+        "version": "retention_guard_v4b_no_delete_by_default",
+        "week_key": wk,
+        "trade_date": td,
+        "generated_at": _now_text(),
+        "sqlite_enabled": bool(SQLITE_ENABLED),
+        "db_path": str(SQLITE_DB_PATH),
+        "github_configured": bool(is_github_sync_configured()),
+        "github_archive_path": EVIDENCE_GITHUB_ARCHIVE_PATH,
+        "keep_recent_days": int(EVIDENCE_RETENTION_KEEP_DAYS),
+        "cutoff_trade_date_exclusive": cutoff,
+        "prune_enabled": bool(EVIDENCE_RETENTION_PRUNE_ENABLED),
+        "actual_delete_available": False,
+        "counts": counts,
+        "paths_for_selected_date": paths,
+        "last_github_sync": last_sync if isinstance(last_sync, dict) else {},
+        "last_verify": last_verify if isinstance(last_verify, dict) else {},
+        "last_prune_dry_run": last_dry if isinstance(last_dry, dict) else {},
+        "safety_rules": [
+            "No Railway deletion in V4b endpoints.",
+            "Only dry-run is available until AUTO PRUNE is explicitly added after verified weekly archive.",
+            "Current week/current trade date are never deletion candidates.",
+            "Deletion requires GitHub sync + readable JSON/CSV verification first.",
+        ],
+    }
+
+
+def _verify_json_payload(name: str, path: str, expected_min_count: int | None = None) -> dict:
+    fetched = fetch_json_file(path)
+    out = {"name": name, "path": path, "ok": False, "exists": False, "readable": False, "count": 0, "sha": fetched.get("sha", "") if isinstance(fetched, dict) else ""}
+    if not isinstance(fetched, dict) or not fetched.get("ok"):
+        out["error"] = (fetched or {}).get("error") if isinstance(fetched, dict) else "fetch_failed"
+        return out
+    out["exists"] = bool(fetched.get("exists"))
+    data = fetched.get("data")
+    out["readable"] = data is not None
+    if isinstance(data, dict):
+        # Prefer the explicit count fields, fall back to list lengths.
+        count = 0
+        for key in ["snapshots_count", "winner_profiles_count", "intraday_bars_count", "runs_count"]:
+            count += _safe_int(data.get(key), 0)
+        if count <= 0:
+            for key in ["snapshots", "winner_profiles", "intraday_bars", "daily_big_movers", "runs"]:
+                val = data.get(key)
+                if isinstance(val, list):
+                    count += len(val)
+        if count <= 0 and any(k in data for k in ["summary", "hypotheses", "winner_pattern_groups", "winner_profiles"]):
+            count = 1
+        out["count"] = int(count)
+    elif isinstance(data, list):
+        out["count"] = len(data)
+    out["ok"] = bool(out["exists"] and out["readable"] and (out["count"] > 0 or expected_min_count in (None, 0)))
+    if expected_min_count is not None and expected_min_count > 0:
+        out["expected_min_count"] = int(expected_min_count)
+        # GitHub exports may be limited, so require non-empty rather than exact parity.
+        out["count_match_level"] = "non_empty" if out["count"] > 0 else "empty"
+    return out
+
+
+def evidence_retention_verify_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool = True) -> dict:
+    """Verify that the GitHub evidence archive for a selected date is readable.
+
+    This is intentionally non-destructive. It does not delete or prune Railway data.
+    """
+    wk = str(week_key or _current_week_key() or "current")
+    td = str(trade_date or _today_text())[:10]
+    paths = _archive_paths_for(wk, td)
+    if not is_github_sync_configured():
+        return {"ok": False, "configured": False, "error": "github_sync_not_configured", "week_key": wk, "trade_date": td}
+    local_expected = {
+        "evidence_json": _sqlite_count("evidence_snapshots", "WHERE week_key=? AND trade_date=?", (wk, td)),
+        "winner_profiles_json": _sqlite_count("evidence_winner_profiles", "WHERE week_key=? AND trade_date=?", (wk, td)),
+        "summary_json": 1,
+        "pattern_readiness_json": 1,
+        "pattern_lab_json": 1,
+    }
+    checks = {}
+    for name in ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json"]:
+        checks[name] = _verify_json_payload(name, paths[name], expected_min_count=local_expected.get(name))
+    if include_csv:
+        csv_fetch = fetch_text_file(paths["evidence_csv"])
+        content = csv_fetch.get("content") if isinstance(csv_fetch, dict) else None
+        line_count = len([ln for ln in str(content or "").splitlines() if ln.strip()]) if content is not None else 0
+        checks["evidence_csv"] = {
+            "name": "evidence_csv",
+            "path": paths["evidence_csv"],
+            "ok": bool(isinstance(csv_fetch, dict) and csv_fetch.get("ok") and csv_fetch.get("exists") and line_count >= 1),
+            "exists": bool(isinstance(csv_fetch, dict) and csv_fetch.get("exists")),
+            "readable": content is not None,
+            "line_count": line_count,
+            "sha": csv_fetch.get("sha", "") if isinstance(csv_fetch, dict) else "",
+            "error": csv_fetch.get("error", "") if isinstance(csv_fetch, dict) else "fetch_failed",
+        }
+    required = ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json"]
+    ok = all(bool((checks.get(k) or {}).get("ok")) for k in required)
+    result = {
+        "ok": bool(ok),
+        "version": "retention_verify_github_v4b",
+        "configured": True,
+        "week_key": wk,
+        "trade_date": td,
+        "verified_at": _now_text(),
+        "paths": paths,
+        "local_expected_counts": local_expected,
+        "checks": checks,
+        "notes": "Verification only. No Railway deletion is performed.",
+    }
+    try:
+        set_json("evidence_last_retention_verify", result)
+    except Exception:
+        pass
+    return result
+
+
+def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: str | None = None, keep_days: int | None = None, require_verified: bool = True) -> dict:
+    """Show what could be pruned later. This function never deletes data."""
+    wk = str(week_key or _current_week_key() or "current")
+    td = str(trade_date or _today_text())[:10]
+    cutoff = _retention_cutoff_date(keep_days)
+    verify = evidence_retention_verify_github(wk, td, include_csv=True) if require_verified else {"ok": True, "skipped": True}
+    candidates = {
+        "evidence_snapshots": _sqlite_count("evidence_snapshots", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
+        "evidence_intraday_bars": _sqlite_count("evidence_intraday_bars", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
+        "evidence_winner_profiles": _sqlite_count("evidence_winner_profiles", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
+        "daily_big_movers": _sqlite_count("daily_big_movers", "WHERE trade_date < ?", (cutoff,)),
+        "evidence_runs": _sqlite_count("evidence_runs", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
+    }
+    would_delete = bool((not require_verified or verify.get("ok")) and any(v > 0 for v in candidates.values()))
+    result = {
+        "ok": True,
+        "version": "retention_prune_dry_run_v4b_no_delete",
+        "week_key": wk,
+        "trade_date": td,
+        "generated_at": _now_text(),
+        "keep_days": int(keep_days if keep_days is not None else EVIDENCE_RETENTION_KEEP_DAYS),
+        "cutoff_trade_date_exclusive": cutoff,
+        "require_verified": bool(require_verified),
+        "verification_ok": bool(verify.get("ok")),
+        "verification": verify,
+        "candidate_rows_by_table": candidates,
+        "candidate_total_rows": int(sum(candidates.values())),
+        "would_delete_if_future_prune_enabled": bool(would_delete),
+        "deleted_rows": 0,
+        "prune_enabled_now": bool(EVIDENCE_RETENTION_PRUNE_ENABLED),
+        "notes": "Dry-run only. V4b intentionally performs zero Railway deletions.",
+    }
+    try:
+        set_json("evidence_last_retention_prune_dry_run", result)
+    except Exception:
+        pass
+    return result
 
 def _daily_auto_sync_due(session: str) -> bool:
     """Compatibility wrapper used by the background worker.
