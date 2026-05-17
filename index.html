@@ -1774,6 +1774,12 @@
     .mood-index-line{font-weight:900;color:var(--text-strong);font-size:13px;background:var(--panel-bg-soft-2);border:1px solid var(--border-main);border-radius:14px;padding:9px;}
     .mood-sector-block{display:grid;gap:6px;}
     .mood-sector-title{font-size:12px;font-weight:900;color:var(--text-muted);}
+    .mood-fear-card{margin-top:10px;border-radius:16px;padding:11px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.08);display:grid;gap:8px;}
+    .mood-fear-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+    .mood-fear-title{font-size:13px;font-weight:950;color:var(--text-strong);}
+    .mood-fear-value{font-size:12px;font-weight:900;color:var(--text-main);}
+    .mood-fear-guidance{font-size:12px;line-height:1.65;color:var(--text-main);padding-inline-start:18px;margin:0;}
+    .mood-fear-guidance li{margin:2px 0;}
     .sector-chip-row{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px;}
     .sector-chip-row::-webkit-scrollbar{display:none;}
     .sector-chip{flex:0 0 auto;border-radius:999px;border:1px solid var(--border-main);padding:6px 9px;font-size:11px;font-weight:800;background:var(--panel-bg-soft-2);white-space:nowrap;}
@@ -2142,7 +2148,7 @@
       <div class="market-mood-top">
         <div>
           <div class="market-mood-title">🧭 مزاج السوق</div>
-          <div class="market-mood-note">طبقة سياقية فقط، لا تدخل في نقاط الأسهم أو ترتيبها.</div>
+          <div class="market-mood-note">طبقة سياقية تنفيذية: VIX/الخوف يعطي إرشاد حجم الدخول والتأكيد، ولا يغير نقاط الأسهم مباشرة.</div>
         </div>
         <span id="marketMoodUpdated" class="live-status-chip">جاري التحميل...</span>
       </div>
@@ -3991,6 +3997,16 @@
       const weakItems = (payload.weak_sectors || []).slice(0,4).map(x => `
         <span class="sector-chip negative"><b>${safeText(x.symbol || '')}</b> ${safeText(x.label || '')} ${formatNumber(x.change_pct || 0)}%</span>
       `).join('') || '<span class="sector-chip neutral">—</span>';
+      const fear = payload.market_fear || {};
+      const fearGuidance = Array.isArray(fear.guidance_ar) ? fear.guidance_ar.slice(0,4) : [];
+      const fearTitle = fear.ok ? `${safeText(fear.badge || '⚪')} ${safeText(fear.regime_label || 'VIX')}` : '⚪ VIX غير متوفر';
+      const fearValue = fear.ok
+        ? `VIX ${formatNumber(fear.vix || 0)} • تغير ${formatNumber(fear.change_pct || 0)}% • حجم ×${formatNumber(fear.position_size_multiplier || 1)}`
+        : safeText(fear.note || fear.error || 'تعذر جلب VIX الآن');
+      const fearRules = fear.ok ? `تأكيد: ${safeText(fear.confirmation_strictness || 'normal')} • مطاردة: ${safeText(fear.no_chase_strictness || 'normal')}` : 'طبقة الخوف غير متاحة الآن';
+      const fearGuidanceHtml = fearGuidance.length
+        ? `<ul class="mood-fear-guidance">${fearGuidance.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`
+        : '<div class="market-mood-note">لا توجد تعليمات إضافية الآن.</div>';
       box.innerHTML = `
         <div class="mood-modern-card ${moodClass}">
           <div class="mood-modern-main">
@@ -4011,6 +4027,14 @@
           <div class="mood-sector-block">
             <div class="mood-sector-title">🔻 القطاعات الأضعف</div>
             <div class="sector-chip-row">${weakItems}</div>
+          </div>
+          <div class="mood-fear-card">
+            <div class="mood-fear-head">
+              <div class="mood-fear-title">${fearTitle}</div>
+              <div class="mood-fear-value">${fearValue}</div>
+            </div>
+            <div class="market-mood-note">${fearRules}</div>
+            ${fearGuidanceHtml}
           </div>
         </div>`;
       if (updated) updated.textContent = payload.updated_at ? `آخر تحديث: ${safeText(payload.updated_at)}` : 'محدث';

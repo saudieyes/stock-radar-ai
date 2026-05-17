@@ -85,6 +85,7 @@ from app.display_contract import *
 from app.single_stock_engine import scan_all, build_single_stock_response, get_last_scan_debug
 
 from app.sqlite_store import init_db, sqlite_status, set_json, get_json
+from app.market_fear import get_market_fear_snapshot, market_fear_status
 from app.user_auth_store import has_auth_user, create_first_user, verify_db_user
 from app.live_quotes import get_live_quotes
 from app.tracking_intelligence import (
@@ -1206,6 +1207,25 @@ def _build_market_mood_from_quotes(quotes: dict, diagnostics: dict | None = None
     else:
         explanation_bits.append("الفرز الفني يبقى أهم من المزاج العام")
 
+    market_fear = {}
+    try:
+        market_fear = get_market_fear_snapshot(force_refresh=False, store=True)
+    except Exception as _market_fear_exc:
+        market_fear = {"ok": False, "error": str(_market_fear_exc)[:160]}
+
+    # V4d: VIX/Market Fear is decision-support context. It does not change
+    # stock score/ranking here, but it does slightly affect the displayed
+    # market mood score so the user sees market stress clearly in the top card.
+    fear_score = _safe_pct((market_fear or {}).get("stress_score", 0), 0) if isinstance(market_fear, dict) else 0
+    if fear_score >= 70:
+        score = max(0.0, min(100.0, score - 8.0))
+    elif fear_score >= 55:
+        score = max(0.0, min(100.0, score - 4.0))
+    elif fear_score <= 35 and market_fear.get("ok"):
+        score = max(0.0, min(100.0, score + 2.0))
+    label = _market_mood_label(score, avg_index_pct)
+    risk_label = _market_mood_risk_label(score)
+
     return {
         "ok": True,
         "mode": "context_only_no_news_points",
@@ -1222,6 +1242,9 @@ def _build_market_mood_from_quotes(quotes: dict, diagnostics: dict | None = None
         "summary_ar": " | ".join(explanation_bits[:3]),
         "index_summary_ar": index_text,
         "hot_sectors_summary_ar": hot_text,
+        "market_fear": market_fear if isinstance(market_fear, dict) else {},
+        "market_fear_summary_ar": (market_fear or {}).get("summary_ar", "") if isinstance(market_fear, dict) else "",
+        "market_fear_guidance_ar": (market_fear or {}).get("guidance_ar", []) if isinstance(market_fear, dict) else [],
         "source": diagnostics.get("source", diagnostics.get("sources", "FMP/Polygon live quotes")) if isinstance(diagnostics, dict) else "FMP/Polygon live quotes",
         "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
         "note": "مزاج السوق طبقة سياقية فقط ولا تدخل في نقاط الأسهم أو ترتيبها.",
@@ -1250,6 +1273,24 @@ def market_mood_endpoint(allow_fallback: bool = True, prefer_cache: bool | None 
             cached["error"] = str(exc)[:160]
             return cached
         return {"ok": False, "error": str(exc)[:180], "note": "تعذر بناء مزاج السوق حاليًا."}
+
+
+
+@app.get("/market-fear")
+@app.get("/vix-risk")
+def market_fear_endpoint(force_refresh: bool = False):
+    """VIX / Market Fear decision-support layer.
+
+    This endpoint is intentionally context-only in V4d: it gives execution
+    guidance and tracking fields, but it does not change stock scoring, ranking,
+    or Sharia filtering.
+    """
+    return get_market_fear_snapshot(force_refresh=bool(force_refresh), store=True)
+
+
+@app.get("/market-fear/status")
+def market_fear_status_endpoint():
+    return market_fear_status()
 
 
 
