@@ -2779,6 +2779,79 @@ def _archive_paths_for(week_key: str | None = None, trade_date: str | None = Non
     }
 
 
+
+def _normalize_retention_sync_paths(paths: dict | None) -> dict[str, str]:
+    """Normalize sync result path keys to retention verifier path keys."""
+    raw = paths if isinstance(paths, dict) else {}
+    return {
+        "evidence_json": str(raw.get("evidence_json") or raw.get("json") or ""),
+        "summary_json": str(raw.get("summary_json") or raw.get("summary") or ""),
+        "winner_profiles_json": str(raw.get("winner_profiles_json") or raw.get("winner_profiles") or ""),
+        "pattern_readiness_json": str(raw.get("pattern_readiness_json") or raw.get("pattern_readiness") or ""),
+        "pattern_lab_json": str(raw.get("pattern_lab_json") or raw.get("pattern_lab") or ""),
+        "evidence_csv": str(raw.get("evidence_csv") or raw.get("csv") or ""),
+    }
+
+
+def _last_successful_github_sync() -> dict:
+    """Return the last successful GitHub evidence sync, if available."""
+    try:
+        last = get_json("evidence_last_github_sync", {})
+    except Exception:
+        last = {}
+    if not isinstance(last, dict) or not last.get("ok"):
+        return {}
+    trade_date = str(last.get("trade_date") or "")[:10]
+    week_key = str(last.get("week_key") or "")
+    if not trade_date or not week_key:
+        return {}
+    return last
+
+
+def _resolve_retention_archive_target(week_key: str | None = None, trade_date: str | None = None) -> dict:
+    """Choose the archive target for retention checks.
+
+    V4c behavior:
+    - If the caller gives week_key/trade_date, respect it.
+    - If not, verify/prune checks use the last successful GitHub sync rather
+      than today's date. This avoids false failures on weekends or non-trading
+      days when no archive is expected for today.
+    """
+    requested_week = str(week_key or "").strip()
+    requested_date = str(trade_date or "").strip()[:10]
+    explicit = bool(requested_week or requested_date)
+    last = _last_successful_github_sync()
+
+    if not explicit and last:
+        wk = str(last.get("week_key") or _current_week_key() or "current")
+        td = str(last.get("trade_date") or _today_text())[:10]
+        sync_paths = _normalize_retention_sync_paths(last.get("paths") if isinstance(last.get("paths"), dict) else {})
+        fallback_paths = _archive_paths_for(wk, td)
+        paths = {k: (sync_paths.get(k) or fallback_paths.get(k) or "") for k in fallback_paths.keys()}
+        return {
+            "week_key": wk,
+            "trade_date": td,
+            "paths": paths,
+            "target_source": "last_successful_github_sync",
+            "used_last_successful_sync": True,
+            "explicit_target_requested": False,
+            "last_successful_sync": last,
+            "note": "No date was requested, so V4c selected the last successful GitHub sync instead of today's date.",
+        }
+
+    wk = str(requested_week or _current_week_key() or "current")
+    td = str(requested_date or _today_text())[:10]
+    return {
+        "week_key": wk,
+        "trade_date": td,
+        "paths": _archive_paths_for(wk, td),
+        "target_source": "explicit_request" if explicit else "current_date_fallback_no_previous_sync",
+        "used_last_successful_sync": False,
+        "explicit_target_requested": explicit,
+        "last_successful_sync": last,
+        "note": "Explicit retention target was used." if explicit else "No previous successful sync was available; current date fallback was used.",
+    }
+
 def _sqlite_count(table: str, where_sql: str = "", args: tuple = ()) -> int:
     try:
         init_evidence_db()
@@ -2799,11 +2872,12 @@ def _retention_cutoff_date(keep_days: int | None = None) -> str:
 
 def evidence_retention_status(week_key: str | None = None, trade_date: str | None = None) -> dict:
     """Return safe retention state. This never deletes Railway data."""
-    wk = str(week_key or _current_week_key() or "current")
-    td = str(trade_date or _today_text())[:10]
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    td = str(target.get("trade_date") or _today_text())[:10]
     cutoff = _retention_cutoff_date()
-    paths = _archive_paths_for(wk, td)
-    last_sync = get_json("evidence_last_github_sync", {})
+    paths = target.get("paths") if isinstance(target.get("paths"), dict) else _archive_paths_for(wk, td)
+    last_sync = target.get("last_successful_sync") or get_json("evidence_last_github_sync", {})
     last_verify = get_json("evidence_last_retention_verify", {})
     last_dry = get_json("evidence_last_retention_prune_dry_run", {})
     counts = {
@@ -2819,7 +2893,7 @@ def evidence_retention_status(week_key: str | None = None, trade_date: str | Non
     }
     return {
         "ok": True,
-        "version": "retention_guard_v4b_no_delete_by_default",
+        "version": "retention_guard_v4c_last_sync_aware_no_delete",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -2833,11 +2907,17 @@ def evidence_retention_status(week_key: str | None = None, trade_date: str | Non
         "actual_delete_available": False,
         "counts": counts,
         "paths_for_selected_date": paths,
+        "retention_target": {
+            "target_source": target.get("target_source"),
+            "used_last_successful_sync": bool(target.get("used_last_successful_sync")),
+            "explicit_target_requested": bool(target.get("explicit_target_requested")),
+            "note": target.get("note", ""),
+        },
         "last_github_sync": last_sync if isinstance(last_sync, dict) else {},
         "last_verify": last_verify if isinstance(last_verify, dict) else {},
         "last_prune_dry_run": last_dry if isinstance(last_dry, dict) else {},
         "safety_rules": [
-            "No Railway deletion in V4b endpoints.",
+            "No Railway deletion in V4c endpoints.",
             "Only dry-run is available until AUTO PRUNE is explicitly added after verified weekly archive.",
             "Current week/current trade date are never deletion candidates.",
             "Deletion requires GitHub sync + readable JSON/CSV verification first.",
@@ -2881,12 +2961,15 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     """Verify that the GitHub evidence archive for a selected date is readable.
 
     This is intentionally non-destructive. It does not delete or prune Railway data.
+    V4c defaults to the last successful GitHub sync when no date is requested,
+    which avoids false errors on weekends/non-trading days.
     """
-    wk = str(week_key or _current_week_key() or "current")
-    td = str(trade_date or _today_text())[:10]
-    paths = _archive_paths_for(wk, td)
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    td = str(target.get("trade_date") or _today_text())[:10]
+    paths = target.get("paths") if isinstance(target.get("paths"), dict) else _archive_paths_for(wk, td)
     if not is_github_sync_configured():
-        return {"ok": False, "configured": False, "error": "github_sync_not_configured", "week_key": wk, "trade_date": td}
+        return {"ok": False, "configured": False, "error": "github_sync_not_configured", "week_key": wk, "trade_date": td, "retention_target": target}
     local_expected = {
         "evidence_json": _sqlite_count("evidence_snapshots", "WHERE week_key=? AND trade_date=?", (wk, td)),
         "winner_profiles_json": _sqlite_count("evidence_winner_profiles", "WHERE week_key=? AND trade_date=?", (wk, td)),
@@ -2915,12 +2998,18 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     ok = all(bool((checks.get(k) or {}).get("ok")) for k in required)
     result = {
         "ok": bool(ok),
-        "version": "retention_verify_github_v4b",
+        "version": "retention_verify_github_v4c_last_sync_aware",
         "configured": True,
         "week_key": wk,
         "trade_date": td,
         "verified_at": _now_text(),
         "paths": paths,
+        "retention_target": {
+            "target_source": target.get("target_source"),
+            "used_last_successful_sync": bool(target.get("used_last_successful_sync")),
+            "explicit_target_requested": bool(target.get("explicit_target_requested")),
+            "note": target.get("note", ""),
+        },
         "local_expected_counts": local_expected,
         "checks": checks,
         "notes": "Verification only. No Railway deletion is performed.",
@@ -2934,10 +3023,11 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
 
 def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: str | None = None, keep_days: int | None = None, require_verified: bool = True) -> dict:
     """Show what could be pruned later. This function never deletes data."""
-    wk = str(week_key or _current_week_key() or "current")
-    td = str(trade_date or _today_text())[:10]
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    td = str(target.get("trade_date") or _today_text())[:10]
     cutoff = _retention_cutoff_date(keep_days)
-    verify = evidence_retention_verify_github(wk, td, include_csv=True) if require_verified else {"ok": True, "skipped": True}
+    verify = evidence_retention_verify_github(wk, td, include_csv=True) if require_verified else {"ok": True, "skipped": True, "retention_target": target}
     candidates = {
         "evidence_snapshots": _sqlite_count("evidence_snapshots", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
         "evidence_intraday_bars": _sqlite_count("evidence_intraday_bars", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
@@ -2948,7 +3038,7 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
     would_delete = bool((not require_verified or verify.get("ok")) and any(v > 0 for v in candidates.values()))
     result = {
         "ok": True,
-        "version": "retention_prune_dry_run_v4b_no_delete",
+        "version": "retention_prune_dry_run_v4c_last_sync_aware_no_delete",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -2962,7 +3052,13 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
         "would_delete_if_future_prune_enabled": bool(would_delete),
         "deleted_rows": 0,
         "prune_enabled_now": bool(EVIDENCE_RETENTION_PRUNE_ENABLED),
-        "notes": "Dry-run only. V4b intentionally performs zero Railway deletions.",
+        "retention_target": {
+            "target_source": target.get("target_source"),
+            "used_last_successful_sync": bool(target.get("used_last_successful_sync")),
+            "explicit_target_requested": bool(target.get("explicit_target_requested")),
+            "note": target.get("note", ""),
+        },
+        "notes": "Dry-run only. V4c intentionally performs zero Railway deletions.",
     }
     try:
         set_json("evidence_last_retention_prune_dry_run", result)
