@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 from .github_sync import is_github_sync_configured, push_json_file, push_text_file, fetch_json_file, fetch_text_file
 from .live_quotes import get_live_quotes
+from .market_fear import get_market_fear_snapshot, market_fear_status
 from .performance_tracker import get_performance_week_key, get_performance_week_window
 from .settings import (
     DATA_DIR,
@@ -2203,6 +2204,10 @@ def collect_evidence_snapshot(mode: str = "manual", include_big_movers: bool = T
         prefer_cache = session not in {"pre_market", "regular", "after_hours"}
         quote_bundle = get_live_quotes(symbols, prefer_cache=bool(prefer_cache), allow_fallback=True)
         quotes = quote_bundle.get("quotes", {}) if isinstance(quote_bundle, dict) else {}
+        try:
+            market_fear_snapshot = get_market_fear_snapshot(force_refresh=False, store=True)
+        except Exception as _market_fear_exc:
+            market_fear_snapshot = {"ok": False, "error": str(_market_fear_exc)[:160]}
 
         polygon_summaries: dict[str, dict] = {}
         polygon_limit = max(0, min(int(EVIDENCE_POLYGON_SYMBOL_LIMIT or 0), len(symbols)))
@@ -2255,6 +2260,8 @@ def collect_evidence_snapshot(mode: str = "manual", include_big_movers: bool = T
             "polygon_symbols": len([x for x in polygon_summaries.values() if isinstance(x, dict) and x.get("ok")]),
             "quote_diagnostics": (quote_bundle or {}).get("diagnostics", {}),
             "big_movers": {k: v for k, v in (movers_result or {}).items() if k != "items"},
+            "market_fear": market_fear_snapshot,
+            "market_fear_tracking_fields": (market_fear_snapshot or {}).get("tracking_fields", {}) if isinstance(market_fear_snapshot, dict) else {},
             "notes": "Passive evidence only; no scoring/ranking/Sharia changes.",
         })
         if sync_to_github:
@@ -2288,6 +2295,7 @@ def evidence_status() -> dict:
         "polygon_enabled": bool(EVIDENCE_POLYGON_ENABLED),
         "polygon_configured": bool(POLYGON_API_KEY),
         "fmp_configured": bool(FMP_API_KEY),
+        "market_fear": (market_fear_status().get("last_snapshot") or {}),
     }
     if not SQLITE_ENABLED:
         out["ok"] = True
@@ -2378,6 +2386,7 @@ def weekly_evidence_summary(week_key: str | None = None, format: str = "json", l
         "intraday_bars": dict(intraday_bar_count) if intraday_bar_count else {},
         "winner_patterns": _rows_to_dicts(winner_patterns),
         "top_movers_observed": _rows_to_dicts(top_movers),
+        "market_fear": get_market_fear_snapshot(force_refresh=False, store=True),
         "notes": {
             "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف.",
             "next_weekend_use": "تحليل ما سبق الرابحين والخاسرين وتحديد الأنماط المتكررة.",
@@ -2396,6 +2405,7 @@ def weekly_evidence_summary(week_key: str | None = None, format: str = "json", l
             f"خطط تحتاج إعادة تأكيد: {int(s.get('reconfirm_count') or 0)}",
             f"ملفات رابحين كبار محللة: {int((result.get('winner_profiles') or {}).get('c') or 0)}",
             f"شموع/لقطات Polygon محفوظة: {int((result.get('intraday_bars') or {}).get('c') or 0)}",
+            f"VIX / خوف السوق: {((result.get('market_fear') or {}).get('summary_ar') or 'غير متوفر')}",
             "",
             "أنماط الرابحين المبدئية:",
         ]
@@ -2447,6 +2457,8 @@ def export_evidence_json(week_key: str | None = None, trade_date: str | None = N
         "winner_profiles": _rows_to_dicts(winners),
         "intraday_bars": _rows_to_dicts(bars),
         "runs": _rows_to_dicts(runs),
+        "market_fear": get_market_fear_snapshot(force_refresh=False, store=True),
+        "market_fear_history": get_json("market_fear_history", []),
     }
 
 
@@ -2736,16 +2748,18 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     winners_path = f"{base}/{d}_winner_profiles.json"
     readiness_path = f"{base}/{d}_pattern_readiness.json"
     pattern_lab_path = f"{base}/{d}_pattern_lab.json"
+    market_fear_path = f"{base}/{d}_market_fear.json"
     results = {
         "ok": False,
         "week_key": wk,
         "trade_date": d,
-        "paths": {"json": json_path, "summary": summary_path, "winner_profiles": winners_path, "pattern_readiness": readiness_path, "pattern_lab": pattern_lab_path},
+        "paths": {"json": json_path, "summary": summary_path, "winner_profiles": winners_path, "pattern_readiness": readiness_path, "pattern_lab": pattern_lab_path, "market_fear": market_fear_path},
         "json": push_json_file(json_path, data, message=f"Sync evidence data {wk} {d}"),
         "summary": push_json_file(summary_path, weekly_evidence_summary(week_key=wk, format="json"), message=f"Sync evidence summary {wk} {d}"),
         "winner_profiles": push_json_file(winners_path, winner_profiles_report(week_key=wk, trade_date=d, format="json"), message=f"Sync winner profiles {wk} {d}"),
         "pattern_readiness": push_json_file(readiness_path, pattern_readiness_report(week_key=wk, format="json"), message=f"Sync evidence pattern readiness {wk}"),
         "pattern_lab": push_json_file(pattern_lab_path, pattern_lab_report(week_key=wk, trade_date=d, format="json"), message=f"Sync evidence pattern lab {wk} {d}"),
+        "market_fear": push_json_file(market_fear_path, {"ok": True, "week_key": wk, "trade_date": d, "snapshot": get_market_fear_snapshot(force_refresh=False, store=True), "history": get_json("market_fear_history", [])}, message=f"Sync market fear {wk} {d}"),
     }
     if include_csv:
         csv_path = f"{base}/{d}_evidence.csv"
