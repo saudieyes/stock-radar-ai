@@ -437,9 +437,15 @@ def enrich_display_meta(stock: dict) -> dict:
             summary_bits.append(f"⏱️ السوق/القطاع الآن: {stock.get('market_sector_live_label')}")
         if stock.get("support_broken_flag") and stock.get("broken_support_level"):
             summary_bits.append(f"⚠️ دعم مكسور: {safe_round(stock.get('broken_support_level'))} يحتاج استعادة")
+        elif stock.get("support_reclaimed_flag") and stock.get("reclaimed_support_level"):
+            summary_bits.append(f"🟢 دعم مستعاد: {safe_round(stock.get('reclaimed_support_level'))} راقب الثبات")
         elif stock.get("nearest_support"):
             summary_bits.append(f"🟢 دعم {stock.get('nearest_support_strength', '')}: {safe_round(stock.get('nearest_support'))}")
-        if stock.get("nearest_resistance"):
+        if stock.get("resistance_reclaimed_flag") and stock.get("reclaimed_resistance_level"):
+            summary_bits.append(f"🟢 مقاومة مخترقة: {safe_round(stock.get('reclaimed_resistance_level'))} تحولت لمستوى ثبات")
+            if stock.get("next_resistance_above"):
+                summary_bits.append(f"🔴 المقاومة التالية: {safe_round(stock.get('next_resistance_above'))}")
+        elif stock.get("nearest_resistance"):
             summary_bits.append(f"🔴 مقاومة {stock.get('nearest_resistance_strength', '')}: {safe_round(stock.get('nearest_resistance'))}")
         stock["quick_explainer"] = " | ".join([x for x in summary_bits if x])
         return stock

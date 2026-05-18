@@ -58,9 +58,9 @@ def _nearest_distance(stock: dict, key: str, fallback_level_key: str, price: flo
 def _first_level_below(stock: dict, price: float, exclude_level: float = 0.0) -> float:
     """Return the closest real support level below the live price.
 
-    V4e guard: live quotes may move below a support computed at analysis time.
-    When that happens, the old support is broken and should not be displayed as
-    the active nearest support; this helper looks for the next support below.
+    Live quotes may move below a support computed at analysis time. When that
+    happens, the old support is broken and should not be displayed as the active
+    nearest support; this helper looks for the next support below.
     """
     if price <= 0:
         return 0.0
@@ -76,6 +76,46 @@ def _first_level_below(stock: dict, price: float, exclude_level: float = 0.0) ->
     if not candidates:
         return 0.0
     return max(candidates)
+
+
+def _first_level_above(stock: dict, price: float, exclude_level: float = 0.0) -> float:
+    """Return the closest real resistance level above the live price.
+
+    V4f guard: when live price moves above the previous nearest resistance, that
+    level becomes a reclaimed/broken resistance, not the active nearest
+    resistance. This helper finds the next level above live price.
+    """
+    if price <= 0:
+        return 0.0
+    candidates: list[float] = []
+    for key in ("resistance_levels_above", "resistance_levels", "key_resistance_levels", "nearby_resistance_levels"):
+        vals = stock.get(key)
+        if not isinstance(vals, (list, tuple)):
+            continue
+        for v in vals:
+            n = _f(v, 0.0)
+            if n > price * 1.001 and (exclude_level <= 0 or abs(n - exclude_level) / max(exclude_level, 1.0) > 0.001):
+                candidates.append(n)
+    for key in ("major_resistance", "year_high", "ath_high", "high_52w"):
+        n = _f(stock.get(key), 0.0)
+        if n > price * 1.001 and (exclude_level <= 0 or abs(n - exclude_level) / max(exclude_level, 1.0) > 0.001):
+            candidates.append(n)
+    if not candidates:
+        return 0.0
+    return min(candidates)
+
+
+def _session_low_for_stock(stock: dict) -> float:
+    intraday = stock.get("intraday") if isinstance(stock.get("intraday"), dict) else {}
+    vals = [
+        _f(stock.get("session_low"), 0.0),
+        _f(stock.get("low_live"), 0.0),
+        _f(stock.get("day_low"), 0.0),
+        _f(intraday.get("session_low"), 0.0),
+        _f(intraday.get("low"), 0.0),
+    ]
+    vals = [v for v in vals if v > 0]
+    return min(vals) if vals else 0.0
 
 
 def compute_liquidity_persistence(stock: dict) -> dict:
@@ -181,47 +221,92 @@ def compute_structure_guards(stock: dict) -> dict:
 
     score_penalty = 0.0
     reasons: list[str] = []
+
     support_broken_flag = False
+    support_reclaimed_flag = False
     broken_support_distance_pct = 0.0
     next_support_below = 0.0
+    support_state = "unknown"
+    reclaimed_support_level = 0.0
 
-    # Support / stop practicality.
-    # V4e: a support level above the live price is no longer support. It is a
-    # broken support / reclaim level and must be shown as risk, not as protection.
-    if price > 0 and support > price * 1.0005:
-        support_broken_flag = True
-        broken_support_distance_pct = ((support - price) / price) * 100.0
-        next_support_below = _first_level_below(stock, price, support)
-        score_penalty += 18
-        support_dist = -round(broken_support_distance_pct, 2)
-        support_label = f"🔴 دعم مكسور {support:.2f} — السعر تحته بنحو {broken_support_distance_pct:.2f}%"
-        if next_support_below > 0:
-            below_pct = ((price - next_support_below) / price) * 100.0
-            support_label += f" | الدعم التالي {next_support_below:.2f} أسفل السعر بنحو {below_pct:.2f}%"
-        else:
-            support_label += " | لا يوجد دعم أدنى مؤكد من البيانات الحالية"
-        reasons.append("السعر الحي أصبح تحت الدعم المحسوب؛ لا تعتمد هذا المستوى كدعم إلا بعد استعادته")
-    else:
-        support_label = "✅ الدعم قريب/واضح" if (0 < abs(support_dist) <= 3.0 or "قوي" in support_strength) else "🟡 الدعم يحتاج تحقق"
-        if "كسر الدعم" in risk_tags:
+    resistance_reclaimed_flag = False
+    reclaimed_resistance_distance_pct = 0.0
+    next_resistance_above = 0.0
+    resistance_state = "unknown"
+    reclaimed_resistance_level = 0.0
+
+    # Support practicality.
+    # V4f: classify the level by live price state, not by the stale label. If a
+    # level was broken intraday then recovered, show it as reclaimed/tested
+    # support; if live price is still below it, show broken support plus the next
+    # lower support. Do not display an above-price level as active support.
+    if price > 0 and support > 0:
+        session_low = _session_low_for_stock(stock)
+        if support > price * 1.0005:
+            support_state = "broken"
+            support_broken_flag = True
+            broken_support_distance_pct = ((support - price) / price) * 100.0
+            next_support_below = _first_level_below(stock, price, support)
             score_penalty += 18
-            support_label = "🔴 كسر دعم / الخطة تحتاج تأكيد جديد"
-            reasons.append("ظهر كسر الدعم في عوامل الخطر")
-        elif support_dist and abs(support_dist) > 5.0 and risk_pct > 6.5:
-            score_penalty += 8
-            support_label = "⚠️ الدعم/الوقف بعيد"
-            reasons.append("الدعم أو الوقف بعيد عن نقطة الدخول")
+            support_dist = -round(broken_support_distance_pct, 2)
+            support_label = f"🔴 دعم مكسور {support:.2f} — السعر تحته بنحو {broken_support_distance_pct:.2f}%"
+            if next_support_below > 0:
+                below_pct = ((price - next_support_below) / price) * 100.0
+                support_label += f" | الدعم التالي {next_support_below:.2f} أسفل السعر بنحو {below_pct:.2f}%"
+            else:
+                support_label += " | لا يوجد دعم أدنى مؤكد من البيانات الحالية"
+            reasons.append("السعر الحي أصبح تحت الدعم المحسوب؛ لا تعتمد هذا المستوى كدعم إلا بعد استعادته")
+        elif session_low > 0 and session_low < support * 0.999 and price > support * 1.0005:
+            support_state = "reclaimed"
+            support_reclaimed_flag = True
+            reclaimed_support_level = support
+            above_pct = ((price - support) / price) * 100.0
+            support_label = f"🟢 دعم مستعاد {support:.2f} — السعر فوقه بنحو {above_pct:.2f}% بعد كسره/اختباره"
+            reasons.append("السهم نزل تحت الدعم خلال الجلسة ثم عاد فوقه؛ راقب الثبات فوق المستوى")
+        else:
+            support_state = "active"
+            support_label = "✅ الدعم قريب/واضح" if (0 < abs(support_dist) <= 3.0 or "قوي" in support_strength) else "🟡 الدعم يحتاج تحقق"
+            if "كسر الدعم" in risk_tags:
+                score_penalty += 18
+                support_label = "🔴 كسر دعم / الخطة تحتاج تأكيد جديد"
+                reasons.append("ظهر كسر الدعم في عوامل الخطر")
+            elif support_dist and abs(support_dist) > 5.0 and risk_pct > 6.5:
+                score_penalty += 8
+                support_label = "⚠️ الدعم/الوقف بعيد"
+                reasons.append("الدعم أو الوقف بعيد عن نقطة الدخول")
+    else:
+        support_label = "🟡 الدعم يحتاج تحقق"
 
-    # Resistance / highs.
-    resistance_label = "✅ المقاومة بعيدة" if resistance_dist >= 3.0 else "🟡 مقاومة تحتاج متابعة"
-    if "قريب من مقاومة قوية" in risk_tags:
-        score_penalty += 16
-        resistance_label = "🔴 قريب من مقاومة قوية"
-        reasons.append("قرب من مقاومة قوية كان من أنماط الخسارة المتكررة")
-    elif "قريب من مقاومة" in risk_tags or (0 < resistance_dist <= 1.5):
-        score_penalty += 10
-        resistance_label = "⚠️ مقاومة قريبة"
-        reasons.append("المقاومة قريبة وقد تحد من استمرار الحركة")
+    # Resistance practicality.
+    # V4f: a resistance level below live price is no longer the nearest active
+    # resistance. It becomes a reclaimed/broken resistance (potential support),
+    # and we look for the next resistance above live price.
+    if price > 0 and resistance > 0 and resistance < price * 0.9995:
+        resistance_state = "reclaimed"
+        resistance_reclaimed_flag = True
+        reclaimed_resistance_level = resistance
+        reclaimed_resistance_distance_pct = ((price - resistance) / price) * 100.0
+        next_resistance_above = _first_level_above(stock, price, resistance)
+        resistance_dist = ((next_resistance_above - price) / price) * 100.0 if next_resistance_above > 0 else 0.0
+        if next_resistance_above > 0:
+            resistance_label = (
+                f"🟢 مقاومة مخترقة {resistance:.2f} — السعر فوقها بنحو {reclaimed_resistance_distance_pct:.2f}%"
+                f" | المقاومة التالية {next_resistance_above:.2f} فوق السعر بنحو {resistance_dist:.2f}%"
+            )
+        else:
+            resistance_label = f"🟢 مقاومة مخترقة {resistance:.2f} — السعر فوقها بنحو {reclaimed_resistance_distance_pct:.2f}% | لا توجد مقاومة أعلى مؤكدة"
+        reasons.append("السعر تجاوز المقاومة السابقة؛ لا تعرضها كمقاومة نشطة، بل كمستوى يحتاج ثباتًا فوقه")
+    else:
+        resistance_state = "active" if resistance > 0 else "unknown"
+        resistance_label = "✅ المقاومة بعيدة" if resistance_dist >= 3.0 else "🟡 مقاومة تحتاج متابعة"
+        if "قريب من مقاومة قوية" in risk_tags:
+            score_penalty += 16
+            resistance_label = "🔴 قريب من مقاومة قوية"
+            reasons.append("قرب من مقاومة قوية كان من أنماط الخسارة المتكررة")
+        elif "قريب من مقاومة" in risk_tags or (0 < resistance_dist <= 1.5):
+            score_penalty += 10
+            resistance_label = "⚠️ مقاومة قريبة"
+            reasons.append("المقاومة قريبة وقد تحد من استمرار الحركة")
 
     if "قرب من قمة تاريخية" in risk_tags or (dist_ath and abs(dist_ath) <= 3.0):
         score_penalty += 12
@@ -230,23 +315,33 @@ def compute_structure_guards(stock: dict) -> dict:
         score_penalty += 10
         reasons.append("السهم قريب من قمة سنوية")
 
-    close_resistance_flag = bool((0 < resistance_dist <= 1.5) or "قريب من مقاومة قوية" in risk_tags or "قريب من مقاومة" in risk_tags)
+    active_resistance_close = bool(resistance_state != "reclaimed" and ((0 < resistance_dist <= 1.5) or "قريب من مقاومة قوية" in risk_tags or "قريب من مقاومة" in risk_tags))
+    if resistance_state == "reclaimed" and next_resistance_above > 0:
+        active_resistance_close = bool(0 < resistance_dist <= 1.5)
+    close_resistance_flag = active_resistance_close
     near_high_flag = bool("قرب من قمة تاريخية" in risk_tags or "قرب من قمة سنوية" in risk_tags or (dist_ath and abs(dist_ath) <= 3.0) or (dist_52 and abs(dist_52) <= 3.0))
     return {
         "support_label": support_label,
         "resistance_label": resistance_label,
         "score_penalty": round(score_penalty, 1),
-        "reasons": reasons[:7],
+        "reasons": reasons[:8],
         "support_distance_pct": round(support_dist, 2),
         "resistance_distance_pct": round(resistance_dist, 2),
         "close_resistance_flag": close_resistance_flag,
         "near_high_flag": near_high_flag,
+        "support_state": support_state,
         "support_broken_flag": support_broken_flag,
+        "support_reclaimed_flag": support_reclaimed_flag,
         "broken_support_level": round(support, 4) if support_broken_flag else 0.0,
+        "reclaimed_support_level": round(reclaimed_support_level, 4) if support_reclaimed_flag else 0.0,
         "broken_support_distance_pct": round(broken_support_distance_pct, 2),
         "next_support_below": round(next_support_below, 4) if next_support_below > 0 else 0.0,
+        "resistance_state": resistance_state,
+        "resistance_reclaimed_flag": resistance_reclaimed_flag,
+        "reclaimed_resistance_level": round(reclaimed_resistance_level, 4) if resistance_reclaimed_flag else 0.0,
+        "reclaimed_resistance_distance_pct": round(reclaimed_resistance_distance_pct, 2),
+        "next_resistance_above": round(next_resistance_above, 4) if next_resistance_above > 0 else 0.0,
     }
-
 
 def compute_pattern_risk(stock: dict, liquidity: dict, no_chase: dict, structure: dict) -> dict:
     risk_tags = set(_lst(stock.get("risk_tags")) + _lst(stock.get("risk_flags")))
