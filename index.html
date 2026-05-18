@@ -1870,6 +1870,8 @@
     .level-quick-label { color:var(--text-muted); font-size:13px; font-weight:900; line-height:1.25; }
     .level-quick-value { color:var(--text-strong); font-size:17px; font-weight:950; line-height:1.25; overflow-wrap:anywhere; }
     .level-quick-chip.support { border-color:rgba(22,163,74,.28); background:rgba(22,163,74,.07); }
+    .level-quick-chip.broken-support { border-color:rgba(220,38,38,.34); background:rgba(220,38,38,.08); }
+    .level-quick-chip.next-support { border-color:rgba(22,163,74,.22); background:rgba(22,163,74,.05); }
     .level-quick-chip.resistance { border-color:rgba(245,158,11,.34); background:rgba(245,158,11,.07); }
     .level-quick-chip.high { border-color:rgba(59,130,246,.28); background:rgba(59,130,246,.07); }
     .indicator-strip { gap:8px !important; flex-wrap:wrap !important; overflow:visible !important; }
@@ -3177,6 +3179,77 @@
       return `<div class="level-quick-chip ${safeText(cls)}"><div class="level-quick-label">${safeText(label)}</div><div class="level-quick-value">${safeText(shown)}</div></div>`;
     }
 
+    function numericValue(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function firstLevelBelowLivePrice(stock, livePrice, excludeLevel=0) {
+      const direct = numericValue(stock?.next_support_below);
+      if (direct > 0 && livePrice > 0 && direct < livePrice * 0.999) return direct;
+      const arrays = [stock?.support_levels_below, stock?.support_levels, stock?.key_support_levels, stock?.nearby_support_levels];
+      let best = 0;
+      arrays.forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach(v => {
+          const n = numericValue(v);
+          if (n > 0 && livePrice > 0 && n < livePrice * 0.999) {
+            if (!excludeLevel || Math.abs(n - excludeLevel) / Math.max(excludeLevel, 1) > 0.001) {
+              best = Math.max(best, n);
+            }
+          }
+        });
+      });
+      return best;
+    }
+
+    function buildSupportSanity(stock, livePrice) {
+      const price = numericValue(livePrice);
+      const support = numericValue(stock?.nearest_support);
+      const backendBroken = Boolean(stock?.support_broken_flag);
+      const brokenByLivePrice = price > 0 && support > 0 && support > price * 1.0005;
+      const originalLabel = String(stock?.nearest_support_label || stock?.support_strength_label || '').trim();
+      if (!support) {
+        return {
+          isBroken: false,
+          detailLabel: 'الدعم الأقرب',
+          detailHtml: '—',
+          quickLabel: 'دعم أقرب',
+          quickValue: '',
+          quickStrength: '',
+          quickClass: 'support',
+          nextSupportHtml: ''
+        };
+      }
+      if (backendBroken || brokenByLivePrice) {
+        const dist = price > 0 ? ((support - price) / price) * 100 : numericValue(stock?.broken_support_distance_pct);
+        const nextSupport = firstLevelBelowLivePrice(stock, price, support);
+        const nextText = nextSupport > 0
+          ? `الدعم التالي ${formatNumber(nextSupport)} — يبعد ${formatNumber(((price - nextSupport) / price) * 100)}% أسفل السعر`
+          : 'لا يوجد دعم أدنى مؤكد من البيانات الحالية';
+        return {
+          isBroken: true,
+          detailLabel: 'دعم مكسور / يحتاج استعادة',
+          detailHtml: `${formatNumber(support)} | السعر تحته بنحو ${formatNumber(Math.max(0, dist))}%<br><small>لا تعتمد هذا المستوى كدعم إلا إذا استعاد السهم التداول فوقه. ${safeText(nextText)}</small>`,
+          quickLabel: 'دعم مكسور',
+          quickValue: formatNumber(support),
+          quickStrength: `السعر تحته ${formatNumber(Math.max(0, dist))}%`,
+          quickClass: 'broken-support',
+          nextSupportHtml: nextSupport > 0 ? `${formatNumber(nextSupport)} | يبعد ${formatNumber(((price - nextSupport) / price) * 100)}% أسفل السعر` : ''
+        };
+      }
+      return {
+        isBroken: false,
+        detailLabel: 'الدعم الأقرب',
+        detailHtml: `${formatNumber(support)} | ${safeText(originalLabel || '')}`,
+        quickLabel: 'دعم أقرب',
+        quickValue: formatNumber(support),
+        quickStrength: originalLabel,
+        quickClass: 'support',
+        nextSupportHtml: ''
+      };
+    }
+
     function livePriceSourceLabel(stock) {
       const t = String(stock?.last_price_update_label || '').trim();
       if (t) return /^آخر/.test(t) ? t : `آخر سعر: ${t}`;
@@ -3443,6 +3516,7 @@
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
       const displayPrice = stock.current_price_live ?? stock.display_price ?? stock.financials?.current_price ?? 0;
+      const supportSanity = buildSupportSanity(stock, displayPrice);
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
@@ -3493,7 +3567,8 @@
       details.push(detailBox('دعم القطاع', formatScoreLabel(stock.sector_support_label || '—', stock.sector_support_score || 0), false, 'دعم القطاع'));
       details.push(detailBox('شرح المؤشر والقطاع', safeText(stock.market_sector_alignment_detail || ''), true, 'شرح المؤشر والقطاع'));
       details.push(detailBox('وضع المؤشر/القطاع الآن', safeText(stock.market_sector_live_detail || ''), true, 'وضع المؤشر/القطاع الآن'));
-      details.push(detailBox('الدعم الأقرب', stock.nearest_support ? `${formatNumber(stock.nearest_support)} | ${safeText(stock.nearest_support_label || '')}` : '—', false, 'الدعم الأقرب'));
+      details.push(detailBox(supportSanity.detailLabel, supportSanity.detailHtml, supportSanity.isBroken, 'الدعم الأقرب'));
+      if (supportSanity.nextSupportHtml) details.push(detailBox('الدعم التالي', supportSanity.nextSupportHtml, false, 'الدعم الأقرب'));
       details.push(detailBox('المقاومة الأقرب', stock.nearest_resistance ? `${formatNumber(stock.nearest_resistance)} | ${safeText(stock.nearest_resistance_label || '')}` : '—', false, 'المقاومة الأقرب'));
       details.push(detailBox('المقاومة الأكبر / 52 أسبوع / تاريخي', stock.major_resistance ? `${formatNumber(stock.major_resistance)} | ${safeText(stock.major_resistance_label || '')}` : safeText(stock.major_resistance_label || '—'), false, 'المقاومة الأكبر'));
       details.push(detailBox('ملخص مستويات الدعم/المقاومة', safeText(stock.levels_summary || ''), true));
@@ -3559,7 +3634,8 @@
       }
 
       const quickLevels = [
-        levelQuickChip('دعم أقرب', stock.nearest_support ? formatNumber(stock.nearest_support) : '', stock.nearest_support_label || stock.support_strength_label || '', 'support'),
+        levelQuickChip(supportSanity.quickLabel, supportSanity.quickValue, supportSanity.quickStrength, supportSanity.quickClass),
+        supportSanity.nextSupportHtml ? levelQuickChip('الدعم التالي', supportSanity.nextSupportHtml, '', 'next-support') : '',
         levelQuickChip('مقاومة أقرب', stock.nearest_resistance ? formatNumber(stock.nearest_resistance) : '', stock.nearest_resistance_label || stock.resistance_strength_label || '', 'resistance'),
         levelQuickChip('قرب القمة', stock.major_resistance ? formatNumber(stock.major_resistance) : (stock.high_52w ? formatNumber(stock.high_52w) : (stock.year_high ? formatNumber(stock.year_high) : '')), stock.major_resistance_label || stock.high_label || stock.ath_label || '', 'high')
       ].filter(Boolean).join('');
