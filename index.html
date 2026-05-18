@@ -1870,9 +1870,12 @@
     .level-quick-label { color:var(--text-muted); font-size:13px; font-weight:900; line-height:1.25; }
     .level-quick-value { color:var(--text-strong); font-size:17px; font-weight:950; line-height:1.25; overflow-wrap:anywhere; }
     .level-quick-chip.support { border-color:rgba(22,163,74,.28); background:rgba(22,163,74,.07); }
+    .level-quick-chip.support-reclaimed { border-color:rgba(22,163,74,.36); background:rgba(22,163,74,.10); }
     .level-quick-chip.broken-support { border-color:rgba(220,38,38,.34); background:rgba(220,38,38,.08); }
     .level-quick-chip.next-support { border-color:rgba(22,163,74,.22); background:rgba(22,163,74,.05); }
     .level-quick-chip.resistance { border-color:rgba(245,158,11,.34); background:rgba(245,158,11,.07); }
+    .level-quick-chip.reclaimed-resistance { border-color:rgba(20,184,166,.34); background:rgba(20,184,166,.08); }
+    .level-quick-chip.next-resistance { border-color:rgba(245,158,11,.28); background:rgba(245,158,11,.05); }
     .level-quick-chip.high { border-color:rgba(59,130,246,.28); background:rgba(59,130,246,.07); }
     .indicator-strip { gap:8px !important; flex-wrap:wrap !important; overflow:visible !important; }
     .indicator-pill, .compact-modern .indicator-pill { font-size:13px !important; padding:7px 10px !important; white-space:normal !important; flex:1 1 calc(50% - 8px) !important; text-align:center !important; }
@@ -3203,14 +3206,46 @@
       return best;
     }
 
+    function firstLevelAboveLivePrice(stock, livePrice, excludeLevel=0) {
+      const direct = numericValue(stock?.next_resistance_above);
+      if (direct > 0 && livePrice > 0 && direct > livePrice * 1.001) return direct;
+      const arrays = [stock?.resistance_levels_above, stock?.resistance_levels, stock?.key_resistance_levels, stock?.nearby_resistance_levels];
+      let best = 0;
+      function consider(v) {
+        const n = numericValue(v);
+        if (n > 0 && livePrice > 0 && n > livePrice * 1.001) {
+          if (!excludeLevel || Math.abs(n - excludeLevel) / Math.max(excludeLevel, 1) > 0.001) {
+            best = best > 0 ? Math.min(best, n) : n;
+          }
+        }
+      }
+      arrays.forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach(consider);
+      });
+      [stock?.major_resistance, stock?.year_high, stock?.ath_high, stock?.high_52w].forEach(consider);
+      return best;
+    }
+
+    function liveSessionLow(stock) {
+      const intraday = stock?.intraday && typeof stock.intraday === 'object' ? stock.intraday : {};
+      const vals = [
+        numericValue(stock?.session_low),
+        numericValue(stock?.low_live),
+        numericValue(stock?.day_low),
+        numericValue(intraday?.session_low),
+        numericValue(intraday?.low)
+      ].filter(v => v > 0);
+      return vals.length ? Math.min(...vals) : 0;
+    }
+
     function buildSupportSanity(stock, livePrice) {
       const price = numericValue(livePrice);
       const support = numericValue(stock?.nearest_support);
-      const backendBroken = Boolean(stock?.support_broken_flag);
-      const brokenByLivePrice = price > 0 && support > 0 && support > price * 1.0005;
       const originalLabel = String(stock?.nearest_support_label || stock?.support_strength_label || '').trim();
       if (!support) {
         return {
+          state: 'unknown',
           isBroken: false,
           detailLabel: 'الدعم الأقرب',
           detailHtml: '—',
@@ -3221,13 +3256,15 @@
           nextSupportHtml: ''
         };
       }
-      if (backendBroken || brokenByLivePrice) {
+      const brokenByLivePrice = price > 0 && support > 0 && support > price * 1.0005;
+      if (brokenByLivePrice) {
         const dist = price > 0 ? ((support - price) / price) * 100 : numericValue(stock?.broken_support_distance_pct);
         const nextSupport = firstLevelBelowLivePrice(stock, price, support);
         const nextText = nextSupport > 0
           ? `الدعم التالي ${formatNumber(nextSupport)} — يبعد ${formatNumber(((price - nextSupport) / price) * 100)}% أسفل السعر`
           : 'لا يوجد دعم أدنى مؤكد من البيانات الحالية';
         return {
+          state: 'broken',
           isBroken: true,
           detailLabel: 'دعم مكسور / يحتاج استعادة',
           detailHtml: `${formatNumber(support)} | السعر تحته بنحو ${formatNumber(Math.max(0, dist))}%<br><small>لا تعتمد هذا المستوى كدعم إلا إذا استعاد السهم التداول فوقه. ${safeText(nextText)}</small>`,
@@ -3238,7 +3275,27 @@
           nextSupportHtml: nextSupport > 0 ? `${formatNumber(nextSupport)} | يبعد ${formatNumber(((price - nextSupport) / price) * 100)}% أسفل السعر` : ''
         };
       }
+
+      const sessionLow = liveSessionLow(stock);
+      const backendReclaimed = Boolean(stock?.support_reclaimed_flag);
+      const testedAndRecovered = price > 0 && sessionLow > 0 && sessionLow < support * 0.999 && price > support * 1.0005;
+      if (backendReclaimed || testedAndRecovered) {
+        const abovePct = price > 0 ? ((price - support) / price) * 100 : 0;
+        return {
+          state: 'reclaimed',
+          isBroken: false,
+          detailLabel: 'دعم مستعاد / اختبار ناجح',
+          detailHtml: `${formatNumber(support)} | السعر فوقه بنحو ${formatNumber(Math.max(0, abovePct))}%<br><small>السهم كسر/اختبر هذا المستوى ثم عاد فوقه. راقب الثبات فوقه؛ إذا عاد تحته تصبح الخطة أضعف.</small>`,
+          quickLabel: 'دعم مستعاد',
+          quickValue: formatNumber(support),
+          quickStrength: `السعر فوقه ${formatNumber(Math.max(0, abovePct))}%`,
+          quickClass: 'support-reclaimed',
+          nextSupportHtml: ''
+        };
+      }
+
       return {
+        state: 'active',
         isBroken: false,
         detailLabel: 'الدعم الأقرب',
         detailHtml: `${formatNumber(support)} | ${safeText(originalLabel || '')}`,
@@ -3247,6 +3304,55 @@
         quickStrength: originalLabel,
         quickClass: 'support',
         nextSupportHtml: ''
+      };
+    }
+
+    function buildResistanceSanity(stock, livePrice) {
+      const price = numericValue(livePrice);
+      const resistance = numericValue(stock?.nearest_resistance);
+      const originalLabel = String(stock?.nearest_resistance_label || stock?.resistance_strength_label || '').trim();
+      if (!resistance) {
+        return {
+          state: 'unknown',
+          isReclaimed: false,
+          detailLabel: 'المقاومة الأقرب',
+          detailHtml: '—',
+          quickLabel: 'مقاومة أقرب',
+          quickValue: '',
+          quickStrength: '',
+          quickClass: 'resistance',
+          nextResistanceHtml: ''
+        };
+      }
+      const reclaimedByLivePrice = price > 0 && resistance > 0 && resistance < price * 0.9995;
+      if (reclaimedByLivePrice) {
+        const abovePct = price > 0 ? ((price - resistance) / price) * 100 : numericValue(stock?.reclaimed_resistance_distance_pct);
+        const nextResistance = firstLevelAboveLivePrice(stock, price, resistance);
+        const nextText = nextResistance > 0
+          ? `المقاومة التالية ${formatNumber(nextResistance)} — تبعد ${formatNumber(((nextResistance - price) / price) * 100)}% فوق السعر`
+          : 'لا توجد مقاومة أعلى مؤكدة من البيانات الحالية';
+        return {
+          state: 'reclaimed',
+          isReclaimed: true,
+          detailLabel: 'مقاومة مخترقة / مستوى ثبات',
+          detailHtml: `${formatNumber(resistance)} | السعر فوقها بنحو ${formatNumber(Math.max(0, abovePct))}%<br><small>هذه لم تعد مقاومة نشطة الآن؛ أصبحت مستوى يجب الثبات فوقه. ${safeText(nextText)}</small>`,
+          quickLabel: 'مقاومة مخترقة',
+          quickValue: formatNumber(resistance),
+          quickStrength: `السعر فوقها ${formatNumber(Math.max(0, abovePct))}%`,
+          quickClass: 'reclaimed-resistance',
+          nextResistanceHtml: nextResistance > 0 ? `${formatNumber(nextResistance)} | تبعد ${formatNumber(((nextResistance - price) / price) * 100)}% فوق السعر` : ''
+        };
+      }
+      return {
+        state: 'active',
+        isReclaimed: false,
+        detailLabel: 'المقاومة الأقرب',
+        detailHtml: `${formatNumber(resistance)} | ${safeText(originalLabel || '')}`,
+        quickLabel: 'مقاومة أقرب',
+        quickValue: formatNumber(resistance),
+        quickStrength: originalLabel,
+        quickClass: 'resistance',
+        nextResistanceHtml: ''
       };
     }
 
@@ -3517,6 +3623,7 @@
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
       const displayPrice = stock.current_price_live ?? stock.display_price ?? stock.financials?.current_price ?? 0;
       const supportSanity = buildSupportSanity(stock, displayPrice);
+      const resistanceSanity = buildResistanceSanity(stock, displayPrice);
       const company = safeText(stock.company || stock.symbol);
       const grayLabel = grayTechnicalLabel(stock);
       const displayDecisionText = grayLabel || safeText(stock.decision);
@@ -3569,7 +3676,8 @@
       details.push(detailBox('وضع المؤشر/القطاع الآن', safeText(stock.market_sector_live_detail || ''), true, 'وضع المؤشر/القطاع الآن'));
       details.push(detailBox(supportSanity.detailLabel, supportSanity.detailHtml, supportSanity.isBroken, 'الدعم الأقرب'));
       if (supportSanity.nextSupportHtml) details.push(detailBox('الدعم التالي', supportSanity.nextSupportHtml, false, 'الدعم الأقرب'));
-      details.push(detailBox('المقاومة الأقرب', stock.nearest_resistance ? `${formatNumber(stock.nearest_resistance)} | ${safeText(stock.nearest_resistance_label || '')}` : '—', false, 'المقاومة الأقرب'));
+      details.push(detailBox(resistanceSanity.detailLabel, resistanceSanity.detailHtml, resistanceSanity.isReclaimed, 'المقاومة الأقرب'));
+      if (resistanceSanity.nextResistanceHtml) details.push(detailBox('المقاومة التالية', resistanceSanity.nextResistanceHtml, false, 'المقاومة الأقرب'));
       details.push(detailBox('المقاومة الأكبر / 52 أسبوع / تاريخي', stock.major_resistance ? `${formatNumber(stock.major_resistance)} | ${safeText(stock.major_resistance_label || '')}` : safeText(stock.major_resistance_label || '—'), false, 'المقاومة الأكبر'));
       details.push(detailBox('ملخص مستويات الدعم/المقاومة', safeText(stock.levels_summary || ''), true));
       details.push(detailBox('ملاحظات تحسين الخطة', Array.isArray(stock.level_refinement_notes) && stock.level_refinement_notes.length ? `<ul class="flags">${stock.level_refinement_notes.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>` : '—', true));
@@ -3636,7 +3744,8 @@
       const quickLevels = [
         levelQuickChip(supportSanity.quickLabel, supportSanity.quickValue, supportSanity.quickStrength, supportSanity.quickClass),
         supportSanity.nextSupportHtml ? levelQuickChip('الدعم التالي', supportSanity.nextSupportHtml, '', 'next-support') : '',
-        levelQuickChip('مقاومة أقرب', stock.nearest_resistance ? formatNumber(stock.nearest_resistance) : '', stock.nearest_resistance_label || stock.resistance_strength_label || '', 'resistance'),
+        levelQuickChip(resistanceSanity.quickLabel, resistanceSanity.quickValue, resistanceSanity.quickStrength, resistanceSanity.quickClass),
+        resistanceSanity.nextResistanceHtml ? levelQuickChip('المقاومة التالية', resistanceSanity.nextResistanceHtml, '', 'next-resistance') : '',
         levelQuickChip('قرب القمة', stock.major_resistance ? formatNumber(stock.major_resistance) : (stock.high_52w ? formatNumber(stock.high_52w) : (stock.year_high ? formatNumber(stock.year_high) : '')), stock.major_resistance_label || stock.high_label || stock.ath_label || '', 'high')
       ].filter(Boolean).join('');
       const levelQuickGrid = quickLevels ? `<div class="level-quick-grid">${quickLevels}</div>` : '';
