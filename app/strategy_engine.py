@@ -432,10 +432,12 @@ def build_support_resistance_context(current_price: float, daily_bars: list[dict
                 "nearest_support_label": "غير متوفر",
                 "nearest_support_strength": "غير واضح",
                 "nearest_support_distance_pct": 0.0,
+                "support_levels_below": [],
                 "nearest_resistance": 0.0,
                 "nearest_resistance_label": "غير متوفر",
                 "nearest_resistance_strength": "غير واضح",
                 "nearest_resistance_distance_pct": 0.0,
+                "resistance_levels_above": [],
                 "major_resistance": safe_round(hist.get("year_high", 0) or hist.get("ath_high", 0) or 0),
                 "major_resistance_label": "غير متوفر",
                 "levels_summary": "لا توجد بيانات كافية لبناء مستويات دعم/مقاومة موثوقة.",
@@ -453,6 +455,27 @@ def build_support_resistance_context(current_price: float, daily_bars: list[dict
         tolerance = 0.012
         support_candidates = [x for x in lows + closes[-60:] if 0 < x < price * 0.999]
         resistance_candidates = [x for x in highs + closes[-60:] if x > price * 1.001]
+
+        # V4e Support/Resistance Sanity Guard:
+        # Keep a small list of levels around the analysis price. The live price can
+        # update after the scan; if it drops under the prior nearest support, the UI
+        # can mark that level as broken and display the next real support below live
+        # price instead of falsely showing a support above the current price.
+        def _unique_levels(vals: list[float], reverse: bool = False) -> list[float]:
+            out: list[float] = []
+            seen: set[float] = set()
+            for v in sorted([float(x) for x in vals if float(x or 0) > 0], reverse=reverse):
+                key = round(v, 3)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(safe_round(v))
+                if len(out) >= 8:
+                    break
+            return out
+
+        support_levels_below = _unique_levels(support_candidates, reverse=True)
+        resistance_levels_above = _unique_levels(resistance_candidates, reverse=False)
 
         nearest_support = max(support_candidates) if support_candidates else 0.0
         nearest_resistance = min(resistance_candidates) if resistance_candidates else 0.0
@@ -503,11 +526,13 @@ def build_support_resistance_context(current_price: float, daily_bars: list[dict
             "nearest_support_strength": support_strength,
             "nearest_support_touches": support_touches,
             "nearest_support_distance_pct": safe_round(support_dist, 2),
+            "support_levels_below": support_levels_below,
             "nearest_resistance": safe_round(nearest_resistance),
             "nearest_resistance_label": resistance_label,
             "nearest_resistance_strength": resistance_strength,
             "nearest_resistance_touches": resistance_touches,
             "nearest_resistance_distance_pct": safe_round(resistance_dist, 2),
+            "resistance_levels_above": resistance_levels_above,
             "major_resistance": safe_round(major_resistance),
             "major_resistance_label": major_label,
             "year_high": safe_round(year_high),
@@ -522,10 +547,12 @@ def build_support_resistance_context(current_price: float, daily_bars: list[dict
             "nearest_support_label": "غير متوفر",
             "nearest_support_strength": "غير واضح",
             "nearest_support_distance_pct": 0.0,
+            "support_levels_below": [],
             "nearest_resistance": 0.0,
             "nearest_resistance_label": "غير متوفر",
             "nearest_resistance_strength": "غير واضح",
             "nearest_resistance_distance_pct": 0.0,
+            "resistance_levels_above": [],
             "major_resistance": 0.0,
             "major_resistance_label": "غير متوفر",
             "levels_summary": "تعذر بناء مستويات الدعم والمقاومة.",

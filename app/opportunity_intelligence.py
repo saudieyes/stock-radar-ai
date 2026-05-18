@@ -55,6 +55,29 @@ def _nearest_distance(stock: dict, key: str, fallback_level_key: str, price: flo
     return _pct_distance(price, _f(stock.get(fallback_level_key), 0.0))
 
 
+def _first_level_below(stock: dict, price: float, exclude_level: float = 0.0) -> float:
+    """Return the closest real support level below the live price.
+
+    V4e guard: live quotes may move below a support computed at analysis time.
+    When that happens, the old support is broken and should not be displayed as
+    the active nearest support; this helper looks for the next support below.
+    """
+    if price <= 0:
+        return 0.0
+    candidates: list[float] = []
+    for key in ("support_levels_below", "support_levels", "key_support_levels", "nearby_support_levels"):
+        vals = stock.get(key)
+        if not isinstance(vals, (list, tuple)):
+            continue
+        for v in vals:
+            n = _f(v, 0.0)
+            if n > 0 and n < price * 0.999 and (exclude_level <= 0 or abs(n - exclude_level) / max(exclude_level, 1.0) > 0.001):
+                candidates.append(n)
+    if not candidates:
+        return 0.0
+    return max(candidates)
+
+
 def compute_liquidity_persistence(stock: dict) -> dict:
     risk_tags = set(_lst(stock.get("risk_tags")) + _lst(stock.get("risk_flags")))
     success_tags = set(_lst(stock.get("success_tags")))
@@ -145,6 +168,8 @@ def compute_no_chase_guard(stock: dict) -> dict:
 
 def compute_structure_guards(stock: dict) -> dict:
     price = _f(stock.get("current_price_live", stock.get("display_price", 0)))
+    support = _f(stock.get("nearest_support"), 0.0)
+    resistance = _f(stock.get("nearest_resistance"), 0.0)
     support_dist = _nearest_distance(stock, "nearest_support_distance_pct", "nearest_support", price)
     resistance_dist = _nearest_distance(stock, "nearest_resistance_distance_pct", "nearest_resistance", price)
     support_strength = _s(stock.get("nearest_support_strength", stock.get("support_strength_label", "")))
@@ -156,17 +181,36 @@ def compute_structure_guards(stock: dict) -> dict:
 
     score_penalty = 0.0
     reasons: list[str] = []
+    support_broken_flag = False
+    broken_support_distance_pct = 0.0
+    next_support_below = 0.0
 
     # Support / stop practicality.
-    support_label = "✅ الدعم قريب/واضح" if (0 < abs(support_dist) <= 3.0 or "قوي" in support_strength) else "🟡 الدعم يحتاج تحقق"
-    if "كسر الدعم" in risk_tags:
+    # V4e: a support level above the live price is no longer support. It is a
+    # broken support / reclaim level and must be shown as risk, not as protection.
+    if price > 0 and support > price * 1.0005:
+        support_broken_flag = True
+        broken_support_distance_pct = ((support - price) / price) * 100.0
+        next_support_below = _first_level_below(stock, price, support)
         score_penalty += 18
-        support_label = "🔴 كسر دعم / الخطة تحتاج تأكيد جديد"
-        reasons.append("ظهر كسر الدعم في عوامل الخطر")
-    elif support_dist and abs(support_dist) > 5.0 and risk_pct > 6.5:
-        score_penalty += 8
-        support_label = "⚠️ الدعم/الوقف بعيد"
-        reasons.append("الدعم أو الوقف بعيد عن نقطة الدخول")
+        support_dist = -round(broken_support_distance_pct, 2)
+        support_label = f"🔴 دعم مكسور {support:.2f} — السعر تحته بنحو {broken_support_distance_pct:.2f}%"
+        if next_support_below > 0:
+            below_pct = ((price - next_support_below) / price) * 100.0
+            support_label += f" | الدعم التالي {next_support_below:.2f} أسفل السعر بنحو {below_pct:.2f}%"
+        else:
+            support_label += " | لا يوجد دعم أدنى مؤكد من البيانات الحالية"
+        reasons.append("السعر الحي أصبح تحت الدعم المحسوب؛ لا تعتمد هذا المستوى كدعم إلا بعد استعادته")
+    else:
+        support_label = "✅ الدعم قريب/واضح" if (0 < abs(support_dist) <= 3.0 or "قوي" in support_strength) else "🟡 الدعم يحتاج تحقق"
+        if "كسر الدعم" in risk_tags:
+            score_penalty += 18
+            support_label = "🔴 كسر دعم / الخطة تحتاج تأكيد جديد"
+            reasons.append("ظهر كسر الدعم في عوامل الخطر")
+        elif support_dist and abs(support_dist) > 5.0 and risk_pct > 6.5:
+            score_penalty += 8
+            support_label = "⚠️ الدعم/الوقف بعيد"
+            reasons.append("الدعم أو الوقف بعيد عن نقطة الدخول")
 
     # Resistance / highs.
     resistance_label = "✅ المقاومة بعيدة" if resistance_dist >= 3.0 else "🟡 مقاومة تحتاج متابعة"
@@ -197,6 +241,10 @@ def compute_structure_guards(stock: dict) -> dict:
         "resistance_distance_pct": round(resistance_dist, 2),
         "close_resistance_flag": close_resistance_flag,
         "near_high_flag": near_high_flag,
+        "support_broken_flag": support_broken_flag,
+        "broken_support_level": round(support, 4) if support_broken_flag else 0.0,
+        "broken_support_distance_pct": round(broken_support_distance_pct, 2),
+        "next_support_below": round(next_support_below, 4) if next_support_below > 0 else 0.0,
     }
 
 
@@ -356,6 +404,10 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
         "structure_guard_reasons": structure.get("reasons", []),
         "structure_resistance_distance_pct": structure.get("resistance_distance_pct", 0),
         "structure_support_distance_pct": structure.get("support_distance_pct", 0),
+        "support_broken_flag": bool(structure.get("support_broken_flag")),
+        "broken_support_level": structure.get("broken_support_level", 0),
+        "broken_support_distance_pct": structure.get("broken_support_distance_pct", 0),
+        "next_support_below": structure.get("next_support_below", 0),
         "near_high_guard_flag": bool(structure.get("near_high_flag")),
         "close_resistance_guard_flag": bool(structure.get("close_resistance_flag")),
         "pattern_risk_score": pattern["score"],
@@ -396,6 +448,8 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
         _add_flag(out, "لا تطارد السعر؛ انتظر Pullback أو إعادة اختبار")
     if str(liquidity.get("status")) in {"fade", "weak"}:
         _add_flag(out, "السيولة غير مثبتة أو بدأت تضعف")
+    if bool(structure.get("support_broken_flag")):
+        _add_flag(out, "كسر الدعم الأقرب؛ يحتاج استعادة المستوى أو انتظار دعم أدنى واضح")
     if str(post_activation.get("status")) in {"weak", "broken"}:
         _add_flag(out, "لا تكتفِ بالتفعيل؛ الخطة تحتاج استمرار فوق الدخول/الدعم")
 

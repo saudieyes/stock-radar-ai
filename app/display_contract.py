@@ -435,7 +435,9 @@ def enrich_display_meta(stock: dict) -> dict:
             summary_bits.append("🏭 القطاع: غير متوفر (ثقة أقل)")
         if stock.get("market_sector_live_label"):
             summary_bits.append(f"⏱️ السوق/القطاع الآن: {stock.get('market_sector_live_label')}")
-        if stock.get("nearest_support"):
+        if stock.get("support_broken_flag") and stock.get("broken_support_level"):
+            summary_bits.append(f"⚠️ دعم مكسور: {safe_round(stock.get('broken_support_level'))} يحتاج استعادة")
+        elif stock.get("nearest_support"):
             summary_bits.append(f"🟢 دعم {stock.get('nearest_support_strength', '')}: {safe_round(stock.get('nearest_support'))}")
         if stock.get("nearest_resistance"):
             summary_bits.append(f"🔴 مقاومة {stock.get('nearest_resistance_strength', '')}: {safe_round(stock.get('nearest_resistance'))}")
