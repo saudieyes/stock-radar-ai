@@ -3356,6 +3356,37 @@
       };
     }
 
+    function renderLevelQuickGrid(stock, livePrice) {
+      const supportSanity = buildSupportSanity(stock, livePrice);
+      const resistanceSanity = buildResistanceSanity(stock, livePrice);
+      const quickLevels = [
+        levelQuickChip(supportSanity.quickLabel, supportSanity.quickValue, supportSanity.quickStrength, supportSanity.quickClass),
+        supportSanity.nextSupportHtml ? levelQuickChip('الدعم التالي', supportSanity.nextSupportHtml, '', 'next-support') : '',
+        levelQuickChip(resistanceSanity.quickLabel, resistanceSanity.quickValue, resistanceSanity.quickStrength, resistanceSanity.quickClass),
+        resistanceSanity.nextResistanceHtml ? levelQuickChip('المقاومة التالية', resistanceSanity.nextResistanceHtml, '', 'next-resistance') : '',
+        levelQuickChip('قرب القمة', stock?.major_resistance ? formatNumber(stock.major_resistance) : (stock?.high_52w ? formatNumber(stock.high_52w) : (stock?.year_high ? formatNumber(stock.year_high) : '')), stock?.major_resistance_label || stock?.high_label || stock?.ath_label || '', 'high')
+      ].filter(Boolean).join('');
+      return quickLevels ? `<div class="level-quick-grid" data-dynamic-levels="1">${quickLevels}</div>` : '';
+    }
+
+    function refreshCardLevelGrid(card, stock, livePrice) {
+      if (!card || !stock) return false;
+      const grid = card.querySelector('.level-quick-grid');
+      const html = renderLevelQuickGrid(stock, livePrice);
+      if (!html) return false;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = html.trim();
+      const newGrid = wrap.firstElementChild;
+      if (!newGrid) return false;
+      if (grid) {
+        if (grid.innerHTML !== newGrid.innerHTML) grid.replaceWith(newGrid);
+      } else {
+        const indicators = card.querySelector('.indicator-strip');
+        if (indicators && indicators.parentElement) indicators.parentElement.insertBefore(newGrid, indicators);
+      }
+      return true;
+    }
+
     function livePriceSourceLabel(stock) {
       const t = String(stock?.last_price_update_label || '').trim();
       if (t) return /^آخر/.test(t) ? t : `آخر سعر: ${t}`;
@@ -3741,14 +3772,7 @@
         details.push(detailBox('ملاحظات المخاطر', `<ul class="flags">${stock.risk_flags.map(x => `<li>${safeText(x)}</li>`).join('')}</ul>`, true));
       }
 
-      const quickLevels = [
-        levelQuickChip(supportSanity.quickLabel, supportSanity.quickValue, supportSanity.quickStrength, supportSanity.quickClass),
-        supportSanity.nextSupportHtml ? levelQuickChip('الدعم التالي', supportSanity.nextSupportHtml, '', 'next-support') : '',
-        levelQuickChip(resistanceSanity.quickLabel, resistanceSanity.quickValue, resistanceSanity.quickStrength, resistanceSanity.quickClass),
-        resistanceSanity.nextResistanceHtml ? levelQuickChip('المقاومة التالية', resistanceSanity.nextResistanceHtml, '', 'next-resistance') : '',
-        levelQuickChip('قرب القمة', stock.major_resistance ? formatNumber(stock.major_resistance) : (stock.high_52w ? formatNumber(stock.high_52w) : (stock.year_high ? formatNumber(stock.year_high) : '')), stock.major_resistance_label || stock.high_label || stock.ath_label || '', 'high')
-      ].filter(Boolean).join('');
-      const levelQuickGrid = quickLevels ? `<div class="level-quick-grid">${quickLevels}</div>` : '';
+      const levelQuickGrid = renderLevelQuickGrid(stock, displayPrice);
 
       const rankNumber = Number(index || 0) + 1;
       const rankSubtitle = sectionKey === 'single-stock' ? 'فحص فردي' : `الترتيب #${rankNumber} داخل هذه المجموعة`;
@@ -4390,6 +4414,8 @@
         card.querySelectorAll('.live-price-item').forEach(box => {
           if (applyLivePriceToBox(box, item)) changed += 1;
         });
+        const p = livePricePresentationFromItem(item);
+        if (p && refreshCardLevelGrid(card, item, p.displayPrice)) changed += 1;
       });
 
       // Fallback for any standalone live-price-item not inside a card.
