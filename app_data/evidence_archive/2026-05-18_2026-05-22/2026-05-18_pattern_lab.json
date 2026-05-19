@@ -114,7 +114,7 @@
       "unique_symbols": 4
     }
   ],
-  "generated_at": "2026-05-19 05:36:40",
+  "generated_at": "2026-05-19 05:39:07",
   "hypotheses": [
     {
       "avg_first30": 7.05,
@@ -419,9 +419,9 @@
   ],
   "loss_pattern_groups": [
     {
-      "avg_max_gain_pct": 1.42,
-      "avg_max_loss_pct": -4.64,
-      "cases": 24,
+      "avg_max_gain_pct": 1.48,
+      "avg_max_loss_pct": -4.25,
+      "cases": 23,
       "signature": "breakout | near_resistance | support_break | high_volatility",
       "unique_symbols": 13
     },
@@ -468,9 +468,9 @@
       "unique_symbols": 5
     },
     {
-      "avg_max_gain_pct": 0.9,
-      "avg_max_loss_pct": -7.66,
-      "cases": 5,
+      "avg_max_gain_pct": 0.74,
+      "avg_max_loss_pct": -8.63,
+      "cases": 6,
       "signature": "breakout | near_resistance | high_volatility",
       "unique_symbols": 4
     },
