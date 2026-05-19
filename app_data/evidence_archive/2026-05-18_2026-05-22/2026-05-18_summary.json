@@ -6,8 +6,8 @@
   "market_fear": {
     "badge": "⚪",
     "cache_hit": true,
-    "captured_at": "2026-05-19 01:21:09",
-    "captured_ts": 1779168068.5676398,
+    "captured_at": "2026-05-19 01:36:11",
+    "captured_ts": 1779168970.7869842,
     "change_pct": -3.31,
     "change_points": -0.61,
     "confirmation_strictness": "normal",
@@ -491,8 +491,8 @@
       "move_quality_label": "early_intraday_acceleration"
     },
     {
-      "avg_gain": 81.4178125,
-      "cases": 32,
+      "avg_gain": 83.68096774193549,
+      "cases": 31,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -503,8 +503,8 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 48.63380952380952,
-      "cases": 21,
+      "avg_gain": 46.934999999999995,
+      "cases": 22,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
