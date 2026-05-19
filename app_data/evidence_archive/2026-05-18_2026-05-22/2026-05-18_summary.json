@@ -5,6 +5,7 @@
   },
   "market_fear": {
     "badge": "⚪",
+    "cache_hit": true,
     "captured_at": "2026-05-19 00:20:24",
     "captured_ts": 1779164424.3572571,
     "change_pct": -3.31,
