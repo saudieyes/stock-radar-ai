@@ -114,7 +114,7 @@
       "unique_symbols": 5
     }
   ],
-  "generated_at": "2026-05-19 12:32:26",
+  "generated_at": "2026-05-19 12:34:47",
   "hypotheses": [
     {
       "avg_first30": 0.64,
@@ -570,7 +570,7 @@
     "source_unknown_winners": 166,
     "tracking_loss_rows": 358,
     "tracking_rows": 1290,
-    "tracking_success_rows": 125,
+    "tracking_success_rows": 126,
     "tradability_unknown_winners": 0,
     "winner_profiles": 260
   },
