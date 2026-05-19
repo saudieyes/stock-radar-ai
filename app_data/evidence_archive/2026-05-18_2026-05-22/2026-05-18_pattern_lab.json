@@ -114,7 +114,7 @@
       "unique_symbols": 5
     }
   ],
-  "generated_at": "2026-05-19 12:10:04",
+  "generated_at": "2026-05-19 12:12:18",
   "hypotheses": [
     {
       "avg_first30": 0.64,
@@ -426,18 +426,18 @@
       "unique_symbols": 29
     },
     {
+      "avg_max_gain_pct": 2.21,
+      "avg_max_loss_pct": -3.63,
+      "cases": 43,
+      "signature": "breakout | near_resistance | support_break | high_volatility",
+      "unique_symbols": 21
+    },
+    {
       "avg_max_gain_pct": 1.39,
       "avg_max_loss_pct": -2.63,
       "cases": 42,
       "signature": "pullback | near_resistance | liquidity_not_persistent | support_break | high_volatility",
       "unique_symbols": 20
-    },
-    {
-      "avg_max_gain_pct": 2.0,
-      "avg_max_loss_pct": -3.83,
-      "cases": 38,
-      "signature": "breakout | near_resistance | support_break | high_volatility",
-      "unique_symbols": 19
     },
     {
       "avg_max_gain_pct": 2.91,
@@ -447,18 +447,25 @@
       "unique_symbols": 21
     },
     {
-      "avg_max_gain_pct": 1.86,
-      "avg_max_loss_pct": -2.79,
-      "cases": 25,
+      "avg_max_gain_pct": 2.07,
+      "avg_max_loss_pct": -2.82,
+      "cases": 29,
       "signature": "breakout | near_resistance | liquidity_not_persistent | support_break | high_volatility",
-      "unique_symbols": 13
+      "unique_symbols": 15
     },
     {
-      "avg_max_gain_pct": 1.53,
-      "avg_max_loss_pct": -2.16,
-      "cases": 21,
+      "avg_max_gain_pct": 1.44,
+      "avg_max_loss_pct": -2.18,
+      "cases": 23,
       "signature": "pullback | near_resistance | near_52w_high | liquidity_not_persistent | support_break",
-      "unique_symbols": 6
+      "unique_symbols": 7
+    },
+    {
+      "avg_max_gain_pct": 1.98,
+      "avg_max_loss_pct": -4.91,
+      "cases": 22,
+      "signature": "breakout | near_resistance | support_break",
+      "unique_symbols": 8
     },
     {
       "avg_max_gain_pct": 0.58,
@@ -466,13 +473,6 @@
       "cases": 18,
       "signature": "pullback | near_resistance | support_break",
       "unique_symbols": 7
-    },
-    {
-      "avg_max_gain_pct": 2.2,
-      "avg_max_loss_pct": -6.03,
-      "cases": 16,
-      "signature": "breakout | near_resistance | support_break",
-      "unique_symbols": 8
     },
     {
       "avg_max_gain_pct": 0.49,
@@ -568,7 +568,7 @@
     "missing_historical_visibility": 167,
     "snapshot_only_visibility_winners": 167,
     "source_unknown_winners": 166,
-    "tracking_loss_rows": 332,
+    "tracking_loss_rows": 350,
     "tracking_rows": 1254,
     "tracking_success_rows": 122,
     "tradability_unknown_winners": 0,
