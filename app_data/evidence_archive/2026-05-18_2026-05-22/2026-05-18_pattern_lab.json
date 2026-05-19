@@ -24,11 +24,11 @@
   "gap_quality_groups": [
     {
       "avg_dollar_volume": 17109989.0,
-      "avg_first30": 8.8,
+      "avg_first30": 8.3,
       "avg_gain": 28.14,
       "avg_gap": -1.28,
-      "avg_liq_accel": 47.8,
-      "avg_liq_persist": 67.5,
+      "avg_liq_accel": 45.8,
+      "avg_liq_persist": 67.0,
       "cases": 49,
       "gap_quality_class": "small_gap_or_contextual",
       "source_seen_count": 17,
@@ -114,7 +114,7 @@
       "unique_symbols": 4
     }
   ],
-  "generated_at": "2026-05-19 09:28:05",
+  "generated_at": "2026-05-19 09:31:03",
   "hypotheses": [
     {
       "avg_first30": 7.05,
@@ -357,21 +357,6 @@
       "unique_symbols": 4
     },
     {
-      "avg_first30": 20.73,
-      "avg_gain": 15.72,
-      "avg_gap": 1.16,
-      "avg_liq_accel": 87.4,
-      "avg_liq_persist": 57.1,
-      "cases": 4,
-      "gap_quality_class": "small_gap_or_contextual",
-      "label": "فرضية التقاط مبكر تستحق مراقبة الاثنين",
-      "pattern": "first_hour_liquidity_acceleration",
-      "source_seen_count": 3,
-      "tool_seen_count": 3,
-      "tradability_bucket": "tradable_but_high_risk",
-      "unique_symbols": 4
-    },
-    {
       "avg_first30": 0.0,
       "avg_gain": 15.24,
       "avg_gap": -0.02,
@@ -415,15 +400,30 @@
       "tool_seen_count": 0,
       "tradability_bucket": "micro_or_special_high_risk",
       "unique_symbols": 3
+    },
+    {
+      "avg_first30": 33.2,
+      "avg_gain": 22.98,
+      "avg_gap": 74.74,
+      "avg_liq_accel": 94.0,
+      "avg_liq_persist": 0.0,
+      "cases": 3,
+      "gap_quality_class": "gap_chase_or_failed",
+      "label": "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين",
+      "pattern": "pre_market_gap_then_followthrough",
+      "source_seen_count": 0,
+      "tool_seen_count": 0,
+      "tradability_bucket": "micro_or_special_high_risk",
+      "unique_symbols": 3
     }
   ],
   "loss_pattern_groups": [
     {
-      "avg_max_gain_pct": 0.83,
-      "avg_max_loss_pct": -3.12,
-      "cases": 27,
+      "avg_max_gain_pct": 0.78,
+      "avg_max_loss_pct": -3.04,
+      "cases": 29,
       "signature": "pullback | near_resistance | liquidity_not_persistent | support_break",
-      "unique_symbols": 18
+      "unique_symbols": 19
     },
     {
       "avg_max_gain_pct": 1.44,
@@ -454,11 +454,11 @@
       "unique_symbols": 9
     },
     {
-      "avg_max_gain_pct": 0.53,
-      "avg_max_loss_pct": -2.78,
-      "cases": 12,
+      "avg_max_gain_pct": 0.64,
+      "avg_max_loss_pct": -2.68,
+      "cases": 14,
       "signature": "pullback | near_resistance | support_break",
-      "unique_symbols": 5
+      "unique_symbols": 6
     },
     {
       "avg_max_gain_pct": 0.72,
@@ -568,9 +568,9 @@
     "missing_historical_visibility": 105,
     "snapshot_only_visibility_winners": 105,
     "source_unknown_winners": 105,
-    "tracking_loss_rows": 167,
-    "tracking_rows": 838,
-    "tracking_success_rows": 85,
+    "tracking_loss_rows": 171,
+    "tracking_rows": 839,
+    "tracking_success_rows": 88,
     "tradability_unknown_winners": 0,
     "winner_profiles": 170
   },
@@ -603,11 +603,11 @@
     },
     {
       "avg_dollar_volume": 24593183.0,
-      "avg_first30": 6.67,
+      "avg_first30": 6.05,
       "avg_gain": 306.79,
       "avg_gap": 349.38,
-      "avg_liq_accel": 51.5,
-      "avg_liq_persist": 55.8,
+      "avg_liq_accel": 49.0,
+      "avg_liq_persist": 55.1,
       "cases": 39,
       "source_seen_count": 19,
       "tool_seen_count": 13,
@@ -910,21 +910,6 @@
       "unique_symbols": 4
     },
     {
-      "avg_dollar_volume": 2561265.0,
-      "avg_first30": 20.73,
-      "avg_gain": 15.72,
-      "avg_gap": 1.16,
-      "avg_liq_accel": 87.4,
-      "avg_liq_persist": 57.1,
-      "cases": 4,
-      "gap_quality_class": "small_gap_or_contextual",
-      "likely_pattern": "first_hour_liquidity_acceleration",
-      "source_seen_count": 3,
-      "tool_seen_count": 3,
-      "tradability_bucket": "tradable_but_high_risk",
-      "unique_symbols": 4
-    },
-    {
       "avg_dollar_volume": 26630.0,
       "avg_first30": 0.0,
       "avg_gain": 15.24,
@@ -997,6 +982,21 @@
       "source_seen_count": 3,
       "tool_seen_count": 3,
       "tradability_bucket": "tradable_core",
+      "unique_symbols": 3
+    },
+    {
+      "avg_dollar_volume": 3073079.0,
+      "avg_first30": 19.52,
+      "avg_gain": 17.46,
+      "avg_gap": 0.31,
+      "avg_liq_accel": 83.2,
+      "avg_liq_persist": 68.1,
+      "cases": 3,
+      "gap_quality_class": "small_gap_or_contextual",
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "source_seen_count": 2,
+      "tool_seen_count": 2,
+      "tradability_bucket": "tradable_but_high_risk",
       "unique_symbols": 3
     },
     {
