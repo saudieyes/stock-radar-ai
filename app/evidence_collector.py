@@ -26,7 +26,7 @@ from datetime import datetime, date, time as dt_time
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .github_sync import is_github_sync_configured, push_json_file, push_text_file, fetch_json_file, fetch_text_file
+from .github_sync import is_github_sync_configured, push_json_file, push_text_file, fetch_json_file, fetch_text_file, push_multiple_files
 from .live_quotes import get_live_quotes
 from .market_fear import get_market_fear_snapshot, market_fear_status
 from .performance_tracker import get_performance_week_key, get_performance_week_window
@@ -68,6 +68,7 @@ def _env_float(name: str, default: float) -> float:
 EVIDENCE_COLLECTION_ENABLED = _env_bool("EVIDENCE_COLLECTION_ENABLED", True)
 EVIDENCE_BACKGROUND_WORKER_ENABLED = _env_bool("EVIDENCE_BACKGROUND_WORKER_ENABLED", True)
 EVIDENCE_GITHUB_AUTO_SYNC_ENABLED = _env_bool("EVIDENCE_GITHUB_AUTO_SYNC_ENABLED", True)
+EVIDENCE_AUTO_SYNC_RIYADH_HOUR = max(0, min(_env_int("EVIDENCE_AUTO_SYNC_RIYADH_HOUR", 5), 23))
 EVIDENCE_BIG_MOVERS_ENABLED = _env_bool("EVIDENCE_BIG_MOVERS_ENABLED", True)
 EVIDENCE_POLYGON_ENABLED = _env_bool("EVIDENCE_POLYGON_ENABLED", True)
 EVIDENCE_BIG_MOVER_THRESHOLD_PCT = _env_float("EVIDENCE_BIG_MOVER_THRESHOLD_PCT", 10.0)
@@ -1928,7 +1929,7 @@ def _week_key_for_trade_date(trade_date: str) -> str:
 
 
 def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, str, str]:
-    """Return whether a 5 AM Riyadh sync should run and the US trade date.
+    """Return whether the Riyadh daily sync should run and the US trade date.
 
     Schedule requested by the user:
     - Saturday 05:00 Asia/Riyadh syncs Friday trading.
@@ -1940,9 +1941,9 @@ def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, s
     wd = now_r.weekday()  # Monday=0 ... Sunday=6
     if wd in {6, 0}:  # Sunday, Monday
         return False, "", "skip_non_trading_previous_day"
-    # Tue-Sat only, after 5:00 AM Riyadh.
-    if now_r.time() < dt_time(5, 0):
-        return False, "", "before_5am_riyadh"
+    # Tue-Sat only, after the configured Riyadh sync hour. Default is 05:00.
+    if now_r.time() < dt_time(EVIDENCE_AUTO_SYNC_RIYADH_HOUR, 0):
+        return False, "", f"before_{EVIDENCE_AUTO_SYNC_RIYADH_HOUR:02d}00_riyadh"
     prev = date.fromordinal(now_r.date().toordinal() - 1)
     # Tue->Mon, Wed->Tue, Thu->Wed, Fri->Thu, Sat->Fri. All are weekdays.
     return True, prev.isoformat(), "due_after_trading_day"
@@ -1951,19 +1952,23 @@ def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, s
 def evidence_auto_sync_status() -> dict:
     due, trade_date, reason = _riyadh_sync_trade_date()
     key = f"evidence_auto_github_synced_{trade_date}" if trade_date else ""
+    attempt_key = f"evidence_auto_github_attempted_{trade_date}" if trade_date else ""
     done = get_json(key, {}) if key else {}
+    attempted = get_json(attempt_key, {}) if attempt_key else {}
     last = get_json("evidence_last_auto_sync", {})
     return {
         "ok": True,
-        "version": "evidence_auto_sync_v1_riyadh_5am",
+        "version": "evidence_auto_sync_v2_riyadh_daily_once",
         "enabled": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED),
         "github_configured": bool(is_github_sync_configured()),
         "now_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
-        "schedule": "Tue/Wed/Thu/Fri/Sat 05:00 Asia/Riyadh; skips Sunday and Monday; never deletes Railway data.",
-        "due_now": bool(due and not (isinstance(done, dict) and done.get("ok"))),
+        "schedule": f"Tue/Wed/Thu/Fri/Sat {EVIDENCE_AUTO_SYNC_RIYADH_HOUR:02d}:00 Asia/Riyadh; skips Sunday and Monday; never deletes Railway data.",
+        "due_now": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED and is_github_sync_configured() and due and not (isinstance(done, dict) and done.get("ok")) and not (isinstance(attempted, dict) and attempted.get("attempted"))),
         "planned_trade_date": trade_date,
-        "skip_reason": reason if not due else ("already_synced" if isinstance(done, dict) and done.get("ok") else ""),
+        "skip_reason": ("auto_sync_disabled" if not EVIDENCE_GITHUB_AUTO_SYNC_ENABLED else ("github_sync_not_configured" if not is_github_sync_configured() else (reason if not due else ("already_synced" if isinstance(done, dict) and done.get("ok") else ("already_attempted" if isinstance(attempted, dict) and attempted.get("attempted") else ""))))),
         "already_synced_for_trade_date": bool(isinstance(done, dict) and done.get("ok")),
+        "already_attempted_for_trade_date": bool(isinstance(attempted, dict) and attempted.get("attempted")),
+        "last_attempt_for_trade_date": attempted if isinstance(attempted, dict) else {},
         "last_auto_sync": last if isinstance(last, dict) else {},
         "railway_prune_enabled": False,
         "notes": "Daily Evidence sync exports to GitHub only. Railway deletion/pruning remains disabled and separate.",
@@ -1971,6 +1976,10 @@ def evidence_auto_sync_status() -> dict:
 
 
 def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_csv: bool = True) -> dict:
+    if not force and not EVIDENCE_GITHUB_AUTO_SYNC_ENABLED:
+        return {"ok": True, "skipped": True, "reason": "auto_sync_disabled", "status": evidence_auto_sync_status()}
+    if not force and not is_github_sync_configured():
+        return {"ok": True, "skipped": True, "reason": "github_sync_not_configured", "status": evidence_auto_sync_status()}
     due, trade_date, reason = _riyadh_sync_trade_date()
     if force and not trade_date:
         # When forced on Sunday/Monday, use the most recent weekday so manual testing is possible.
@@ -1982,13 +1991,22 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
         due = True
         reason = "forced_manual_recent_trading_day"
     key = f"evidence_auto_github_synced_{trade_date}" if trade_date else ""
+    attempt_key = f"evidence_auto_github_attempted_{trade_date}" if trade_date else ""
     done = get_json(key, {}) if key else {}
+    attempted = get_json(attempt_key, {}) if attempt_key else {}
     if not force and isinstance(done, dict) and done.get("ok"):
         return {"ok": True, "skipped": True, "reason": "already_synced", "trade_date": trade_date, "previous_result": done}
+    if not force and isinstance(attempted, dict) and attempted.get("attempted"):
+        return {"ok": True, "skipped": True, "reason": "already_attempted", "trade_date": trade_date, "previous_attempt": attempted}
     if not (due or force):
         return {"ok": True, "skipped": True, "reason": reason, "trade_date": trade_date, "status": evidence_auto_sync_status()}
     if dry_run:
-        return {"ok": True, "dry_run": True, "trade_date": trade_date, "week_key": _week_key_for_trade_date(trade_date), "reason": reason, "would_sync_github": True, "would_prune_railway": False}
+        return {"ok": True, "dry_run": True, "trade_date": trade_date, "week_key": _week_key_for_trade_date(trade_date), "reason": reason, "would_sync_github": True, "would_prune_railway": False, "batch_commit": True}
+    if attempt_key:
+        try:
+            set_json(attempt_key, {"attempted": True, "ok": None, "trade_date": trade_date, "started_at_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"), "reason": reason})
+        except Exception:
+            pass
     wk = _week_key_for_trade_date(trade_date)
     # Run a final winner-profile backfill for the trade date before syncing. This is passive and safe.
     backfill = {}
@@ -2004,7 +2022,7 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
     sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=bool(include_csv))
     result = {
         "ok": bool(sync.get("ok")),
-        "version": "evidence_daily_auto_sync_v1",
+        "version": "evidence_daily_auto_sync_v2_once_daily_batch",
         "trade_date": trade_date,
         "week_key": wk,
         "ran_at_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2012,10 +2030,12 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
         "backfill": backfill,
         "sync": sync,
         "pruned_railway": False,
-        "notes": "GitHub sync only. No Railway deletion is performed by daily auto-sync.",
+        "notes": "GitHub sync only. One automatic attempt per trade_date; no Railway deletion is performed by daily auto-sync.",
     }
     try:
-        if key:
+        if attempt_key:
+            set_json(attempt_key, {"attempted": True, "ok": bool(result.get("ok")), "trade_date": trade_date, "finished_at_riyadh": result.get("ran_at_riyadh"), "reason": reason, "error": (sync or {}).get("error", "") if isinstance(sync, dict) else ""})
+        if key and result.get("ok"):
             set_json(key, result)
         set_json("evidence_last_auto_sync", result)
     except Exception:
@@ -2749,30 +2769,66 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     readiness_path = f"{base}/{d}_pattern_readiness.json"
     pattern_lab_path = f"{base}/{d}_pattern_lab.json"
     market_fear_path = f"{base}/{d}_market_fear.json"
-    results = {
-        "ok": False,
-        "week_key": wk,
-        "trade_date": d,
-        "paths": {"json": json_path, "summary": summary_path, "winner_profiles": winners_path, "pattern_readiness": readiness_path, "pattern_lab": pattern_lab_path, "market_fear": market_fear_path},
-        "json": push_json_file(json_path, data, message=f"Sync evidence data {wk} {d}"),
-        "summary": push_json_file(summary_path, weekly_evidence_summary(week_key=wk, format="json"), message=f"Sync evidence summary {wk} {d}"),
-        "winner_profiles": push_json_file(winners_path, winner_profiles_report(week_key=wk, trade_date=d, format="json"), message=f"Sync winner profiles {wk} {d}"),
-        "pattern_readiness": push_json_file(readiness_path, pattern_readiness_report(week_key=wk, format="json"), message=f"Sync evidence pattern readiness {wk}"),
-        "pattern_lab": push_json_file(pattern_lab_path, pattern_lab_report(week_key=wk, trade_date=d, format="json"), message=f"Sync evidence pattern lab {wk} {d}"),
-        "market_fear": push_json_file(market_fear_path, {"ok": True, "week_key": wk, "trade_date": d, "snapshot": get_market_fear_snapshot(force_refresh=False, store=True), "history": get_json("market_fear_history", [])}, message=f"Sync market fear {wk} {d}"),
+    paths = {
+        "json": json_path,
+        "summary": summary_path,
+        "winner_profiles": winners_path,
+        "pattern_readiness": readiness_path,
+        "pattern_lab": pattern_lab_path,
+        "market_fear": market_fear_path,
     }
+    files = [
+        {"label": "json", "path": json_path, "content": data, "is_json": True},
+        {"label": "summary", "path": summary_path, "content": weekly_evidence_summary(week_key=wk, format="json"), "is_json": True},
+        {"label": "winner_profiles", "path": winners_path, "content": winner_profiles_report(week_key=wk, trade_date=d, format="json"), "is_json": True},
+        {"label": "pattern_readiness", "path": readiness_path, "content": pattern_readiness_report(week_key=wk, format="json"), "is_json": True},
+        {"label": "pattern_lab", "path": pattern_lab_path, "content": pattern_lab_report(week_key=wk, trade_date=d, format="json"), "is_json": True},
+        {"label": "market_fear", "path": market_fear_path, "content": {"ok": True, "week_key": wk, "trade_date": d, "snapshot": get_market_fear_snapshot(force_refresh=False, store=True), "history": get_json("market_fear_history", [])}, "is_json": True},
+    ]
     if include_csv:
         csv_path = f"{base}/{d}_evidence.csv"
         csv_text = "\ufeff" + export_evidence_csv(week_key=wk, trade_date=d, limit=50000)
-        results["paths"]["csv"] = csv_path
-        results["csv"] = push_text_file(csv_path, csv_text, message=f"Sync evidence CSV {wk} {d}")
-    results["ok"] = bool((results.get("json") or {}).get("ok") and (results.get("summary") or {}).get("ok"))
+        paths["csv"] = csv_path
+        files.append({"label": "csv", "path": csv_path, "content": csv_text, "is_json": False})
+
+    batch = push_multiple_files(files, message=f"Sync evidence archive {wk} {d}")
+    file_results = {}
+    if batch.get("ok"):
+        commit_sha = str(batch.get("commit_sha") or "")
+        for item in batch.get("files", []) or []:
+            if isinstance(item, dict):
+                label = str(item.get("label") or "")
+                if label:
+                    file_results[label] = {
+                        "ok": True,
+                        "configured": True,
+                        "path": item.get("path", ""),
+                        "branch": batch.get("branch", ""),
+                        "commit_sha": commit_sha,
+                        "bytes": item.get("bytes", 0),
+                        "synced_at": batch.get("synced_at", ""),
+                    }
+    else:
+        for item in files:
+            label = str(item.get("label") or "")
+            if label:
+                file_results[label] = {"ok": False, "configured": True, "path": item.get("path", ""), "error": batch.get("error", "batch_sync_failed")}
+
+    results = {
+        "ok": bool(batch.get("ok")),
+        "version": "evidence_github_batch_sync_v2",
+        "week_key": wk,
+        "trade_date": d,
+        "paths": paths,
+        "batch_commit": True,
+        "batch": batch,
+        **file_results,
+    }
     try:
         set_json("evidence_last_github_sync", results)
     except Exception:
         pass
     return results
-
 
 
 # ---------------------------------------------------------------------------
