@@ -486,8 +486,8 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 46.144285714285715,
-      "cases": 42,
+      "avg_gain": 46.81121951219512,
+      "cases": 41,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
@@ -498,8 +498,8 @@
       "move_quality_label": "early_intraday_acceleration"
     },
     {
-      "avg_gain": 44.25807692307693,
-      "cases": 26,
+      "avg_gain": 43.315185185185186,
+      "cases": 27,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
