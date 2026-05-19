@@ -1,7 +1,7 @@
 {
   "intraday_bars": {
-    "c": 71224,
-    "symbols": 653
+    "c": 71707,
+    "symbols": 659
   },
   "market_fear": {
     "badge": "⚪",
@@ -62,9 +62,9 @@
       "symbols": 394
     },
     {
-      "c": 8741,
+      "c": 9001,
       "session": "regular",
-      "symbols": 637
+      "symbols": 654
     },
     {
       "c": 1709,
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 11.51253910657787,
-    "avg_dollar_volume": 98395440.16096202,
-    "big_mover_snapshots": 9179,
+    "avg_change_pct": 11.462057108916119,
+    "avg_dollar_volume": 98893240.88606815,
+    "big_mover_snapshots": 9221,
     "no_chase_count": 165,
-    "reconfirm_count": 10436,
-    "snapshots": 45197,
-    "symbols": 669,
-    "tool_snapshots": 37213
+    "reconfirm_count": 10556,
+    "snapshots": 45457,
+    "symbols": 685,
+    "tool_snapshots": 37433
   },
   "top_movers_observed": [
     {
@@ -148,14 +148,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 165,
+      "observations": 166,
       "symbol": "GOVX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 199.67,
-      "observations": 163,
+      "observations": 164,
       "symbol": "VRAX"
     },
     {
@@ -169,7 +169,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 177,
+      "observations": 178,
       "symbol": "PIII"
     },
     {
@@ -211,7 +211,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 89.76,
-      "observations": 160,
+      "observations": 161,
       "symbol": "NXXT"
     },
     {
@@ -225,8 +225,15 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 80.38,
-      "observations": 8,
+      "observations": 9,
       "symbol": "CODX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 68.39,
+      "observations": 5,
+      "symbol": "GIPR"
     },
     {
       "in_big_movers": 1,
@@ -234,13 +241,6 @@
       "max_change_pct": 60.66,
       "observations": 164,
       "symbol": "AUUD"
-    },
-    {
-      "in_big_movers": 1,
-      "in_tool_snapshot": 0,
-      "max_change_pct": 57.24,
-      "observations": 4,
-      "symbol": "GIPR"
     },
     {
       "in_big_movers": 1,
@@ -253,14 +253,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.74,
-      "observations": 165,
+      "observations": 166,
       "symbol": "AIIO"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.56,
-      "observations": 3,
+      "observations": 4,
       "symbol": "PHOE"
     },
     {
@@ -281,7 +281,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 48.65,
-      "observations": 2,
+      "observations": 3,
       "symbol": "MTVA"
     },
     {
@@ -295,7 +295,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 44.44,
-      "observations": 3,
+      "observations": 4,
       "symbol": "RUBI"
     },
     {
@@ -330,7 +330,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 42.48,
-      "observations": 165,
+      "observations": 166,
       "symbol": "HIVE"
     },
     {
@@ -386,7 +386,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 34.94,
-      "observations": 173,
+      "observations": 174,
       "symbol": "AGYS"
     },
     {
@@ -443,20 +443,20 @@
   "week_key": "2026-05-18_2026-05-22",
   "winner_patterns": [
     {
-      "avg_gain": 26.99929411764706,
-      "cases": 170,
+      "avg_gain": 26.977633136094678,
+      "cases": 169,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 181.161375,
-      "cases": 80,
+      "avg_gain": 182.7825316455696,
+      "cases": 79,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 31.640625,
-      "cases": 64,
+      "avg_gain": 31.625538461538458,
+      "cases": 65,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -473,16 +473,10 @@
       "move_quality_label": "gap_followthrough_candidate"
     },
     {
-      "avg_gain": 27.249302325581397,
-      "cases": 43,
+      "avg_gain": 27.83659090909091,
+      "cases": 44,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "gap_chase_risk"
-    },
-    {
-      "avg_gain": 53.20060606060606,
-      "cases": 33,
-      "likely_pattern": "pre_market_gap_then_followthrough",
-      "move_quality_label": "high_quality_followthrough"
     },
     {
       "avg_gain": 20.837878787878786,
@@ -497,14 +491,20 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
+      "avg_gain": 54.175,
+      "cases": 32,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
       "avg_gain": 19.632083333333334,
       "cases": 24,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 48.63380952380952,
-      "cases": 21,
+      "avg_gain": 47.42409090909091,
+      "cases": 22,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
