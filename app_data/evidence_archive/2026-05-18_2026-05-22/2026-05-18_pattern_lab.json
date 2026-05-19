@@ -37,11 +37,11 @@
     },
     {
       "avg_dollar_volume": 15959104.0,
-      "avg_first30": 8.23,
+      "avg_first30": 8.11,
       "avg_gain": 27.2,
       "avg_gap": -1.84,
-      "avg_liq_accel": 45.3,
-      "avg_liq_persist": 63.1,
+      "avg_liq_accel": 45.2,
+      "avg_liq_persist": 61.5,
       "cases": 56,
       "gap_quality_class": "small_gap_or_contextual",
       "source_seen_count": 20,
@@ -62,6 +62,19 @@
       "unique_symbols": 42
     },
     {
+      "avg_dollar_volume": 161393475.0,
+      "avg_first30": 5.66,
+      "avg_gain": 25.49,
+      "avg_gap": 17.5,
+      "avg_liq_accel": 75.2,
+      "avg_liq_persist": 38.5,
+      "cases": 38,
+      "gap_quality_class": "pre_gap_build_needs_confirmation",
+      "source_seen_count": 20,
+      "tool_seen_count": 11,
+      "unique_symbols": 38
+    },
+    {
       "avg_dollar_volume": 9305754.0,
       "avg_first30": 8.66,
       "avg_gain": 15.2,
@@ -75,30 +88,17 @@
       "unique_symbols": 38
     },
     {
-      "avg_dollar_volume": 165089098.0,
-      "avg_first30": 5.25,
-      "avg_gain": 25.6,
-      "avg_gap": 17.83,
-      "avg_liq_accel": 74.5,
-      "avg_liq_persist": 38.4,
-      "cases": 37,
-      "gap_quality_class": "pre_gap_build_needs_confirmation",
-      "source_seen_count": 19,
-      "tool_seen_count": 10,
-      "unique_symbols": 37
-    },
-    {
-      "avg_dollar_volume": 5435665.0,
-      "avg_first30": 0.32,
-      "avg_gain": 26.42,
-      "avg_gap": 8.99,
-      "avg_liq_accel": 19.3,
-      "avg_liq_persist": 33.2,
-      "cases": 17,
+      "avg_dollar_volume": 4234431.0,
+      "avg_first30": 0.34,
+      "avg_gain": 26.72,
+      "avg_gap": 9.22,
+      "avg_liq_accel": 20.5,
+      "avg_liq_persist": 35.3,
+      "cases": 16,
       "gap_quality_class": "gap_needs_confirmation",
-      "source_seen_count": 1,
-      "tool_seen_count": 1,
-      "unique_symbols": 17
+      "source_seen_count": 0,
+      "tool_seen_count": 0,
+      "unique_symbols": 16
     },
     {
       "avg_dollar_volume": 21313.0,
@@ -114,7 +114,7 @@
       "unique_symbols": 5
     }
   ],
-  "generated_at": "2026-05-19 12:44:59",
+  "generated_at": "2026-05-19 12:47:35",
   "hypotheses": [
     {
       "avg_first30": 0.64,
@@ -177,21 +177,6 @@
       "unique_symbols": 13
     },
     {
-      "avg_first30": 7.05,
-      "avg_gain": 41.45,
-      "avg_gap": -4.41,
-      "avg_liq_accel": 14.5,
-      "avg_liq_persist": 83.1,
-      "cases": 13,
-      "gap_quality_class": "small_gap_or_contextual",
-      "label": "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين",
-      "pattern": "steady_liquidity_followthrough",
-      "source_seen_count": 1,
-      "tool_seen_count": 1,
-      "tradability_bucket": "micro_or_special_high_risk",
-      "unique_symbols": 13
-    },
-    {
       "avg_first30": 6.3,
       "avg_gain": 27.61,
       "avg_gap": 15.15,
@@ -205,6 +190,21 @@
       "tool_seen_count": 7,
       "tradability_bucket": "tradable_core",
       "unique_symbols": 13
+    },
+    {
+      "avg_first30": 7.07,
+      "avg_gain": 43.61,
+      "avg_gap": -5.12,
+      "avg_liq_accel": 14.9,
+      "avg_liq_persist": 82.5,
+      "cases": 12,
+      "gap_quality_class": "small_gap_or_contextual",
+      "label": "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين",
+      "pattern": "steady_liquidity_followthrough",
+      "source_seen_count": 1,
+      "tool_seen_count": 1,
+      "tradability_bucket": "micro_or_special_high_risk",
+      "unique_symbols": 12
     },
     {
       "avg_first30": 10.81,
@@ -252,6 +252,21 @@
       "unique_symbols": 8
     },
     {
+      "avg_first30": 2.21,
+      "avg_gain": 57.77,
+      "avg_gap": -7.85,
+      "avg_liq_accel": 9.4,
+      "avg_liq_persist": 20.7,
+      "cases": 8,
+      "gap_quality_class": "small_gap_or_contextual",
+      "label": "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين",
+      "pattern": "unclassified_winner",
+      "source_seen_count": 0,
+      "tool_seen_count": 0,
+      "tradability_bucket": "micro_or_special_high_risk",
+      "unique_symbols": 8
+    },
+    {
       "avg_first30": 8.87,
       "avg_gain": 20.08,
       "avg_gap": -0.03,
@@ -295,21 +310,6 @@
       "tool_seen_count": 3,
       "tradability_bucket": "tradable_core",
       "unique_symbols": 8
-    },
-    {
-      "avg_first30": 2.53,
-      "avg_gain": 63.81,
-      "avg_gap": -9.58,
-      "avg_liq_accel": 10.7,
-      "avg_liq_persist": 23.7,
-      "cases": 7,
-      "gap_quality_class": "small_gap_or_contextual",
-      "label": "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين",
-      "pattern": "unclassified_winner",
-      "source_seen_count": 0,
-      "tool_seen_count": 0,
-      "tradability_bucket": "micro_or_special_high_risk",
-      "unique_symbols": 7
     },
     {
       "avg_first30": 12.56,
@@ -387,6 +387,21 @@
       "unique_symbols": 5
     },
     {
+      "avg_first30": 10.29,
+      "avg_gain": 17.94,
+      "avg_gap": 5.96,
+      "avg_liq_accel": 97.0,
+      "avg_liq_persist": 40.3,
+      "cases": 5,
+      "gap_quality_class": "pre_gap_build_needs_confirmation",
+      "label": "فرضية التقاط مبكر تستحق مراقبة الاثنين",
+      "pattern": "first_hour_liquidity_acceleration",
+      "source_seen_count": 4,
+      "tool_seen_count": 3,
+      "tradability_bucket": "tradable_core",
+      "unique_symbols": 5
+    },
+    {
       "avg_first30": 0.0,
       "avg_gain": 16.39,
       "avg_gap": 0.11,
@@ -400,35 +415,20 @@
       "tool_seen_count": 0,
       "tradability_bucket": "micro_or_special_high_risk",
       "unique_symbols": 5
-    },
-    {
-      "avg_first30": 8.31,
-      "avg_gain": 13.83,
-      "avg_gap": 0.7,
-      "avg_liq_accel": 83.7,
-      "avg_liq_persist": 47.1,
-      "cases": 5,
-      "gap_quality_class": "no_gap_steady_followthrough",
-      "label": "فرضية مخاطرة/مطاردة لا تعتمدها قبل مقارنة الخاسرين",
-      "pattern": "first_hour_liquidity_acceleration",
-      "source_seen_count": 0,
-      "tool_seen_count": 0,
-      "tradability_bucket": "micro_or_special_high_risk",
-      "unique_symbols": 5
     }
   ],
   "loss_pattern_groups": [
     {
-      "avg_max_gain_pct": 0.85,
-      "avg_max_loss_pct": -2.74,
-      "cases": 61,
+      "avg_max_gain_pct": 0.87,
+      "avg_max_loss_pct": -2.72,
+      "cases": 62,
       "signature": "pullback | near_resistance | liquidity_not_persistent | support_break",
-      "unique_symbols": 29
+      "unique_symbols": 30
     },
     {
-      "avg_max_gain_pct": 2.22,
-      "avg_max_loss_pct": -3.52,
-      "cases": 46,
+      "avg_max_gain_pct": 2.28,
+      "avg_max_loss_pct": -3.5,
+      "cases": 47,
       "signature": "breakout | near_resistance | support_break | high_volatility",
       "unique_symbols": 23
     },
@@ -568,7 +568,7 @@
     "missing_historical_visibility": 167,
     "snapshot_only_visibility_winners": 167,
     "source_unknown_winners": 166,
-    "tracking_loss_rows": 367,
+    "tracking_loss_rows": 369,
     "tracking_rows": 1318,
     "tracking_success_rows": 126,
     "tradability_unknown_winners": 0,
@@ -577,11 +577,11 @@
   "tradability_groups": [
     {
       "avg_dollar_volume": 273851.0,
-      "avg_first30": 5.59,
+      "avg_first30": 5.53,
       "avg_gain": 40.82,
       "avg_gap": 29.77,
       "avg_liq_accel": 36.0,
-      "avg_liq_persist": 42.5,
+      "avg_liq_persist": 41.7,
       "cases": 112,
       "source_seen_count": 7,
       "tool_seen_count": 4,
@@ -590,11 +590,11 @@
     },
     {
       "avg_dollar_volume": 200957200.0,
-      "avg_first30": 7.18,
+      "avg_first30": 7.4,
       "avg_gain": 22.77,
       "avg_gap": 14.07,
-      "avg_liq_accel": 72.6,
-      "avg_liq_persist": 49.6,
+      "avg_liq_accel": 73.7,
+      "avg_liq_persist": 50.0,
       "cases": 97,
       "source_seen_count": 61,
       "tool_seen_count": 34,
@@ -738,21 +738,6 @@
       "unique_symbols": 13
     },
     {
-      "avg_dollar_volume": 463397.0,
-      "avg_first30": 7.05,
-      "avg_gain": 41.45,
-      "avg_gap": -4.41,
-      "avg_liq_accel": 14.5,
-      "avg_liq_persist": 83.1,
-      "cases": 13,
-      "gap_quality_class": "small_gap_or_contextual",
-      "likely_pattern": "steady_liquidity_followthrough",
-      "source_seen_count": 1,
-      "tool_seen_count": 1,
-      "tradability_bucket": "micro_or_special_high_risk",
-      "unique_symbols": 13
-    },
-    {
       "avg_dollar_volume": 573864800.0,
       "avg_first30": 6.3,
       "avg_gain": 27.61,
@@ -766,6 +751,21 @@
       "tool_seen_count": 7,
       "tradability_bucket": "tradable_core",
       "unique_symbols": 13
+    },
+    {
+      "avg_dollar_volume": 499754.0,
+      "avg_first30": 7.07,
+      "avg_gain": 43.61,
+      "avg_gap": -5.12,
+      "avg_liq_accel": 14.9,
+      "avg_liq_persist": 82.5,
+      "cases": 12,
+      "gap_quality_class": "small_gap_or_contextual",
+      "likely_pattern": "steady_liquidity_followthrough",
+      "source_seen_count": 1,
+      "tool_seen_count": 1,
+      "tradability_bucket": "micro_or_special_high_risk",
+      "unique_symbols": 12
     },
     {
       "avg_dollar_volume": 64090970.0,
@@ -813,6 +813,21 @@
       "unique_symbols": 8
     },
     {
+      "avg_dollar_volume": 175738.0,
+      "avg_first30": 2.21,
+      "avg_gain": 57.77,
+      "avg_gap": -7.85,
+      "avg_liq_accel": 9.4,
+      "avg_liq_persist": 20.7,
+      "cases": 8,
+      "gap_quality_class": "small_gap_or_contextual",
+      "likely_pattern": "unclassified_winner",
+      "source_seen_count": 0,
+      "tool_seen_count": 0,
+      "tradability_bucket": "micro_or_special_high_risk",
+      "unique_symbols": 8
+    },
+    {
       "avg_dollar_volume": 26240165.0,
       "avg_first30": 8.87,
       "avg_gain": 20.08,
@@ -856,21 +871,6 @@
       "tool_seen_count": 3,
       "tradability_bucket": "tradable_core",
       "unique_symbols": 8
-    },
-    {
-      "avg_dollar_volume": 196970.0,
-      "avg_first30": 2.53,
-      "avg_gain": 63.81,
-      "avg_gap": -9.58,
-      "avg_liq_accel": 10.7,
-      "avg_liq_persist": 23.7,
-      "cases": 7,
-      "gap_quality_class": "small_gap_or_contextual",
-      "likely_pattern": "unclassified_winner",
-      "source_seen_count": 0,
-      "tool_seen_count": 0,
-      "tradability_bucket": "micro_or_special_high_risk",
-      "unique_symbols": 7
     },
     {
       "avg_dollar_volume": 328011.0,
@@ -948,6 +948,21 @@
       "unique_symbols": 5
     },
     {
+      "avg_dollar_volume": 843855582.0,
+      "avg_first30": 10.29,
+      "avg_gain": 17.94,
+      "avg_gap": 5.96,
+      "avg_liq_accel": 97.0,
+      "avg_liq_persist": 40.3,
+      "cases": 5,
+      "gap_quality_class": "pre_gap_build_needs_confirmation",
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "source_seen_count": 4,
+      "tool_seen_count": 3,
+      "tradability_bucket": "tradable_core",
+      "unique_symbols": 5
+    },
+    {
       "avg_dollar_volume": 21313.0,
       "avg_first30": 0.0,
       "avg_gain": 16.39,
@@ -1020,21 +1035,6 @@
       "source_seen_count": 0,
       "tool_seen_count": 0,
       "tradability_bucket": "micro_or_special_high_risk",
-      "unique_symbols": 4
-    },
-    {
-      "avg_dollar_volume": 1048655623.0,
-      "avg_first30": 7.68,
-      "avg_gain": 17.01,
-      "avg_gap": 6.12,
-      "avg_liq_accel": 96.2,
-      "avg_liq_persist": 40.6,
-      "cases": 4,
-      "gap_quality_class": "pre_gap_build_needs_confirmation",
-      "likely_pattern": "first_hour_liquidity_acceleration",
-      "source_seen_count": 3,
-      "tool_seen_count": 2,
-      "tradability_bucket": "tradable_core",
       "unique_symbols": 4
     },
     {
