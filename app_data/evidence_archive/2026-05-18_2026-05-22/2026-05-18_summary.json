@@ -4,49 +4,50 @@
     "symbols": 632
   },
   "market_fear": {
-    "badge": "⚪",
+    "badge": "🟡",
     "cache_hit": true,
-    "captured_at": "2026-05-19 09:29:15",
-    "captured_ts": 1779197354.6172202,
-    "change_pct": -0.62,
-    "change_points": -0.11,
-    "confirmation_strictness": "normal",
+    "captured_at": "2026-05-19 09:47:15",
+    "captured_ts": 1779198434.680442,
+    "change_pct": 2.53,
+    "change_points": 0.45,
+    "confirmation_strictness": "elevated",
     "enabled": true,
     "execution_rules": {
-      "avoid_late_entries_when_stressed": false,
-      "breakout_requires_liquidity_confirmation": false,
-      "confirmation_strictness": "normal",
-      "no_chase_strictness": "normal",
-      "position_size_multiplier": 0.85,
-      "prefer_near_support_entries_when_stressed": false
+      "avoid_late_entries_when_stressed": true,
+      "breakout_requires_liquidity_confirmation": true,
+      "confirmation_strictness": "elevated",
+      "no_chase_strictness": "elevated",
+      "position_size_multiplier": 0.7,
+      "prefer_near_support_entries_when_stressed": true
     },
     "guidance_ar": [
-      "الخوف العام طبيعي تقريبًا؛ قرارات السهم الفردية والسيولة تبقى الأهم.",
-      "استمر في طلب تأكيد الاختراق والسيولة خصوصًا قرب المقاومات."
+      "السوق يحتاج حذرًا إضافيًا؛ لا تطارد الحركة المتأخرة.",
+      "يفضل الدخول قرب الدعم أو بعد تأكيد السيولة.",
+      "خفض حجم الدخول قليلًا إذا كانت الخطة عالية المخاطرة."
     ],
     "history_points": 0,
     "is_proxy": false,
-    "no_chase_strictness": "normal",
+    "no_chase_strictness": "elevated",
     "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
     "ok": true,
-    "position_size_multiplier": 0.85,
+    "position_size_multiplier": 0.7,
     "previous_close": 17.82,
-    "regime_key": "normal",
-    "regime_label": "طبيعي",
+    "regime_key": "caution",
+    "regime_label": "حذر متوسط",
     "requested_symbol": "^VIX",
     "source": "FMP",
     "source_symbol": "^VIX",
-    "stress_score": 42.0,
-    "summary_ar": "⚪ طبيعي | VIX 17.71 | التغير -0.62% | حجم الدخول المقترح ×0.85",
+    "stress_score": 58.0,
+    "summary_ar": "🟡 حذر متوسط | VIX 18.27 | التغير 2.53% | حجم الدخول المقترح ×0.7",
     "tracking_fields": {
-      "market_fear_regime": "normal",
-      "market_fear_score": 42.0,
-      "vix": 17.71,
-      "vix_change_pct": -0.62,
+      "market_fear_regime": "caution",
+      "market_fear_score": 58.0,
+      "vix": 18.27,
+      "vix_change_pct": 2.53,
       "vix_trend_5d_pct": 0.0
     },
     "version": "market_fear_v4d_decision_support_no_scoring",
-    "vix": 17.71,
+    "vix": 18.27,
     "vix_avg_5d": 0.0,
     "vix_trend_5d_pct": 0.0
   },
@@ -449,14 +450,14 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 181.161375,
-      "cases": 80,
+      "avg_gain": 184.7753846153846,
+      "cases": 78,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 31.966507936507938,
-      "cases": 63,
+      "avg_gain": 31.461384615384617,
+      "cases": 65,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -473,8 +474,8 @@
       "move_quality_label": "gap_followthrough_candidate"
     },
     {
-      "avg_gain": 27.249302325581397,
-      "cases": 43,
+      "avg_gain": 27.825555555555557,
+      "cases": 45,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "gap_chase_risk"
     },
@@ -491,8 +492,8 @@
       "move_quality_label": "early_intraday_acceleration"
     },
     {
-      "avg_gain": 81.4178125,
-      "cases": 32,
+      "avg_gain": 83.69387096774194,
+      "cases": 31,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -503,8 +504,8 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 48.63380952380952,
-      "cases": 21,
+      "avg_gain": 46.916818181818186,
+      "cases": 22,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
