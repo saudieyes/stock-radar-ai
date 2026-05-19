@@ -1,13 +1,13 @@
 {
   "intraday_bars": {
-    "c": 66562,
-    "symbols": 594
+    "c": 66827,
+    "symbols": 596
   },
   "market_fear": {
     "badge": "⚪",
     "cache_hit": true,
-    "captured_at": "2026-05-18 23:49:58",
-    "captured_ts": 1779162597.717641,
+    "captured_at": "2026-05-19 00:05:07",
+    "captured_ts": 1779163506.9510167,
     "change_pct": -3.31,
     "change_points": -0.61,
     "confirmation_strictness": "normal",
@@ -449,8 +449,8 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 43.37012658227848,
-      "cases": 79,
+      "avg_gain": 181.161375,
+      "cases": 80,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_chase_risk"
     },
@@ -479,6 +479,12 @@
       "move_quality_label": "gap_chase_risk"
     },
     {
+      "avg_gain": 53.20060606060606,
+      "cases": 33,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
       "avg_gain": 20.837878787878786,
       "cases": 33,
       "likely_pattern": "first_hour_liquidity_acceleration",
@@ -489,12 +495,6 @@
       "cases": 32,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "winner_needs_more_context"
-    },
-    {
-      "avg_gain": 34.403125,
-      "cases": 32,
-      "likely_pattern": "pre_market_gap_then_followthrough",
-      "move_quality_label": "high_quality_followthrough"
     },
     {
       "avg_gain": 19.632083333333334,
@@ -516,7 +516,7 @@
     }
   ],
   "winner_profiles": {
-    "c": 656,
-    "symbols": 522
+    "c": 658,
+    "symbols": 524
   }
 }
