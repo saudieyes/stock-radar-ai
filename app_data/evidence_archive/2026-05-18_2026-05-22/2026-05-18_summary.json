@@ -455,8 +455,8 @@
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 31.6309375,
-      "cases": 64,
+      "avg_gain": 31.966507936507938,
+      "cases": 63,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -485,16 +485,16 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
+      "avg_gain": 20.837878787878786,
+      "cases": 33,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "early_intraday_acceleration"
+    },
+    {
       "avg_gain": 81.4178125,
       "cases": 32,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "winner_needs_more_context"
-    },
-    {
-      "avg_gain": 21.16125,
-      "cases": 32,
-      "likely_pattern": "first_hour_liquidity_acceleration",
-      "move_quality_label": "early_intraday_acceleration"
     },
     {
       "avg_gain": 19.632083333333334,
