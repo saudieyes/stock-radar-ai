@@ -16,7 +16,7 @@
   },
   "top_winner_patterns": [
     {
-      "cases": 244,
+      "cases": 245,
       "likely_pattern": "pre_market_gap_then_followthrough"
     },
     {
@@ -28,7 +28,7 @@
       "likely_pattern": "first_hour_liquidity_acceleration"
     },
     {
-      "cases": 98,
+      "cases": 97,
       "likely_pattern": "open_gap_big_mover"
     },
     {
