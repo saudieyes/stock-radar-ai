@@ -1,6 +1,15 @@
 {
   "history": [
     {
+      "captured_at": "2026-05-19 05:45:43",
+      "change_pct": 2.19,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.21
+    },
+    {
       "captured_at": "2026-05-19 05:29:16",
       "change_pct": 1.29,
       "regime_label": "حذر متوسط",
@@ -743,10 +752,10 @@
   "snapshot": {
     "badge": "🟡",
     "cache_hit": true,
-    "captured_at": "2026-05-19 05:29:16",
-    "captured_ts": 1779182956.1373022,
-    "change_pct": 1.29,
-    "change_points": 0.23,
+    "captured_at": "2026-05-19 05:45:43",
+    "captured_ts": 1779183943.0860004,
+    "change_pct": 2.19,
+    "change_points": 0.39,
     "confirmation_strictness": "elevated",
     "enabled": true,
     "execution_rules": {
@@ -775,16 +784,16 @@
     "source": "FMP",
     "source_symbol": "^VIX",
     "stress_score": 58.0,
-    "summary_ar": "🟡 حذر متوسط | VIX 18.05 | التغير 1.29% | حجم الدخول المقترح ×0.7",
+    "summary_ar": "🟡 حذر متوسط | VIX 18.21 | التغير 2.19% | حجم الدخول المقترح ×0.7",
     "tracking_fields": {
       "market_fear_regime": "caution",
       "market_fear_score": 58.0,
-      "vix": 18.05,
-      "vix_change_pct": 1.29,
+      "vix": 18.21,
+      "vix_change_pct": 2.19,
       "vix_trend_5d_pct": 0.0
     },
     "version": "market_fear_v4d_decision_support_no_scoring",
-    "vix": 18.05,
+    "vix": 18.21,
     "vix_avg_5d": 0.0,
     "vix_trend_5d_pct": 0.0
   },
