@@ -24,7 +24,7 @@
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
-      "cases": 116,
+      "cases": 115,
       "likely_pattern": "first_hour_liquidity_acceleration"
     },
     {
@@ -32,7 +32,7 @@
       "likely_pattern": "open_gap_big_mover"
     },
     {
-      "cases": 79,
+      "cases": 80,
       "likely_pattern": "unclassified_winner"
     }
   ],
