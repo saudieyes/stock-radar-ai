@@ -1,6 +1,6 @@
 {
   "intraday_bars": {
-    "c": 67673,
+    "c": 67692,
     "symbols": 602
   },
   "market_fear": {
@@ -57,7 +57,7 @@
   "ok": true,
   "sessions": [
     {
-      "c": 23417,
+      "c": 23677,
       "session": "pre_market",
       "symbols": 390
     },
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 13.61855268389662,
-    "avg_dollar_volume": 126201057.36051384,
-    "big_mover_snapshots": 7151,
-    "no_chase_count": 115,
-    "reconfirm_count": 7768,
-    "snapshots": 32695,
+    "avg_change_pct": 13.564011834319526,
+    "avg_dollar_volume": 125235393.59875588,
+    "big_mover_snapshots": 7198,
+    "no_chase_count": 116,
+    "reconfirm_count": 7816,
+    "snapshots": 32955,
     "symbols": 603,
-    "tool_snapshots": 26436
+    "tool_snapshots": 26656
   },
   "top_movers_observed": [
     {
@@ -99,28 +99,28 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 2225.58,
-      "observations": 143,
+      "observations": 144,
       "symbol": "PPCB"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 1252.19,
-      "observations": 128,
+      "observations": 129,
       "symbol": "YMT"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 684.93,
-      "observations": 117,
+      "observations": 118,
       "symbol": "SBFM"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 350.0,
-      "observations": 94,
+      "observations": 95,
       "symbol": "AMPGR"
     },
     {
@@ -148,56 +148,56 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 119,
+      "observations": 120,
       "symbol": "GOVX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 199.67,
-      "observations": 117,
+      "observations": 118,
       "symbol": "VRAX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 192.6,
-      "observations": 119,
+      "observations": 120,
       "symbol": "HCAI"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 128,
+      "observations": 129,
       "symbol": "PIII"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 176.0,
-      "observations": 106,
+      "observations": 107,
       "symbol": "AMPGZ"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 146.17,
-      "observations": 117,
+      "observations": 118,
       "symbol": "AIM"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 138.8,
-      "observations": 113,
+      "observations": 114,
       "symbol": "WGRX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 129.75,
-      "observations": 117,
+      "observations": 118,
       "symbol": "CREG"
     },
     {
@@ -211,7 +211,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 89.76,
-      "observations": 117,
+      "observations": 118,
       "symbol": "NXXT"
     },
     {
@@ -225,7 +225,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 60.66,
-      "observations": 122,
+      "observations": 123,
       "symbol": "AUUD"
     },
     {
@@ -239,7 +239,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.74,
-      "observations": 119,
+      "observations": 120,
       "symbol": "AIIO"
     },
     {
@@ -274,7 +274,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 43.43,
-      "observations": 107,
+      "observations": 108,
       "symbol": "RIBBR"
     },
     {
@@ -295,14 +295,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 42.48,
-      "observations": 119,
+      "observations": 120,
       "symbol": "HIVE"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 40.98,
-      "observations": 146,
+      "observations": 147,
       "symbol": "GCTS"
     },
     {
@@ -316,7 +316,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 38.83,
-      "observations": 115,
+      "observations": 116,
       "symbol": "SACH"
     },
     {
@@ -351,14 +351,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 34.53,
-      "observations": 115,
+      "observations": 116,
       "symbol": "WFCF"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 34.22,
-      "observations": 145,
+      "observations": 146,
       "symbol": "SEGG"
     },
     {
@@ -400,14 +400,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 30.66,
-      "observations": 97,
+      "observations": 98,
       "symbol": "TOP"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 30.15,
-      "observations": 109,
+      "observations": 110,
       "symbol": "RVPH"
     },
     {
@@ -421,7 +421,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 29.44,
-      "observations": 104,
+      "observations": 105,
       "symbol": "MPU"
     },
     {
