@@ -1,18 +1,18 @@
 {
   "daily_big_movers": {
-    "c": 256
+    "c": 273
   },
   "intraday_bars": {
-    "c": 70756,
-    "symbols": 643
+    "c": 71224,
+    "symbols": 653
   },
   "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
   "ok": true,
   "readiness_label": "جاهز لتحليل أولي",
   "readiness_score": 100,
   "snapshots": {
-    "c": 44950,
-    "symbols": 651
+    "c": 45197,
+    "symbols": 669
   },
   "top_winner_patterns": [
     {
