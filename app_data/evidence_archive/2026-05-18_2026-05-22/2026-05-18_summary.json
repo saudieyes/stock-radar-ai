@@ -443,8 +443,8 @@
   "week_key": "2026-05-18_2026-05-22",
   "winner_patterns": [
     {
-      "avg_gain": 26.736802325581394,
-      "cases": 172,
+      "avg_gain": 26.75947976878613,
+      "cases": 173,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -455,7 +455,7 @@
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 30.745555555555555,
+      "avg_gain": 30.63902777777778,
       "cases": 72,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
@@ -509,8 +509,8 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 19.24047619047619,
-      "cases": 21,
+      "avg_gain": 19.053,
+      "cases": 20,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "gap_followthrough_candidate"
     }
