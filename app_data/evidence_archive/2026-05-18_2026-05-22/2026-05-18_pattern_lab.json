@@ -114,7 +114,7 @@
       "unique_symbols": 4
     }
   ],
-  "generated_at": "2026-05-19 01:00:00",
+  "generated_at": "2026-05-19 01:01:49",
   "hypotheses": [
     {
       "avg_first30": 7.05,
@@ -1027,7 +1027,7 @@
       "avg_first30": 24.66,
       "avg_gain": 45.25,
       "avg_gap": 10.64,
-      "avg_liq_accel": 37.2,
+      "avg_liq_accel": 37.1,
       "avg_liq_persist": 77.4,
       "cases": 2,
       "gap_quality_class": "healthy_gap_followthrough",
