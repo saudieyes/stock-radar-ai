@@ -1,7 +1,7 @@
 {
   "intraday_bars": {
-    "c": 70756,
-    "symbols": 643
+    "c": 71224,
+    "symbols": 653
   },
   "market_fear": {
     "badge": "⚪",
@@ -62,9 +62,9 @@
       "symbols": 394
     },
     {
-      "c": 8494,
+      "c": 8741,
       "session": "regular",
-      "symbols": 619
+      "symbols": 637
     },
     {
       "c": 1709,
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 11.558221357063404,
-    "avg_dollar_volume": 98048185.9080089,
-    "big_mover_snapshots": 9136,
-    "no_chase_count": 163,
-    "reconfirm_count": 10301,
-    "snapshots": 44950,
-    "symbols": 651,
-    "tool_snapshots": 36993
+    "avg_change_pct": 11.51253910657787,
+    "avg_dollar_volume": 98395440.16096202,
+    "big_mover_snapshots": 9179,
+    "no_chase_count": 165,
+    "reconfirm_count": 10436,
+    "snapshots": 45197,
+    "symbols": 669,
+    "tool_snapshots": 37213
   },
   "top_movers_observed": [
     {
@@ -120,14 +120,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 350.0,
-      "observations": 139,
+      "observations": 140,
       "symbol": "AMPGR"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 318.05,
-      "observations": 33,
+      "observations": 34,
       "symbol": "FRGT"
     },
     {
@@ -148,14 +148,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 164,
+      "observations": 165,
       "symbol": "GOVX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 199.67,
-      "observations": 162,
+      "observations": 163,
       "symbol": "VRAX"
     },
     {
@@ -169,14 +169,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 176,
+      "observations": 177,
       "symbol": "PIII"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 176.0,
-      "observations": 148,
+      "observations": 149,
       "symbol": "AMPGZ"
     },
     {
@@ -211,7 +211,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 89.76,
-      "observations": 159,
+      "observations": 160,
       "symbol": "NXXT"
     },
     {
@@ -225,21 +225,21 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 80.38,
-      "observations": 7,
+      "observations": 8,
       "symbol": "CODX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 60.66,
-      "observations": 163,
+      "observations": 164,
       "symbol": "AUUD"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 57.24,
-      "observations": 3,
+      "observations": 4,
       "symbol": "GIPR"
     },
     {
@@ -253,14 +253,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.74,
-      "observations": 164,
+      "observations": 165,
       "symbol": "AIIO"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.56,
-      "observations": 2,
+      "observations": 3,
       "symbol": "PHOE"
     },
     {
@@ -279,6 +279,13 @@
     },
     {
       "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 48.65,
+      "observations": 2,
+      "symbol": "MTVA"
+    },
+    {
+      "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 48.4,
       "observations": 29,
@@ -288,7 +295,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 44.44,
-      "observations": 2,
+      "observations": 3,
       "symbol": "RUBI"
     },
     {
@@ -302,7 +309,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 43.43,
-      "observations": 150,
+      "observations": 151,
       "symbol": "RIBBR"
     },
     {
@@ -323,15 +330,8 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 42.48,
-      "observations": 164,
+      "observations": 165,
       "symbol": "HIVE"
-    },
-    {
-      "in_big_movers": 1,
-      "in_tool_snapshot": 1,
-      "max_change_pct": 41.44,
-      "observations": 1,
-      "symbol": "MTVA"
     },
     {
       "in_big_movers": 1,
@@ -365,7 +365,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 36.52,
-      "observations": 3,
+      "observations": 4,
       "symbol": "HUBC"
     },
     {
@@ -386,7 +386,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 34.94,
-      "observations": 172,
+      "observations": 173,
       "symbol": "AGYS"
     },
     {
