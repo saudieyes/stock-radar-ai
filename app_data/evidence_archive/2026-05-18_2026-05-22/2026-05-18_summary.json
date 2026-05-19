@@ -450,32 +450,32 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 153.16755102040815,
-      "cases": 98,
+      "avg_gain": 155.90156249999998,
+      "cases": 96,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 30.27418918918919,
+      "avg_gain": 29.966081081081086,
       "cases": 74,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 21.1375,
-      "cases": 60,
+      "avg_gain": 21.645263157894735,
+      "cases": 57,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 78.86396226415094,
-      "cases": 53,
+      "avg_gain": 77.6225925925926,
+      "cases": 54,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_followthrough_candidate"
     },
     {
-      "avg_gain": 26.3911320754717,
-      "cases": 53,
+      "avg_gain": 26.349259259259256,
+      "cases": 54,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "gap_chase_risk"
     },
@@ -492,20 +492,20 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 20.547272727272727,
-      "cases": 33,
+      "avg_gain": 20.46457142857143,
+      "cases": 35,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "early_intraday_acceleration"
     },
     {
-      "avg_gain": 43.95384615384615,
+      "avg_gain": 44.25807692307693,
       "cases": 26,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 19.284000000000002,
-      "cases": 25,
+      "avg_gain": 19.27576923076923,
+      "cases": 26,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
