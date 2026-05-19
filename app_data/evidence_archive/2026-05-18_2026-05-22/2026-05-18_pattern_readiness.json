@@ -16,7 +16,7 @@
   },
   "top_winner_patterns": [
     {
-      "cases": 202,
+      "cases": 203,
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
@@ -24,7 +24,7 @@
       "likely_pattern": "pre_market_gap_then_followthrough"
     },
     {
-      "cases": 111,
+      "cases": 109,
       "likely_pattern": "first_hour_liquidity_acceleration"
     },
     {
@@ -32,7 +32,7 @@
       "likely_pattern": "open_gap_big_mover"
     },
     {
-      "cases": 72,
+      "cases": 73,
       "likely_pattern": "unclassified_winner"
     }
   ],
