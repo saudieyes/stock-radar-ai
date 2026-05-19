@@ -3,15 +3,15 @@
     "c": 222
   },
   "intraday_bars": {
-    "c": 68930,
-    "symbols": 612
+    "c": 68952,
+    "symbols": 614
   },
   "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
   "ok": true,
   "readiness_label": "جاهز لتحليل أولي",
   "readiness_score": 100,
   "snapshots": {
-    "c": 41975,
+    "c": 42195,
     "symbols": 603
   },
   "top_winner_patterns": [
