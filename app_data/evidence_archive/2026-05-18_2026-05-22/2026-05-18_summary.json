@@ -1,53 +1,52 @@
 {
   "intraday_bars": {
-    "c": 68107,
-    "symbols": 602
+    "c": 68818,
+    "symbols": 612
   },
   "market_fear": {
-    "badge": "🟡",
+    "badge": "⚪",
     "cache_hit": true,
-    "captured_at": "2026-05-19 08:41:34",
-    "captured_ts": 1779194493.9271772,
-    "change_pct": 1.35,
-    "change_points": 0.24,
-    "confirmation_strictness": "elevated",
+    "captured_at": "2026-05-19 08:56:35",
+    "captured_ts": 1779195395.0032196,
+    "change_pct": 0.67,
+    "change_points": 0.12,
+    "confirmation_strictness": "normal",
     "enabled": true,
     "execution_rules": {
-      "avoid_late_entries_when_stressed": true,
-      "breakout_requires_liquidity_confirmation": true,
-      "confirmation_strictness": "elevated",
-      "no_chase_strictness": "elevated",
-      "position_size_multiplier": 0.7,
-      "prefer_near_support_entries_when_stressed": true
+      "avoid_late_entries_when_stressed": false,
+      "breakout_requires_liquidity_confirmation": false,
+      "confirmation_strictness": "normal",
+      "no_chase_strictness": "normal",
+      "position_size_multiplier": 0.85,
+      "prefer_near_support_entries_when_stressed": false
     },
     "guidance_ar": [
-      "السوق يحتاج حذرًا إضافيًا؛ لا تطارد الحركة المتأخرة.",
-      "يفضل الدخول قرب الدعم أو بعد تأكيد السيولة.",
-      "خفض حجم الدخول قليلًا إذا كانت الخطة عالية المخاطرة."
+      "الخوف العام طبيعي تقريبًا؛ قرارات السهم الفردية والسيولة تبقى الأهم.",
+      "استمر في طلب تأكيد الاختراق والسيولة خصوصًا قرب المقاومات."
     ],
     "history_points": 0,
     "is_proxy": false,
-    "no_chase_strictness": "elevated",
+    "no_chase_strictness": "normal",
     "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
     "ok": true,
-    "position_size_multiplier": 0.7,
+    "position_size_multiplier": 0.85,
     "previous_close": 17.82,
-    "regime_key": "caution",
-    "regime_label": "حذر متوسط",
+    "regime_key": "normal",
+    "regime_label": "طبيعي",
     "requested_symbol": "^VIX",
     "source": "FMP",
     "source_symbol": "^VIX",
-    "stress_score": 58.0,
-    "summary_ar": "🟡 حذر متوسط | VIX 18.06 | التغير 1.35% | حجم الدخول المقترح ×0.7",
+    "stress_score": 42.0,
+    "summary_ar": "⚪ طبيعي | VIX 17.94 | التغير 0.67% | حجم الدخول المقترح ×0.85",
     "tracking_fields": {
-      "market_fear_regime": "caution",
-      "market_fear_score": 58.0,
-      "vix": 18.06,
-      "vix_change_pct": 1.35,
+      "market_fear_regime": "normal",
+      "market_fear_score": 42.0,
+      "vix": 17.94,
+      "vix_change_pct": 0.67,
       "vix_trend_5d_pct": 0.0
     },
     "version": "market_fear_v4d_decision_support_no_scoring",
-    "vix": 18.06,
+    "vix": 17.94,
     "vix_avg_5d": 0.0,
     "vix_trend_5d_pct": 0.0
   },
@@ -58,7 +57,7 @@
   "ok": true,
   "sessions": [
     {
-      "c": 31737,
+      "c": 31957,
       "session": "pre_market",
       "symbols": 394
     },
@@ -79,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 12.237829086919419,
-    "avg_dollar_volume": 105713590.89069852,
+    "avg_change_pct": 12.172481387171093,
+    "avg_dollar_volume": 105164442.00737238,
     "big_mover_snapshots": 8640,
-    "no_chase_count": 143,
-    "reconfirm_count": 9351,
-    "snapshots": 41015,
+    "no_chase_count": 145,
+    "reconfirm_count": 9398,
+    "snapshots": 41235,
     "symbols": 603,
-    "tool_snapshots": 33476
+    "tool_snapshots": 33696
   },
   "top_movers_observed": [
     {
@@ -149,7 +148,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 151,
+      "observations": 152,
       "symbol": "GOVX"
     },
     {
@@ -163,14 +162,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 192.6,
-      "observations": 151,
+      "observations": 152,
       "symbol": "HCAI"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 160,
+      "observations": 161,
       "symbol": "PIII"
     },
     {
@@ -240,7 +239,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.74,
-      "observations": 151,
+      "observations": 152,
       "symbol": "AIIO"
     },
     {
@@ -296,7 +295,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 42.48,
-      "observations": 151,
+      "observations": 152,
       "symbol": "HIVE"
     },
     {
@@ -436,7 +435,7 @@
       "in_big_movers": 0,
       "in_tool_snapshot": 1,
       "max_change_pct": 28.97,
-      "observations": 156,
+      "observations": 157,
       "symbol": "AGYS"
     }
   ],
