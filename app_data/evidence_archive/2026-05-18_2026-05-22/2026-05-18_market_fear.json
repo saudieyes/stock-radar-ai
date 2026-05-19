@@ -1,6 +1,15 @@
 {
   "history": [
     {
+      "captured_at": "2026-05-19 10:33:19",
+      "change_pct": 0.95,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.99
+    },
+    {
       "captured_at": "2026-05-19 10:18:16",
       "change_pct": 0.95,
       "regime_label": "طبيعي",
@@ -905,8 +914,8 @@
   "snapshot": {
     "badge": "⚪",
     "cache_hit": true,
-    "captured_at": "2026-05-19 10:18:16",
-    "captured_ts": 1779200296.1780791,
+    "captured_at": "2026-05-19 10:33:19",
+    "captured_ts": 1779201198.697139,
     "change_pct": 0.95,
     "change_points": 0.17,
     "confirmation_strictness": "normal",
