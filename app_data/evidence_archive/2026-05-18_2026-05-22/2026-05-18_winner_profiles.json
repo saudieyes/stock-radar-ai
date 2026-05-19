@@ -201,12 +201,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"صعود شديد جدًا؛ قد يكون عينة مضاربية غير ممثلة\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.1757429,
+      "updated_at": 1779163606.642704,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 350.0,
-      "winner_rank": 3
+      "winner_rank": 1
     },
     {
       "after_hours_change_pct": 0.0,
@@ -270,12 +270,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"صعود شديد جدًا؛ قد يكون عينة مضاربية غير ممثلة\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.278787,
+      "updated_at": 1779163606.768526,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 313.04,
-      "winner_rank": 4
+      "winner_rank": 2
     },
     {
       "after_hours_change_pct": 0.0,
@@ -339,12 +339,12 @@
       "tradability_reasons_json": "[\"صعود شديد جدًا؛ قد يكون عينة مضاربية غير ممثلة\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 82.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.3933542,
+      "updated_at": 1779163606.9016993,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 311.06,
-      "winner_rank": 5
+      "winner_rank": 3
     },
     {
       "after_hours_change_pct": 0.0,
@@ -408,12 +408,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"صعود شديد جدًا؛ قد يكون عينة مضاربية غير ممثلة\"]",
       "tradability_score": 12.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.4787278,
+      "updated_at": 1779163606.9845362,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 150.0,
-      "winner_rank": 6
+      "winner_rank": 4
     },
     {
       "after_hours_change_pct": -3.48,
@@ -477,12 +477,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"صعود شديد جدًا؛ قد يكون عينة مضاربية غير ممثلة\"]",
       "tradability_score": 48.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.5846124,
+      "updated_at": 1779163607.0930521,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 108.38,
-      "winner_rank": 7
+      "winner_rank": 5
     },
     {
       "after_hours_change_pct": -17.64,
@@ -546,12 +546,12 @@
       "tradability_reasons_json": "[\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 92.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.7077923,
+      "updated_at": 1779163607.2108092,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 98.56,
-      "winner_rank": 8
+      "winner_rank": 6
     },
     {
       "after_hours_change_pct": -9.13,
@@ -615,12 +615,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 82.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.8288941,
+      "updated_at": 1779163607.3339536,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 79.67,
-      "winner_rank": 9
+      "winner_rank": 7
     },
     {
       "after_hours_change_pct": -9.7,
@@ -684,12 +684,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163478.9697337,
+      "updated_at": 1779163607.4640677,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 79.51,
-      "winner_rank": 10
+      "winner_rank": 8
     },
     {
       "after_hours_change_pct": 0.0,
@@ -753,12 +753,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.1150467,
+      "updated_at": 1779163607.6268547,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 71.74,
-      "winner_rank": 11
+      "winner_rank": 9
     },
     {
       "after_hours_change_pct": 0.0,
@@ -822,12 +822,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.2184188,
+      "updated_at": 1779163607.7278638,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 66.04,
-      "winner_rank": 12
+      "winner_rank": 10
     },
     {
       "after_hours_change_pct": -16.48,
@@ -891,12 +891,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\"]",
       "tradability_score": 58.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.328174,
+      "updated_at": 1779163607.838408,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 61.26,
-      "winner_rank": 13
+      "winner_rank": 11
     },
     {
       "after_hours_change_pct": 0.0,
@@ -960,12 +960,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.4306028,
+      "updated_at": 1779163607.9396067,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 60.87,
-      "winner_rank": 14
+      "winner_rank": 12
     },
     {
       "after_hours_change_pct": 11.48,
@@ -1029,12 +1029,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.551043,
+      "updated_at": 1779163608.056585,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 53.09,
-      "winner_rank": 15
+      "winner_rank": 13
     },
     {
       "after_hours_change_pct": 0.0,
@@ -1098,12 +1098,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.6509829,
+      "updated_at": 1779163608.1597812,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 47.84,
-      "winner_rank": 16
+      "winner_rank": 14
     },
     {
       "after_hours_change_pct": -0.67,
@@ -1167,12 +1167,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.7651908,
+      "updated_at": 1779163608.2743008,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 46.22,
-      "winner_rank": 17
+      "winner_rank": 15
     },
     {
       "after_hours_change_pct": 0.0,
@@ -1236,12 +1236,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.8664474,
+      "updated_at": 1779163608.3787062,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 43.33,
-      "winner_rank": 18
+      "winner_rank": 16
     },
     {
       "after_hours_change_pct": -3.88,
@@ -1305,12 +1305,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\"]",
       "tradability_score": 90.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163479.98423,
+      "updated_at": 1779163608.4992888,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 40.98,
-      "winner_rank": 19
+      "winner_rank": 17
     },
     {
       "after_hours_change_pct": 12.14,
@@ -1374,12 +1374,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.090565,
+      "updated_at": 1779163608.6041126,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 40.0,
-      "winner_rank": 20
+      "winner_rank": 18
     },
     {
       "after_hours_change_pct": -0.45,
@@ -1443,12 +1443,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.2043216,
+      "updated_at": 1779163608.71747,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 39.3,
-      "winner_rank": 21
+      "winner_rank": 19
     },
     {
       "after_hours_change_pct": 0.0,
@@ -1512,12 +1512,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.3062818,
+      "updated_at": 1779163609.0259454,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 36.14,
-      "winner_rank": 22
+      "winner_rank": 20
     },
     {
       "after_hours_change_pct": -0.71,
@@ -1581,12 +1581,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\"]",
       "tradability_score": 76.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.408176,
+      "updated_at": 1779163609.135217,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 33.98,
-      "winner_rank": 23
+      "winner_rank": 21
     },
     {
       "after_hours_change_pct": -3.74,
@@ -1650,12 +1650,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 58.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.493081,
+      "updated_at": 1779163609.2209375,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 30.66,
-      "winner_rank": 24
+      "winner_rank": 22
     },
     {
       "after_hours_change_pct": 24.27,
@@ -1719,12 +1719,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.6256154,
+      "updated_at": 1779163609.3435757,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 30.59,
-      "winner_rank": 25
+      "winner_rank": 23
     },
     {
       "after_hours_change_pct": 0.0,
@@ -1788,12 +1788,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.7295954,
+      "updated_at": 1779163609.447429,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 29.69,
-      "winner_rank": 26
+      "winner_rank": 24
     },
     {
       "after_hours_change_pct": 0.0,
@@ -1857,12 +1857,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.8148553,
+      "updated_at": 1779163609.534148,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 29.25,
-      "winner_rank": 27
+      "winner_rank": 25
     },
     {
       "after_hours_change_pct": -4.33,
@@ -1926,12 +1926,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163480.9204147,
+      "updated_at": 1779163609.6409743,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 29.03,
-      "winner_rank": 28
+      "winner_rank": 26
     },
     {
       "after_hours_change_pct": 3.77,
@@ -1995,12 +1995,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 82.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.0350358,
+      "updated_at": 1779163609.7582674,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 28.62,
-      "winner_rank": 29
+      "winner_rank": 27
     },
     {
       "after_hours_change_pct": -2.04,
@@ -2064,12 +2064,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\"]",
       "tradability_score": 90.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.1373088,
+      "updated_at": 1779163609.8621356,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 28.34,
-      "winner_rank": 30
+      "winner_rank": 28
     },
     {
       "after_hours_change_pct": 0.03,
@@ -2133,12 +2133,12 @@
       "tradability_reasons_json": "[\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 92.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.2399373,
+      "updated_at": 1779163609.9708622,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 27.34,
-      "winner_rank": 31
+      "winner_rank": 29
     },
     {
       "after_hours_change_pct": 7.92,
@@ -2202,12 +2202,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.3491526,
+      "updated_at": 1779163610.0761619,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 26.63,
-      "winner_rank": 32
+      "winner_rank": 30
     },
     {
       "after_hours_change_pct": -0.38,
@@ -2271,12 +2271,12 @@
       "tradability_reasons_json": "[\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 82.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.4372873,
+      "updated_at": 1779163610.1636074,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 26.54,
-      "winner_rank": 33
+      "winner_rank": 31
     },
     {
       "after_hours_change_pct": 0.0,
@@ -2340,12 +2340,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.5519118,
+      "updated_at": 1779163610.2681048,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 26.21,
-      "winner_rank": 34
+      "winner_rank": 32
     },
     {
       "after_hours_change_pct": 0.0,
@@ -2409,12 +2409,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.6661196,
+      "updated_at": 1779163610.3699193,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 26.21,
-      "winner_rank": 35
+      "winner_rank": 33
     },
     {
       "after_hours_change_pct": 0.0,
@@ -2478,12 +2478,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 15.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.7830644,
+      "updated_at": 1779163610.4759293,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 25.71,
-      "winner_rank": 36
+      "winner_rank": 34
     },
     {
       "after_hours_change_pct": -3.91,
@@ -2547,12 +2547,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.8957255,
+      "updated_at": 1779163610.5805821,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 25.61,
-      "winner_rank": 37
+      "winner_rank": 35
     },
     {
       "after_hours_change_pct": 2.44,
@@ -2616,12 +2616,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\"]",
       "tradability_score": 90.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163481.99709,
+      "updated_at": 1779163610.6827052,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 25.42,
-      "winner_rank": 38
+      "winner_rank": 36
     },
     {
       "after_hours_change_pct": 0.0,
@@ -2685,12 +2685,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.101136,
+      "updated_at": 1779163610.7865334,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 25.06,
-      "winner_rank": 39
+      "winner_rank": 37
     },
     {
       "after_hours_change_pct": 0.0,
@@ -2754,12 +2754,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.206485,
+      "updated_at": 1779163610.8839455,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 24.73,
-      "winner_rank": 40
+      "winner_rank": 38
     },
     {
       "after_hours_change_pct": -0.95,
@@ -2823,12 +2823,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.289891,
+      "updated_at": 1779163610.972538,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 24.66,
-      "winner_rank": 41
+      "winner_rank": 39
     },
     {
       "after_hours_change_pct": -4.44,
@@ -2892,12 +2892,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 58.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.387054,
+      "updated_at": 1779163611.074787,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 24.31,
-      "winner_rank": 42
+      "winner_rank": 40
     },
     {
       "after_hours_change_pct": 5.27,
@@ -2961,12 +2961,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.5043545,
+      "updated_at": 1779163611.186742,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 23.46,
-      "winner_rank": 43
+      "winner_rank": 41
     },
     {
       "after_hours_change_pct": -0.26,
@@ -3030,12 +3030,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.5879023,
+      "updated_at": 1779163611.2702217,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 22.99,
-      "winner_rank": 44
+      "winner_rank": 42
     },
     {
       "after_hours_change_pct": 0.0,
@@ -3099,12 +3099,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 68.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.7001293,
+      "updated_at": 1779163611.384606,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 22.76,
-      "winner_rank": 45
+      "winner_rank": 43
     },
     {
       "after_hours_change_pct": -15.9,
@@ -3168,12 +3168,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.8057005,
+      "updated_at": 1779163611.4896667,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 22.47,
-      "winner_rank": 46
+      "winner_rank": 44
     },
     {
       "after_hours_change_pct": -0.77,
@@ -3237,12 +3237,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.9022114,
+      "updated_at": 1779163611.5890477,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 22.17,
-      "winner_rank": 47
+      "winner_rank": 45
     },
     {
       "after_hours_change_pct": 0.75,
@@ -3306,12 +3306,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار متوسط/منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 33.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163482.9950259,
+      "updated_at": 1779163611.6855187,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 22.02,
-      "winner_rank": 48
+      "winner_rank": 46
     },
     {
       "after_hours_change_pct": -0.55,
@@ -3375,12 +3375,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\"]",
       "tradability_score": 90.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.123717,
+      "updated_at": 1779163611.7840245,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 21.67,
-      "winner_rank": 49
+      "winner_rank": 47
     },
     {
       "after_hours_change_pct": 0.64,
@@ -3444,12 +3444,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.2198017,
+      "updated_at": 1779163611.8802667,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 21.65,
-      "winner_rank": 50
+      "winner_rank": 48
     },
     {
       "after_hours_change_pct": 0.0,
@@ -3513,12 +3513,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.3373306,
+      "updated_at": 1779163611.9857209,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 21.43,
-      "winner_rank": 51
+      "winner_rank": 49
     },
     {
       "after_hours_change_pct": 1.1,
@@ -3582,12 +3582,12 @@
       "tradability_reasons_json": "[\"حجم الدولار متوسط/منخفض\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 68.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.4171188,
+      "updated_at": 1779163612.0660572,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 21.33,
-      "winner_rank": 52
+      "winner_rank": 50
     },
     {
       "after_hours_change_pct": 0.2,
@@ -3651,12 +3651,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.4978075,
+      "updated_at": 1779163612.148562,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 20.99,
-      "winner_rank": 53
+      "winner_rank": 51
     },
     {
       "after_hours_change_pct": -5.69,
@@ -3720,12 +3720,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\"]",
       "tradability_score": 90.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.6128068,
+      "updated_at": 1779163612.2688925,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 20.92,
-      "winner_rank": 54
+      "winner_rank": 52
     },
     {
       "after_hours_change_pct": 14.39,
@@ -3789,12 +3789,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.6898174,
+      "updated_at": 1779163612.3465555,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 20.6,
-      "winner_rank": 55
+      "winner_rank": 53
     },
     {
       "after_hours_change_pct": -0.27,
@@ -3858,12 +3858,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 54.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.7751582,
+      "updated_at": 1779163612.435297,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 20.59,
-      "winner_rank": 56
+      "winner_rank": 54
     },
     {
       "after_hours_change_pct": 2.59,
@@ -3927,12 +3927,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 58.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.8743515,
+      "updated_at": 1779163612.534822,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 20.28,
-      "winner_rank": 57
+      "winner_rank": 55
     },
     {
       "after_hours_change_pct": 0.0,
@@ -3996,12 +3996,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163483.975447,
+      "updated_at": 1779163612.636211,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 20.25,
-      "winner_rank": 58
+      "winner_rank": 56
     },
     {
       "after_hours_change_pct": 0.0,
@@ -4065,12 +4065,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.077557,
+      "updated_at": 1779163612.7368548,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 19.74,
-      "winner_rank": 59
+      "winner_rank": 57
     },
     {
       "after_hours_change_pct": 1.0,
@@ -4134,12 +4134,12 @@
       "tradability_reasons_json": "[\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 75.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.194708,
+      "updated_at": 1779163612.845678,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 19.73,
-      "winner_rank": 60
+      "winner_rank": 58
     },
     {
       "after_hours_change_pct": -4.51,
@@ -4203,12 +4203,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.2734637,
+      "updated_at": 1779163612.9232614,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 19.24,
-      "winner_rank": 61
+      "winner_rank": 59
     },
     {
       "after_hours_change_pct": -1.57,
@@ -4272,12 +4272,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.3802857,
+      "updated_at": 1779163613.032408,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 19.07,
-      "winner_rank": 62
+      "winner_rank": 60
     },
     {
       "after_hours_change_pct": 1.49,
@@ -4341,12 +4341,12 @@
       "tradability_reasons_json": "[\"حجم الدولار متوسط/منخفض\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 43.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.4808893,
+      "updated_at": 1779163613.1400366,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 19.05,
-      "winner_rank": 63
+      "winner_rank": 61
     },
     {
       "after_hours_change_pct": 0.0,
@@ -4410,12 +4410,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.5781698,
+      "updated_at": 1779163613.2394156,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 19.0,
-      "winner_rank": 64
+      "winner_rank": 62
     },
     {
       "after_hours_change_pct": 0.67,
@@ -4479,12 +4479,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.6710668,
+      "updated_at": 1779163613.3301373,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.98,
-      "winner_rank": 65
+      "winner_rank": 63
     },
     {
       "after_hours_change_pct": 8.98,
@@ -4548,12 +4548,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 54.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.760707,
+      "updated_at": 1779163613.4209495,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.88,
-      "winner_rank": 66
+      "winner_rank": 64
     },
     {
       "after_hours_change_pct": 0.69,
@@ -4617,12 +4617,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.8511252,
+      "updated_at": 1779163613.5182354,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.8,
-      "winner_rank": 67
+      "winner_rank": 65
     },
     {
       "after_hours_change_pct": 0.0,
@@ -4686,12 +4686,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163484.952584,
+      "updated_at": 1779163613.6264768,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.57,
-      "winner_rank": 68
+      "winner_rank": 66
     },
     {
       "after_hours_change_pct": -6.42,
@@ -4755,12 +4755,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 22.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.0415423,
+      "updated_at": 1779163613.712805,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.49,
-      "winner_rank": 69
+      "winner_rank": 67
     },
     {
       "after_hours_change_pct": -3.41,
@@ -4824,12 +4824,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.1385136,
+      "updated_at": 1779163613.8040552,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.39,
-      "winner_rank": 70
+      "winner_rank": 68
     },
     {
       "after_hours_change_pct": -0.81,
@@ -4893,12 +4893,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\"]",
       "tradability_score": 76.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.2647266,
+      "updated_at": 1779163613.9400144,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.33,
-      "winner_rank": 71
+      "winner_rank": 69
     },
     {
       "after_hours_change_pct": 0.0,
@@ -4962,12 +4962,12 @@
       "tradability_reasons_json": "[\"حجم الدولار متوسط/منخفض\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 68.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.3402855,
+      "updated_at": 1779163614.028046,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 18.29,
-      "winner_rank": 72
+      "winner_rank": 70
     },
     {
       "after_hours_change_pct": 0.39,
@@ -5031,12 +5031,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.4562614,
+      "updated_at": 1779163614.1523042,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 17.81,
-      "winner_rank": 73
+      "winner_rank": 71
     },
     {
       "after_hours_change_pct": 0.16,
@@ -5100,12 +5100,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.5391414,
+      "updated_at": 1779163614.240069,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 17.8,
-      "winner_rank": 74
+      "winner_rank": 72
     },
     {
       "after_hours_change_pct": -2.49,
@@ -5169,12 +5169,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.6308804,
+      "updated_at": 1779163614.3287108,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 17.6,
-      "winner_rank": 75
+      "winner_rank": 73
     },
     {
       "after_hours_change_pct": 5.28,
@@ -5238,12 +5238,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.7144845,
+      "updated_at": 1779163614.4099226,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 17.57,
-      "winner_rank": 76
+      "winner_rank": 74
     },
     {
       "after_hours_change_pct": 4.15,
@@ -5307,12 +5307,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.834259,
+      "updated_at": 1779163614.5262003,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 17.42,
-      "winner_rank": 77
+      "winner_rank": 75
     },
     {
       "after_hours_change_pct": -1.64,
@@ -5376,12 +5376,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163485.9785888,
+      "updated_at": 1779163614.6393967,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 17.4,
-      "winner_rank": 78
+      "winner_rank": 76
     },
     {
       "after_hours_change_pct": 1.35,
@@ -5445,12 +5445,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.0730965,
+      "updated_at": 1779163614.732963,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.81,
-      "winner_rank": 79
+      "winner_rank": 77
     },
     {
       "after_hours_change_pct": 8.56,
@@ -5514,12 +5514,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.1611028,
+      "updated_at": 1779163614.8168156,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.69,
-      "winner_rank": 80
+      "winner_rank": 78
     },
     {
       "after_hours_change_pct": 0.63,
@@ -5583,12 +5583,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.2485476,
+      "updated_at": 1779163614.901477,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.67,
-      "winner_rank": 81
+      "winner_rank": 79
     },
     {
       "after_hours_change_pct": -1.41,
@@ -5652,12 +5652,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.337591,
+      "updated_at": 1779163615.0068138,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.56,
-      "winner_rank": 82
+      "winner_rank": 80
     },
     {
       "after_hours_change_pct": 0.0,
@@ -5721,12 +5721,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.4405704,
+      "updated_at": 1779163615.1180754,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.55,
-      "winner_rank": 83
+      "winner_rank": 81
     },
     {
       "after_hours_change_pct": -1.57,
@@ -5790,12 +5790,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.563686,
+      "updated_at": 1779163615.2314503,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.25,
-      "winner_rank": 84
+      "winner_rank": 82
     },
     {
       "after_hours_change_pct": -13.79,
@@ -5859,12 +5859,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.664727,
+      "updated_at": 1779163615.3315759,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 16.0,
-      "winner_rank": 85
+      "winner_rank": 83
     },
     {
       "after_hours_change_pct": 0.0,
@@ -5928,12 +5928,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.7623882,
+      "updated_at": 1779163615.4283745,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.75,
-      "winner_rank": 86
+      "winner_rank": 84
     },
     {
       "after_hours_change_pct": 0.06,
@@ -5997,12 +5997,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 8.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.8379576,
+      "updated_at": 1779163615.5067732,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.53,
-      "winner_rank": 87
+      "winner_rank": 85
     },
     {
       "after_hours_change_pct": 0.0,
@@ -6066,12 +6066,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163486.9530017,
+      "updated_at": 1779163615.6078227,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.48,
-      "winner_rank": 88
+      "winner_rank": 86
     },
     {
       "after_hours_change_pct": 0.0,
@@ -6135,12 +6135,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163487.0554554,
+      "updated_at": 1779163615.7089374,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.36,
-      "winner_rank": 89
+      "winner_rank": 87
     },
     {
       "after_hours_change_pct": -35.66,
@@ -6204,12 +6204,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\",\"قاب كبير جدًا؛ يحتاج فصل جودة القاب\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163487.2227015,
+      "updated_at": 1779163615.8183851,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.32,
-      "winner_rank": 90
+      "winner_rank": 88
     },
     {
       "after_hours_change_pct": 0.0,
@@ -6273,12 +6273,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163487.2990901,
+      "updated_at": 1779163615.8985298,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.27,
-      "winner_rank": 91
+      "winner_rank": 89
     },
     {
       "after_hours_change_pct": -1.94,
@@ -6342,12 +6342,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار متوسط/منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 47.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163487.383962,
+      "updated_at": 1779163615.9828932,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 15.07,
-      "winner_rank": 92
+      "winner_rank": 90
     },
     {
       "after_hours_change_pct": -1.77,
@@ -6411,12 +6411,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163487.502723,
+      "updated_at": 1779163616.104011,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 14.92,
-      "winner_rank": 93
+      "winner_rank": 91
     },
     {
       "after_hours_change_pct": 0.0,
@@ -6480,12 +6480,12 @@
       "tradability_reasons_json": "[\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 82.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163488.6591094,
+      "updated_at": 1779163616.2012258,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 14.81,
-      "winner_rank": 94
+      "winner_rank": 92
     },
     {
       "after_hours_change_pct": 2.34,
@@ -6549,12 +6549,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار متوسط/منخفض\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 58.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163488.747492,
+      "updated_at": 1779163616.287173,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 14.32,
-      "winner_rank": 95
+      "winner_rank": 93
     },
     {
       "after_hours_change_pct": -1.65,
@@ -6618,12 +6618,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 54.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163488.833368,
+      "updated_at": 1779163616.371868,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 14.0,
-      "winner_rank": 96
+      "winner_rank": 94
     },
     {
       "after_hours_change_pct": -3.15,
@@ -6687,12 +6687,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163488.9522202,
+      "updated_at": 1779163616.475113,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.86,
-      "winner_rank": 97
+      "winner_rank": 95
     },
     {
       "after_hours_change_pct": 1.05,
@@ -6756,12 +6756,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.063236,
+      "updated_at": 1779163616.5730078,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.85,
-      "winner_rank": 98
+      "winner_rank": 96
     },
     {
       "after_hours_change_pct": 0.0,
@@ -6825,12 +6825,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 72.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.2772744,
+      "updated_at": 1779163616.654944,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.78,
-      "winner_rank": 99
+      "winner_rank": 97
     },
     {
       "after_hours_change_pct": -1.09,
@@ -6894,12 +6894,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.3766856,
+      "updated_at": 1779163616.760419,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.74,
-      "winner_rank": 100
+      "winner_rank": 98
     },
     {
       "after_hours_change_pct": 0.0,
@@ -6963,12 +6963,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.4910784,
+      "updated_at": 1779163616.9949036,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.59,
-      "winner_rank": 101
+      "winner_rank": 99
     },
     {
       "after_hours_change_pct": -2.53,
@@ -7032,12 +7032,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.6294234,
+      "updated_at": 1779163617.124074,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.53,
-      "winner_rank": 102
+      "winner_rank": 100
     },
     {
       "after_hours_change_pct": -3.49,
@@ -7101,12 +7101,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 22.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.7340255,
+      "updated_at": 1779163617.226849,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.4,
-      "winner_rank": 103
+      "winner_rank": 101
     },
     {
       "after_hours_change_pct": 0.0,
@@ -7170,12 +7170,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.83325,
+      "updated_at": 1779163617.3275564,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.33,
-      "winner_rank": 104
+      "winner_rank": 102
     },
     {
       "after_hours_change_pct": 1.38,
@@ -7239,12 +7239,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 26.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163489.9073792,
+      "updated_at": 1779163617.4081607,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.28,
-      "winner_rank": 105
+      "winner_rank": 103
     },
     {
       "after_hours_change_pct": -0.19,
@@ -7308,12 +7308,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 22.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.0308065,
+      "updated_at": 1779163617.5429184,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.17,
-      "winner_rank": 106
+      "winner_rank": 104
     },
     {
       "after_hours_change_pct": 2.14,
@@ -7377,12 +7377,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\",\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 72.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.1502435,
+      "updated_at": 1779163617.678563,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.06,
-      "winner_rank": 107
+      "winner_rank": 105
     },
     {
       "after_hours_change_pct": 4.94,
@@ -7446,12 +7446,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.2770414,
+      "updated_at": 1779163617.804351,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 13.04,
-      "winner_rank": 108
+      "winner_rank": 106
     },
     {
       "after_hours_change_pct": -1.61,
@@ -7515,12 +7515,12 @@
       "tradability_reasons_json": "[\"حجم الدولار متوسط/منخفض\"]",
       "tradability_score": 82.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.359627,
+      "updated_at": 1779163617.8871472,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.93,
-      "winner_rank": 109
+      "winner_rank": 107
     },
     {
       "after_hours_change_pct": 0.35,
@@ -7584,12 +7584,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.4542584,
+      "updated_at": 1779163617.9805067,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.92,
-      "winner_rank": 110
+      "winner_rank": 108
     },
     {
       "after_hours_change_pct": 7.6,
@@ -7653,12 +7653,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.5558138,
+      "updated_at": 1779163618.0833974,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.85,
-      "winner_rank": 111
+      "winner_rank": 109
     },
     {
       "after_hours_change_pct": 0.0,
@@ -7722,12 +7722,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.634253,
+      "updated_at": 1779163618.1604917,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.75,
-      "winner_rank": 112
+      "winner_rank": 110
     },
     {
       "after_hours_change_pct": -1.97,
@@ -7791,12 +7791,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.7121701,
+      "updated_at": 1779163618.237328,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.71,
-      "winner_rank": 113
+      "winner_rank": 111
     },
     {
       "after_hours_change_pct": -0.42,
@@ -7860,12 +7860,12 @@
       "tradability_reasons_json": "[\"سعر منخفض نسبيًا\"]",
       "tradability_score": 90.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.8329842,
+      "updated_at": 1779163618.3663287,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.68,
-      "winner_rank": 114
+      "winner_rank": 112
     },
     {
       "after_hours_change_pct": 2.99,
@@ -7929,12 +7929,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 8.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163490.9400098,
+      "updated_at": 1779163618.468799,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.65,
-      "winner_rank": 115
+      "winner_rank": 113
     },
     {
       "after_hours_change_pct": 0.0,
@@ -7998,12 +7998,12 @@
       "tradability_reasons_json": "[\"سعر منخفض جدًا؛ يحتاج فصل عن العينة النظيفة\",\"حجم الدولار ضعيف جدًا\"]",
       "tradability_score": 40.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163491.1216586,
+      "updated_at": 1779163618.5750198,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.63,
-      "winner_rank": 116
+      "winner_rank": 114
     },
     {
       "after_hours_change_pct": 0.64,
@@ -8067,12 +8067,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163491.210828,
+      "updated_at": 1779163618.6675777,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 1,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.5,
-      "winner_rank": 117
+      "winner_rank": 115
     },
     {
       "after_hours_change_pct": 0.0,
@@ -8136,12 +8136,12 @@
       "tradability_reasons_json": "[\"سعر أقل من 1 دولار؛ عينة مضاربية عالية المخاطر\",\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\",\"رمز قد يكون warrant/unit/right؛ افصله عن العينة الأساسية\"]",
       "tradability_score": 0.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163491.318014,
+      "updated_at": 1779163618.7694664,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.5,
-      "winner_rank": 118
+      "winner_rank": 116
     },
     {
       "after_hours_change_pct": 0.0,
@@ -8205,12 +8205,12 @@
       "tradability_reasons_json": "[]",
       "tradability_score": 100.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163491.4452634,
+      "updated_at": 1779163618.8774314,
       "visibility_confidence_label": "historical_timeline",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.48,
-      "winner_rank": 119
+      "winner_rank": 117
     },
     {
       "after_hours_change_pct": -2.0,
@@ -8274,12 +8274,12 @@
       "tradability_reasons_json": "[\"حجم الدولار ضعيف جدًا\",\"حجم الأسهم المتداولة منخفض\"]",
       "tradability_score": 50.0,
       "trade_date": "2026-05-18",
-      "updated_at": 1779163491.6011858,
+      "updated_at": 1779163618.9824462,
       "visibility_confidence_label": "current_or_evidence_snapshot_only",
       "volume_fade_flag": 0,
       "week_key": "2026-05-18_2026-05-22",
       "winner_change_pct": 12.29,
-      "winner_rank": 120
+      "winner_rank": 118
     }
   ],
   "ok": true,
