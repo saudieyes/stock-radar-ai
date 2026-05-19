@@ -823,6 +823,14 @@
     "symbol": "LEA",
     "updated_at": "2026-05-01 17:02:13"
   },
+  "LEDS": {
+    "excluded_at": "2026-05-19 14:23:52",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LEDS",
+    "updated_at": "2026-05-19 14:23:52"
+  },
   "LIFE": {
     "excluded_at": "2026-04-27 17:54:20",
     "note": "",
