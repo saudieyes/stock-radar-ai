@@ -1,52 +1,52 @@
 {
   "intraday_bars": {
-    "c": 66959,
+    "c": 66974,
     "symbols": 596
   },
   "market_fear": {
-    "badge": "⚪",
-    "cache_hit": true,
-    "captured_at": "2026-05-19 04:26:36",
-    "captured_ts": 1779179196.187534,
-    "change_pct": 0.84,
-    "change_points": 0.15,
-    "confirmation_strictness": "normal",
+    "badge": "🟡",
+    "captured_at": "2026-05-19 04:41:49",
+    "captured_ts": 1779180109.0307353,
+    "change_pct": 1.96,
+    "change_points": 0.35,
+    "confirmation_strictness": "elevated",
     "enabled": true,
     "execution_rules": {
-      "avoid_late_entries_when_stressed": false,
-      "breakout_requires_liquidity_confirmation": false,
-      "confirmation_strictness": "normal",
-      "no_chase_strictness": "normal",
-      "position_size_multiplier": 0.85,
-      "prefer_near_support_entries_when_stressed": false
+      "avoid_late_entries_when_stressed": true,
+      "breakout_requires_liquidity_confirmation": true,
+      "confirmation_strictness": "elevated",
+      "no_chase_strictness": "elevated",
+      "position_size_multiplier": 0.7,
+      "prefer_near_support_entries_when_stressed": true
     },
     "guidance_ar": [
-      "الخوف العام طبيعي تقريبًا؛ قرارات السهم الفردية والسيولة تبقى الأهم.",
-      "استمر في طلب تأكيد الاختراق والسيولة خصوصًا قرب المقاومات."
+      "السوق يحتاج حذرًا إضافيًا؛ لا تطارد الحركة المتأخرة.",
+      "يفضل الدخول قرب الدعم أو بعد تأكيد السيولة.",
+      "خفض حجم الدخول قليلًا إذا كانت الخطة عالية المخاطرة."
     ],
     "history_points": 0,
     "is_proxy": false,
-    "no_chase_strictness": "normal",
+    "no_chase_strictness": "elevated",
     "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
     "ok": true,
-    "position_size_multiplier": 0.85,
+    "position_size_multiplier": 0.7,
     "previous_close": 17.82,
-    "regime_key": "normal",
-    "regime_label": "طبيعي",
+    "regime_key": "caution",
+    "regime_label": "حذر متوسط",
     "requested_symbol": "^VIX",
     "source": "FMP",
     "source_symbol": "^VIX",
-    "stress_score": 42.0,
-    "summary_ar": "⚪ طبيعي | VIX 17.97 | التغير 0.84% | حجم الدخول المقترح ×0.85",
+    "stress_score": 58.0,
+    "summary_ar": "🟡 حذر متوسط | VIX 18.17 | التغير 1.96% | حجم الدخول المقترح ×0.7",
     "tracking_fields": {
-      "market_fear_regime": "normal",
-      "market_fear_score": 42.0,
-      "vix": 17.97,
-      "vix_change_pct": 0.84,
+      "market_fear_regime": "caution",
+      "market_fear_score": 58.0,
+      "vix": 18.17,
+      "vix_change_pct": 1.96,
       "vix_trend_5d_pct": 0.0
     },
     "version": "market_fear_v4d_decision_support_no_scoring",
-    "vix": 17.97,
+    "vix": 18.17,
     "vix_avg_5d": 0.0,
     "vix_trend_5d_pct": 0.0
   },
@@ -57,7 +57,7 @@
   "ok": true,
   "sessions": [
     {
-      "c": 10136,
+      "c": 10329,
       "session": "pre_market",
       "symbols": 368
     },
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 16.845941073452146,
-    "avg_dollar_volume": 201221678.71633872,
-    "big_mover_snapshots": 3925,
-    "no_chase_count": 48,
-    "reconfirm_count": 5812,
-    "snapshots": 19414,
+    "avg_change_pct": 16.772614882439942,
+    "avg_dollar_volume": 199247061.96470648,
+    "big_mover_snapshots": 3975,
+    "no_chase_count": 50,
+    "reconfirm_count": 5835,
+    "snapshots": 19607,
     "symbols": 603,
-    "tool_snapshots": 15976
+    "tool_snapshots": 16126
   },
   "top_movers_observed": [
     {
@@ -99,28 +99,28 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 2225.58,
-      "observations": 78,
+      "observations": 79,
       "symbol": "PPCB"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 1252.19,
-      "observations": 63,
+      "observations": 64,
       "symbol": "YMT"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 684.93,
-      "observations": 52,
+      "observations": 53,
       "symbol": "SBFM"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 350.0,
-      "observations": 29,
+      "observations": 30,
       "symbol": "AMPGR"
     },
     {
@@ -148,56 +148,56 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 53,
+      "observations": 54,
       "symbol": "GOVX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 199.67,
-      "observations": 52,
+      "observations": 53,
       "symbol": "VRAX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 192.6,
-      "observations": 53,
+      "observations": 54,
       "symbol": "HCAI"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 62,
+      "observations": 63,
       "symbol": "PIII"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 176.0,
-      "observations": 41,
+      "observations": 42,
       "symbol": "AMPGZ"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 146.17,
-      "observations": 52,
+      "observations": 53,
       "symbol": "AIM"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 138.8,
-      "observations": 48,
+      "observations": 49,
       "symbol": "WGRX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 129.75,
-      "observations": 52,
+      "observations": 53,
       "symbol": "CREG"
     },
     {
@@ -211,7 +211,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 89.76,
-      "observations": 52,
+      "observations": 53,
       "symbol": "NXXT"
     },
     {
@@ -225,7 +225,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 60.66,
-      "observations": 57,
+      "observations": 58,
       "symbol": "AUUD"
     },
     {
@@ -239,7 +239,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.74,
-      "observations": 53,
+      "observations": 54,
       "symbol": "AIIO"
     },
     {
@@ -274,7 +274,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 43.43,
-      "observations": 42,
+      "observations": 43,
       "symbol": "RIBBR"
     },
     {
@@ -295,14 +295,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 42.48,
-      "observations": 53,
+      "observations": 54,
       "symbol": "HIVE"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 40.98,
-      "observations": 81,
+      "observations": 82,
       "symbol": "GCTS"
     },
     {
@@ -316,7 +316,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 38.83,
-      "observations": 50,
+      "observations": 51,
       "symbol": "SACH"
     },
     {
@@ -351,14 +351,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 34.53,
-      "observations": 50,
+      "observations": 51,
       "symbol": "WFCF"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 34.22,
-      "observations": 80,
+      "observations": 81,
       "symbol": "SEGG"
     },
     {
@@ -400,14 +400,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 30.66,
-      "observations": 32,
+      "observations": 33,
       "symbol": "TOP"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 30.15,
-      "observations": 44,
+      "observations": 45,
       "symbol": "RVPH"
     },
     {
@@ -421,7 +421,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 29.44,
-      "observations": 39,
+      "observations": 40,
       "symbol": "MPU"
     },
     {
