@@ -114,7 +114,7 @@
       "unique_symbols": 4
     }
   ],
-  "generated_at": "2026-05-19 01:09:12",
+  "generated_at": "2026-05-19 01:11:18",
   "hypotheses": [
     {
       "avg_first30": 7.05,
@@ -225,7 +225,7 @@
       "avg_first30": 7.67,
       "avg_gain": 34.8,
       "avg_gap": 18.02,
-      "avg_liq_accel": 53.1,
+      "avg_liq_accel": 53.2,
       "avg_liq_persist": 69.9,
       "cases": 7,
       "gap_quality_class": "healthy_gap_followthrough",
@@ -772,7 +772,7 @@
       "avg_first30": 7.67,
       "avg_gain": 34.8,
       "avg_gap": 18.02,
-      "avg_liq_accel": 53.1,
+      "avg_liq_accel": 53.2,
       "avg_liq_persist": 69.9,
       "cases": 7,
       "gap_quality_class": "healthy_gap_followthrough",
@@ -997,7 +997,7 @@
       "avg_first30": 5.49,
       "avg_gain": 16.16,
       "avg_gap": 5.93,
-      "avg_liq_accel": 80.5,
+      "avg_liq_accel": 80.6,
       "avg_liq_persist": 68.4,
       "cases": 3,
       "gap_quality_class": "healthy_gap_followthrough",
