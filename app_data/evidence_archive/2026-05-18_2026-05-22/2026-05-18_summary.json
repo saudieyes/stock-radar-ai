@@ -1,7 +1,7 @@
 {
   "intraday_bars": {
-    "c": 68930,
-    "symbols": 612
+    "c": 68952,
+    "symbols": 614
   },
   "market_fear": {
     "badge": "⚪",
@@ -57,7 +57,7 @@
   "ok": true,
   "sessions": [
     {
-      "c": 32697,
+      "c": 32917,
       "session": "pre_market",
       "symbols": 394
     },
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 12.044120071471113,
-    "avg_dollar_volume": 103419841.28686123,
+    "avg_change_pct": 11.982239364853655,
+    "avg_dollar_volume": 102906304.44291978,
     "big_mover_snapshots": 8729,
-    "no_chase_count": 150,
-    "reconfirm_count": 9547,
-    "snapshots": 41975,
+    "no_chase_count": 151,
+    "reconfirm_count": 9596,
+    "snapshots": 42195,
     "symbols": 603,
-    "tool_snapshots": 34356
+    "tool_snapshots": 34576
   },
   "top_movers_observed": [
     {
@@ -169,7 +169,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 164,
+      "observations": 165,
       "symbol": "PIII"
     },
     {
@@ -435,7 +435,7 @@
       "in_big_movers": 0,
       "in_tool_snapshot": 1,
       "max_change_pct": 28.97,
-      "observations": 160,
+      "observations": 161,
       "symbol": "AGYS"
     }
   ],
