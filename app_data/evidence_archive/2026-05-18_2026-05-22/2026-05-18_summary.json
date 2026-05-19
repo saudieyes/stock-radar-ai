@@ -1,7 +1,7 @@
 {
   "intraday_bars": {
-    "c": 80102,
-    "symbols": 712
+    "c": 80219,
+    "symbols": 713
   },
   "market_fear": {
     "badge": "⚪",
@@ -62,9 +62,9 @@
       "symbols": 394
     },
     {
-      "c": 10813,
+      "c": 11071,
       "session": "regular",
-      "symbols": 705
+      "symbols": 714
     },
     {
       "c": 1709,
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 11.189763904461698,
-    "avg_dollar_volume": 106651799.04652098,
-    "big_mover_snapshots": 9564,
-    "no_chase_count": 165,
-    "reconfirm_count": 11394,
-    "snapshots": 47269,
-    "symbols": 732,
-    "tool_snapshots": 38913
+    "avg_change_pct": 11.160835314663245,
+    "avg_dollar_volume": 108167060.05285417,
+    "big_mover_snapshots": 9614,
+    "no_chase_count": 166,
+    "reconfirm_count": 11516,
+    "snapshots": 47527,
+    "symbols": 741,
+    "tool_snapshots": 39123
   },
   "top_movers_observed": [
     {
@@ -120,7 +120,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 350.0,
-      "observations": 143,
+      "observations": 144,
       "symbol": "AMPGR"
     },
     {
@@ -148,42 +148,42 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 170,
+      "observations": 171,
       "symbol": "GOVX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 199.67,
-      "observations": 171,
+      "observations": 172,
       "symbol": "VRAX"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 192.6,
-      "observations": 163,
+      "observations": 164,
       "symbol": "HCAI"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 182,
+      "observations": 183,
       "symbol": "PIII"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 176.0,
-      "observations": 156,
+      "observations": 157,
       "symbol": "AMPGZ"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 174.24,
-      "observations": 8,
+      "observations": 9,
       "symbol": "AMST"
     },
     {
@@ -211,28 +211,28 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 125.5,
-      "observations": 4,
+      "observations": 5,
       "symbol": "INM"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 120.5,
-      "observations": 12,
+      "observations": 13,
       "symbol": "GIPR"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 94.24,
-      "observations": 33,
+      "observations": 34,
       "symbol": "MRNO"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 89.76,
-      "observations": 168,
+      "observations": 169,
       "symbol": "NXXT"
     },
     {
@@ -246,7 +246,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 80.38,
-      "observations": 16,
+      "observations": 17,
       "symbol": "CODX"
     },
     {
@@ -258,23 +258,23 @@
     },
     {
       "in_big_movers": 1,
-      "in_tool_snapshot": 1,
-      "max_change_pct": 60.0,
-      "observations": 11,
-      "symbol": "PHOE"
-    },
-    {
-      "in_big_movers": 1,
       "in_tool_snapshot": 0,
-      "max_change_pct": 54.56,
-      "observations": 1,
+      "max_change_pct": 60.3,
+      "observations": 2,
       "symbol": "FSHPR"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
+      "max_change_pct": 60.0,
+      "observations": 12,
+      "symbol": "PHOE"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
       "max_change_pct": 53.6,
-      "observations": 10,
+      "observations": 11,
       "symbol": "MTVA"
     },
     {
@@ -400,7 +400,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 34.94,
-      "observations": 181,
+      "observations": 182,
       "symbol": "AGYS"
     },
     {
@@ -485,8 +485,8 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 46.144285714285715,
-      "cases": 42,
+      "avg_gain": 46.84487804878049,
+      "cases": 41,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
@@ -497,8 +497,8 @@
       "move_quality_label": "early_intraday_acceleration"
     },
     {
-      "avg_gain": 44.25807692307693,
-      "cases": 26,
+      "avg_gain": 43.26407407407408,
+      "cases": 27,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
