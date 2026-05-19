@@ -20,7 +20,7 @@
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
-      "cases": 193,
+      "cases": 194,
       "likely_pattern": "pre_market_gap_then_followthrough"
     },
     {
@@ -28,7 +28,7 @@
       "likely_pattern": "first_hour_liquidity_acceleration"
     },
     {
-      "cases": 80,
+      "cases": 79,
       "likely_pattern": "open_gap_big_mover"
     },
     {
