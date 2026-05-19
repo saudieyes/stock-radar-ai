@@ -859,6 +859,7 @@
   "ok": true,
   "snapshot": {
     "badge": "⚪",
+    "cache_hit": true,
     "captured_at": "2026-05-19 08:56:35",
     "captured_ts": 1779195395.0032196,
     "change_pct": 0.67,
