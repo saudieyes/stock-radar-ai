@@ -444,26 +444,26 @@
   "week_key": "2026-05-18_2026-05-22",
   "winner_patterns": [
     {
-      "avg_gain": 26.75947976878613,
-      "cases": 173,
+      "avg_gain": 26.795290697674417,
+      "cases": 172,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 153.16755102040815,
-      "cases": 98,
+      "avg_gain": 154.44731958762887,
+      "cases": 97,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 30.477916666666665,
-      "cases": 72,
+      "avg_gain": 30.348767123287672,
+      "cases": 73,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 21.1375,
-      "cases": 60,
+      "avg_gain": 21.295084745762715,
+      "cases": 59,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "high_quality_followthrough"
     },
@@ -474,8 +474,8 @@
       "move_quality_label": "gap_followthrough_candidate"
     },
     {
-      "avg_gain": 26.51903846153846,
-      "cases": 52,
+      "avg_gain": 26.56641509433962,
+      "cases": 53,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "gap_chase_risk"
     },
@@ -486,8 +486,8 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 46.81121951219512,
-      "cases": 41,
+      "avg_gain": 46.144285714285715,
+      "cases": 42,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
@@ -498,8 +498,8 @@
       "move_quality_label": "early_intraday_acceleration"
     },
     {
-      "avg_gain": 43.315185185185186,
-      "cases": 27,
+      "avg_gain": 44.25807692307693,
+      "cases": 26,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -510,8 +510,8 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 19.633000000000003,
-      "cases": 20,
+      "avg_gain": 19.24047619047619,
+      "cases": 21,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "gap_followthrough_candidate"
     }
