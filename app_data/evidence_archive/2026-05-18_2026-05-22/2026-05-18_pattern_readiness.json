@@ -3,7 +3,7 @@
     "c": 222
   },
   "intraday_bars": {
-    "c": 66914,
+    "c": 66926,
     "symbols": 596
   },
   "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
@@ -11,7 +11,7 @@
   "readiness_label": "جاهز لتحليل أولي",
   "readiness_score": 100,
   "snapshots": {
-    "c": 18642,
+    "c": 18835,
     "symbols": 603
   },
   "top_winner_patterns": [
