@@ -114,7 +114,7 @@
       "unique_symbols": 4
     }
   ],
-  "generated_at": "2026-05-19 04:07:08",
+  "generated_at": "2026-05-19 04:09:28",
   "hypotheses": [
     {
       "avg_first30": 7.05,
@@ -419,9 +419,9 @@
   ],
   "loss_pattern_groups": [
     {
-      "avg_max_gain_pct": 1.26,
-      "avg_max_loss_pct": -3.95,
-      "cases": 19,
+      "avg_max_gain_pct": 1.29,
+      "avg_max_loss_pct": -4.3,
+      "cases": 20,
       "signature": "breakout | near_resistance | support_break | high_volatility",
       "unique_symbols": 10
     },
@@ -568,7 +568,7 @@
     "missing_historical_visibility": 105,
     "snapshot_only_visibility_winners": 105,
     "source_unknown_winners": 105,
-    "tracking_loss_rows": 117,
+    "tracking_loss_rows": 118,
     "tracking_rows": 760,
     "tracking_success_rows": 59,
     "tradability_unknown_winners": 0,
