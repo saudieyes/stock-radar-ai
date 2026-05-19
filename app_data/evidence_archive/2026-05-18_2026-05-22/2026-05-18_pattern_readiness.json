@@ -20,7 +20,7 @@
       "likely_pattern": "pre_market_gap_then_followthrough"
     },
     {
-      "cases": 211,
+      "cases": 210,
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
@@ -32,7 +32,7 @@
       "likely_pattern": "open_gap_big_mover"
     },
     {
-      "cases": 80,
+      "cases": 81,
       "likely_pattern": "unclassified_winner"
     }
   ],
