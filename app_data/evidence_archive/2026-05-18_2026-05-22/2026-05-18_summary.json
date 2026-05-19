@@ -443,20 +443,20 @@
   "week_key": "2026-05-18_2026-05-22",
   "winner_patterns": [
     {
-      "avg_gain": 26.996,
-      "cases": 170,
+      "avg_gain": 26.90637426900585,
+      "cases": 171,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 183.32443037974681,
-      "cases": 79,
+      "avg_gain": 181.161375,
+      "cases": 80,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 31.150000000000002,
-      "cases": 66,
+      "avg_gain": 31.966507936507938,
+      "cases": 63,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -467,16 +467,16 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 26.634666666666664,
+      "avg_gain": 89.07955555555556,
       "cases": 45,
-      "likely_pattern": "open_gap_big_mover",
-      "move_quality_label": "gap_chase_risk"
-    },
-    {
-      "avg_gain": 89.60659090909091,
-      "cases": 44,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "gap_followthrough_candidate"
+    },
+    {
+      "avg_gain": 27.249302325581397,
+      "cases": 43,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "gap_chase_risk"
     },
     {
       "avg_gain": 53.20060606060606,
@@ -485,25 +485,25 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
+      "avg_gain": 20.837878787878786,
+      "cases": 33,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "early_intraday_acceleration"
+    },
+    {
       "avg_gain": 81.4178125,
       "cases": 32,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 21.02625,
-      "cases": 32,
-      "likely_pattern": "first_hour_liquidity_acceleration",
-      "move_quality_label": "early_intraday_acceleration"
-    },
-    {
-      "avg_gain": 19.810434782608695,
-      "cases": 23,
+      "avg_gain": 19.632083333333334,
+      "cases": 24,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 49.20772727272727,
+      "avg_gain": 46.96545454545455,
       "cases": 22,
       "likely_pattern": "open_gap_big_mover",
       "move_quality_label": "winner_needs_more_context"
