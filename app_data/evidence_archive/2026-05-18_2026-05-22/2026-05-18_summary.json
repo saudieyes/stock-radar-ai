@@ -1,13 +1,13 @@
 {
   "intraday_bars": {
-    "c": 66837,
+    "c": 66838,
     "symbols": 596
   },
   "market_fear": {
     "badge": "⚪",
     "cache_hit": true,
-    "captured_at": "2026-05-19 00:50:33",
-    "captured_ts": 1779166232.8682172,
+    "captured_at": "2026-05-19 01:05:39",
+    "captured_ts": 1779167138.4631672,
     "change_pct": -3.31,
     "change_points": -0.61,
     "confirmation_strictness": "normal",
