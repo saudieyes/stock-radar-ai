@@ -1,6 +1,6 @@
 {
   "daily_big_movers": {
-    "c": 172
+    "c": 222
   },
   "intraday_bars": {
     "c": 66845,
@@ -11,7 +11,7 @@
   "readiness_label": "جاهز لتحليل أولي",
   "readiness_score": 100,
   "snapshots": {
-    "c": 16311,
+    "c": 16504,
     "symbols": 603
   },
   "top_winner_patterns": [
