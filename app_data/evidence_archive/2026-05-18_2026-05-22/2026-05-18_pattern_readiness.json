@@ -1,34 +1,34 @@
 {
   "daily_big_movers": {
-    "c": 297
+    "c": 301
   },
   "intraday_bars": {
-    "c": 78452,
-    "symbols": 688
+    "c": 78666,
+    "symbols": 690
   },
   "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
   "ok": true,
   "readiness_label": "جاهز لتحليل أولي",
   "readiness_score": 100,
   "snapshots": {
-    "c": 45717,
-    "symbols": 690
+    "c": 45975,
+    "symbols": 699
   },
   "top_winner_patterns": [
     {
-      "cases": 245,
+      "cases": 244,
       "likely_pattern": "pre_market_gap_then_followthrough"
     },
     {
-      "cases": 209,
+      "cases": 210,
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
-      "cases": 115,
+      "cases": 114,
       "likely_pattern": "first_hour_liquidity_acceleration"
     },
     {
-      "cases": 97,
+      "cases": 98,
       "likely_pattern": "open_gap_big_mover"
     },
     {
