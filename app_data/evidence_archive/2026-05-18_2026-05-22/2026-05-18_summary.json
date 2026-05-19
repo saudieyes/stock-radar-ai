@@ -5,11 +5,10 @@
   },
   "market_fear": {
     "badge": "⚪",
-    "cache_hit": true,
-    "captured_at": "2026-05-19 10:03:11",
-    "captured_ts": 1779199390.7187705,
-    "change_pct": 0.73,
-    "change_points": 0.13,
+    "captured_at": "2026-05-19 10:18:16",
+    "captured_ts": 1779200296.1780791,
+    "change_pct": 0.95,
+    "change_points": 0.17,
     "confirmation_strictness": "normal",
     "enabled": true,
     "execution_rules": {
@@ -37,16 +36,16 @@
     "source": "FMP",
     "source_symbol": "^VIX",
     "stress_score": 42.0,
-    "summary_ar": "⚪ طبيعي | VIX 17.95 | التغير 0.73% | حجم الدخول المقترح ×0.85",
+    "summary_ar": "⚪ طبيعي | VIX 17.99 | التغير 0.95% | حجم الدخول المقترح ×0.85",
     "tracking_fields": {
       "market_fear_regime": "normal",
       "market_fear_score": 42.0,
-      "vix": 17.95,
-      "vix_change_pct": 0.73,
+      "vix": 17.99,
+      "vix_change_pct": 0.95,
       "vix_trend_5d_pct": 0.0
     },
     "version": "market_fear_v4d_decision_support_no_scoring",
-    "vix": 17.95,
+    "vix": 17.99,
     "vix_avg_5d": 0.0,
     "vix_trend_5d_pct": 0.0
   },
@@ -443,7 +442,7 @@
   "week_key": "2026-05-18_2026-05-22",
   "winner_patterns": [
     {
-      "avg_gain": 26.94189349112426,
+      "avg_gain": 27.017573964497043,
       "cases": 169,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "winner_needs_more_context"
@@ -455,8 +454,8 @@
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 31.443787878787877,
-      "cases": 66,
+      "avg_gain": 31.114029850746267,
+      "cases": 67,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -485,20 +484,20 @@
       "move_quality_label": "high_quality_followthrough"
     },
     {
-      "avg_gain": 20.837878787878786,
-      "cases": 33,
-      "likely_pattern": "first_hour_liquidity_acceleration",
-      "move_quality_label": "early_intraday_acceleration"
-    },
-    {
       "avg_gain": 81.4178125,
       "cases": 32,
       "likely_pattern": "pre_market_gap_then_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 19.894782608695653,
-      "cases": 23,
+      "avg_gain": 21.02625,
+      "cases": 32,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "early_intraday_acceleration"
+    },
+    {
+      "avg_gain": 19.632083333333334,
+      "cases": 24,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "high_quality_followthrough"
     },
@@ -509,8 +508,8 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 19.443684210526317,
-      "cases": 19,
+      "avg_gain": 19.361666666666665,
+      "cases": 18,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "gap_followthrough_candidate"
     }
