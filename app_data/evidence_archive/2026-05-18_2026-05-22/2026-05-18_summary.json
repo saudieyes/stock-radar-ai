@@ -1,7 +1,7 @@
 {
   "intraday_bars": {
-    "c": 69894,
-    "symbols": 626
+    "c": 70094,
+    "symbols": 632
   },
   "market_fear": {
     "badge": "⚪",
@@ -62,9 +62,9 @@
       "symbols": 394
     },
     {
-      "c": 8024,
+      "c": 8263,
       "session": "regular",
-      "symbols": 581
+      "symbols": 587
     },
     {
       "c": 1709,
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 11.65548336330935,
-    "avg_dollar_volume": 98040699.30589029,
-    "big_mover_snapshots": 9080,
+    "avg_change_pct": 11.603584382477246,
+    "avg_dollar_volume": 97798657.83273329,
+    "big_mover_snapshots": 9102,
     "no_chase_count": 162,
-    "reconfirm_count": 10093,
-    "snapshots": 44480,
-    "symbols": 615,
-    "tool_snapshots": 36556
+    "reconfirm_count": 10175,
+    "snapshots": 44719,
+    "symbols": 621,
+    "tool_snapshots": 36776
   },
   "top_movers_observed": [
     {
@@ -120,14 +120,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 350.0,
-      "observations": 137,
+      "observations": 138,
       "symbol": "AMPGR"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 318.05,
-      "observations": 31,
+      "observations": 32,
       "symbol": "FRGT"
     },
     {
@@ -155,7 +155,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
       "max_change_pct": 199.67,
-      "observations": 160,
+      "observations": 161,
       "symbol": "VRAX"
     },
     {
@@ -169,7 +169,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 174,
+      "observations": 175,
       "symbol": "PIII"
     },
     {
@@ -231,6 +231,13 @@
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
+      "max_change_pct": 58.76,
+      "observations": 6,
+      "symbol": "CODX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
       "max_change_pct": 54.56,
       "observations": 1,
       "symbol": "FSHPR"
@@ -241,13 +248,6 @@
       "max_change_pct": 52.74,
       "observations": 163,
       "symbol": "AIIO"
-    },
-    {
-      "in_big_movers": 1,
-      "in_tool_snapshot": 0,
-      "max_change_pct": 52.56,
-      "observations": 5,
-      "symbol": "CODX"
     },
     {
       "in_big_movers": 1,
@@ -273,6 +273,13 @@
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 0,
+      "max_change_pct": 44.44,
+      "observations": 1,
+      "symbol": "RUBI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
       "max_change_pct": 44.07,
       "observations": 2,
       "symbol": "JZ"
@@ -283,6 +290,13 @@
       "max_change_pct": 43.43,
       "observations": 149,
       "symbol": "RIBBR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 43.38,
+      "observations": 2,
+      "symbol": "GIPR"
     },
     {
       "in_big_movers": 1,
@@ -335,6 +349,13 @@
     },
     {
       "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 36.52,
+      "observations": 2,
+      "symbol": "HUBC"
+    },
+    {
+      "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 36.44,
       "observations": 33,
@@ -351,7 +372,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 34.94,
-      "observations": 170,
+      "observations": 171,
       "symbol": "AGYS"
     },
     {
@@ -360,13 +381,6 @@
       "max_change_pct": 34.69,
       "observations": 2,
       "symbol": "SPEGU"
-    },
-    {
-      "in_big_movers": 1,
-      "in_tool_snapshot": 0,
-      "max_change_pct": 34.64,
-      "observations": 1,
-      "symbol": "HUBC"
     },
     {
       "in_big_movers": 1,
@@ -423,20 +437,6 @@
       "max_change_pct": 30.66,
       "observations": 138,
       "symbol": "TOP"
-    },
-    {
-      "in_big_movers": 1,
-      "in_tool_snapshot": 0,
-      "max_change_pct": 30.15,
-      "observations": 151,
-      "symbol": "RVPH"
-    },
-    {
-      "in_big_movers": 1,
-      "in_tool_snapshot": 0,
-      "max_change_pct": 30.0,
-      "observations": 29,
-      "symbol": "TDIC"
     }
   ],
   "version": "evidence_collection_v2_passive",
@@ -455,14 +455,14 @@
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 30.855820895522392,
-      "cases": 67,
+      "avg_gain": 31.6309375,
+      "cases": 64,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 21.556842105263158,
-      "cases": 57,
+      "avg_gain": 21.264237288135593,
+      "cases": 59,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "high_quality_followthrough"
     },
@@ -491,8 +491,8 @@
       "move_quality_label": "winner_needs_more_context"
     },
     {
-      "avg_gain": 21.291935483870965,
-      "cases": 31,
+      "avg_gain": 21.16125,
+      "cases": 32,
       "likely_pattern": "first_hour_liquidity_acceleration",
       "move_quality_label": "early_intraday_acceleration"
     },
