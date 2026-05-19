@@ -6,10 +6,10 @@
   "market_fear": {
     "badge": "🟡",
     "cache_hit": true,
-    "captured_at": "2026-05-19 12:08:49",
-    "captured_ts": 1779206928.6926434,
-    "change_pct": 1.18,
-    "change_points": 0.21,
+    "captured_at": "2026-05-19 12:23:52",
+    "captured_ts": 1779207832.0719378,
+    "change_pct": 1.07,
+    "change_points": 0.19,
     "confirmation_strictness": "elevated",
     "enabled": true,
     "execution_rules": {
@@ -38,16 +38,16 @@
     "source": "FMP",
     "source_symbol": "^VIX",
     "stress_score": 58.0,
-    "summary_ar": "🟡 حذر متوسط | VIX 18.03 | التغير 1.18% | حجم الدخول المقترح ×0.7",
+    "summary_ar": "🟡 حذر متوسط | VIX 18.01 | التغير 1.07% | حجم الدخول المقترح ×0.7",
     "tracking_fields": {
       "market_fear_regime": "caution",
       "market_fear_score": 58.0,
-      "vix": 18.03,
-      "vix_change_pct": 1.18,
+      "vix": 18.01,
+      "vix_change_pct": 1.07,
       "vix_trend_5d_pct": 0.0
     },
     "version": "market_fear_v4d_decision_support_no_scoring",
-    "vix": 18.03,
+    "vix": 18.01,
     "vix_avg_5d": 0.0,
     "vix_trend_5d_pct": 0.0
   },
@@ -444,8 +444,8 @@
   "week_key": "2026-05-18_2026-05-22",
   "winner_patterns": [
     {
-      "avg_gain": 26.75947976878613,
-      "cases": 173,
+      "avg_gain": 26.82505813953488,
+      "cases": 172,
       "likely_pattern": "steady_liquidity_followthrough",
       "move_quality_label": "winner_needs_more_context"
     },
@@ -456,8 +456,8 @@
       "move_quality_label": "gap_chase_risk"
     },
     {
-      "avg_gain": 30.74676056338028,
-      "cases": 71,
+      "avg_gain": 30.53472222222222,
+      "cases": 72,
       "likely_pattern": "unclassified_winner",
       "move_quality_label": "winner_needs_more_context"
     },
