@@ -114,7 +114,7 @@
       "unique_symbols": 4
     }
   ],
-  "generated_at": "2026-05-19 05:34:11",
+  "generated_at": "2026-05-19 05:36:40",
   "hypotheses": [
     {
       "avg_first30": 7.05,
@@ -426,9 +426,9 @@
       "unique_symbols": 13
     },
     {
-      "avg_max_gain_pct": 4.92,
-      "avg_max_loss_pct": -5.89,
-      "cases": 17,
+      "avg_max_gain_pct": 4.82,
+      "avg_max_loss_pct": -5.82,
+      "cases": 16,
       "signature": "pullback | near_resistance | support_break | high_volatility",
       "unique_symbols": 12
     },
@@ -503,6 +503,13 @@
       "unique_symbols": 3
     },
     {
+      "avg_max_gain_pct": 3.46,
+      "avg_max_loss_pct": -4.6,
+      "cases": 3,
+      "signature": "pullback | near_resistance | high_volatility",
+      "unique_symbols": 3
+    },
+    {
       "avg_max_gain_pct": 1.52,
       "avg_max_loss_pct": -3.65,
       "cases": 3,
@@ -521,13 +528,6 @@
       "avg_max_loss_pct": -2.17,
       "cases": 2,
       "signature": "pullback | near_resistance | liquidity_not_persistent | high_volatility",
-      "unique_symbols": 2
-    },
-    {
-      "avg_max_gain_pct": 1.88,
-      "avg_max_loss_pct": -3.41,
-      "cases": 2,
-      "signature": "pullback | near_resistance | high_volatility",
       "unique_symbols": 2
     },
     {
