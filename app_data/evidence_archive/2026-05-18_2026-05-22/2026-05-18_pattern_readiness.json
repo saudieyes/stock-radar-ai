@@ -3,8 +3,8 @@
     "c": 172
   },
   "intraday_bars": {
-    "c": 66562,
-    "symbols": 594
+    "c": 66827,
+    "symbols": 596
   },
   "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
   "ok": true,
@@ -20,7 +20,7 @@
       "likely_pattern": "steady_liquidity_followthrough"
     },
     {
-      "cases": 192,
+      "cases": 194,
       "likely_pattern": "pre_market_gap_then_followthrough"
     },
     {
@@ -39,7 +39,7 @@
   "version": "pattern_readiness_v2",
   "week_key": "2026-05-18_2026-05-22",
   "winner_profiles": {
-    "c": 656,
-    "symbols": 522
+    "c": 658,
+    "symbols": 524
   }
 }
