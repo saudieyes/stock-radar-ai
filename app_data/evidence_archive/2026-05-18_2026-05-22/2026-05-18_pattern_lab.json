@@ -37,11 +37,11 @@
     },
     {
       "avg_dollar_volume": 15959104.0,
-      "avg_first30": 8.23,
+      "avg_first30": 7.96,
       "avg_gain": 27.2,
       "avg_gap": -1.84,
-      "avg_liq_accel": 45.3,
-      "avg_liq_persist": 63.1,
+      "avg_liq_accel": 43.7,
+      "avg_liq_persist": 62.5,
       "cases": 56,
       "gap_quality_class": "small_gap_or_contextual",
       "source_seen_count": 20,
@@ -114,7 +114,7 @@
       "unique_symbols": 5
     }
   ],
-  "generated_at": "2026-05-19 12:49:48",
+  "generated_at": "2026-05-19 12:52:12",
   "hypotheses": [
     {
       "avg_first30": 0.64,
@@ -207,19 +207,19 @@
       "unique_symbols": 13
     },
     {
-      "avg_first30": 10.81,
-      "avg_gain": 13.58,
-      "avg_gap": 1.02,
-      "avg_liq_accel": 87.1,
-      "avg_liq_persist": 57.1,
-      "cases": 12,
+      "avg_first30": 10.4,
+      "avg_gain": 13.14,
+      "avg_gap": 0.87,
+      "avg_liq_accel": 86.5,
+      "avg_liq_persist": 59.1,
+      "cases": 11,
       "gap_quality_class": "small_gap_or_contextual",
       "label": "فرضية التقاط مبكر تستحق مراقبة الاثنين",
       "pattern": "first_hour_liquidity_acceleration",
       "source_seen_count": 6,
       "tool_seen_count": 3,
       "tradability_bucket": "tradable_core",
-      "unique_symbols": 12
+      "unique_symbols": 11
     },
     {
       "avg_first30": 0.22,
@@ -590,11 +590,11 @@
     },
     {
       "avg_dollar_volume": 200957200.0,
-      "avg_first30": 7.4,
+      "avg_first30": 7.24,
       "avg_gain": 22.77,
       "avg_gap": 14.07,
-      "avg_liq_accel": 73.7,
-      "avg_liq_persist": 50.0,
+      "avg_liq_accel": 72.7,
+      "avg_liq_persist": 49.6,
       "cases": 97,
       "source_seen_count": 61,
       "tool_seen_count": 34,
@@ -768,19 +768,19 @@
       "unique_symbols": 13
     },
     {
-      "avg_dollar_volume": 64090970.0,
-      "avg_first30": 10.81,
-      "avg_gain": 13.58,
-      "avg_gap": 1.02,
-      "avg_liq_accel": 87.1,
-      "avg_liq_persist": 57.1,
-      "cases": 12,
+      "avg_dollar_volume": 66589457.0,
+      "avg_first30": 10.4,
+      "avg_gain": 13.14,
+      "avg_gap": 0.87,
+      "avg_liq_accel": 86.5,
+      "avg_liq_persist": 59.1,
+      "cases": 11,
       "gap_quality_class": "small_gap_or_contextual",
       "likely_pattern": "first_hour_liquidity_acceleration",
       "source_seen_count": 6,
       "tool_seen_count": 3,
       "tradability_bucket": "tradable_core",
-      "unique_symbols": 12
+      "unique_symbols": 11
     },
     {
       "avg_dollar_volume": 67850424.0,
