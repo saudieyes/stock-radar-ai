@@ -1,6 +1,6 @@
 {
   "intraday_bars": {
-    "c": 68842,
+    "c": 68930,
     "symbols": 612
   },
   "market_fear": {
@@ -57,7 +57,7 @@
   "ok": true,
   "sessions": [
     {
-      "c": 32477,
+      "c": 32697,
       "session": "pre_market",
       "symbols": 394
     },
@@ -78,14 +78,14 @@
     }
   ],
   "summary": {
-    "avg_change_pct": 12.107563884564723,
-    "avg_dollar_volume": 103911595.12262005,
+    "avg_change_pct": 12.044120071471113,
+    "avg_dollar_volume": 103419841.28686123,
     "big_mover_snapshots": 8729,
-    "no_chase_count": 148,
-    "reconfirm_count": 9496,
-    "snapshots": 41755,
+    "no_chase_count": 150,
+    "reconfirm_count": 9547,
+    "snapshots": 41975,
     "symbols": 603,
-    "tool_snapshots": 34136
+    "tool_snapshots": 34356
   },
   "top_movers_observed": [
     {
@@ -148,7 +148,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 227.64,
-      "observations": 154,
+      "observations": 155,
       "symbol": "GOVX"
     },
     {
@@ -162,14 +162,14 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 192.6,
-      "observations": 154,
+      "observations": 155,
       "symbol": "HCAI"
     },
     {
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 180.03,
-      "observations": 163,
+      "observations": 164,
       "symbol": "PIII"
     },
     {
@@ -239,7 +239,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 52.74,
-      "observations": 154,
+      "observations": 155,
       "symbol": "AIIO"
     },
     {
@@ -295,7 +295,7 @@
       "in_big_movers": 1,
       "in_tool_snapshot": 1,
       "max_change_pct": 42.48,
-      "observations": 154,
+      "observations": 155,
       "symbol": "HIVE"
     },
     {
@@ -435,7 +435,7 @@
       "in_big_movers": 0,
       "in_tool_snapshot": 1,
       "max_change_pct": 28.97,
-      "observations": 159,
+      "observations": 160,
       "symbol": "AGYS"
     }
   ],
