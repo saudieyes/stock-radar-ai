@@ -166,6 +166,7 @@ from app.evidence_collector import (
     evidence_retention_status,
     evidence_retention_verify_github,
     evidence_retention_prune_dry_run,
+    evidence_retention_prune_execute,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -2808,19 +2809,20 @@ def evidence_export_csv_endpoint(week_key: str = "", trade_date: str = "", limit
 
 @app.post("/evidence/sync-github")
 @app.get("/evidence/sync-github")
-def evidence_sync_github_endpoint(week_key: str = "", trade_date: str = "", include_csv: bool = True):
+def evidence_sync_github_endpoint(week_key: str = "", trade_date: str = "", include_csv: bool = False):
     return sync_evidence_to_github(week_key=week_key or None, trade_date=trade_date or None, include_csv=bool(include_csv))
 
 
 @app.get("/evidence/auto-sync/status")
 @app.get("/evidence/auto-status")
+@app.get("/data-sync/status")
 def evidence_auto_sync_status_endpoint():
     return evidence_auto_sync_status()
 
 
 @app.post("/evidence/auto-sync/run")
 @app.get("/evidence/auto-sync/run")
-def evidence_auto_sync_run_endpoint(force: bool = False, dry_run: bool = False, include_csv: bool = True):
+def evidence_auto_sync_run_endpoint(force: bool = False, dry_run: bool = False, include_csv: bool = False):
     return run_evidence_auto_sync(force=bool(force), dry_run=bool(dry_run), include_csv=bool(include_csv))
 
 
@@ -2844,6 +2846,19 @@ def evidence_retention_verify_github_endpoint(week_key: str = "", trade_date: st
 @app.get("/evidence/retention/prune-dry-run")
 def evidence_retention_prune_dry_run_endpoint(week_key: str = "", trade_date: str = "", keep_days: int | None = None, require_verified: bool = True):
     return evidence_retention_prune_dry_run(week_key=week_key or None, trade_date=trade_date or None, keep_days=keep_days, require_verified=bool(require_verified))
+
+
+@app.post("/evidence/retention/prune-execute")
+@app.get("/evidence/retention/prune-execute")
+def evidence_retention_prune_execute_endpoint(week_key: str = "", trade_date: str = "", keep_days: int | None = None, require_verified: bool = True, confirm: str = "", include_snapshots: bool = False):
+    return evidence_retention_prune_execute(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+        confirm=confirm,
+        include_snapshots=bool(include_snapshots),
+    )
 
 
 @app.get("/diagnostics/source-entry-audit")
