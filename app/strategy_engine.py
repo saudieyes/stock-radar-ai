@@ -414,135 +414,22 @@ def _count_level_touches(level: float, values: list[float], tolerance_pct: float
 
 
 def build_support_resistance_context(current_price: float, daily_bars: list[dict], intraday: dict, hist: dict | None = None) -> dict:
-    """Build practical support/resistance references.
+    """V4h professional support/resistance engine.
 
-    This avoids random-looking entries/targets by linking the plan to nearby
-    levels, level strength, and 52-week/ATH context.
+    Goals:
+    - Use one price basis for card, levels and warnings.
+    - Cluster nearby levels so support/resistance do not appear a few cents apart.
+    - Reclassify levels around the latest live price: active support, broken support,
+      reclaimed/support flip, next support, next resistance.
+    - Strength uses touches + recency + bounce/rejection reaction + volume + timeframe.
     """
     hist = hist or {}
-    try:
-        price = float(current_price or 0)
-        bars = list(daily_bars or [])[-260:]
-        highs = [to_float(x.get("h")) for x in bars if to_float(x.get("h")) > 0]
-        lows = [to_float(x.get("l")) for x in bars if to_float(x.get("l")) > 0]
-        closes = [to_float(x.get("c")) for x in bars if to_float(x.get("c")) > 0]
-        if price <= 0 or len(highs) < 10 or len(lows) < 10:
-            return {
-                "nearest_support": 0.0,
-                "nearest_support_label": "غير متوفر",
-                "nearest_support_strength": "غير واضح",
-                "nearest_support_distance_pct": 0.0,
-                "support_levels_below": [],
-                "nearest_resistance": 0.0,
-                "nearest_resistance_label": "غير متوفر",
-                "nearest_resistance_strength": "غير واضح",
-                "nearest_resistance_distance_pct": 0.0,
-                "resistance_levels_above": [],
-                "major_resistance": safe_round(hist.get("year_high", 0) or hist.get("ath_high", 0) or 0),
-                "major_resistance_label": "غير متوفر",
-                "levels_summary": "لا توجد بيانات كافية لبناء مستويات دعم/مقاومة موثوقة.",
-            }
 
-        # Add current session high/low because intraday levels matter for execution.
-        session_high = float((intraday or {}).get("session_high", 0) or 0)
-        session_low = float((intraday or {}).get("session_low", 0) or 0)
-        if session_high > 0:
-            highs.append(session_high)
-        if session_low > 0:
-            lows.append(session_low)
-
-        all_level_values = highs + lows + closes
-        tolerance = 0.012
-        support_candidates = [x for x in lows + closes[-60:] if 0 < x < price * 0.999]
-        resistance_candidates = [x for x in highs + closes[-60:] if x > price * 1.001]
-
-        # V4e Support/Resistance Sanity Guard:
-        # Keep a small list of levels around the analysis price. The live price can
-        # update after the scan; if it drops under the prior nearest support, the UI
-        # can mark that level as broken and display the next real support below live
-        # price instead of falsely showing a support above the current price.
-        def _unique_levels(vals: list[float], reverse: bool = False) -> list[float]:
-            out: list[float] = []
-            seen: set[float] = set()
-            for v in sorted([float(x) for x in vals if float(x or 0) > 0], reverse=reverse):
-                key = round(v, 3)
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append(safe_round(v))
-                if len(out) >= 8:
-                    break
-            return out
-
-        support_levels_below = _unique_levels(support_candidates, reverse=True)
-        resistance_levels_above = _unique_levels(resistance_candidates, reverse=False)
-
-        nearest_support = max(support_candidates) if support_candidates else 0.0
-        nearest_resistance = min(resistance_candidates) if resistance_candidates else 0.0
-
-        # Major resistance: next 52w/ATH level above price if available.
-        year_high = float(hist.get("year_high", 0) or 0)
-        ath_high = float(hist.get("ath_high", 0) or 0)
-        major_res_candidates = [x for x in [year_high, ath_high, max(highs[-120:]) if highs else 0] if x > price * 1.003]
-        major_resistance = min(major_res_candidates) if major_res_candidates else (max(highs) if highs else 0)
-
-        support_dist = ((price - nearest_support) / price) * 100 if nearest_support > 0 and price > 0 else 0.0
-        resistance_dist = ((nearest_resistance - price) / price) * 100 if nearest_resistance > 0 and price > 0 else 0.0
-        support_touches = _count_level_touches(nearest_support, all_level_values[-180:], tolerance)
-        resistance_touches = _count_level_touches(nearest_resistance, all_level_values[-180:], tolerance)
-        support_strength = _sr_strength_label(support_touches, support_dist)
-        resistance_strength = _sr_strength_label(resistance_touches, resistance_dist)
-
-        if nearest_support > 0:
-            support_label = f"{support_strength} - يبعد {safe_round(support_dist, 2)}% أسفل السعر"
-        else:
-            support_label = "غير متوفر"
-        if nearest_resistance > 0:
-            resistance_label = f"{resistance_strength} - يبعد {safe_round(resistance_dist, 2)}% فوق السعر"
-        else:
-            resistance_label = "لا توجد مقاومة قريبة واضحة"
-
-        major_label = ""
-        if ath_high > 0 and price >= ath_high * 0.995:
-            major_label = "قرب/اختراق قمة تاريخية"
-        elif year_high > 0 and price >= year_high * 0.97:
-            major_label = "قريب من هاي 52 أسبوع"
-        elif major_resistance > 0:
-            major_label = f"المقاومة الأكبر التالية قرب {safe_round(major_resistance)}"
-        else:
-            major_label = "غير متوفر"
-
-        summary_parts = []
-        if nearest_support > 0:
-            summary_parts.append(f"الدعم الأقرب {safe_round(nearest_support)} ({support_strength})")
-        if nearest_resistance > 0:
-            summary_parts.append(f"المقاومة الأقرب {safe_round(nearest_resistance)} ({resistance_strength})")
-        if major_label:
-            summary_parts.append(major_label)
-
+    def _empty(reason: str = "لا توجد بيانات كافية لبناء مستويات دعم/مقاومة موثوقة.") -> dict:
         return {
-            "nearest_support": safe_round(nearest_support),
-            "nearest_support_label": support_label,
-            "nearest_support_strength": support_strength,
-            "nearest_support_touches": support_touches,
-            "nearest_support_distance_pct": safe_round(support_dist, 2),
-            "support_levels_below": support_levels_below,
-            "nearest_resistance": safe_round(nearest_resistance),
-            "nearest_resistance_label": resistance_label,
-            "nearest_resistance_strength": resistance_strength,
-            "nearest_resistance_touches": resistance_touches,
-            "nearest_resistance_distance_pct": safe_round(resistance_dist, 2),
-            "resistance_levels_above": resistance_levels_above,
-            "major_resistance": safe_round(major_resistance),
-            "major_resistance_label": major_label,
-            "year_high": safe_round(year_high),
-            "ath_high": safe_round(ath_high),
-            "near_strong_support": bool(nearest_support > 0 and support_dist <= 2.0 and support_strength in {"قوي", "قوي جدًا"}),
-            "near_strong_resistance": bool(nearest_resistance > 0 and resistance_dist <= 2.0 and resistance_strength in {"قوي", "قوي جدًا"}),
-            "levels_summary": " | ".join(summary_parts) if summary_parts else "لا توجد مستويات واضحة.",
-        }
-    except Exception:
-        return {
+            "support_resistance_version": "sr_v4h_rebuild",
+            "sr_price_basis": safe_round(float(current_price or 0), 4),
+            "price_freshness_label": "غير واضح",
             "nearest_support": 0.0,
             "nearest_support_label": "غير متوفر",
             "nearest_support_strength": "غير واضح",
@@ -553,11 +440,257 @@ def build_support_resistance_context(current_price: float, daily_bars: list[dict
             "nearest_resistance_strength": "غير واضح",
             "nearest_resistance_distance_pct": 0.0,
             "resistance_levels_above": [],
-            "major_resistance": 0.0,
+            "major_resistance": safe_round(hist.get("year_high", 0) or hist.get("ath_high", 0) or 0),
             "major_resistance_label": "غير متوفر",
-            "levels_summary": "تعذر بناء مستويات الدعم والمقاومة.",
+            "active_support_level": 0.0,
+            "broken_support_level": 0.0,
+            "support_broken_flag": False,
+            "support_reclaimed_flag": False,
+            "reclaimed_support_level": 0.0,
+            "resistance_reclaimed_flag": False,
+            "reclaimed_resistance_level": 0.0,
+            "next_support_below": 0.0,
+            "next_resistance_above": 0.0,
+            "sr_warning_flags": [],
+            "levels_summary": reason,
         }
 
+    try:
+        price = float(current_price or 0)
+        bars = list(daily_bars or [])[-320:]
+        if price <= 0 or len(bars) < 20:
+            return _empty()
+
+        session_high = float((intraday or {}).get("session_high", 0) or 0)
+        session_low = float((intraday or {}).get("session_low", 0) or 0)
+        current_session_price = float((intraday or {}).get("current_price", 0) or (intraday or {}).get("price", 0) or 0)
+        if current_session_price > 0:
+            price = current_session_price
+
+        price_source = str((intraday or {}).get("price_source_label") or (intraday or {}).get("source_label") or "live_or_latest").strip() or "live_or_latest"
+        phase = str((intraday or {}).get("market_phase") or (intraday or {}).get("phase") or "").lower()
+        price_freshness_label = "حي/حديث" if phase in {"regular", "pre_market", "after_hours", "open"} else "آخر سعر محفوظ/إغلاق"
+
+        # Normalize daily bars while preserving index for recency scoring.
+        norm = []
+        for i, row in enumerate(bars):
+            h = to_float((row or {}).get("h", 0))
+            l = to_float((row or {}).get("l", 0))
+            c = to_float((row or {}).get("c", 0))
+            o = to_float((row or {}).get("o", 0))
+            v = to_float((row or {}).get("v", 0))
+            if h > 0 and l > 0 and c > 0:
+                norm.append({"i": i, "h": h, "l": l, "c": c, "o": o, "v": v})
+        if len(norm) < 20:
+            return _empty()
+
+        # Use ATR-like noise floor and price-based tolerance. This prevents a 0.01
+        # or 0.02 distance from becoming a fake support/resistance for normal stocks.
+        ranges = [max(0.0, x["h"] - x["l"]) for x in norm[-60:]]
+        avg_range = sum(ranges) / max(1, len(ranges))
+        min_gap_pct = 0.45 if price >= 10 else 0.9
+        cluster_tol_pct = max(0.25, min(1.25, (avg_range / price * 100.0 * 0.35) if price > 0 else 0.6))
+        cluster_abs_tol = max(price * cluster_tol_pct / 100.0, 0.02 if price >= 5 else 0.005)
+
+        raw_levels = []
+        last_idx = max(1, len(norm) - 1)
+        avg_vol = sum([x["v"] for x in norm[-60:] if x["v"] > 0]) / max(1, len([x for x in norm[-60:] if x["v"] > 0]))
+        for idx, x in enumerate(norm):
+            recency = 1.0 - min(0.85, (last_idx - idx) / max(1, last_idx) * 0.85)
+            vol_factor = min(1.8, max(0.6, (x["v"] / avg_vol) if avg_vol > 0 and x["v"] > 0 else 1.0))
+            body_mid = (x["o"] + x["c"]) / 2.0 if x["o"] > 0 else x["c"]
+            # Lows/closes represent support memory; highs/closes represent resistance memory.
+            raw_levels.append({"level": x["l"], "kind": "support", "weight": 1.1 * recency * vol_factor, "reaction": max(0.0, (x["c"] - x["l"]) / max(x["l"], 0.01) * 100.0), "idx": idx})
+            raw_levels.append({"level": x["h"], "kind": "resistance", "weight": 1.1 * recency * vol_factor, "reaction": max(0.0, (x["h"] - x["c"]) / max(x["h"], 0.01) * 100.0), "idx": idx})
+            raw_levels.append({"level": x["c"], "kind": "close", "weight": 0.65 * recency * vol_factor, "reaction": abs((x["c"] - body_mid) / max(x["c"], 0.01) * 100.0), "idx": idx})
+        if session_high > 0:
+            raw_levels.append({"level": session_high, "kind": "intraday_high", "weight": 1.35, "reaction": 0.0, "idx": last_idx + 1})
+        if session_low > 0:
+            raw_levels.append({"level": session_low, "kind": "intraday_low", "weight": 1.35, "reaction": 0.0, "idx": last_idx + 1})
+
+        # Cluster by absolute tolerance.
+        raw_levels = [x for x in raw_levels if float(x.get("level") or 0) > 0]
+        raw_levels.sort(key=lambda x: float(x["level"]))
+        clusters = []
+        for item in raw_levels:
+            lvl = float(item["level"])
+            if not clusters or abs(lvl - clusters[-1]["center"]) > cluster_abs_tol:
+                clusters.append({"levels": [item], "center": lvl})
+            else:
+                clusters[-1]["levels"].append(item)
+                total_w = sum(float(z.get("weight") or 1) for z in clusters[-1]["levels"])
+                clusters[-1]["center"] = sum(float(z["level"]) * float(z.get("weight") or 1) for z in clusters[-1]["levels"]) / max(total_w, 0.01)
+
+        ladder = []
+        for c in clusters:
+            vals = c["levels"]
+            center = float(c["center"])
+            touches = len(vals)
+            wsum = sum(float(z.get("weight") or 0) for z in vals)
+            recency_idx = max(int(z.get("idx") or 0) for z in vals)
+            recency_score = 1.0 - min(1.0, (last_idx - recency_idx) / max(1, len(norm)))
+            reaction = sum(float(z.get("reaction") or 0) for z in vals) / max(1, touches)
+            kind_counts = {}
+            for z in vals:
+                kind_counts[str(z.get("kind") or "")] = kind_counts.get(str(z.get("kind") or ""), 0) + 1
+            score = min(100.0, touches * 10.0 + wsum * 7.0 + recency_score * 18.0 + min(reaction, 5.0) * 3.0)
+            dist_pct = abs(center - price) / price * 100.0 if price > 0 else 999.0
+            if score >= 70:
+                strength = "قوي جدًا"
+            elif score >= 52:
+                strength = "قوي"
+            elif score >= 32:
+                strength = "متوسط"
+            else:
+                strength = "ضعيف"
+            ladder.append({
+                "level": safe_round(center, 4),
+                "score": safe_round(score, 1),
+                "strength": strength,
+                "touches": touches,
+                "distance_pct": safe_round(dist_pct, 2),
+                "kind_counts": kind_counts,
+                "recent": bool(recency_score >= 0.55),
+            })
+
+        # Add 52w/ATH as major resistance candidates; not mixed into close ladder unless above price.
+        year_high = float(hist.get("year_high", 0) or 0)
+        ath_high = float(hist.get("ath_high", 0) or 0)
+        major_candidates = [x for x in [year_high, ath_high] if x > 0]
+        for lvl in major_candidates:
+            if all(abs(lvl - float(x["level"])) > cluster_abs_tol for x in ladder):
+                dist_pct = abs(lvl - price) / price * 100.0 if price > 0 else 999.0
+                ladder.append({"level": safe_round(lvl, 4), "score": 72.0, "strength": "قوي", "touches": 1, "distance_pct": safe_round(dist_pct, 2), "kind_counts": {"major_high": 1}, "recent": False})
+
+        # Remove weak tiny clusters unless they are very near current price or major highs.
+        ladder = [x for x in ladder if float(x.get("score") or 0) >= 22 or float(x.get("distance_pct") or 999) <= 1.5 or (x.get("kind_counts") or {}).get("major_high")]
+        ladder.sort(key=lambda x: float(x["level"]))
+
+        # Classify around the latest price with a small neutral band to avoid cents-apart contradictions.
+        neutral_band = max(price * min_gap_pct / 100.0, cluster_abs_tol)
+        below = [x for x in ladder if float(x["level"]) < price - neutral_band]
+        above = [x for x in ladder if float(x["level"]) > price + neutral_band]
+        near_band_levels = [x for x in ladder if abs(float(x["level"]) - price) <= neutral_band]
+
+        nearest_support_row = below[-1] if below else {}
+        nearest_resistance_row = above[0] if above else {}
+        next_support_row = below[-2] if len(below) >= 2 else {}
+        next_resistance_row = above[1] if len(above) >= 2 else {}
+
+        # Recent broken support: strong level just above current price that used to be below analysis price.
+        broken_support_row = {}
+        reclaimed_resistance_row = {}
+        if near_band_levels:
+            # If price is sitting directly on a clustered level, treat it as active test/support flip
+            # rather than simultaneously support and resistance.
+            candidate = max(near_band_levels, key=lambda x: float(x.get("score") or 0))
+            if price >= float(candidate["level"]):
+                reclaimed_resistance_row = candidate
+                if not nearest_support_row:
+                    nearest_support_row = candidate
+            else:
+                broken_support_row = candidate
+                if not nearest_resistance_row:
+                    nearest_resistance_row = candidate
+
+        support = float(nearest_support_row.get("level") or 0)
+        resistance = float(nearest_resistance_row.get("level") or 0)
+        support_dist = ((price - support) / price) * 100 if support > 0 and price > 0 else 0.0
+        resistance_dist = ((resistance - price) / price) * 100 if resistance > 0 and price > 0 else 0.0
+
+        # Final sanity: do not show support/resistance too close to each other.
+        if support > 0 and resistance > 0 and ((resistance - support) / price * 100.0) < min_gap_pct:
+            if float(nearest_support_row.get("score") or 0) >= float(nearest_resistance_row.get("score") or 0):
+                # keep support, move resistance to next true level
+                nearest_resistance_row = next_resistance_row or {}
+                resistance = float(nearest_resistance_row.get("level") or 0)
+                resistance_dist = ((resistance - price) / price) * 100 if resistance > 0 and price > 0 else 0.0
+            else:
+                nearest_support_row = next_support_row or {}
+                support = float(nearest_support_row.get("level") or 0)
+                support_dist = ((price - support) / price) * 100 if support > 0 and price > 0 else 0.0
+
+        support_strength = str(nearest_support_row.get("strength") or "غير واضح") if support > 0 else "غير واضح"
+        resistance_strength = str(nearest_resistance_row.get("strength") or "غير واضح") if resistance > 0 else "غير واضح"
+        support_label = f"{support_strength} - يبعد {safe_round(support_dist, 2)}% أسفل السعر" if support > 0 and support < price else (f"support flip {support_strength} قرب السعر" if support > 0 else "غير متوفر")
+        resistance_label = f"{resistance_strength} - يبعد {safe_round(resistance_dist, 2)}% فوق السعر" if resistance > 0 and resistance > price else "لا توجد مقاومة قريبة واضحة"
+
+        major_res_candidates = [x for x in [year_high, ath_high] + [float(x.get("level") or 0) for x in above] if x > price * 1.003]
+        major_resistance = min(major_res_candidates) if major_res_candidates else (max([x["h"] for x in norm]) if norm else 0)
+        if ath_high > 0 and price >= ath_high * 0.995:
+            major_label = "قرب/اختراق قمة تاريخية"
+        elif year_high > 0 and price >= year_high * 0.97:
+            major_label = "قريب من هاي 52 أسبوع"
+        elif major_resistance > 0:
+            major_label = f"المقاومة الأكبر التالية قرب {safe_round(major_resistance)}"
+        else:
+            major_label = "غير متوفر"
+
+        support_levels_below = [safe_round(float(x["level"]), 4) for x in reversed(below[-10:])]
+        resistance_levels_above = [safe_round(float(x["level"]), 4) for x in above[:10]]
+        warnings = []
+        if resistance > 0 and resistance_dist <= 0.75 and resistance_strength in {"قوي", "قوي جدًا"}:
+            warnings.append("قريب جدًا من مقاومة قوية؛ لا يعتبر نظيفًا إلا بعد اختراق وثبات بسيولة")
+        if support <= 0:
+            warnings.append("لا يوجد دعم واضح أسفل السعر؛ المخاطرة أعلى")
+        if broken_support_row:
+            warnings.append("السعر تحت/عند دعم مكسور يحتاج استعادة")
+
+        summary_parts = []
+        if support > 0:
+            summary_parts.append(f"الدعم الأقرب {safe_round(support,4)} ({support_strength})")
+        if resistance > 0:
+            summary_parts.append(f"المقاومة الأقرب {safe_round(resistance,4)} ({resistance_strength})")
+        if reclaimed_resistance_row:
+            summary_parts.append(f"مقاومة مخترقة/اختبار ثبات قرب {safe_round(reclaimed_resistance_row.get('level'),4)}")
+        if broken_support_row:
+            summary_parts.append(f"دعم مكسور/اختبار استعادة قرب {safe_round(broken_support_row.get('level'),4)}")
+        if major_label:
+            summary_parts.append(major_label)
+
+        return {
+            "support_resistance_version": "sr_v4h_rebuild",
+            "sr_price_basis": safe_round(price, 4),
+            "sr_price_source": price_source,
+            "price_freshness_label": price_freshness_label,
+            "nearest_support": safe_round(support, 4),
+            "nearest_support_label": support_label,
+            "nearest_support_strength": support_strength,
+            "nearest_support_touches": int(nearest_support_row.get("touches") or 0),
+            "nearest_support_score": safe_round(nearest_support_row.get("score") or 0, 1),
+            "nearest_support_distance_pct": safe_round(max(0.0, support_dist), 2),
+            "support_levels_below": support_levels_below,
+            "nearest_resistance": safe_round(resistance, 4),
+            "nearest_resistance_label": resistance_label,
+            "nearest_resistance_strength": resistance_strength,
+            "nearest_resistance_touches": int(nearest_resistance_row.get("touches") or 0),
+            "nearest_resistance_score": safe_round(nearest_resistance_row.get("score") or 0, 1),
+            "nearest_resistance_distance_pct": safe_round(max(0.0, resistance_dist), 2),
+            "resistance_levels_above": resistance_levels_above,
+            "major_resistance": safe_round(major_resistance, 4),
+            "major_resistance_label": major_label,
+            "year_high": safe_round(year_high, 4),
+            "ath_high": safe_round(ath_high, 4),
+            "active_support_level": safe_round(support, 4),
+            "broken_support_level": safe_round(broken_support_row.get("level") or 0, 4),
+            "broken_support_distance_pct": safe_round(abs(float(broken_support_row.get("level") or 0) - price) / price * 100.0, 2) if broken_support_row and price > 0 else 0.0,
+            "support_broken_flag": bool(broken_support_row),
+            "support_reclaimed_flag": bool(reclaimed_resistance_row and support > 0),
+            "reclaimed_support_level": safe_round(reclaimed_resistance_row.get("level") or 0, 4),
+            "resistance_reclaimed_flag": bool(reclaimed_resistance_row),
+            "reclaimed_resistance_level": safe_round(reclaimed_resistance_row.get("level") or 0, 4),
+            "next_support_below": safe_round(next_support_row.get("level") or 0, 4),
+            "next_resistance_above": safe_round(next_resistance_row.get("level") or 0, 4),
+            "sr_min_gap_pct": safe_round(min_gap_pct, 2),
+            "sr_cluster_tolerance_pct": safe_round(cluster_tol_pct, 2),
+            "sr_warning_flags": warnings,
+            "near_strong_support": bool(support > 0 and support_dist <= 2.0 and support_strength in {"قوي", "قوي جدًا"}),
+            "near_strong_resistance": bool(resistance > 0 and resistance_dist <= 2.0 and resistance_strength in {"قوي", "قوي جدًا"}),
+            "levels_summary": " | ".join(summary_parts) if summary_parts else "لا توجد مستويات واضحة.",
+            "support_resistance_ladder": ladder[:30],
+        }
+    except Exception:
+        return _empty("تعذر بناء مستويات الدعم والمقاومة.")
 
 def refine_plan_with_key_levels(trade_type: str, entry: float, stop: float, target1: float, target2: float, sr: dict, daily_bars: list[dict]) -> tuple[float, float, float, float, list[str]]:
     notes = []
@@ -896,6 +1029,13 @@ def trade_plan_pro(symbol, manual_sharia_exclusions=None, manual_sharia_approval
             risk_flags.append(f"قريب من مقاومة {sr_context.get('nearest_resistance_strength', '')}: {sr_context.get('nearest_resistance')}")
         if sr_context.get("near_strong_support"):
             risk_flags.append(f"قريب من دعم {sr_context.get('nearest_support_strength', '')}: {sr_context.get('nearest_support')}")
+        if sr_context.get("support_broken_flag") and sr_context.get("broken_support_level"):
+            risk_flags.append(f"دعم مكسور يحتاج استعادة: {sr_context.get('broken_support_level')}")
+        if sr_context.get("resistance_reclaimed_flag") and sr_context.get("reclaimed_resistance_level"):
+            risk_flags.append(f"اختراق/Support flip يحتاج ثبات: {sr_context.get('reclaimed_resistance_level')}")
+        for warn in sr_context.get("sr_warning_flags", []) or []:
+            if warn:
+                risk_flags.append(str(warn))
         for note in level_refinement_notes:
             risk_flags.append(note)
     except Exception:

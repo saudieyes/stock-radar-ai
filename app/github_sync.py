@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -82,6 +83,39 @@ def push_multiple_files(files: list[dict], message: str = "Sync Stock Radar data
         })
     if not safe_files:
         return {"ok": False, "configured": True, "error": "no_files_to_sync"}
+
+    # Stability guard: never build/send oversized GitHub batches from Railway.
+    # Large evidence exports were the main risk for network-egress spikes, timeouts,
+    # and memory pressure. Callers should sync compact manifests/summaries and keep
+    # raw heavy data in SQLite until verified retention/prune is requested.
+    try:
+        max_file_bytes = int(float(os.getenv("GITHUB_BATCH_MAX_FILE_BYTES", "3000000") or 3000000))
+    except Exception:
+        max_file_bytes = 3000000
+    try:
+        max_total_bytes = int(float(os.getenv("GITHUB_BATCH_MAX_TOTAL_BYTES", "8000000") or 8000000))
+    except Exception:
+        max_total_bytes = 8000000
+    byte_rows = []
+    total_bytes = 0
+    for item in safe_files:
+        b = len(str(item.get("content", "")).encode("utf-8"))
+        total_bytes += b
+        byte_rows.append({"label": item.get("label"), "path": item.get("path"), "bytes": b})
+    too_large = [x for x in byte_rows if int(x.get("bytes") or 0) > max_file_bytes]
+    if too_large or total_bytes > max_total_bytes:
+        return {
+            "ok": False,
+            "configured": True,
+            "error": "github_batch_too_large",
+            "file_count": len(safe_files),
+            "total_bytes": total_bytes,
+            "max_file_bytes": max_file_bytes,
+            "max_total_bytes": max_total_bytes,
+            "oversized_files": too_large[:10],
+            "files": byte_rows[:20],
+            "advice": "Use compact evidence sync or split archives before retrying. No network upload was attempted.",
+        }
 
     branch = GITHUB_SYNC_BRANCH or "main"
     timeout = float(GITHUB_SYNC_TIMEOUT_SEC or 12)

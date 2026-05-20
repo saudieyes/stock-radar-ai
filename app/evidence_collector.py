@@ -94,6 +94,20 @@ EVIDENCE_RETENTION_KEEP_DAYS = _env_int("EVIDENCE_RETENTION_KEEP_DAYS", 14)
 EVIDENCE_RETENTION_PRUNE_ENABLED = _env_bool("EVIDENCE_RETENTION_PRUNE_ENABLED", False)
 EVIDENCE_RETENTION_REQUIRE_VERIFY = _env_bool("EVIDENCE_RETENTION_REQUIRE_VERIFY", True)
 
+# Railway stability guard. Defaults are intentionally conservative because the
+# evidence archive can become large enough to cause GitHub timeouts, high egress,
+# and memory pressure when serialized as one huge JSON/CSV payload.
+EVIDENCE_RAILWAY_STABILITY_GUARD_ENABLED = _env_bool("EVIDENCE_RAILWAY_STABILITY_GUARD_ENABLED", True)
+EVIDENCE_GITHUB_COMPACT_SYNC = _env_bool("EVIDENCE_GITHUB_COMPACT_SYNC", True)
+EVIDENCE_SYNC_INCLUDE_CSV_DEFAULT = _env_bool("EVIDENCE_SYNC_INCLUDE_CSV_DEFAULT", False)
+EVIDENCE_EXPORT_MAX_ROWS = _env_int("EVIDENCE_EXPORT_MAX_ROWS", 5000)
+EVIDENCE_SYNC_SAMPLE_ROWS = _env_int("EVIDENCE_SYNC_SAMPLE_ROWS", 1500)
+EVIDENCE_SYNC_WINNER_LIMIT = _env_int("EVIDENCE_SYNC_WINNER_LIMIT", 800)
+EVIDENCE_SYNC_BAR_SAMPLE_LIMIT = _env_int("EVIDENCE_SYNC_BAR_SAMPLE_LIMIT", 0)
+EVIDENCE_WORKER_LEASE_TTL_SEC = _env_int("EVIDENCE_WORKER_LEASE_TTL_SEC", 300)
+EVIDENCE_AUTO_BACKFILL_STORE_BARS = _env_bool("EVIDENCE_AUTO_BACKFILL_STORE_BARS", False)
+EVIDENCE_RETENTION_VACUUM_AFTER_PRUNE = _env_bool("EVIDENCE_RETENTION_VACUUM_AFTER_PRUNE", False)
+
 
 def _now_ts() -> float:
     return time.time()
@@ -1975,7 +1989,7 @@ def evidence_auto_sync_status() -> dict:
     }
 
 
-def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_csv: bool = True) -> dict:
+def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_csv: bool | None = None) -> dict:
     if not force and not EVIDENCE_GITHUB_AUTO_SYNC_ENABLED:
         return {"ok": True, "skipped": True, "reason": "auto_sync_disabled", "status": evidence_auto_sync_status()}
     if not force and not is_github_sync_configured():
@@ -2017,9 +2031,9 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
             days_back=1,
             threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT,
             limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT,
-            store_bars=True,
+            store_bars=bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
         )
-    sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=bool(include_csv))
+    sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=include_csv)
     result = {
         "ok": bool(sync.get("ok")),
         "version": "evidence_daily_auto_sync_v2_once_daily_batch",
@@ -2166,13 +2180,21 @@ def _daily_winner_backfill_due(session: str) -> bool:
     if session == "after_hours" and now.time() < dt_time(20, 10):
         return False
     key = f"evidence_winner_backfilled_{_today_text()}"
+    attempt_key = f"evidence_winner_backfill_attempted_{_today_text()}"
     done = get_json(key, {})
-    return not (isinstance(done, dict) and done.get("ok"))
+    attempted = get_json(attempt_key, {})
+    # One automatic backfill attempt per trade date. If it fails, we do not loop
+    # every minute and burn Railway memory/network. Manual force/backfill can still
+    # be used later after reviewing logs.
+    return not (isinstance(done, dict) and done.get("ok")) and not (isinstance(attempted, dict) and attempted.get("attempted"))
 
 
 def _mark_daily_winner_backfill(result: dict) -> None:
     try:
-        set_json(f"evidence_winner_backfilled_{_today_text()}", result)
+        key_date = _today_text()
+        set_json(f"evidence_winner_backfill_attempted_{key_date}", {"attempted": True, "ok": bool((result or {}).get("ok")), "at": _now_text(), "error": str((result or {}).get("error") or "")[:180]})
+        if isinstance(result, dict) and result.get("ok"):
+            set_json(f"evidence_winner_backfilled_{key_date}", result)
     except Exception:
         pass
 
@@ -2454,13 +2476,13 @@ def export_evidence_json(week_key: str | None = None, trade_date: str | None = N
         where.append("trade_date=?")
         args.append(d)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    lim = max(1, min(int(limit or 10000), 50000))
+    lim = max(1, min(int(limit or 10000), int(EVIDENCE_EXPORT_MAX_ROWS or 5000)))
     with _connect() as conn:
         snaps = conn.execute(f"SELECT * FROM evidence_snapshots {where_sql} ORDER BY captured_at DESC LIMIT ?", (*args, lim)).fetchall()
         movers = conn.execute("SELECT * FROM daily_big_movers WHERE trade_date=? ORDER BY change_pct DESC LIMIT ?", (d or _today_text(), 500)).fetchall()
         runs = conn.execute(f"SELECT * FROM evidence_runs {where_sql} ORDER BY started_at DESC LIMIT 100", tuple(args)).fetchall() if where_sql else conn.execute("SELECT * FROM evidence_runs ORDER BY started_at DESC LIMIT 100").fetchall()
         winners = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, min(lim, 5000))).fetchall() if where_sql else conn.execute("SELECT * FROM evidence_winner_profiles ORDER BY trade_date DESC, winner_change_pct DESC LIMIT ?", (min(lim, 5000),)).fetchall()
-        bars = conn.execute(f"SELECT * FROM evidence_intraday_bars {where_sql} ORDER BY trade_date DESC, symbol, bar_ts LIMIT ?", (*args, min(lim, 20000))).fetchall() if where_sql else conn.execute("SELECT * FROM evidence_intraday_bars ORDER BY trade_date DESC, symbol, bar_ts LIMIT ?", (min(lim, 20000),)).fetchall()
+        bars = conn.execute(f"SELECT * FROM evidence_intraday_bars {where_sql} ORDER BY trade_date DESC, symbol, bar_ts LIMIT ?", (*args, min(lim, int(EVIDENCE_SYNC_BAR_SAMPLE_LIMIT or 0)))).fetchall() if (where_sql and int(EVIDENCE_SYNC_BAR_SAMPLE_LIMIT or 0) > 0) else []
     return {
         "ok": True,
         "version": "evidence_collection_v2_passive",
@@ -2478,7 +2500,7 @@ def export_evidence_json(week_key: str | None = None, trade_date: str | None = N
         "intraday_bars": _rows_to_dicts(bars),
         "runs": _rows_to_dicts(runs),
         "market_fear": get_market_fear_snapshot(force_refresh=False, store=True),
-        "market_fear_history": get_json("market_fear_history", []),
+        "market_fear_history": (get_json("market_fear_history", []) or [])[-50:],
     }
 
 
@@ -2756,12 +2778,101 @@ def pattern_lab_report(week_key: str | None = None, trade_date: str | None = Non
         return "\n".join(lines)
     return result
 
-def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool = True) -> dict:
+
+def _evidence_local_counts_for_archive(week_key: str, trade_date: str) -> dict:
+    """Small count manifest used for GitHub verification and safe pruning."""
+    wk = str(week_key or "")
+    td = str(trade_date or "")[:10]
+    init_evidence_db()
+    with _connect() as conn:
+        counts = {
+            "evidence_snapshots": conn.execute("SELECT COUNT(*) AS c FROM evidence_snapshots WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+            "snapshot_symbols": conn.execute("SELECT COUNT(DISTINCT symbol) AS c FROM evidence_snapshots WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+            "evidence_winner_profiles": conn.execute("SELECT COUNT(*) AS c FROM evidence_winner_profiles WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+            "winner_symbols": conn.execute("SELECT COUNT(DISTINCT symbol) AS c FROM evidence_winner_profiles WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+            "evidence_intraday_bars": conn.execute("SELECT COUNT(*) AS c FROM evidence_intraday_bars WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+            "bar_symbols": conn.execute("SELECT COUNT(DISTINCT symbol) AS c FROM evidence_intraday_bars WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+            "daily_big_movers": conn.execute("SELECT COUNT(*) AS c FROM daily_big_movers WHERE trade_date=?", (td,)).fetchone()["c"],
+            "evidence_runs": conn.execute("SELECT COUNT(*) AS c FROM evidence_runs WHERE week_key=? AND trade_date=?", (wk, td)).fetchone()["c"],
+        }
+    return {k: int(v or 0) for k, v in counts.items()}
+
+
+def _compact_snapshot_rows_for_sync(week_key: str, trade_date: str, limit: int | None = None) -> list[dict]:
+    """Return a compact, decision-useful sample without heavy raw_json payloads."""
+    lim = max(50, min(int(limit or EVIDENCE_SYNC_SAMPLE_ROWS or 1500), int(EVIDENCE_EXPORT_MAX_ROWS or 5000)))
+    cols = [
+        "captured_at_text", "week_key", "trade_date", "session", "symbol", "source_group",
+        "in_tool_snapshot", "in_big_movers", "signal_bucket", "decision", "sharia_status", "plan_family",
+        "price", "previous_close", "change_pct", "volume", "dollar_volume", "entry_price", "target_price", "stop_loss",
+        "support_price", "resistance_price", "distance_from_entry_pct", "distance_from_support_pct", "distance_from_resistance_pct",
+        "gap_from_prev_close_pct", "pre_market_change_pct", "pre_market_volume", "pre_market_dollar_volume", "after_hours_change_pct",
+        "open_gap_pct", "first_15m_followthrough", "first_30m_followthrough", "held_above_open", "held_above_vwap_proxy",
+        "gap_fade_flag", "gap_retest_success", "first_seen_change_pct", "no_chase_flag", "plan_needs_reconfirm",
+        "liquidity_score", "momentum_acceleration_score", "pattern_risk_score", "quote_source", "price_source",
+    ]
+    select_cols = ",".join(cols)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT {select_cols} FROM evidence_snapshots WHERE week_key=? AND trade_date=? ORDER BY in_big_movers DESC, ABS(change_pct) DESC, captured_at DESC LIMIT ?",
+            (str(week_key or ""), str(trade_date or "")[:10], lim),
+        ).fetchall()
+    return _rows_to_dicts(rows)
+
+
+def _compact_winner_profile_rows_for_sync(week_key: str, trade_date: str, limit: int | None = None) -> list[dict]:
+    lim = max(50, min(int(limit or EVIDENCE_SYNC_WINNER_LIMIT or 800), 2000))
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM evidence_winner_profiles WHERE week_key=? AND trade_date=? ORDER BY winner_change_pct DESC LIMIT ?",
+            (str(week_key or ""), str(trade_date or "")[:10], lim),
+        ).fetchall()
+    out = []
+    for row in _rows_to_dicts(rows):
+        # Keep fields needed for learning/verification; drop heavy/noisy raw payload fields.
+        compact = {k: v for k, v in row.items() if k not in {"raw_json", "polygon_summary_json", "payload_json"}}
+        out.append(_enrich_winner_profile_row(compact, week_key=week_key, refresh_visibility=False))
+    return out
+
+
+def _compact_evidence_archive_payload(week_key: str, trade_date: str) -> dict:
+    """A compact archive that is safe for Railway/GitHub and still useful for learning."""
+    wk = str(week_key or _current_week_key() or "current")
+    td = str(trade_date or _today_text())[:10]
+    counts = _evidence_local_counts_for_archive(wk, td)
+    snapshots = _compact_snapshot_rows_for_sync(wk, td)
+    winners = _compact_winner_profile_rows_for_sync(wk, td)
+    return {
+        "ok": True,
+        "version": "evidence_compact_archive_v5_railway_safe",
+        "week_key": wk,
+        "trade_date": td,
+        "exported_at": _now_text(),
+        "compact": True,
+        "manifest": {
+            "local_counts_at_sync": counts,
+            "snapshot_rows_in_archive": len(snapshots),
+            "winner_profile_rows_in_archive": len(winners),
+            "raw_intraday_bars_archived": False,
+            "raw_snapshot_json_omitted": True,
+            "reason": "Railway stability: preserve counts, samples, reports and winner profiles without uploading giant raw JSON/CSV payloads.",
+        },
+        "snapshots_sample": snapshots,
+        "winner_profiles": winners,
+        "daily_big_movers": daily_winners_report(trade_date=td, format="json", limit=500).get("items", []),
+        "market_fear": get_market_fear_snapshot(force_refresh=False, store=True),
+        "market_fear_history_tail": (get_json("market_fear_history", []) or [])[-80:],
+    }
+
+
+def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool | None = None) -> dict:
     wk = str(week_key or _current_week_key() or "current")
     d = str(trade_date or _today_text())[:10]
+    if include_csv is None:
+        include_csv = bool(EVIDENCE_SYNC_INCLUDE_CSV_DEFAULT)
     if not is_github_sync_configured():
         return {"ok": False, "configured": False, "error": "github_sync_not_configured"}
-    data = export_evidence_json(week_key=wk, trade_date=d, limit=50000)
+
     base = f"{EVIDENCE_GITHUB_ARCHIVE_PATH}/{wk}"
     json_path = f"{base}/{d}_evidence.json"
     summary_path = f"{base}/{d}_summary.json"
@@ -2769,6 +2880,7 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     readiness_path = f"{base}/{d}_pattern_readiness.json"
     pattern_lab_path = f"{base}/{d}_pattern_lab.json"
     market_fear_path = f"{base}/{d}_market_fear.json"
+    manifest_path = f"{base}/{d}_manifest.json"
     paths = {
         "json": json_path,
         "summary": summary_path,
@@ -2776,18 +2888,44 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
         "pattern_readiness": readiness_path,
         "pattern_lab": pattern_lab_path,
         "market_fear": market_fear_path,
+        "manifest": manifest_path,
+    }
+
+    local_counts = _evidence_local_counts_for_archive(wk, d)
+    compact_payload = _compact_evidence_archive_payload(wk, d) if EVIDENCE_GITHUB_COMPACT_SYNC else export_evidence_json(week_key=wk, trade_date=d, limit=EVIDENCE_SYNC_SAMPLE_ROWS)
+    manifest = {
+        "ok": True,
+        "version": "evidence_archive_manifest_v5",
+        "week_key": wk,
+        "trade_date": d,
+        "generated_at": _now_text(),
+        "compact_sync": bool(EVIDENCE_GITHUB_COMPACT_SYNC),
+        "local_counts_at_sync": local_counts,
+        "prune_allowed_after_verify": True,
+        "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync.",
+    }
+    summary = weekly_evidence_summary(week_key=wk, format="json")
+    if isinstance(summary, dict):
+        summary.setdefault("archive_manifest", manifest)
+    market_fear_payload = {
+        "ok": True,
+        "week_key": wk,
+        "trade_date": d,
+        "snapshot": get_market_fear_snapshot(force_refresh=False, store=True),
+        "history_tail": (get_json("market_fear_history", []) or [])[-80:],
     }
     files = [
-        {"label": "json", "path": json_path, "content": data, "is_json": True},
-        {"label": "summary", "path": summary_path, "content": weekly_evidence_summary(week_key=wk, format="json"), "is_json": True},
-        {"label": "winner_profiles", "path": winners_path, "content": winner_profiles_report(week_key=wk, trade_date=d, format="json"), "is_json": True},
+        {"label": "manifest", "path": manifest_path, "content": manifest, "is_json": True},
+        {"label": "json", "path": json_path, "content": compact_payload, "is_json": True},
+        {"label": "summary", "path": summary_path, "content": summary, "is_json": True},
+        {"label": "winner_profiles", "path": winners_path, "content": {"ok": True, "version": "winner_profiles_compact_v5", "week_key": wk, "trade_date": d, "manifest": manifest, "items": _compact_winner_profile_rows_for_sync(wk, d)}, "is_json": True},
         {"label": "pattern_readiness", "path": readiness_path, "content": pattern_readiness_report(week_key=wk, format="json"), "is_json": True},
         {"label": "pattern_lab", "path": pattern_lab_path, "content": pattern_lab_report(week_key=wk, trade_date=d, format="json"), "is_json": True},
-        {"label": "market_fear", "path": market_fear_path, "content": {"ok": True, "week_key": wk, "trade_date": d, "snapshot": get_market_fear_snapshot(force_refresh=False, store=True), "history": get_json("market_fear_history", [])}, "is_json": True},
+        {"label": "market_fear", "path": market_fear_path, "content": market_fear_payload, "is_json": True},
     ]
     if include_csv:
         csv_path = f"{base}/{d}_evidence.csv"
-        csv_text = "\ufeff" + export_evidence_csv(week_key=wk, trade_date=d, limit=50000)
+        csv_text = "\ufeff" + export_evidence_csv(week_key=wk, trade_date=d, limit=EVIDENCE_SYNC_SAMPLE_ROWS)
         paths["csv"] = csv_path
         files.append({"label": "csv", "path": csv_path, "content": csv_text, "is_json": False})
 
@@ -2816,10 +2954,13 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
 
     results = {
         "ok": bool(batch.get("ok")),
-        "version": "evidence_github_batch_sync_v2",
+        "version": "evidence_github_batch_sync_v5_railway_safe_compact",
         "week_key": wk,
         "trade_date": d,
         "paths": paths,
+        "local_counts_at_sync": local_counts,
+        "compact_sync": bool(EVIDENCE_GITHUB_COMPACT_SYNC),
+        "include_csv": bool(include_csv),
         "batch_commit": True,
         "batch": batch,
         **file_results,
@@ -2845,6 +2986,8 @@ def _archive_paths_for(week_key: str | None = None, trade_date: str | None = Non
         "winner_profiles_json": f"{base}/{d}_winner_profiles.json",
         "pattern_readiness_json": f"{base}/{d}_pattern_readiness.json",
         "pattern_lab_json": f"{base}/{d}_pattern_lab.json",
+        "market_fear_json": f"{base}/{d}_market_fear.json",
+        "manifest_json": f"{base}/{d}_manifest.json",
         "evidence_csv": f"{base}/{d}_evidence.csv",
     }
 
@@ -2859,6 +3002,8 @@ def _normalize_retention_sync_paths(paths: dict | None) -> dict[str, str]:
         "winner_profiles_json": str(raw.get("winner_profiles_json") or raw.get("winner_profiles") or ""),
         "pattern_readiness_json": str(raw.get("pattern_readiness_json") or raw.get("pattern_readiness") or ""),
         "pattern_lab_json": str(raw.get("pattern_lab_json") or raw.get("pattern_lab") or ""),
+        "market_fear_json": str(raw.get("market_fear_json") or raw.get("market_fear") or ""),
+        "manifest_json": str(raw.get("manifest_json") or raw.get("manifest") or ""),
         "evidence_csv": str(raw.get("evidence_csv") or raw.get("csv") or ""),
     }
 
@@ -3027,12 +3172,12 @@ def _verify_json_payload(name: str, path: str, expected_min_count: int | None = 
     return out
 
 
-def evidence_retention_verify_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool = True) -> dict:
-    """Verify that the GitHub evidence archive for a selected date is readable.
+def evidence_retention_verify_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool = False) -> dict:
+    """Verify GitHub archive before any Railway pruning.
 
-    This is intentionally non-destructive. It does not delete or prune Railway data.
-    V4c defaults to the last successful GitHub sync when no date is requested,
-    which avoids false errors on weekends/non-trading days.
+    V5 prefers the manifest written by compact sync. The manifest contains local
+    row counts captured at sync time. This avoids downloading huge JSON/CSV files
+    just to verify an archive and prevents another memory/egress spike.
     """
     target = _resolve_retention_archive_target(week_key, trade_date)
     wk = str(target.get("week_key") or _current_week_key() or "current")
@@ -3040,17 +3185,55 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     paths = target.get("paths") if isinstance(target.get("paths"), dict) else _archive_paths_for(wk, td)
     if not is_github_sync_configured():
         return {"ok": False, "configured": False, "error": "github_sync_not_configured", "week_key": wk, "trade_date": td, "retention_target": target}
-    local_expected = {
-        "evidence_json": _sqlite_count("evidence_snapshots", "WHERE week_key=? AND trade_date=?", (wk, td)),
-        "winner_profiles_json": _sqlite_count("evidence_winner_profiles", "WHERE week_key=? AND trade_date=?", (wk, td)),
-        "summary_json": 1,
-        "pattern_readiness_json": 1,
-        "pattern_lab_json": 1,
-    }
+
+    local_now = _evidence_local_counts_for_archive(wk, td)
     checks = {}
-    for name in ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json"]:
-        checks[name] = _verify_json_payload(name, paths[name], expected_min_count=local_expected.get(name))
-    if include_csv:
+    manifest_fetch = fetch_json_file(paths.get("manifest_json") or _archive_paths_for(wk, td).get("manifest_json", ""))
+    manifest_data = manifest_fetch.get("data") if isinstance(manifest_fetch, dict) else None
+    manifest_counts = {}
+    if isinstance(manifest_data, dict):
+        manifest_counts = ((manifest_data.get("local_counts_at_sync") or {}) if isinstance(manifest_data.get("local_counts_at_sync"), dict) else {})
+    manifest_ok = bool(isinstance(manifest_fetch, dict) and manifest_fetch.get("ok") and manifest_fetch.get("exists") and isinstance(manifest_data, dict) and manifest_counts)
+    count_checks = {}
+    for k in ["evidence_snapshots", "evidence_winner_profiles", "evidence_intraday_bars", "daily_big_movers", "evidence_runs"]:
+        archived = int(_safe_int(manifest_counts.get(k), 0)) if manifest_counts else 0
+        current = int(local_now.get(k, 0))
+        count_checks[k] = {
+            "archived_count": archived,
+            "current_count": current,
+            # Current can be higher after sync if more evidence was collected later.
+            "ok": bool(archived > 0 or current == 0),
+            "note": "current_may_be_higher_after_sync" if current >= archived else "current_lower_than_manifest_check_manually",
+        }
+        if archived > 0 and current < archived:
+            count_checks[k]["ok"] = False
+
+    checks["manifest_json"] = {
+        "name": "manifest_json",
+        "path": paths.get("manifest_json", ""),
+        "ok": manifest_ok,
+        "exists": bool(isinstance(manifest_fetch, dict) and manifest_fetch.get("exists")),
+        "readable": isinstance(manifest_data, dict),
+        "counts_present": bool(manifest_counts),
+        "error": manifest_fetch.get("error", "") if isinstance(manifest_fetch, dict) else "fetch_failed",
+    }
+    for name in ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json", "market_fear_json"]:
+        path = paths.get(name) or ""
+        if not path:
+            checks[name] = {"name": name, "ok": False, "exists": False, "error": "missing_path"}
+            continue
+        fetch = fetch_json_file(path)
+        data = fetch.get("data") if isinstance(fetch, dict) else None
+        checks[name] = {
+            "name": name,
+            "path": path,
+            "ok": bool(isinstance(fetch, dict) and fetch.get("ok") and fetch.get("exists") and data is not None),
+            "exists": bool(isinstance(fetch, dict) and fetch.get("exists")),
+            "readable": data is not None,
+            "sha": fetch.get("sha", "") if isinstance(fetch, dict) else "",
+            "error": fetch.get("error", "") if isinstance(fetch, dict) else "fetch_failed",
+        }
+    if include_csv and paths.get("evidence_csv"):
         csv_fetch = fetch_text_file(paths["evidence_csv"])
         content = csv_fetch.get("content") if isinstance(csv_fetch, dict) else None
         line_count = len([ln for ln in str(content or "").splitlines() if ln.strip()]) if content is not None else 0
@@ -3064,11 +3247,14 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
             "sha": csv_fetch.get("sha", "") if isinstance(csv_fetch, dict) else "",
             "error": csv_fetch.get("error", "") if isinstance(csv_fetch, dict) else "fetch_failed",
         }
-    required = ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json"]
-    ok = all(bool((checks.get(k) or {}).get("ok")) for k in required)
+
+    required = ["manifest_json", "evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json"]
+    files_ok = all(bool((checks.get(k) or {}).get("ok")) for k in required)
+    counts_ok = all(bool(v.get("ok")) for v in count_checks.values()) if count_checks else False
+    ok = bool(files_ok and counts_ok)
     result = {
-        "ok": bool(ok),
-        "version": "retention_verify_github_v4c_last_sync_aware",
+        "ok": ok,
+        "version": "retention_verify_github_v5_manifest_no_large_downloads",
         "configured": True,
         "week_key": wk,
         "trade_date": td,
@@ -3080,9 +3266,11 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
             "explicit_target_requested": bool(target.get("explicit_target_requested")),
             "note": target.get("note", ""),
         },
-        "local_expected_counts": local_expected,
+        "local_counts_now": local_now,
+        "manifest_counts_at_sync": manifest_counts,
+        "count_checks": count_checks,
         "checks": checks,
-        "notes": "Verification only. No Railway deletion is performed.",
+        "notes": "Verification only. No Railway deletion is performed here. Uses manifest to avoid huge downloads.",
     }
     try:
         set_json("evidence_last_retention_verify", result)
@@ -3097,7 +3285,7 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
     wk = str(target.get("week_key") or _current_week_key() or "current")
     td = str(target.get("trade_date") or _today_text())[:10]
     cutoff = _retention_cutoff_date(keep_days)
-    verify = evidence_retention_verify_github(wk, td, include_csv=True) if require_verified else {"ok": True, "skipped": True, "retention_target": target}
+    verify = evidence_retention_verify_github(wk, td, include_csv=False) if require_verified else {"ok": True, "skipped": True, "retention_target": target}
     candidates = {
         "evidence_snapshots": _sqlite_count("evidence_snapshots", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
         "evidence_intraday_bars": _sqlite_count("evidence_intraday_bars", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
@@ -3136,6 +3324,84 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
         pass
     return result
 
+def evidence_retention_prune_execute(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+    include_snapshots: bool = False,
+) -> dict:
+    """Safely prune old Railway evidence rows after GitHub verification.
+
+    Default deletes only old intraday bars/runs/big-mover rows because they are the
+    heaviest operational data. Snapshots and winner profiles are preserved unless
+    include_snapshots=true is explicitly passed after verification.
+    """
+    if str(confirm or "").strip() != "DELETE_ARCHIVED_EVIDENCE":
+        return {
+            "ok": False,
+            "deleted_rows": 0,
+            "error": "confirmation_required",
+            "required_confirm": "DELETE_ARCHIVED_EVIDENCE",
+            "notes": "No deletion was performed.",
+        }
+    if require_verified:
+        verify = evidence_retention_verify_github(week_key=week_key, trade_date=trade_date, include_csv=False)
+        if not verify.get("ok"):
+            return {"ok": False, "deleted_rows": 0, "error": "github_verification_failed", "verification": verify, "notes": "No deletion was performed."}
+    else:
+        verify = {"ok": True, "skipped": True}
+
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    cutoff = _retention_cutoff_date(keep_days)
+    tables = [
+        ("evidence_intraday_bars", "trade_date < ? AND week_key != ?"),
+        ("daily_big_movers", "trade_date < ?"),
+        ("evidence_runs", "trade_date < ? AND week_key != ?"),
+    ]
+    if bool(include_snapshots):
+        tables.extend([
+            ("evidence_snapshots", "trade_date < ? AND week_key != ?"),
+            ("evidence_winner_profiles", "trade_date < ? AND week_key != ?"),
+        ])
+    before = {}
+    deleted = {}
+    with _LOCK:
+        with _connect() as conn:
+            for table, where_sql in tables:
+                if table == "daily_big_movers":
+                    args = (cutoff,)
+                else:
+                    args = (cutoff, wk)
+                before[table] = int(conn.execute(f"SELECT COUNT(*) AS c FROM {table} WHERE {where_sql}", args).fetchone()["c"] or 0)
+                cur = conn.execute(f"DELETE FROM {table} WHERE {where_sql}", args)
+                deleted[table] = int(cur.rowcount if cur.rowcount is not None else 0)
+            if EVIDENCE_RETENTION_VACUUM_AFTER_PRUNE:
+                conn.execute("VACUUM")
+            conn.commit()
+    result = {
+        "ok": True,
+        "version": "retention_prune_execute_v5_verified_guarded",
+        "week_key_protected": wk,
+        "trade_date_verified": str(target.get("trade_date") or "")[:10],
+        "executed_at": _now_text(),
+        "keep_days": int(keep_days if keep_days is not None else EVIDENCE_RETENTION_KEEP_DAYS),
+        "cutoff_trade_date_exclusive": cutoff,
+        "include_snapshots": bool(include_snapshots),
+        "verification": verify,
+        "candidate_rows_before_delete": before,
+        "deleted_rows_by_table": deleted,
+        "deleted_rows_total": int(sum(deleted.values())),
+        "notes": "Pruned only data older than cutoff and outside the protected verified week. GitHub verification passed before deletion.",
+    }
+    try:
+        set_json("evidence_last_retention_prune_execute", result)
+    except Exception:
+        pass
+    return result
+
 def _daily_auto_sync_due(session: str) -> bool:
     """Compatibility wrapper used by the background worker.
 
@@ -3157,10 +3423,44 @@ def _mark_daily_auto_sync(result: dict) -> None:
         pass
 
 
+def _worker_lease_key() -> str:
+    return "evidence_background_worker_lease"
+
+
+def _claim_worker_lease() -> tuple[bool, dict]:
+    """Best-effort cross-process guard for Railway.
+
+    The old in-memory _WORKER_STARTED flag only protects one Python process. If
+    Railway starts more than one process during deploy/restart, each could start a
+    background evidence thread. This lease makes duplicate workers back off.
+    """
+    if not SQLITE_ENABLED:
+        return True, {"sqlite": False}
+    now = _now_ts()
+    pid = os.getpid()
+    try:
+        lease = get_json(_worker_lease_key(), {})
+        if isinstance(lease, dict) and float(lease.get("expires_at") or 0) > now and int(lease.get("pid") or -1) != pid:
+            return False, lease
+        new_lease = {"pid": pid, "claimed_at": _now_text(), "heartbeat_at": _now_text(), "expires_at": now + max(120, int(EVIDENCE_WORKER_LEASE_TTL_SEC or 300))}
+        set_json(_worker_lease_key(), new_lease)
+        return True, new_lease
+    except Exception as exc:
+        return True, {"lease_error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
+
+def _refresh_worker_lease() -> None:
+    try:
+        set_json(_worker_lease_key(), {"pid": os.getpid(), "heartbeat_at": _now_text(), "expires_at": _now_ts() + max(120, int(EVIDENCE_WORKER_LEASE_TTL_SEC or 300))})
+    except Exception:
+        pass
+
+
 def _worker_loop() -> None:
     last_collect_ts = 0.0
     while True:
         try:
+            _refresh_worker_lease()
             if not EVIDENCE_COLLECTION_ENABLED:
                 time.sleep(600)
                 continue
@@ -3184,7 +3484,7 @@ def _worker_loop() -> None:
                 _mark_daily_winner_backfill(backfill)
             # GitHub sync follows the user-defined Riyadh schedule: Tue-Sat 05:00 only, never Sunday/Monday.
             if _daily_auto_sync_due(session):
-                sync = run_evidence_auto_sync(force=False, dry_run=False, include_csv=True)
+                sync = run_evidence_auto_sync(force=False, dry_run=False, include_csv=None)
                 _mark_daily_auto_sync(sync)
             time.sleep(60)
         except Exception as exc:
@@ -3203,10 +3503,13 @@ def start_evidence_background_worker() -> dict:
         return {"ok": True, "started": True, "already_running": True}
     try:
         init_evidence_db()
+        claimed, lease = _claim_worker_lease()
+        if not claimed:
+            return {"ok": True, "started": False, "enabled": True, "reason": "another_worker_lease_active", "lease": lease}
         _WORKER_THREAD = threading.Thread(target=_worker_loop, name="evidence-collector-worker", daemon=True)
         _WORKER_THREAD.start()
         _WORKER_STARTED = True
-        return {"ok": True, "started": True, "enabled": True}
+        return {"ok": True, "started": True, "enabled": True, "lease": lease}
     except Exception as exc:
         return {"ok": False, "started": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 

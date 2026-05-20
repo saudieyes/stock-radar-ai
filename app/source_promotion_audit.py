@@ -257,10 +257,19 @@ def _candidate_profile(row: dict, ev: dict | None = None) -> dict:
     clean_score -= min(pattern_score * 0.35, 35)
     clean_score -= 22 if no_chase else 0
     clean_score -= 18 if near_high else 0
-    if res and res <= 1.0:
-        clean_score -= 22
-    elif res and res <= 2.0:
-        clean_score -= 12
+    # V2: a stock is not a clean alternative if it is sitting directly under
+    # resistance. It can still be technically strong, but it must be treated as
+    # breakout-confirmation / no-chase, not as clean.
+    resistance_guard_status = "clear"
+    if res and res <= 0.75:
+        clean_score -= 45
+        resistance_guard_status = "blocked_until_breakout_confirmed"
+    elif res and res <= 1.5:
+        clean_score -= 30
+        resistance_guard_status = "requires_breakout_confirmation"
+    elif res and res <= 2.5:
+        clean_score -= 15
+        resistance_guard_status = "watch_resistance"
     if liq and liq < 55:
         clean_score -= 18
     if any("السيولة لم تستمر" in t for t in tags):
@@ -270,7 +279,10 @@ def _candidate_profile(row: dict, ev: dict | None = None) -> dict:
     if any("قريب من مقاومة قوية" in t for t in tags):
         clean_score -= 18
     clean_score = max(0.0, min(100.0, safe_round(clean_score, 1)))
-    if clean_score >= 75 and q >= 70:
+    if resistance_guard_status == "blocked_until_breakout_confirmed" and q >= 70:
+        cleanliness = "technical_but_risky"
+        label = "⚠️ قريب جدًا من مقاومة — يحتاج اختراق وثبات"
+    elif clean_score >= 75 and q >= 70:
         cleanliness = "clean_candidate"
         label = "✅ بديل نظيف نسبيًا"
     elif clean_score >= 55:
@@ -292,6 +304,7 @@ def _candidate_profile(row: dict, ev: dict | None = None) -> dict:
         "signal_strength_score": _first_float(row, ["signal_strength_score"]),
         "liquidity_score": safe_round(liq, 1),
         "resistance_distance_pct": safe_round(res, 2),
+        "resistance_guard_status": resistance_guard_status,
         "support_distance_pct": safe_round(sup, 2),
         "near_year_or_ath_high": bool(near_high),
         "no_chase": bool(no_chase),
