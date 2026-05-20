@@ -879,6 +879,14 @@
     "symbol": "LYB",
     "updated_at": "2026-05-01 11:27:06"
   },
+  "M": {
+    "excluded_at": "2026-05-20 14:03:46",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "M",
+    "updated_at": "2026-05-20 14:03:46"
+  },
   "MARA": {
     "excluded_at": "2026-05-01 09:44:03",
     "note": "استبعاد يدوي شرعي",
@@ -1206,6 +1214,22 @@
     "source": "manual",
     "symbol": "UIS",
     "updated_at": "2026-05-12 15:00:57"
+  },
+  "UTZ": {
+    "excluded_at": "2026-05-20 14:16:47",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "UTZ",
+    "updated_at": "2026-05-20 14:16:47"
+  },
+  "VAC": {
+    "excluded_at": "2026-05-20 14:38:25",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "VAC",
+    "updated_at": "2026-05-20 14:38:25"
   },
   "VSH": {
     "excluded_at": "2026-05-13 13:28:46",
