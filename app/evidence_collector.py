@@ -80,6 +80,7 @@ EVIDENCE_POLYGON_SYMBOL_LIMIT = _env_int("EVIDENCE_POLYGON_SYMBOL_LIMIT", 45)
 EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED = _env_bool("EVIDENCE_AUTO_BACKFILL_WINNERS_ENABLED", True)
 EVIDENCE_BIG_WINNER_BACKFILL_ENABLED = _env_bool("EVIDENCE_BIG_WINNER_BACKFILL_ENABLED", True)
 EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT = _env_int("EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT", 180)
+EVIDENCE_AUTO_BACKFILL_SYMBOL_LIMIT = _env_int("EVIDENCE_AUTO_BACKFILL_SYMBOL_LIMIT", 80)
 EVIDENCE_INTRADAY_BAR_STORE_ENABLED = _env_bool("EVIDENCE_INTRADAY_BAR_STORE_ENABLED", True)
 EVIDENCE_INTRADAY_BAR_SYMBOL_LIMIT = _env_int("EVIDENCE_INTRADAY_BAR_SYMBOL_LIMIT", 90)
 EVIDENCE_MIN_WINNER_DOLLAR_VOLUME = _env_float("EVIDENCE_MIN_WINNER_DOLLAR_VOLUME", 0.0)
@@ -1972,7 +1973,7 @@ def evidence_auto_sync_status() -> dict:
     last = get_json("evidence_last_auto_sync", {})
     return {
         "ok": True,
-        "version": "evidence_auto_sync_v2_riyadh_daily_once",
+        "version": "evidence_auto_sync_v5b_riyadh_daily_once_guarded",
         "enabled": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED),
         "github_configured": bool(is_github_sync_configured()),
         "now_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1985,7 +1986,11 @@ def evidence_auto_sync_status() -> dict:
         "last_attempt_for_trade_date": attempted if isinstance(attempted, dict) else {},
         "last_auto_sync": last if isinstance(last, dict) else {},
         "railway_prune_enabled": False,
-        "notes": "Daily Evidence sync exports to GitHub only. Railway deletion/pruning remains disabled and separate.",
+        "auto_backfill_symbol_limit": int(EVIDENCE_AUTO_BACKFILL_SYMBOL_LIMIT),
+        "auto_backfill_store_bars": bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
+        "sync_include_csv_default": bool(EVIDENCE_SYNC_INCLUDE_CSV_DEFAULT),
+        "attempt_state": ("incomplete_or_crashed" if isinstance(attempted, dict) and attempted.get("attempted") and attempted.get("ok") is None else ("finished" if isinstance(attempted, dict) and attempted.get("attempted") else "none")),
+        "notes": "Daily Evidence sync exports compact GitHub files only. Railway deletion/pruning remains disabled unless the guarded prune-execute endpoint is called manually with confirmation.",
     }
 
 
@@ -2030,13 +2035,13 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
             end_date=trade_date,
             days_back=1,
             threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT,
-            limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT,
+            limit_per_day=EVIDENCE_AUTO_BACKFILL_SYMBOL_LIMIT,
             store_bars=bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
         )
     sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=include_csv)
     result = {
         "ok": bool(sync.get("ok")),
-        "version": "evidence_daily_auto_sync_v2_once_daily_batch",
+        "version": "evidence_daily_auto_sync_v5b_compact_once_daily",
         "trade_date": trade_date,
         "week_key": wk,
         "ran_at_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -3108,7 +3113,7 @@ def evidence_retention_status(week_key: str | None = None, trade_date: str | Non
     }
     return {
         "ok": True,
-        "version": "retention_guard_v4c_last_sync_aware_no_delete",
+        "version": "retention_guard_v5b_verified_prune_available_no_auto_delete",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -3119,7 +3124,8 @@ def evidence_retention_status(week_key: str | None = None, trade_date: str | Non
         "keep_recent_days": int(EVIDENCE_RETENTION_KEEP_DAYS),
         "cutoff_trade_date_exclusive": cutoff,
         "prune_enabled": bool(EVIDENCE_RETENTION_PRUNE_ENABLED),
-        "actual_delete_available": False,
+        "actual_delete_available": True,
+        "actual_delete_requires_confirm": "DELETE_ARCHIVED_EVIDENCE",
         "counts": counts,
         "paths_for_selected_date": paths,
         "retention_target": {
@@ -3132,10 +3138,10 @@ def evidence_retention_status(week_key: str | None = None, trade_date: str | Non
         "last_verify": last_verify if isinstance(last_verify, dict) else {},
         "last_prune_dry_run": last_dry if isinstance(last_dry, dict) else {},
         "safety_rules": [
-            "No Railway deletion in V4c endpoints.",
-            "Only dry-run is available until AUTO PRUNE is explicitly added after verified weekly archive.",
+            "No automatic Railway deletion. Manual prune-execute requires confirmation and GitHub verification.",
+            "Default manual prune deletes only old intraday bars, daily movers, and evidence runs; snapshots/profiles require include_snapshots=true.",
             "Current week/current trade date are never deletion candidates.",
-            "Deletion requires GitHub sync + readable JSON/CSV verification first.",
+            "Deletion requires GitHub sync + readable manifest/JSON verification first.",
         ],
     }
 
@@ -3296,7 +3302,7 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
     would_delete = bool((not require_verified or verify.get("ok")) and any(v > 0 for v in candidates.values()))
     result = {
         "ok": True,
-        "version": "retention_prune_dry_run_v4c_last_sync_aware_no_delete",
+        "version": "retention_prune_dry_run_v5b_verified_no_delete",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -3478,8 +3484,8 @@ def _worker_loop() -> None:
                     end_date=_today_text(),
                     days_back=1,
                     threshold_pct=EVIDENCE_BIG_MOVER_THRESHOLD_PCT,
-                    limit_per_day=EVIDENCE_BIG_WINNER_BACKFILL_SYMBOL_LIMIT,
-                    store_bars=True,
+                    limit_per_day=EVIDENCE_AUTO_BACKFILL_SYMBOL_LIMIT,
+                    store_bars=bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
                 )
                 _mark_daily_winner_backfill(backfill)
             # GitHub sync follows the user-defined Riyadh schedule: Tue-Sat 05:00 only, never Sunday/Monday.
