@@ -303,6 +303,14 @@
     "symbol": "CLSK",
     "updated_at": "2026-05-04 12:11:11"
   },
+  "CMPS": {
+    "excluded_at": "2026-05-20 10:11:17",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CMPS",
+    "updated_at": "2026-05-20 10:11:17"
+  },
   "CMRC": {
     "excluded_at": "2026-04-20 21:48:31",
     "note": "",
@@ -998,6 +1006,14 @@
     "source": "manual",
     "symbol": "NUTX",
     "updated_at": "2026-05-01 14:08:58"
+  },
+  "NVAX": {
+    "excluded_at": "2026-05-20 10:12:32",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "NVAX",
+    "updated_at": "2026-05-20 10:12:32"
   },
   "ONDS": {
     "excluded_at": "2026-05-01 13:45:25",
