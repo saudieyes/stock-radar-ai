@@ -2463,6 +2463,7 @@ def data_sync_status():
     status["manual_sharia_approvals_local_count"] = len(load_manual_sharia_approvals())
     status["manual_sharia_last_pull"] = get_manual_sharia_sync_diagnostics()
     status["manual_sharia_approvals_last_pull"] = get_manual_sharia_approvals_sync_diagnostics()
+    status["evidence_auto_sync"] = evidence_auto_sync_status()
     return {"ok": True, **status}
 
 
@@ -2815,7 +2816,6 @@ def evidence_sync_github_endpoint(week_key: str = "", trade_date: str = "", incl
 
 @app.get("/evidence/auto-sync/status")
 @app.get("/evidence/auto-status")
-@app.get("/data-sync/status")
 def evidence_auto_sync_status_endpoint():
     return evidence_auto_sync_status()
 
