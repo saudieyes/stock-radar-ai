@@ -22,7 +22,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import datetime, date, time as dt_time
+from datetime import datetime, date, time as dt_time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -1868,6 +1868,637 @@ def winner_profiles_report(week_key: str | None = None, trade_date: str | None =
         for x in items[:20]:
             tool = "ظهر في الأداة" if int(x.get("tool_seen") or 0) else "لم يظهر في الأداة/غير مؤكد"
             lines.append(f"- {x.get('symbol')}: +{safe_round(x.get('winner_change_pct'),2)}% | gap {safe_round(x.get('gap_pct'),2)}% | {x.get('likely_pattern') or '-'} | {x.get('gap_quality_class') or '-'} | {x.get('tradability_bucket') or '-'} | {tool}")
+        return "\n".join(lines)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Big Mover Anatomy + Historical Pattern / Scan Gap Audit V1
+# ---------------------------------------------------------------------------
+# Read-only diagnostic report.  It explains HOW >10% movers rose, whether the
+# tool/source saw them, and where the promotion path delayed.  The default mode
+# uses already-collected SQLite evidence only so Railway is not stressed.  A
+# bounded optional Polygon daily-history mode can be enabled with
+# history_mode=light for a small number of symbols.
+
+_BIG_MOVER_AUDIT_VERSION = "big_mover_anatomy_scan_gap_v1"
+
+
+def _parse_ny_time_text(value: Any) -> datetime | None:
+    txt = str(value or "").strip()[:19]
+    if not txt:
+        return None
+    try:
+        return datetime.strptime(txt, "%Y-%m-%d %H:%M:%S").replace(tzinfo=NY_TZ)
+    except Exception:
+        try:
+            return datetime.fromtimestamp(float(value), tz=NY_TZ)
+        except Exception:
+            return None
+
+
+def _time_text(dt: datetime | None) -> str:
+    try:
+        return dt.astimezone(NY_TZ).strftime("%Y-%m-%d %H:%M:%S") if dt else ""
+    except Exception:
+        return ""
+
+
+def _minutes_between_dt(a: datetime | None, b: datetime | None) -> float:
+    try:
+        if not a or not b:
+            return 0.0
+        return safe_round((b - a).total_seconds() / 60.0, 1)
+    except Exception:
+        return 0.0
+
+
+def _safe_json_list(value: Any) -> list:
+    loaded = _json_loads(value, []) if isinstance(value, str) else value
+    return loaded if isinstance(loaded, list) else []
+
+
+def _safe_json_dict(value: Any) -> dict:
+    loaded = _json_loads(value, {}) if isinstance(value, str) else value
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _fetch_symbol_daily_bars_light(symbol: str, end_date: str, lookback_days: int = 30) -> list[dict]:
+    """Small bounded Polygon daily history fetch for one symbol.
+
+    This is used only when history_mode=light.  The report defaults to stored
+    evidence to avoid Railway egress/API pressure.
+    """
+    sym = _clean_symbol(symbol)
+    if not (sym and POLYGON_API_KEY and EVIDENCE_POLYGON_ENABLED):
+        return []
+    end_d = _parse_date(end_date) or _now_dt().date()
+    start_d = end_d - timedelta(days=max(5, min(int(lookback_days or 30), 45)) + 10)
+    try:
+        url = f"https://api.polygon.io/v2/aggs/ticker/{sym}/range/1/day/{start_d.isoformat()}/{end_d.isoformat()}"
+        r = HTTP_SESSION.get(url, params={"adjusted": "true", "sort": "asc", "limit": 5000, "apiKey": POLYGON_API_KEY}, timeout=min(float(EVIDENCE_HTTP_TIMEOUT_SEC), 10.0))
+        if r.status_code >= 400:
+            return []
+        payload = r.json() or {}
+        rows = payload.get("results") or []
+        if not isinstance(rows, list):
+            return []
+        out = []
+        for b in rows[-max(8, min(int(lookback_days or 30), 45)):]:
+            if not isinstance(b, dict):
+                continue
+            dt = _dt_from_polygon_ms(b.get("t"))
+            if not dt:
+                continue
+            c = _safe_float(b.get("c"), 0)
+            v = _safe_float(b.get("v"), 0)
+            out.append({
+                "date": dt.date().isoformat(),
+                "open": _safe_float(b.get("o"), 0),
+                "high": _safe_float(b.get("h"), 0),
+                "low": _safe_float(b.get("l"), 0),
+                "close": c,
+                "volume": v,
+                "dollar_volume": c * v if c > 0 and v > 0 else 0,
+            })
+        return out
+    except Exception:
+        return []
+
+
+def _daily_history_features(symbol: str, trade_date: str, bars: list[dict]) -> dict:
+    sym = _clean_symbol(symbol)
+    rows = [b for b in (bars or []) if isinstance(b, dict) and _safe_float(b.get("close"), 0) > 0]
+    rows = sorted(rows, key=lambda x: str(x.get("date") or ""))
+    if not rows:
+        return {"ok": False, "symbol": sym, "reason": "no_daily_history"}
+    # Use bars before the move date as the real pre-move window.
+    before = [b for b in rows if str(b.get("date") or "") < str(trade_date or "")]
+    during = [b for b in rows if str(b.get("date") or "") <= str(trade_date or "")]
+    pre = before[-20:]
+    recent5 = before[-5:]
+    recent10 = before[-10:]
+    if not before:
+        return {"ok": False, "symbol": sym, "reason": "no_pre_move_history", "days": len(rows)}
+    last = before[-1]
+    first5 = recent5[0] if recent5 else last
+    first10 = recent10[0] if recent10 else last
+    first20 = pre[0] if pre else last
+    avg20_vol = sum(_safe_float(x.get("volume"), 0) for x in pre) / max(1, len(pre))
+    avg5_vol = sum(_safe_float(x.get("volume"), 0) for x in recent5) / max(1, len(recent5))
+    avg20_dollar = sum(_safe_float(x.get("dollar_volume"), 0) for x in pre) / max(1, len(pre))
+    avg5_dollar = sum(_safe_float(x.get("dollar_volume"), 0) for x in recent5) / max(1, len(recent5))
+    highs20 = [_safe_float(x.get("high"), 0) for x in pre if _safe_float(x.get("high"), 0) > 0]
+    lows20 = [_safe_float(x.get("low"), 0) for x in pre if _safe_float(x.get("low"), 0) > 0]
+    high20 = max(highs20 or [0])
+    low20 = min(lows20 or [0])
+    close_last = _safe_float(last.get("close"), 0)
+    range20_pct = _pct_change(high20, low20) if high20 > 0 and low20 > 0 else 0
+    close_to_20d_high_pct = _pct_change(close_last, high20) if close_last > 0 and high20 > 0 else 0
+    up_days5 = 0
+    for i in range(1, len(recent5)):
+        if _safe_float(recent5[i].get("close"), 0) > _safe_float(recent5[i-1].get("close"), 0):
+            up_days5 += 1
+    change5 = _pct_change(close_last, _safe_float(first5.get("close"), 0)) if first5 else 0
+    change10 = _pct_change(close_last, _safe_float(first10.get("close"), 0)) if first10 else 0
+    change20 = _pct_change(close_last, _safe_float(first20.get("close"), 0)) if first20 else 0
+    vol_build_ratio = safe_round(avg5_vol / avg20_vol, 2) if avg20_vol > 0 else 0
+    dollar_build_ratio = safe_round(avg5_dollar / avg20_dollar, 2) if avg20_dollar > 0 else 0
+    accumulation_score = 0.0
+    reasons = []
+    if vol_build_ratio >= 1.5 or dollar_build_ratio >= 1.5:
+        accumulation_score += 25
+        reasons.append("حجم/دولار فوليوم بدأ يرتفع قبل الحركة")
+    if change5 > 0 and up_days5 >= 3:
+        accumulation_score += 20
+        reasons.append("صعود تدريجي لعدة أيام قبل الانفجار")
+    if range20_pct <= 18 and close_to_20d_high_pct >= -8:
+        accumulation_score += 18
+        reasons.append("قاعدة/تجميع قريب من أعلى نطاق 20 يوم")
+    if change10 >= 8:
+        accumulation_score += 15
+        reasons.append("زخم 10 أيام قبل الحركة")
+    if close_to_20d_high_pct >= -3:
+        accumulation_score += 12
+        reasons.append("إغلاق ما قبل الحركة قريب من قمة 20 يوم")
+    accumulation_score = min(100.0, safe_round(accumulation_score, 1))
+    return {
+        "ok": True,
+        "symbol": sym,
+        "days": len(rows),
+        "pre_move_days": len(before),
+        "price_change_5d_pct": safe_round(change5, 2),
+        "price_change_10d_pct": safe_round(change10, 2),
+        "price_change_20d_pct": safe_round(change20, 2),
+        "avg5_vs_avg20_volume": vol_build_ratio,
+        "avg5_vs_avg20_dollar_volume": dollar_build_ratio,
+        "range20_pct": safe_round(range20_pct, 2),
+        "close_to_20d_high_pct": safe_round(close_to_20d_high_pct, 2),
+        "up_days_last5": up_days5,
+        "accumulation_score": accumulation_score,
+        "accumulation_reasons": reasons,
+    }
+
+
+def _index_context_features(trade_date: str, lookback_days: int = 10) -> dict:
+    """Light SPY/QQQ context for the move date. Cached only within one report call."""
+    out = {}
+    for sym in ["SPY", "QQQ"]:
+        bars = _fetch_symbol_daily_bars_light(sym, trade_date, lookback_days=max(8, min(int(lookback_days or 10), 20)))
+        feat = _daily_history_features(sym, trade_date, bars)
+        if feat.get("ok"):
+            out[sym] = {
+                "price_change_5d_pct": feat.get("price_change_5d_pct"),
+                "price_change_10d_pct": feat.get("price_change_10d_pct"),
+                "trend_label": "داعم" if _safe_float(feat.get("price_change_5d_pct"), 0) > 0 else "محايد/ضاغط",
+            }
+    return out
+
+
+def _load_intraday_bars_from_db(symbol: str, trade_date: str, limit: int = 500) -> list[dict]:
+    if not SQLITE_ENABLED:
+        return []
+    try:
+        init_evidence_db()
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT bar_ts, bar_time_text, open, high, low, close, volume, dollar_volume FROM evidence_intraday_bars WHERE trade_date=? AND symbol=? ORDER BY bar_ts ASC LIMIT ?",
+                (str(trade_date or "")[:10], _clean_symbol(symbol), max(10, min(int(limit or 500), 1000))),
+            ).fetchall()
+        out = []
+        for r in rows or []:
+            d = dict(r)
+            out.append({"t": d.get("bar_ts"), "time": d.get("bar_time_text"), "o": d.get("open"), "h": d.get("high"), "l": d.get("low"), "c": d.get("close"), "v": d.get("volume"), "vw": d.get("close")})
+        return out
+    except Exception:
+        return []
+
+
+def _movement_start_from_bars(symbol: str, trade_date: str, previous_close: float = 0.0, day_open: float = 0.0, fallback_pattern: str = "") -> dict:
+    bars = _load_intraday_bars_from_db(symbol, trade_date)
+    prev = _safe_float(previous_close, 0)
+    open_px = _safe_float(day_open, 0)
+    baseline = prev if prev > 0 else open_px
+    if not bars or baseline <= 0:
+        # Fallback: if no bars are stored, classify movement origin from profile fields only.
+        return {
+            "movement_start_time": "",
+            "movement_start_ts": None,
+            "movement_start_reason": "daily_profile_only_no_intraday_bars",
+            "movement_start_gain_pct": 0.0,
+            "intraday_bars_available": 0,
+        }
+    first_liq_ts = None
+    first_threshold_ts = None
+    first_reason = ""
+    volumes = [_safe_float(b.get("v"), 0) for b in bars]
+    avg_vol = sum(volumes) / max(1, len(volumes))
+    for b in bars:
+        dt = _dt_from_polygon_ms(b.get("t"))
+        high = _safe_float(b.get("h"), 0)
+        close = _safe_float(b.get("c"), 0)
+        vol = _safe_float(b.get("v"), 0)
+        gain_high = _pct_change(high, baseline)
+        gain_close = _pct_change(close, baseline)
+        if not first_liq_ts and vol > 0 and avg_vol > 0 and vol >= avg_vol * 2.5:
+            first_liq_ts = dt
+        if gain_high >= 5 or gain_close >= 4:
+            first_threshold_ts = dt
+            first_reason = f"أول شمعة وصلت حركة مبكرة ({safe_round(max(gain_high, gain_close),1)}%)"
+            break
+    chosen = first_threshold_ts or first_liq_ts
+    if not first_reason and first_liq_ts:
+        first_reason = "أول تسارع حجم واضح قبل/أثناء الحركة"
+    return {
+        "movement_start_time": _time_text(chosen),
+        "movement_start_ts": chosen.timestamp() if chosen else None,
+        "movement_start_reason": first_reason or "intraday_bars_present_but_start_unclear",
+        "movement_start_gain_pct": 5.0 if first_threshold_ts else 0.0,
+        "intraday_bars_available": len(bars),
+    }
+
+
+def _last_evidence_run_before(ts: float | None, trade_date: str = "") -> dict:
+    if not (SQLITE_ENABLED and ts):
+        return {}
+    try:
+        init_evidence_db()
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM evidence_runs WHERE trade_date=? AND started_at<=? ORDER BY started_at DESC LIMIT 1",
+                (str(trade_date or "")[:10], float(ts)),
+            ).fetchone()
+        if not row:
+            return {}
+        d = dict(row)
+        started = _safe_float(d.get("started_at"), 0)
+        return {
+            "run_id": d.get("run_id", ""),
+            "started_at": datetime.fromtimestamp(started, tz=NY_TZ).strftime("%Y-%m-%d %H:%M:%S") if started > 0 else "",
+            "session": d.get("session", ""),
+            "mode": d.get("mode", ""),
+            "symbols_requested": d.get("symbols_requested", 0),
+        }
+    except Exception:
+        return {}
+
+
+def _event_from_visibility(vis: dict, event_key: str) -> dict:
+    events = (vis or {}).get("timeline_events") or {}
+    ev = events.get(event_key) or {}
+    return ev if isinstance(ev, dict) else {}
+
+
+def _gain_from_event(ev: dict) -> float | None:
+    if not ev:
+        return None
+    val = ev.get("first_gain_pct")
+    if val is None or val == "":
+        return None
+    f = _safe_float(val, 0.0)
+    if abs(f) > 1000:
+        return None
+    return safe_round(f, 2)
+
+
+def _classify_anatomy(row: dict, hist: dict | None = None) -> dict:
+    hist = hist or {}
+    gap = _safe_float(row.get("gap_pct") or row.get("open_gap_pct"), 0)
+    premkt = _safe_float(row.get("pre_market_change_pct") or row.get("pre_market_move_pct"), 0)
+    pre_vol = _safe_float(row.get("pre_market_volume"), 0)
+    first30 = _safe_float(row.get("first_30m_gain_pct"), 0)
+    first60 = _safe_float(row.get("first_60m_gain_pct"), 0)
+    liq_acc = _safe_float(row.get("liquidity_acceleration_score"), 0)
+    liq_persist = _safe_float(row.get("liquidity_persistence_score"), 0)
+    close_pos = _safe_float(row.get("close_position_pct"), 0)
+    close_open = _safe_float(row.get("close_vs_open_pct"), 0)
+    fade = int(row.get("volume_fade_flag") or row.get("gap_fade_flag") or 0)
+    likely = str(row.get("likely_pattern") or "")
+    quality = str(row.get("move_quality_label") or "")
+    trad = str(row.get("tradability_bucket") or "")
+    reasons = []
+    warnings = []
+    pattern = likely or "unclassified_winner"
+    if abs(premkt) >= 5 or pre_vol > 0:
+        reasons.append(f"حركة/حجم قبل الافتتاح: {safe_round(premkt,1)}%")
+    if gap >= 8:
+        reasons.append(f"قاب افتتاح قوي: {safe_round(gap,1)}%")
+    if first30 >= 4 or first60 >= 6:
+        reasons.append(f"متابعة أول ساعة: 30د {safe_round(first30,1)}% / 60د {safe_round(first60,1)}%")
+    if liq_acc >= 60:
+        reasons.append(f"تسارع سيولة مرتفع: {safe_round(liq_acc,1)}/100")
+    if liq_persist >= 65:
+        reasons.append(f"السيولة استمرت: {safe_round(liq_persist,1)}/100")
+    if close_pos >= 75 or close_open >= 8:
+        reasons.append("أغلق قويًا قرب القمة أو أعلى الافتتاح")
+    if hist.get("ok"):
+        if _safe_float(hist.get("accumulation_score"), 0) >= 45:
+            reasons.append("ظهرت إشارات بناء/تجميع قبل يوم الحركة")
+        for r in hist.get("accumulation_reasons") or []:
+            if len(reasons) < 8:
+                reasons.append(str(r))
+    if fade:
+        warnings.append("ظهر فشل/تلاشي سيولة داخل الحركة")
+    if "micro" in trad or "special" in trad:
+        warnings.append("رمز صغير/خاص عالي المخاطر؛ لا يُعامل كـ Strong عادي")
+    if gap >= 20 and liq_persist < 55:
+        warnings.append("قاب كبير مع استمرار سيولة غير كافٍ = مطاردة محتملة")
+    # Prominent pattern label.
+    if gap >= 8 and (first30 >= 3 or liq_persist >= 60) and not fade:
+        prominent = "pre_market_or_open_gap_followthrough"
+        label_ar = "قاب/ما قبل الافتتاح مع متابعة صحية"
+    elif liq_acc >= 65 and first30 >= 3:
+        prominent = "first_hour_liquidity_acceleration"
+        label_ar = "تسارع سيولة أول ساعة"
+    elif liq_persist >= 70 and abs(gap) < 5:
+        prominent = "steady_liquidity_followthrough"
+        label_ar = "استمرار سيولة بدون قاب كبير"
+    elif hist.get("ok") and _safe_float(hist.get("accumulation_score"), 0) >= 45:
+        prominent = "pre_move_accumulation_build"
+        label_ar = "بناء/تجميع قبل الحركة"
+    elif gap >= 15 and fade:
+        prominent = "gap_chase_or_failed_gap_risk"
+        label_ar = "قاب كبير عالي المطاردة"
+    else:
+        prominent = pattern
+        label_ar = "نمط صعود غير مكتمل التصنيف"
+    return {
+        "prominent_pattern": prominent,
+        "prominent_pattern_ar": label_ar,
+        "likely_pattern": pattern,
+        "move_quality_label": quality,
+        "reasons": reasons[:10] or ["الصعود واضح لكن لا توجد أسباب كافية مخزنة لتفسيره بثقة"],
+        "warnings": warnings[:8],
+    }
+
+
+def _classify_latency(row: dict, movement: dict, visibility: dict) -> dict:
+    source_at = str(visibility.get("first_source_seen_at") or "")
+    deep_at = str(visibility.get("first_deep_seen_at") or "")
+    watch_at = str(visibility.get("first_watch_seen_at") or "")
+    cautious_at = str(visibility.get("first_cautious_seen_at") or "")
+    strong_at = str(visibility.get("first_strong_seen_at") or "")
+    entry_at = strong_at or cautious_at
+    source_dt = _parse_ny_time_text(source_at)
+    deep_dt = _parse_ny_time_text(deep_at)
+    watch_dt = _parse_ny_time_text(watch_at)
+    cautious_dt = _parse_ny_time_text(cautious_at)
+    strong_dt = _parse_ny_time_text(strong_at)
+    entry_dt = strong_dt or cautious_dt
+    move_ts = movement.get("movement_start_ts")
+    move_dt = datetime.fromtimestamp(float(move_ts), tz=NY_TZ) if move_ts else None
+    gain_source = _safe_float(visibility.get("first_source_gain_pct"), 0)
+    gain_watch = _gain_from_event(_event_from_visibility(visibility, "watch"))
+    gain_cautious = _gain_from_event(_event_from_visibility(visibility, "cautious"))
+    gain_strong = _gain_from_event(_event_from_visibility(visibility, "strong"))
+    gain_entry = gain_strong if gain_strong is not None else gain_cautious
+    delay = {
+        "movement_to_source_minutes": _minutes_between_dt(move_dt, source_dt),
+        "source_to_deep_minutes": _minutes_between_dt(source_dt, deep_dt),
+        "deep_to_watch_minutes": _minutes_between_dt(deep_dt, watch_dt),
+        "watch_to_cautious_minutes": _minutes_between_dt(watch_dt, cautious_dt),
+        "watch_to_strong_minutes": _minutes_between_dt(watch_dt, strong_dt),
+        "source_to_entry_minutes": _minutes_between_dt(source_dt, entry_dt),
+        "movement_to_entry_minutes": _minutes_between_dt(move_dt, entry_dt),
+    }
+    source_seen = bool(visibility.get("source_seen") or source_at or deep_at)
+    tool_stage = str(visibility.get("best_tool_stage") or visibility.get("tool_stage") or "")
+    category = "unknown"
+    reason_ar = "لا يوجد سبب تأخير واضح"
+    if not source_seen:
+        category = "source_missed"
+        reason_ar = "لم يدخل المنبع تاريخيًا حسب البيانات المخزنة"
+    elif source_seen and not deep_at:
+        category = "source_not_deep"
+        reason_ar = "دخل المنبع ولم يصل إلى التحليل العميق"
+    elif deep_at and not (watch_at or cautious_at or strong_at):
+        category = "deep_not_watch"
+        reason_ar = "دخل التحليل العميق ولم يظهر في القوائم"
+    elif watch_at and not (cautious_at or strong_at):
+        category = "watch_not_promoted"
+        reason_ar = "ظهر مراقبة ولم يترقَّ إلى دخول"
+    elif (gain_entry is not None and gain_entry >= 12) or (_safe_float(row.get("winner_change_pct"), 0) >= 20 and entry_at and _safe_float(gain_source, 0) <= 8):
+        category = "late_entry"
+        reason_ar = "ترقّى كدخول بعد حركة كبيرة"
+    elif source_seen and (cautious_at or strong_at):
+        category = "promoted"
+        reason_ar = "دخل المنبع ثم وصل إلى فرصة دخول"
+    if move_dt and source_dt and _minutes_between_dt(move_dt, source_dt) > 20 and category in {"source_missed", "source_not_deep", "late_entry", "promoted"}:
+        category = "scan_or_source_delay"
+        reason_ar = "هناك فجوة بين بداية الحركة وأول التقاط للمنبع/المسح"
+    return {
+        "latency_category": category,
+        "latency_reason_ar": reason_ar,
+        "tool_stage": tool_stage,
+        "first_source_time": source_at,
+        "first_deep_time": deep_at,
+        "first_watch_time": watch_at,
+        "first_cautious_time": cautious_at,
+        "first_strong_time": strong_at,
+        "gain_at_source_pct": safe_round(gain_source, 2),
+        "gain_at_watch_pct": gain_watch,
+        "gain_at_cautious_pct": gain_cautious,
+        "gain_at_strong_pct": gain_strong,
+        "delay_minutes": delay,
+    }
+
+
+def _recommended_future_action(row: dict, anatomy: dict, latency: dict) -> dict:
+    gain = _safe_float(row.get("winner_change_pct"), 0)
+    pattern = str(anatomy.get("prominent_pattern") or "")
+    liq_acc = _safe_float(row.get("liquidity_acceleration_score"), 0)
+    liq_persist = _safe_float(row.get("liquidity_persistence_score"), 0)
+    gap = _safe_float(row.get("gap_pct"), 0)
+    latency_cat = str(latency.get("latency_category") or "")
+    gain_source = _safe_float(latency.get("gain_at_source_pct"), 0)
+    gain_entry = latency.get("gain_at_strong_pct") if latency.get("gain_at_strong_pct") is not None else latency.get("gain_at_cautious_pct")
+    gain_entry_f = _safe_float(gain_entry, 0) if gain_entry is not None else 0
+    warnings = anatomy.get("warnings") or []
+    if gain_entry_f >= 20 or (gap >= 20 and liq_persist < 55):
+        action = "no_chase_warning"
+        label = "⛔ لا تطارد — الحركة متأخرة أو القاب كبير"
+    elif latency_cat in {"source_missed", "source_not_deep", "deep_not_watch"} and (liq_acc >= 55 or liq_persist >= 60 or "accumulation" in pattern):
+        action = "add_to_source_and_close_watch"
+        label = "🔍 أدخله المنبع مستقبلًا وضعه تحت مراقبة لصيقة عند تكرار النمط"
+    elif latency_cat in {"watch_not_promoted", "late_entry"} and gain_source <= 8 and (liq_acc >= 50 or liq_persist >= 55):
+        action = "early_momentum_candidate"
+        label = "🚀 مرشح Early Momentum عند تكرار النمط قبل التأخر"
+    elif pattern in {"first_hour_liquidity_acceleration", "steady_liquidity_followthrough", "pre_move_accumulation_build", "pre_market_or_open_gap_followthrough"} and not warnings:
+        action = "telegram_candidate_after_confirmation"
+        label = "📲 يصلح لتنبيه Telegram بعد تأكيد السيولة وعدم التأخر"
+    else:
+        action = "monitor_pattern_only"
+        label = "👁️ راقب النمط فقط حتى تتكرر العينة"
+    return {"action": action, "label_ar": label, "reason": f"gain={safe_round(gain,1)}%, pattern={pattern}, latency={latency_cat}"}
+
+
+def big_mover_anatomy_scan_gap_report(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    format: str = "json",
+    threshold: float = 10.0,
+    limit: int = 40,
+    history_mode: str = "stored",
+    lookback_days: int = 30,
+) -> dict | str:
+    """Explain why >threshold movers rose and where the tool/source delayed.
+
+    Default history_mode='stored' makes no external API calls.  history_mode='light'
+    fetches bounded Polygon daily history for at most 15 symbols plus SPY/QQQ.
+    """
+    wk = str(week_key or _current_week_key() or "")
+    d = str(trade_date or "")[:10]
+    th = max(1.0, min(float(threshold or 10.0), 200.0))
+    lim = max(5, min(int(limit or 40), 120))
+    hist_mode = str(history_mode or "stored").lower().strip()
+    fetch_light = hist_mode in {"light", "polygon", "true", "1", "yes"}
+    history_limit = min(lim, 15) if fetch_light else 0
+    init_evidence_db()
+    where = ["winner_change_pct>=?"]
+    args: list[Any] = [th]
+    if wk:
+        where.append("week_key=?")
+        args.append(wk)
+    if d:
+        where.append("trade_date=?")
+        args.append(d)
+    where_sql = " WHERE " + " AND ".join(where)
+    with _connect() as conn:
+        total = conn.execute(f"SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles {where_sql}", tuple(args)).fetchone()
+        rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, lim)).fetchall()
+    items_raw = [_enrich_winner_profile_row(dict(r), week_key=wk, refresh_visibility=True) for r in rows or []]
+    index_context = _index_context_features(d or (items_raw[0].get("trade_date") if items_raw else _today_text()), lookback_days=10) if fetch_light else {}
+    items = []
+    for idx, row in enumerate(items_raw, start=1):
+        sym = _clean_symbol(row.get("symbol"))
+        td = str(row.get("trade_date") or d or "")[:10]
+        hist = {}
+        if fetch_light and idx <= history_limit:
+            bars = _fetch_symbol_daily_bars_light(sym, td, lookback_days=lookback_days)
+            hist = _daily_history_features(sym, td, bars)
+        profile_json = _safe_json_dict(row.get("profile_json"))
+        if not hist:
+            prev_daily = profile_json.get("previous_daily") if isinstance(profile_json, dict) else {}
+            hist = {"ok": False, "mode": "stored_only", "previous_daily_available": bool(prev_daily)}
+        movement = _movement_start_from_bars(sym, td, previous_close=row.get("previous_close"), day_open=row.get("day_open"), fallback_pattern=row.get("likely_pattern"))
+        last_scan = _last_evidence_run_before(movement.get("movement_start_ts"), td)
+        visibility = _historical_visibility_for_symbol(sym, week_key=wk, trade_date=td)
+        anatomy = _classify_anatomy(row, hist=hist)
+        latency = _classify_latency(row, movement, visibility)
+        if movement.get("movement_start_ts") and last_scan.get("started_at"):
+            last_dt = _parse_ny_time_text(last_scan.get("started_at"))
+            movement["last_scan_before_move"] = last_scan.get("started_at")
+            movement["minutes_from_last_scan_to_move"] = _minutes_between_dt(last_dt, datetime.fromtimestamp(float(movement.get("movement_start_ts")), tz=NY_TZ))
+        else:
+            movement["last_scan_before_move"] = ""
+            movement["minutes_from_last_scan_to_move"] = 0.0
+        action = _recommended_future_action(row, anatomy, latency)
+        item = {
+            "symbol": sym,
+            "trade_date": td,
+            "winner_rank": row.get("winner_rank"),
+            "max_gain_pct": safe_round(row.get("winner_change_pct"), 2),
+            "day_dollar_volume": safe_round(row.get("day_dollar_volume"), 0),
+            "tradability_bucket": row.get("tradability_bucket", ""),
+            "anatomy": anatomy,
+            "historical_pre_move": hist,
+            "movement_start": movement,
+            "index_context": index_context,
+            "scan_gap_latency": latency,
+            "future_action": action,
+            "raw_metrics": {
+                "gap_pct": safe_round(row.get("gap_pct"), 2),
+                "pre_market_change_pct": safe_round(row.get("pre_market_change_pct"), 2),
+                "pre_market_volume": safe_round(row.get("pre_market_volume"), 0),
+                "first_15m_gain_pct": safe_round(row.get("first_15m_gain_pct"), 2),
+                "first_30m_gain_pct": safe_round(row.get("first_30m_gain_pct"), 2),
+                "first_60m_gain_pct": safe_round(row.get("first_60m_gain_pct"), 2),
+                "liquidity_acceleration_score": safe_round(row.get("liquidity_acceleration_score"), 1),
+                "liquidity_persistence_score": safe_round(row.get("liquidity_persistence_score"), 1),
+                "close_position_pct": safe_round(row.get("close_position_pct"), 1),
+                "volume_fade_flag": int(row.get("volume_fade_flag") or 0),
+                "gap_fade_flag": int(row.get("gap_fade_flag") or 0),
+            },
+        }
+        items.append(item)
+    # Aggregates for decision-making.
+    pattern_counts: dict[str, dict] = {}
+    latency_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+    for it in items:
+        p = str((it.get("anatomy") or {}).get("prominent_pattern") or "unknown")
+        pc = pattern_counts.setdefault(p, {"cases": 0, "sum_gain": 0.0, "examples": []})
+        pc["cases"] += 1
+        pc["sum_gain"] += _safe_float(it.get("max_gain_pct"), 0)
+        if len(pc["examples"]) < 5:
+            pc["examples"].append(it.get("symbol"))
+        lat = str((it.get("scan_gap_latency") or {}).get("latency_category") or "unknown")
+        latency_counts[lat] = latency_counts.get(lat, 0) + 1
+        act = str((it.get("future_action") or {}).get("action") or "unknown")
+        action_counts[act] = action_counts.get(act, 0) + 1
+    top_patterns = []
+    for k, v in pattern_counts.items():
+        cases = max(1, int(v.get("cases") or 0))
+        top_patterns.append({"pattern": k, "cases": cases, "avg_gain_pct": safe_round(_safe_float(v.get("sum_gain"), 0) / cases, 2), "examples": v.get("examples") or []})
+    top_patterns.sort(key=lambda x: (x.get("cases", 0), x.get("avg_gain_pct", 0)), reverse=True)
+    result = {
+        "ok": True,
+        "version": _BIG_MOVER_AUDIT_VERSION,
+        "week_key": wk,
+        "trade_date": d,
+        "threshold_pct": th,
+        "history_mode": "light_polygon" if fetch_light else "stored_only_no_external_calls",
+        "lookback_days": max(1, min(int(lookback_days or 30), 45)),
+        "total_matching_profiles": int(dict(total).get("c", 0) if total else 0),
+        "total_matching_symbols": int(dict(total).get("symbols", 0) if total else 0),
+        "items_returned": len(items),
+        "top_patterns": top_patterns,
+        "latency_counts": latency_counts,
+        "future_action_counts": action_counts,
+        "items": items,
+        "notes": "Read-only diagnostic. Default mode uses stored SQLite evidence only. Use history_mode=light with a small limit for bounded Polygon daily-history enrichment.",
+    }
+    if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
+        lines = [
+            "تقرير Big Mover Anatomy + Scan Gap Audit V1",
+            f"الأسبوع: {wk}",
+            f"التاريخ: {d or 'كل الأسبوع'} | الحد: +{safe_round(th,1)}%",
+            f"النمط/التاريخ: {result['history_mode']} | المعروض: {len(items)} من {result['total_matching_profiles']} ملف رابح",
+            "",
+            "أبرز أنماط الصعود:",
+        ]
+        for p in top_patterns[:8]:
+            lines.append(f"- {p.get('pattern')}: {p.get('cases')} حالة | متوسط الصعود {p.get('avg_gain_pct')}% | أمثلة: {', '.join(p.get('examples') or [])}")
+        lines.append("")
+        lines.append("أين تأخرت الأداة/المنبع:")
+        if not latency_counts:
+            lines.append("- لا توجد عينة كافية.")
+        for k, v in sorted(latency_counts.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"- {k}: {v}")
+        lines.append("")
+        lines.append("أهم الأسهم وتشريح الحركة:")
+        for it in items[:min(25, len(items))]:
+            anat = it.get("anatomy") or {}
+            lat = it.get("scan_gap_latency") or {}
+            mv = it.get("movement_start") or {}
+            action = it.get("future_action") or {}
+            metrics = it.get("raw_metrics") or {}
+            src_gain = lat.get("gain_at_source_pct")
+            entry_gain = lat.get("gain_at_strong_pct") if lat.get("gain_at_strong_pct") is not None else lat.get("gain_at_cautious_pct")
+            lines.append(
+                f"- {it.get('symbol')}: +{safe_round(it.get('max_gain_pct'),1)}% | {anat.get('prominent_pattern_ar')} | "
+                f"gap {safe_round(metrics.get('gap_pct'),1)}% | 30د {safe_round(metrics.get('first_30m_gain_pct'),1)}% | "
+                f"سيولة {safe_round(metrics.get('liquidity_persistence_score'),1)}/100 | latency={lat.get('latency_category')} | {action.get('label_ar')}"
+            )
+            reasons = anat.get("reasons") or []
+            if reasons:
+                lines.append("  • لماذا صعد؟ " + "؛ ".join(str(x) for x in reasons[:4]))
+            if mv.get("movement_start_time") or mv.get("last_scan_before_move"):
+                lines.append(f"  • بداية الحركة: {mv.get('movement_start_time') or 'غير مؤكدة'} | آخر مسح قبلها: {mv.get('last_scan_before_move') or 'غير متوفر'}")
+            lines.append(
+                f"  • المنبع/القوائم: source {lat.get('first_source_time') or '-'} عند {src_gain if src_gain is not None else '-'}% | "
+                f"watch {lat.get('first_watch_time') or '-'} | cautious {lat.get('first_cautious_time') or '-'} عند {entry_gain if entry_gain is not None else '-'}% | strong {lat.get('first_strong_time') or '-'}"
+            )
         return "\n".join(lines)
     return result
 
