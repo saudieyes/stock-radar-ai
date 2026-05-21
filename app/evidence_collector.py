@@ -69,6 +69,8 @@ EVIDENCE_COLLECTION_ENABLED = _env_bool("EVIDENCE_COLLECTION_ENABLED", True)
 EVIDENCE_BACKGROUND_WORKER_ENABLED = _env_bool("EVIDENCE_BACKGROUND_WORKER_ENABLED", True)
 EVIDENCE_GITHUB_AUTO_SYNC_ENABLED = _env_bool("EVIDENCE_GITHUB_AUTO_SYNC_ENABLED", True)
 EVIDENCE_AUTO_SYNC_RIYADH_HOUR = max(0, min(_env_int("EVIDENCE_AUTO_SYNC_RIYADH_HOUR", 5), 23))
+EVIDENCE_AUTO_SYNC_RIYADH_MINUTE = max(0, min(_env_int("EVIDENCE_AUTO_SYNC_RIYADH_MINUTE", 45), 59))
+EVIDENCE_AUTO_SYNC_STATE_VERSION = "v5c"
 EVIDENCE_BIG_MOVERS_ENABLED = _env_bool("EVIDENCE_BIG_MOVERS_ENABLED", True)
 EVIDENCE_POLYGON_ENABLED = _env_bool("EVIDENCE_POLYGON_ENABLED", True)
 EVIDENCE_BIG_MOVER_THRESHOLD_PCT = _env_float("EVIDENCE_BIG_MOVER_THRESHOLD_PCT", 10.0)
@@ -1947,7 +1949,7 @@ def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, s
     """Return whether the Riyadh daily sync should run and the US trade date.
 
     Schedule requested by the user:
-    - Saturday 05:00 Asia/Riyadh syncs Friday trading.
+    - Saturday 05:45 Asia/Riyadh syncs Friday trading by default.
     - Sunday and Monday do not sync because Saturday/Sunday are closed.
     - Tuesday syncs Monday, Wednesday syncs Tuesday, Thursday syncs Wednesday,
       Friday syncs Thursday.
@@ -1956,9 +1958,10 @@ def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, s
     wd = now_r.weekday()  # Monday=0 ... Sunday=6
     if wd in {6, 0}:  # Sunday, Monday
         return False, "", "skip_non_trading_previous_day"
-    # Tue-Sat only, after the configured Riyadh sync hour. Default is 05:00.
-    if now_r.time() < dt_time(EVIDENCE_AUTO_SYNC_RIYADH_HOUR, 0):
-        return False, "", f"before_{EVIDENCE_AUTO_SYNC_RIYADH_HOUR:02d}00_riyadh"
+    # Tue-Sat only, after the configured Riyadh sync time. Default is 05:45.
+    sync_time = dt_time(EVIDENCE_AUTO_SYNC_RIYADH_HOUR, EVIDENCE_AUTO_SYNC_RIYADH_MINUTE)
+    if now_r.time() < sync_time:
+        return False, "", f"before_{EVIDENCE_AUTO_SYNC_RIYADH_HOUR:02d}{EVIDENCE_AUTO_SYNC_RIYADH_MINUTE:02d}_riyadh"
     prev = date.fromordinal(now_r.date().toordinal() - 1)
     # Tue->Mon, Wed->Tue, Thu->Wed, Fri->Thu, Sat->Fri. All are weekdays.
     return True, prev.isoformat(), "due_after_trading_day"
@@ -1966,20 +1969,21 @@ def _riyadh_sync_trade_date(now_riyadh: datetime | None = None) -> tuple[bool, s
 
 def evidence_auto_sync_status() -> dict:
     due, trade_date, reason = _riyadh_sync_trade_date()
-    key = f"evidence_auto_github_synced_{trade_date}" if trade_date else ""
-    attempt_key = f"evidence_auto_github_attempted_{trade_date}" if trade_date else ""
+    key = f"evidence_auto_github_synced_{EVIDENCE_AUTO_SYNC_STATE_VERSION}_{trade_date}" if trade_date else ""
+    attempt_key = f"evidence_auto_github_attempted_{EVIDENCE_AUTO_SYNC_STATE_VERSION}_{trade_date}" if trade_date else ""
     done = get_json(key, {}) if key else {}
     attempted = get_json(attempt_key, {}) if attempt_key else {}
     last = get_json("evidence_last_auto_sync", {})
     return {
         "ok": True,
-        "version": "evidence_auto_sync_v5b_riyadh_daily_once_guarded",
+        "version": "evidence_auto_sync_v5c_riyadh_daily_once_github_fallback",
         "enabled": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED),
         "github_configured": bool(is_github_sync_configured()),
         "now_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
-        "schedule": f"Tue/Wed/Thu/Fri/Sat {EVIDENCE_AUTO_SYNC_RIYADH_HOUR:02d}:00 Asia/Riyadh; skips Sunday and Monday; never deletes Railway data.",
+        "schedule": f"Tue/Wed/Thu/Fri/Sat {EVIDENCE_AUTO_SYNC_RIYADH_HOUR:02d}:{EVIDENCE_AUTO_SYNC_RIYADH_MINUTE:02d} Asia/Riyadh; skips Sunday and Monday; never deletes Railway data.",
         "due_now": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED and is_github_sync_configured() and due and not (isinstance(done, dict) and done.get("ok")) and not (isinstance(attempted, dict) and attempted.get("attempted"))),
         "planned_trade_date": trade_date,
+        "state_version": EVIDENCE_AUTO_SYNC_STATE_VERSION,
         "skip_reason": ("auto_sync_disabled" if not EVIDENCE_GITHUB_AUTO_SYNC_ENABLED else ("github_sync_not_configured" if not is_github_sync_configured() else (reason if not due else ("already_synced" if isinstance(done, dict) and done.get("ok") else ("already_attempted" if isinstance(attempted, dict) and attempted.get("attempted") else ""))))),
         "already_synced_for_trade_date": bool(isinstance(done, dict) and done.get("ok")),
         "already_attempted_for_trade_date": bool(isinstance(attempted, dict) and attempted.get("attempted")),
@@ -1990,7 +1994,7 @@ def evidence_auto_sync_status() -> dict:
         "auto_backfill_store_bars": bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
         "sync_include_csv_default": bool(EVIDENCE_SYNC_INCLUDE_CSV_DEFAULT),
         "attempt_state": ("incomplete_or_crashed" if isinstance(attempted, dict) and attempted.get("attempted") and attempted.get("ok") is None else ("finished" if isinstance(attempted, dict) and attempted.get("attempted") else "none")),
-        "notes": "Daily Evidence sync exports compact GitHub files only. Railway deletion/pruning remains disabled unless the guarded prune-execute endpoint is called manually with confirmation.",
+        "notes": "Daily Evidence sync exports compact GitHub files only, default 05:45 Riyadh. GitHub Contents API fallback avoids Git Data API 404. Railway deletion/pruning remains disabled unless the guarded prune-execute endpoint is called manually with confirmation.",
     }
 
 
@@ -2009,8 +2013,8 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
         trade_date = prev.isoformat()
         due = True
         reason = "forced_manual_recent_trading_day"
-    key = f"evidence_auto_github_synced_{trade_date}" if trade_date else ""
-    attempt_key = f"evidence_auto_github_attempted_{trade_date}" if trade_date else ""
+    key = f"evidence_auto_github_synced_{EVIDENCE_AUTO_SYNC_STATE_VERSION}_{trade_date}" if trade_date else ""
+    attempt_key = f"evidence_auto_github_attempted_{EVIDENCE_AUTO_SYNC_STATE_VERSION}_{trade_date}" if trade_date else ""
     done = get_json(key, {}) if key else {}
     attempted = get_json(attempt_key, {}) if attempt_key else {}
     if not force and isinstance(done, dict) and done.get("ok"):
@@ -2041,7 +2045,7 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
     sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=include_csv)
     result = {
         "ok": bool(sync.get("ok")),
-        "version": "evidence_daily_auto_sync_v5b_compact_once_daily",
+        "version": "evidence_daily_auto_sync_v5c_compact_once_daily",
         "trade_date": trade_date,
         "week_key": wk,
         "ran_at_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2959,14 +2963,15 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
 
     results = {
         "ok": bool(batch.get("ok")),
-        "version": "evidence_github_batch_sync_v5_railway_safe_compact",
+        "version": "evidence_github_sync_v5c_contents_fallback_compact",
         "week_key": wk,
         "trade_date": d,
         "paths": paths,
         "local_counts_at_sync": local_counts,
         "compact_sync": bool(EVIDENCE_GITHUB_COMPACT_SYNC),
         "include_csv": bool(include_csv),
-        "batch_commit": True,
+        "batch_commit": bool(batch.get("method") == "git_data_batch"),
+        "github_sync_method": batch.get("method", ""),
         "batch": batch,
         **file_results,
     }
@@ -3411,7 +3416,7 @@ def evidence_retention_prune_execute(
 def _daily_auto_sync_due(session: str) -> bool:
     """Compatibility wrapper used by the background worker.
 
-    The real schedule is Riyadh 5 AM after US trading days only. We keep the
+    The real schedule is Riyadh 05:45 after US trading days by default. We keep the
     session argument for backward compatibility but do not use it as the primary
     decision, because 5 AM Riyadh occurs while New York is closed.
     """
@@ -3423,7 +3428,7 @@ def _mark_daily_auto_sync(result: dict) -> None:
     try:
         trade_date = str((result or {}).get("trade_date") or "")[:10]
         if trade_date:
-            set_json(f"evidence_auto_github_synced_{trade_date}", result)
+            set_json(f"evidence_auto_github_synced_{EVIDENCE_AUTO_SYNC_STATE_VERSION}_{trade_date}", result)
         set_json("evidence_last_auto_sync", result)
     except Exception:
         pass
@@ -3488,7 +3493,7 @@ def _worker_loop() -> None:
                     store_bars=bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
                 )
                 _mark_daily_winner_backfill(backfill)
-            # GitHub sync follows the user-defined Riyadh schedule: Tue-Sat 05:00 only, never Sunday/Monday.
+            # GitHub sync follows the user-defined Riyadh schedule: Tue-Sat 05:45 by default, never Sunday/Monday.
             if _daily_auto_sync_due(session):
                 sync = run_evidence_auto_sync(force=False, dry_run=False, include_csv=None)
                 _mark_daily_auto_sync(sync)

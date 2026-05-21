@@ -56,6 +56,75 @@ def _serialize_file_content(content: Any, *, is_json: bool = False) -> str:
     return str(content or "")
 
 
+
+def _contents_api_put_serialized_file(item: dict, message: str, branch: str, timeout: float) -> dict:
+    """Create/update one serialized text file using GitHub Contents API.
+
+    This is intentionally used as the Railway-safe fallback/default for evidence
+    archives because some tokens can read/write repository contents but cannot
+    use the Git Data ref/tree API. It is compact-file only; caller-side size
+    guards run before this function.
+    """
+    path = str(item.get("path") or "").strip().lstrip("/")
+    label = str(item.get("label") or path)
+    raw = str(item.get("content") or "")
+    current = fetch_text_file(path)
+    sha = current.get("sha") if current.get("ok") and current.get("exists") else ""
+    body = {
+        "message": message,
+        "content": base64.b64encode(raw.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if sha:
+        body["sha"] = sha
+    r = HTTP_SESSION.put(_content_url(path), headers=_headers(), json=body, timeout=timeout)
+    r.raise_for_status()
+    payload = r.json() or {}
+    return {
+        "ok": True,
+        "configured": True,
+        "label": label,
+        "path": path,
+        "branch": branch,
+        "commit_sha": ((payload.get("commit") or {}).get("sha") or ""),
+        "bytes": len(raw.encode("utf-8")),
+        "synced_at": datetime.now(ZoneInfo("America/New_York")).isoformat(),
+    }
+
+
+def _push_multiple_files_contents_api(safe_files: list[dict], message: str, *, reason: str = "contents_api") -> dict:
+    branch = GITHUB_SYNC_BRANCH or "main"
+    timeout = float(GITHUB_SYNC_TIMEOUT_SEC or 12)
+    synced_files = []
+    errors = []
+    for item in safe_files:
+        try:
+            one = _contents_api_put_serialized_file(item, message, branch, timeout)
+            synced_files.append(one)
+        except Exception as exc:
+            errors.append({
+                "label": item.get("label"),
+                "path": item.get("path"),
+                "error": f"{type(exc).__name__}: {str(exc)[:220]}",
+            })
+            # Stop immediately to avoid repeated network/egress attempts.
+            break
+    ok = bool(synced_files) and not errors and len(synced_files) == len(safe_files)
+    return {
+        "ok": ok,
+        "configured": True,
+        "method": "contents_api_fallback" if reason != "contents_api_default" else "contents_api_default",
+        "fallback_reason": reason,
+        "branch": branch,
+        "file_count": len(safe_files),
+        "synced_count": len(synced_files),
+        "files": synced_files,
+        "errors": errors,
+        "error": "" if ok else (errors[0].get("error") if errors else "contents_api_sync_incomplete"),
+        "synced_at": datetime.now(ZoneInfo("America/New_York")).isoformat(),
+        "note": "Uses GitHub Contents API. This may create one commit per compact archive file, but Watch Paths keep app_data commits from deploying Railway.",
+    }
+
 def push_multiple_files(files: list[dict], message: str = "Sync Stock Radar data batch") -> dict:
     """Create/update multiple repository files in one GitHub commit.
 
@@ -116,6 +185,13 @@ def push_multiple_files(files: list[dict], message: str = "Sync Stock Radar data
             "files": byte_rows[:20],
             "advice": "Use compact evidence sync or split archives before retrying. No network upload was attempted.",
         }
+
+    # V5c: default to the Contents API for Railway evidence archives. The previous
+    # Git Data batch path failed for this repo/token with 404 on /git/ref/heads/main.
+    # Contents API is the same permission family used by the working manual Sharia sync.
+    use_git_data = str(os.getenv("GITHUB_SYNC_USE_GIT_DATA_API", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if not use_git_data:
+        return _push_multiple_files_contents_api(safe_files, message, reason="contents_api_default")
 
     branch = GITHUB_SYNC_BRANCH or "main"
     timeout = float(GITHUB_SYNC_TIMEOUT_SEC or 12)
@@ -185,6 +261,7 @@ def push_multiple_files(files: list[dict], message: str = "Sync Stock Radar data
         return {
             "ok": True,
             "configured": True,
+            "method": "git_data_batch",
             "branch": branch,
             "commit_sha": new_commit_sha,
             "parent_sha": head_sha,
@@ -193,7 +270,15 @@ def push_multiple_files(files: list[dict], message: str = "Sync Stock Radar data
             "synced_at": datetime.now(ZoneInfo("America/New_York")).isoformat(),
         }
     except Exception as exc:
-        return {"ok": False, "configured": True, "error": f"{type(exc).__name__}: {str(exc)[:260]}", "branch": branch, "file_count": len(safe_files)}
+        err = f"{type(exc).__name__}: {str(exc)[:260]}"
+        # V5c fallback: if Git Data API cannot access refs/trees, fall back once to
+        # the Contents API instead of failing the daily archive. This avoids retry loops
+        # and keeps network usage bounded by the compact file size guard above.
+        if ("404" in err or "Not Found" in err or "git/ref" in err or "403" in err):
+            fb = _push_multiple_files_contents_api(safe_files, message, reason=f"git_data_failed:{err[:120]}")
+            fb["git_data_error"] = err
+            return fb
+        return {"ok": False, "configured": True, "method": "git_data_batch", "error": err, "branch": branch, "file_count": len(safe_files)}
 
 
 def fetch_json_file(path: str) -> dict:
