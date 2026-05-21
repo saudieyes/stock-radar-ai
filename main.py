@@ -163,6 +163,7 @@ from app.evidence_collector import (
     evidence_auto_sync_status,
     run_evidence_auto_sync,
     liquidity_confirmation_check,
+    big_mover_anatomy_scan_gap_report,
     evidence_retention_status,
     evidence_retention_verify_github,
     evidence_retention_prune_dry_run,
@@ -2790,6 +2791,31 @@ def evidence_pattern_readiness_endpoint(week_key: str = "", format: str = "json"
 @app.get("/evidence/pattern-lab")
 def evidence_pattern_lab_endpoint(week_key: str = "", trade_date: str = "", format: str = "json", limit: int = 40):
     result = pattern_lab_report(week_key=week_key or None, trade_date=trade_date or None, format=format, limit=limit)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
+@app.get("/diagnostics/big-mover-anatomy")
+@app.get("/diagnostics/big-mover-pattern-audit")
+@app.get("/diagnostics/scan-gap-latency")
+def diagnostics_big_mover_anatomy_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    format: str = "json",
+    threshold: float = 10.0,
+    limit: int = 40,
+    history_mode: str = "stored",
+    lookback_days: int = 30,
+):
+    result = big_mover_anatomy_scan_gap_report(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        format=format,
+        threshold=threshold,
+        limit=limit,
+        history_mode=history_mode,
+        lookback_days=lookback_days,
+    )
     if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
     return result
