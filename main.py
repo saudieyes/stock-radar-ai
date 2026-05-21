@@ -2806,6 +2806,10 @@ def diagnostics_big_mover_anatomy_endpoint(
     limit: int = 40,
     history_mode: str = "stored",
     lookback_days: int = 30,
+    max_profiles: int = 1000,
+    sample_limit: int = 120,
+    external_limit: int = 0,
+    compare_losses: bool = True,
 ):
     result = big_mover_anatomy_scan_gap_report(
         week_key=week_key or None,
@@ -2815,6 +2819,10 @@ def diagnostics_big_mover_anatomy_endpoint(
         limit=limit,
         history_mode=history_mode,
         lookback_days=lookback_days,
+        max_profiles=max_profiles,
+        sample_limit=sample_limit,
+        external_limit=external_limit,
+        compare_losses=compare_losses,
     )
     if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
