@@ -1881,7 +1881,7 @@ def winner_profiles_report(week_key: str | None = None, trade_date: str | None =
 # bounded optional Polygon daily-history mode can be enabled with
 # history_mode=light for a small number of symbols.
 
-_BIG_MOVER_AUDIT_VERSION = "big_mover_anatomy_scan_gap_v1"
+_BIG_MOVER_AUDIT_VERSION = "big_mover_anatomy_historical_pattern_audit_v2"
 
 
 def _parse_ny_time_text(value: Any) -> datetime | None:
@@ -2332,6 +2332,255 @@ def _recommended_future_action(row: dict, anatomy: dict, latency: dict) -> dict:
     return {"action": action, "label_ar": label, "reason": f"gain={safe_round(gain,1)}%, pattern={pattern}, latency={latency_cat}"}
 
 
+def _winner_profile_key(row: dict) -> str:
+    return f"{str((row or {}).get('trade_date') or '')[:10]}::{_clean_symbol((row or {}).get('symbol'))}"
+
+
+def _is_special_or_warrant_symbol(symbol: str) -> bool:
+    sym = _clean_symbol(symbol)
+    if not sym:
+        return True
+    # Warrants/rights/units and odd classes often dominate huge % gainers but are not normal Strong candidates.
+    upper = sym.upper()
+    if any(marker in upper for marker in [".W", ".WS", "-W", "-WS", " WT", " WS"]):
+        return True
+    if upper.endswith("W") and len(upper) >= 4:
+        return True
+    if upper.endswith("WS") or upper.endswith("WT") or upper.endswith("U"):
+        return True
+    return False
+
+
+def _tradable_bucket_simple(row: dict) -> str:
+    bucket = str((row or {}).get("tradability_bucket") or "").lower()
+    sym = _clean_symbol((row or {}).get("symbol"))
+    if _is_special_or_warrant_symbol(sym):
+        return "special_symbol_or_warrant"
+    if "micro" in bucket or "special" in bucket:
+        return "micro_or_special_high_risk"
+    if "high_risk" in bucket or "high-risk" in bucket:
+        return "tradable_but_high_risk"
+    if bucket:
+        return bucket
+    dv = _safe_float((row or {}).get("day_dollar_volume"), 0)
+    if dv >= 5_000_000:
+        return "tradable_core"
+    if dv >= 750_000:
+        return "tradable_but_high_risk"
+    return "low_liquidity_or_unknown"
+
+
+def _stored_anatomy_bucket(row: dict) -> str:
+    anatomy = _classify_anatomy(row, hist={})
+    return str(anatomy.get("prominent_pattern") or row.get("likely_pattern") or "unknown")
+
+
+def _select_representative_winner_rows(rows: list[dict], sample_limit: int = 120) -> list[dict]:
+    """Stratified stored-only sample for deeper analysis.
+
+    We deliberately avoid external calls here.  The goal is enough breadth to learn
+    real patterns without loading every winner deeply or stressing Railway.
+    """
+    limit = max(20, min(int(sample_limit or 120), 220))
+    selected: list[dict] = []
+    seen: set[str] = set()
+
+    def add_many(candidates: list[dict], n: int) -> None:
+        nonlocal selected, seen
+        for r in candidates:
+            if len(selected) >= limit:
+                return
+            key = _winner_profile_key(r)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            selected.append(r)
+            n -= 1
+            if n <= 0:
+                return
+
+    rows_sorted = sorted(rows or [], key=lambda x: _safe_float(x.get("winner_change_pct"), 0), reverse=True)
+    tradable = [r for r in rows_sorted if _tradable_bucket_simple(r) in {"tradable_core", "tradable_but_high_risk"}]
+    source_missed = [r for r in rows_sorted if not (_safe_int(r.get("source_seen"), 0) or str(r.get("first_source_seen_at") or "").strip())]
+    source_delay = [r for r in rows_sorted if _safe_int(r.get("source_seen"), 0) and not str(r.get("first_cautious_seen_at") or r.get("first_strong_seen_at") or "").strip()]
+    steady = [r for r in rows_sorted if "steady" in str(r.get("likely_pattern") or "").lower() or _safe_float(r.get("liquidity_persistence_score"), 0) >= 70]
+    first_hour = [r for r in rows_sorted if "first_hour" in str(r.get("likely_pattern") or "").lower() or _safe_float(r.get("liquidity_acceleration_score"), 0) >= 65]
+    reasonable_gap = [r for r in rows_sorted if 3 <= _safe_float(r.get("gap_pct"), 0) <= 35 and _safe_float(r.get("liquidity_persistence_score"), 0) >= 55]
+    huge_gap = [r for r in rows_sorted if _safe_float(r.get("gap_pct"), 0) >= 50]
+    gray_or_blocked_like = [r for r in rows_sorted if str(r.get("tool_stage") or "").lower() in {"gray_strong", "gray", "sharia_blocked"}]
+
+    # Quotas sum above limit intentionally; add_many stops when full.
+    add_many(tradable, max(25, limit // 4))
+    add_many(source_missed, max(20, limit // 5))
+    add_many(source_delay, max(15, limit // 8))
+    add_many(steady, max(18, limit // 6))
+    add_many(first_hour, max(18, limit // 6))
+    add_many(reasonable_gap, max(15, limit // 8))
+    add_many(huge_gap, max(10, limit // 10))
+    add_many(gray_or_blocked_like, max(8, limit // 12))
+    add_many(rows_sorted, limit)
+    return selected[:limit]
+
+
+def _summarize_winner_universe(rows: list[dict]) -> dict:
+    pattern_counts: dict[str, dict] = {}
+    tradability_counts: dict[str, int] = {}
+    gap_buckets = {"no_or_small_gap": 0, "reasonable_gap_3_15": 0, "large_gap_15_50": 0, "huge_gap_50_plus": 0}
+    source_counts = {"source_seen": 0, "source_missed": 0, "entry_seen": 0, "watch_only_or_not_promoted": 0}
+    for r in rows or []:
+        p = _stored_anatomy_bucket(r)
+        c = pattern_counts.setdefault(p, {"cases": 0, "sum_gain": 0.0, "examples": [], "tradable_cases": 0})
+        c["cases"] += 1
+        c["sum_gain"] += _safe_float(r.get("winner_change_pct"), 0)
+        if _tradable_bucket_simple(r) in {"tradable_core", "tradable_but_high_risk"}:
+            c["tradable_cases"] += 1
+        if len(c["examples"]) < 5:
+            c["examples"].append(_clean_symbol(r.get("symbol")))
+        tb = _tradable_bucket_simple(r)
+        tradability_counts[tb] = tradability_counts.get(tb, 0) + 1
+        gap = _safe_float(r.get("gap_pct"), 0)
+        if gap >= 50:
+            gap_buckets["huge_gap_50_plus"] += 1
+        elif gap >= 15:
+            gap_buckets["large_gap_15_50"] += 1
+        elif gap >= 3:
+            gap_buckets["reasonable_gap_3_15"] += 1
+        else:
+            gap_buckets["no_or_small_gap"] += 1
+        source_seen = bool(_safe_int(r.get("source_seen"), 0) or str(r.get("first_source_seen_at") or "").strip())
+        entry_seen = bool(str(r.get("first_cautious_seen_at") or r.get("first_strong_seen_at") or "").strip())
+        watch_seen = bool(str(r.get("first_watch_seen_at") or "").strip())
+        if source_seen:
+            source_counts["source_seen"] += 1
+        else:
+            source_counts["source_missed"] += 1
+        if entry_seen:
+            source_counts["entry_seen"] += 1
+        elif watch_seen or source_seen:
+            source_counts["watch_only_or_not_promoted"] += 1
+    top_patterns = []
+    for k, v in pattern_counts.items():
+        cases = max(1, int(v.get("cases") or 0))
+        top_patterns.append({
+            "pattern": k,
+            "cases": cases,
+            "tradable_cases": int(v.get("tradable_cases") or 0),
+            "avg_gain_pct": safe_round(_safe_float(v.get("sum_gain"), 0) / cases, 2),
+            "examples": v.get("examples") or [],
+        })
+    top_patterns.sort(key=lambda x: (x.get("cases", 0), x.get("tradable_cases", 0), x.get("avg_gain_pct", 0)), reverse=True)
+    return {
+        "total_rows_analyzed": len(rows or []),
+        "top_patterns": top_patterns,
+        "tradability_counts": tradability_counts,
+        "gap_buckets": gap_buckets,
+        "source_visibility_counts": source_counts,
+    }
+
+
+def _loss_pattern_comparison(week_key: str, limit: int = 1000) -> dict:
+    """Compare candidate winner patterns with recurring failure ingredients.
+
+    Stored-only and bounded.  It reads tracking_signals directly when present.
+    """
+    out = {"ok": False, "loss_rows": 0, "top_loss_patterns": [], "risk_factor_counts": {}, "notes": ""}
+    if not SQLITE_ENABLED:
+        out["notes"] = "sqlite_disabled"
+        return out
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol, signal_bucket, plan_family, status, status_label, outcome_group,
+                       risk_tags_json, success_tags_json, max_gain_pct, max_loss_pct,
+                       nearest_resistance_distance_pct, nearest_support_distance_pct,
+                       liquidity_ratio, volume_ratio, volatility_pct, is_late_above_entry,
+                       stopped_at
+                FROM tracking_signals
+                WHERE week_key=? AND (
+                    stopped_at!='' OR status LIKE '%stop%' OR outcome_group LIKE '%loss%' OR status_label LIKE '%وقف%'
+                )
+                ORDER BY updated_at_ts DESC
+                LIMIT ?
+                """,
+                (str(week_key or ""), max(50, min(int(limit or 1000), 2000))),
+            ).fetchall()
+    except Exception as exc:
+        out["notes"] = f"tracking_query_failed: {type(exc).__name__}: {str(exc)[:120]}"
+        return out
+    risk_counts: dict[str, int] = {}
+    pattern_counts: dict[str, dict] = {}
+    for rr in rows or []:
+        r = dict(rr)
+        tags = _safe_json_list(r.get("risk_tags_json"))
+        normalized = []
+        tag_text = " ".join(str(t) for t in tags)
+        if "مقاومة" in tag_text or _safe_float(r.get("nearest_resistance_distance_pct"), 999) <= 1.5:
+            normalized.append("near_resistance")
+        if "السيولة" in tag_text or _safe_float(r.get("liquidity_ratio"), 0) < 1.0:
+            normalized.append("liquidity_not_persistent")
+        if "كسر الدعم" in tag_text or "كسر" in tag_text:
+            normalized.append("support_break")
+        if "تذبذب" in tag_text or _safe_float(r.get("volatility_pct"), 0) >= 7:
+            normalized.append("high_volatility")
+        if _safe_int(r.get("is_late_above_entry"), 0):
+            normalized.append("late_above_entry")
+        if not normalized:
+            normalized.append("loss_unclassified")
+        for n in normalized:
+            risk_counts[n] = risk_counts.get(n, 0) + 1
+        key = f"{str(r.get('plan_family') or 'unknown')} | " + " + ".join(normalized[:4])
+        pc = pattern_counts.setdefault(key, {"cases": 0, "symbols": set(), "sum_loss": 0.0, "sum_gain": 0.0})
+        pc["cases"] += 1
+        pc["symbols"].add(_clean_symbol(r.get("symbol")))
+        pc["sum_loss"] += _safe_float(r.get("max_loss_pct"), 0)
+        pc["sum_gain"] += _safe_float(r.get("max_gain_pct"), 0)
+    top = []
+    for k, v in pattern_counts.items():
+        cases = max(1, int(v.get("cases") or 0))
+        top.append({
+            "pattern": k,
+            "cases": cases,
+            "unique_symbols": len(v.get("symbols") or []),
+            "avg_max_loss_pct": safe_round(_safe_float(v.get("sum_loss"), 0) / cases, 2),
+            "avg_max_gain_before_loss_pct": safe_round(_safe_float(v.get("sum_gain"), 0) / cases, 2),
+        })
+    top.sort(key=lambda x: (x.get("cases", 0), x.get("unique_symbols", 0)), reverse=True)
+    return {"ok": True, "loss_rows": len(rows or []), "top_loss_patterns": top[:12], "risk_factor_counts": dict(sorted(risk_counts.items(), key=lambda x: x[1], reverse=True)), "notes": "Stored tracking_signals comparison only."}
+
+
+def _pattern_action_matrix(universe_summary: dict, loss_cmp: dict) -> list[dict]:
+    risk_counts = (loss_cmp or {}).get("risk_factor_counts") or {}
+    rows = []
+    for p in (universe_summary or {}).get("top_patterns", [])[:15]:
+        name = str(p.get("pattern") or "unknown")
+        cases = int(p.get("cases") or 0)
+        tradable_cases = int(p.get("tradable_cases") or 0)
+        action = "monitor_only"
+        confidence = "low"
+        rationale = []
+        if cases >= 25:
+            confidence = "medium"
+        if cases >= 50 and tradable_cases >= 15:
+            confidence = "good"
+        if "gap_chase" in name or "failed_gap" in name:
+            action = "no_chase_warning"
+            rationale.append("النمط يغلب عليه قاب/مطاردة عالية؛ يصلح كتحذير لا كدخول قوي")
+        elif "first_hour" in name or "liquidity_acceleration" in name:
+            action = "early_momentum_close_watch"
+            rationale.append("تسارع السيولة أول ساعة قد يكون إنذارًا مبكرًا")
+        elif "steady_liquidity" in name:
+            action = "early_momentum_candidate"
+            rationale.append("استمرار السيولة بدون قاب ضخم أفضل للمراقبة اللصيقة")
+        elif "gap" in name and tradable_cases >= 10:
+            action = "gap_followthrough_watch"
+            rationale.append("قاب مع متابعة يحتاج شرط عدم التأخر واستمرار السيولة")
+        if risk_counts.get("near_resistance", 0) or risk_counts.get("support_break", 0):
+            rationale.append("يجب ربطه بتحقق دعم/مقاومة V4h لأن الخسائر تتكرر قرب المقاومة/كسر الدعم")
+        rows.append({"pattern": name, "cases": cases, "tradable_cases": tradable_cases, "avg_gain_pct": p.get("avg_gain_pct"), "confidence": confidence, "recommended_use": action, "rationale": rationale[:4], "examples": p.get("examples") or []})
+    return rows
+
+
 def big_mover_anatomy_scan_gap_report(
     week_key: str | None = None,
     trade_date: str | None = None,
@@ -2340,19 +2589,30 @@ def big_mover_anatomy_scan_gap_report(
     limit: int = 40,
     history_mode: str = "stored",
     lookback_days: int = 30,
+    max_profiles: int = 1000,
+    sample_limit: int = 120,
+    external_limit: int = 0,
+    compare_losses: bool = True,
 ) -> dict | str:
-    """Explain why >threshold movers rose and where the tool/source delayed.
+    """Big Mover Anatomy + Historical Pattern + Scan Gap Audit V2.
 
-    Default history_mode='stored' makes no external API calls.  history_mode='light'
-    fetches bounded Polygon daily history for at most 15 symbols plus SPY/QQQ.
+    V2 separates three layers:
+    1) universe-level stored-only analysis across up to max_profiles winners,
+    2) stratified detailed sample (default 120) to diagnose scan/promotion delay,
+    3) stored loser comparison to avoid learning patterns that also fail often.
+
+    Default mode makes no external API calls.  history_mode=light is bounded by
+    external_limit (default 0; hard cap 25) to protect Railway and API credits.
     """
     wk = str(week_key or _current_week_key() or "")
     d = str(trade_date or "")[:10]
     th = max(1.0, min(float(threshold or 10.0), 200.0))
-    lim = max(5, min(int(limit or 40), 120))
+    display_limit = max(5, min(int(limit or 40), 80))
+    universe_limit = max(100, min(int(max_profiles or 1000), 1200))
+    sample_n = max(30, min(int(sample_limit or 120), 220))
+    ext_limit = max(0, min(int(external_limit or 0), 25))
     hist_mode = str(history_mode or "stored").lower().strip()
-    fetch_light = hist_mode in {"light", "polygon", "true", "1", "yes"}
-    history_limit = min(lim, 15) if fetch_light else 0
+    fetch_light = hist_mode in {"light", "polygon", "true", "1", "yes"} and ext_limit > 0
     init_evidence_db()
     where = ["winner_change_pct>=?"]
     args: list[Any] = [th]
@@ -2365,19 +2625,24 @@ def big_mover_anatomy_scan_gap_report(
     where_sql = " WHERE " + " AND ".join(where)
     with _connect() as conn:
         total = conn.execute(f"SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles {where_sql}", tuple(args)).fetchone()
-        rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, lim)).fetchall()
-    items_raw = [_enrich_winner_profile_row(dict(r), week_key=wk, refresh_visibility=True) for r in rows or []]
-    index_context = _index_context_features(d or (items_raw[0].get("trade_date") if items_raw else _today_text()), lookback_days=10) if fetch_light else {}
-    items = []
-    for idx, row in enumerate(items_raw, start=1):
+        rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, universe_limit)).fetchall()
+    raw_rows = [dict(r) for r in rows or []]
+    universe = _summarize_winner_universe(raw_rows)
+    selected_rows = _select_representative_winner_rows(raw_rows, sample_limit=sample_n)
+    # Index context only when explicitly requested with light mode; otherwise zero external calls.
+    index_context = _index_context_features(d or (selected_rows[0].get("trade_date") if selected_rows else _today_text()), lookback_days=10) if fetch_light else {}
+    detailed_items = []
+    for idx, raw in enumerate(selected_rows, start=1):
+        # Enrich only representative rows to keep DB work bounded.
+        row = _enrich_winner_profile_row(dict(raw), week_key=wk, refresh_visibility=True)
         sym = _clean_symbol(row.get("symbol"))
         td = str(row.get("trade_date") or d or "")[:10]
         hist = {}
-        if fetch_light and idx <= history_limit:
+        if fetch_light and idx <= ext_limit:
             bars = _fetch_symbol_daily_bars_light(sym, td, lookback_days=lookback_days)
             hist = _daily_history_features(sym, td, bars)
-        profile_json = _safe_json_dict(row.get("profile_json"))
         if not hist:
+            profile_json = _safe_json_dict(row.get("profile_json"))
             prev_daily = profile_json.get("previous_daily") if isinstance(profile_json, dict) else {}
             hist = {"ok": False, "mode": "stored_only", "previous_daily_available": bool(prev_daily)}
         movement = _movement_start_from_bars(sym, td, previous_close=row.get("previous_close"), day_open=row.get("day_open"), fallback_pattern=row.get("likely_pattern"))
@@ -2387,19 +2652,20 @@ def big_mover_anatomy_scan_gap_report(
         latency = _classify_latency(row, movement, visibility)
         if movement.get("movement_start_ts") and last_scan.get("started_at"):
             last_dt = _parse_ny_time_text(last_scan.get("started_at"))
+            move_dt = datetime.fromtimestamp(float(movement.get("movement_start_ts")), tz=NY_TZ)
             movement["last_scan_before_move"] = last_scan.get("started_at")
-            movement["minutes_from_last_scan_to_move"] = _minutes_between_dt(last_dt, datetime.fromtimestamp(float(movement.get("movement_start_ts")), tz=NY_TZ))
+            movement["minutes_from_last_scan_to_move"] = _minutes_between_dt(last_dt, move_dt)
         else:
             movement["last_scan_before_move"] = ""
             movement["minutes_from_last_scan_to_move"] = 0.0
         action = _recommended_future_action(row, anatomy, latency)
-        item = {
+        detailed_items.append({
             "symbol": sym,
             "trade_date": td,
             "winner_rank": row.get("winner_rank"),
             "max_gain_pct": safe_round(row.get("winner_change_pct"), 2),
             "day_dollar_volume": safe_round(row.get("day_dollar_volume"), 0),
-            "tradability_bucket": row.get("tradability_bucket", ""),
+            "tradability_bucket": _tradable_bucket_simple(row),
             "anatomy": anatomy,
             "historical_pre_move": hist,
             "movement_start": movement,
@@ -2419,65 +2685,84 @@ def big_mover_anatomy_scan_gap_report(
                 "volume_fade_flag": int(row.get("volume_fade_flag") or 0),
                 "gap_fade_flag": int(row.get("gap_fade_flag") or 0),
             },
-        }
-        items.append(item)
-    # Aggregates for decision-making.
-    pattern_counts: dict[str, dict] = {}
+        })
     latency_counts: dict[str, int] = {}
     action_counts: dict[str, int] = {}
-    for it in items:
-        p = str((it.get("anatomy") or {}).get("prominent_pattern") or "unknown")
-        pc = pattern_counts.setdefault(p, {"cases": 0, "sum_gain": 0.0, "examples": []})
-        pc["cases"] += 1
-        pc["sum_gain"] += _safe_float(it.get("max_gain_pct"), 0)
-        if len(pc["examples"]) < 5:
-            pc["examples"].append(it.get("symbol"))
+    for it in detailed_items:
         lat = str((it.get("scan_gap_latency") or {}).get("latency_category") or "unknown")
         latency_counts[lat] = latency_counts.get(lat, 0) + 1
         act = str((it.get("future_action") or {}).get("action") or "unknown")
         action_counts[act] = action_counts.get(act, 0) + 1
-    top_patterns = []
-    for k, v in pattern_counts.items():
-        cases = max(1, int(v.get("cases") or 0))
-        top_patterns.append({"pattern": k, "cases": cases, "avg_gain_pct": safe_round(_safe_float(v.get("sum_gain"), 0) / cases, 2), "examples": v.get("examples") or []})
-    top_patterns.sort(key=lambda x: (x.get("cases", 0), x.get("avg_gain_pct", 0)), reverse=True)
+    loss_cmp = _loss_pattern_comparison(wk, limit=1000) if compare_losses else {"ok": False, "skipped": True}
+    pattern_matrix = _pattern_action_matrix(universe, loss_cmp)
     result = {
         "ok": True,
         "version": _BIG_MOVER_AUDIT_VERSION,
         "week_key": wk,
         "trade_date": d,
         "threshold_pct": th,
-        "history_mode": "light_polygon" if fetch_light else "stored_only_no_external_calls",
+        "history_mode": "light_polygon_bounded" if fetch_light else "stored_only_no_external_calls",
         "lookback_days": max(1, min(int(lookback_days or 30), 45)),
+        "external_calls_allowed": int(ext_limit if fetch_light else 0),
         "total_matching_profiles": int(dict(total).get("c", 0) if total else 0),
         "total_matching_symbols": int(dict(total).get("symbols", 0) if total else 0),
-        "items_returned": len(items),
-        "top_patterns": top_patterns,
-        "latency_counts": latency_counts,
-        "future_action_counts": action_counts,
-        "items": items,
-        "notes": "Read-only diagnostic. Default mode uses stored SQLite evidence only. Use history_mode=light with a small limit for bounded Polygon daily-history enrichment.",
+        "universe_rows_analyzed": len(raw_rows),
+        "detailed_sample_size": len(detailed_items),
+        "items_returned": min(display_limit, len(detailed_items)),
+        "universe_summary": universe,
+        "latency_counts_in_detailed_sample": latency_counts,
+        "future_action_counts_in_detailed_sample": action_counts,
+        "loss_comparison": loss_cmp,
+        "pattern_action_matrix": pattern_matrix,
+        "items": detailed_items[:display_limit],
+        "notes": "Read-only diagnostic. V2 analyzes all stored winners up to max_profiles, deep-dives a stratified sample, and compares stored loser patterns. Default makes zero external calls.",
     }
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
         lines = [
-            "تقرير Big Mover Anatomy + Scan Gap Audit V1",
+            "تقرير Big Mover Anatomy + Historical Pattern + Scan Gap Audit V2",
             f"الأسبوع: {wk}",
             f"التاريخ: {d or 'كل الأسبوع'} | الحد: +{safe_round(th,1)}%",
-            f"النمط/التاريخ: {result['history_mode']} | المعروض: {len(items)} من {result['total_matching_profiles']} ملف رابح",
+            f"النمط/التاريخ: {result['history_mode']} | تحليل شامل: {len(raw_rows)} من {result['total_matching_profiles']} ملف رابح | عينة تفصيلية: {len(detailed_items)} | المعروض: {result['items_returned']}",
             "",
-            "أبرز أنماط الصعود:",
+            "ملخص العينة الشاملة:",
         ]
-        for p in top_patterns[:8]:
-            lines.append(f"- {p.get('pattern')}: {p.get('cases')} حالة | متوسط الصعود {p.get('avg_gain_pct')}% | أمثلة: {', '.join(p.get('examples') or [])}")
+        sc = universe.get("source_visibility_counts") or {}
+        gb = universe.get("gap_buckets") or {}
+        tc = universe.get("tradability_counts") or {}
+        lines.append(f"- دخل المنبع: {sc.get('source_seen',0)} | لم يدخل المنبع: {sc.get('source_missed',0)} | دخل فرصة: {sc.get('entry_seen',0)} | منبع/مراقبة بلا ترقية: {sc.get('watch_only_or_not_promoted',0)}")
+        lines.append(f"- القاب: صغير/بدون {gb.get('no_or_small_gap',0)} | 3-15% {gb.get('reasonable_gap_3_15',0)} | 15-50% {gb.get('large_gap_15_50',0)} | 50%+ {gb.get('huge_gap_50_plus',0)}")
+        top_trad = sorted(tc.items(), key=lambda x: x[1], reverse=True)[:5]
+        if top_trad:
+            lines.append("- قابلية التداول: " + " | ".join(f"{k}: {v}" for k, v in top_trad))
         lines.append("")
-        lines.append("أين تأخرت الأداة/المنبع:")
+        lines.append("أبرز أنماط الصعود من كل العينة:")
+        for p in (universe.get("top_patterns") or [])[:10]:
+            lines.append(f"- {p.get('pattern')}: {p.get('cases')} حالة | قابلة للتداول {p.get('tradable_cases')} | متوسط الصعود {p.get('avg_gain_pct')}% | أمثلة: {', '.join(p.get('examples') or [])}")
+        lines.append("")
+        lines.append("قرار عملي أولي للأنماط:")
+        for m in pattern_matrix[:8]:
+            why = "؛ ".join(m.get("rationale") or [])
+            lines.append(f"- {m.get('pattern')}: {m.get('recommended_use')} | ثقة {m.get('confidence')} | حالات {m.get('cases')} | {why}")
+        lines.append("")
+        lines.append("أين تأخرت الأداة/المنبع في العينة التفصيلية:")
         if not latency_counts:
             lines.append("- لا توجد عينة كافية.")
         for k, v in sorted(latency_counts.items(), key=lambda x: x[1], reverse=True):
             lines.append(f"- {k}: {v}")
         lines.append("")
+        lines.append("مقارنة الخاسرين المخزنة:")
+        if loss_cmp.get("ok"):
+            lines.append(f"- عينة الخسائر المقارنة: {loss_cmp.get('loss_rows')} إشارة")
+            rf = loss_cmp.get("risk_factor_counts") or {}
+            if rf:
+                lines.append("- عوامل الخسارة الأبرز: " + " | ".join(f"{k}: {v}" for k, v in list(rf.items())[:6]))
+            for lp in (loss_cmp.get("top_loss_patterns") or [])[:5]:
+                lines.append(f"  • {lp.get('pattern')}: {lp.get('cases')} حالة / {lp.get('unique_symbols')} رمز | متوسط هبوط {lp.get('avg_max_loss_pct')}%")
+        else:
+            lines.append(f"- غير متاحة أو متخطاة: {loss_cmp.get('notes') or loss_cmp.get('skipped')}")
+        lines.append("")
         lines.append("أهم الأسهم وتشريح الحركة:")
-        for it in items[:min(25, len(items))]:
+        for it in detailed_items[:min(display_limit, len(detailed_items))]:
             anat = it.get("anatomy") or {}
             lat = it.get("scan_gap_latency") or {}
             mv = it.get("movement_start") or {}
@@ -2486,13 +2771,16 @@ def big_mover_anatomy_scan_gap_report(
             src_gain = lat.get("gain_at_source_pct")
             entry_gain = lat.get("gain_at_strong_pct") if lat.get("gain_at_strong_pct") is not None else lat.get("gain_at_cautious_pct")
             lines.append(
-                f"- {it.get('symbol')}: +{safe_round(it.get('max_gain_pct'),1)}% | {anat.get('prominent_pattern_ar')} | "
+                f"- {it.get('symbol')} {it.get('trade_date')}: +{safe_round(it.get('max_gain_pct'),1)}% | {anat.get('prominent_pattern_ar')} | "
                 f"gap {safe_round(metrics.get('gap_pct'),1)}% | 30د {safe_round(metrics.get('first_30m_gain_pct'),1)}% | "
-                f"سيولة {safe_round(metrics.get('liquidity_persistence_score'),1)}/100 | latency={lat.get('latency_category')} | {action.get('label_ar')}"
+                f"سيولة {safe_round(metrics.get('liquidity_persistence_score'),1)}/100 | {it.get('tradability_bucket')} | latency={lat.get('latency_category')} | {action.get('label_ar')}"
             )
             reasons = anat.get("reasons") or []
             if reasons:
-                lines.append("  • لماذا صعد؟ " + "؛ ".join(str(x) for x in reasons[:4]))
+                lines.append("  • لماذا صعد؟ " + "؛ ".join(str(x) for x in reasons[:5]))
+            warnings = anat.get("warnings") or []
+            if warnings:
+                lines.append("  • تحذيرات: " + "؛ ".join(str(x) for x in warnings[:4]))
             if mv.get("movement_start_time") or mv.get("last_scan_before_move"):
                 lines.append(f"  • بداية الحركة: {mv.get('movement_start_time') or 'غير مؤكدة'} | آخر مسح قبلها: {mv.get('last_scan_before_move') or 'غير متوفر'}")
             lines.append(
