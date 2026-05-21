@@ -1,0 +1,542 @@
+{
+  "archive_manifest": {
+    "compact_sync": true,
+    "generated_at": "2026-05-20 22:45:31",
+    "local_counts_at_sync": {
+      "bar_symbols": 184,
+      "daily_big_movers": 170,
+      "evidence_intraday_bars": 10858,
+      "evidence_runs": 66,
+      "evidence_snapshots": 15726,
+      "evidence_winner_profiles": 80,
+      "snapshot_symbols": 588,
+      "winner_symbols": 80
+    },
+    "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync.",
+    "ok": true,
+    "prune_allowed_after_verify": true,
+    "trade_date": "2026-05-20",
+    "version": "evidence_archive_manifest_v5",
+    "week_key": "2026-05-18_2026-05-22"
+  },
+  "intraday_bars": {
+    "c": 98464,
+    "symbols": 857
+  },
+  "market_fear": {
+    "badge": "⚪",
+    "cache_hit": true,
+    "captured_at": "2026-05-20 22:45:31",
+    "captured_ts": 1779331531.0871367,
+    "change_pct": -3.43,
+    "change_points": -0.62,
+    "confirmation_strictness": "normal",
+    "enabled": true,
+    "execution_rules": {
+      "avoid_late_entries_when_stressed": false,
+      "breakout_requires_liquidity_confirmation": false,
+      "confirmation_strictness": "normal",
+      "no_chase_strictness": "normal",
+      "position_size_multiplier": 0.85,
+      "prefer_near_support_entries_when_stressed": false
+    },
+    "guidance_ar": [
+      "الخوف العام طبيعي تقريبًا؛ قرارات السهم الفردية والسيولة تبقى الأهم.",
+      "استمر في طلب تأكيد الاختراق والسيولة خصوصًا قرب المقاومات."
+    ],
+    "history_points": 0,
+    "is_proxy": false,
+    "no_chase_strictness": "normal",
+    "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
+    "ok": true,
+    "position_size_multiplier": 0.85,
+    "previous_close": 18.06,
+    "regime_key": "normal",
+    "regime_label": "طبيعي",
+    "requested_symbol": "^VIX",
+    "source": "FMP",
+    "source_symbol": "^VIX",
+    "stress_score": 42.0,
+    "summary_ar": "⚪ طبيعي | VIX 17.44 | التغير -3.43% | حجم الدخول المقترح ×0.85",
+    "tracking_fields": {
+      "market_fear_regime": "normal",
+      "market_fear_score": 42.0,
+      "vix": 17.44,
+      "vix_change_pct": -3.43,
+      "vix_trend_5d_pct": 0.0
+    },
+    "version": "market_fear_v4d_decision_support_no_scoring",
+    "vix": 17.44,
+    "vix_avg_5d": 0.0,
+    "vix_trend_5d_pct": 0.0
+  },
+  "notes": {
+    "next_weekend_use": "تحليل ما سبق الرابحين والخاسرين وتحديد الأنماط المتكررة.",
+    "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف."
+  },
+  "ok": true,
+  "sessions": [
+    {
+      "c": 42059,
+      "session": "pre_market",
+      "symbols": 510
+    },
+    {
+      "c": 20848,
+      "session": "regular",
+      "symbols": 892
+    },
+    {
+      "c": 5451,
+      "session": "after_hours",
+      "symbols": 534
+    },
+    {
+      "c": 10,
+      "session": "closed_weekend",
+      "symbols": 5
+    }
+  ],
+  "summary": {
+    "avg_change_pct": 9.969992832904282,
+    "avg_dollar_volume": 154028281.2287181,
+    "big_mover_snapshots": 13580,
+    "no_chase_count": 320,
+    "reconfirm_count": 19427,
+    "snapshots": 68368,
+    "symbols": 925,
+    "tool_snapshots": 56193
+  },
+  "top_movers_observed": [
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 2454.49,
+      "observations": 30,
+      "symbol": "ADTX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 2225.58,
+      "observations": 184,
+      "symbol": "PPCB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 1252.19,
+      "observations": 164,
+      "symbol": "YMT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 684.93,
+      "observations": 158,
+      "symbol": "SBFM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 350.0,
+      "observations": 219,
+      "symbol": "AMPGR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 318.05,
+      "observations": 51,
+      "symbol": "FRGT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 262.02,
+      "observations": 63,
+      "symbol": "HCWB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 257.46,
+      "observations": 29,
+      "symbol": "RETO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 227.64,
+      "observations": 204,
+      "symbol": "GOVX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 199.67,
+      "observations": 224,
+      "symbol": "VRAX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 192.6,
+      "observations": 215,
+      "symbol": "HCAI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 180.03,
+      "observations": 244,
+      "symbol": "PIII"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 176.0,
+      "observations": 230,
+      "symbol": "AMPGZ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 174.24,
+      "observations": 64,
+      "symbol": "AMST"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 162.17,
+      "observations": 223,
+      "symbol": "NXXT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 151.23,
+      "observations": 57,
+      "symbol": "INM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 146.17,
+      "observations": 158,
+      "symbol": "AIM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 138.8,
+      "observations": 155,
+      "symbol": "WGRX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 129.75,
+      "observations": 158,
+      "symbol": "CREG"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 122.5,
+      "observations": 49,
+      "symbol": "CNEY"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 120.5,
+      "observations": 65,
+      "symbol": "GIPR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 113.78,
+      "observations": 25,
+      "symbol": "GCL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 110.26,
+      "observations": 27,
+      "symbol": "SLXN"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 94.24,
+      "observations": 39,
+      "symbol": "MRNO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 89.4,
+      "observations": 25,
+      "symbol": "MWC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 86.89,
+      "observations": 23,
+      "symbol": "CISS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 80.38,
+      "observations": 92,
+      "symbol": "CODX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 79.49,
+      "observations": 3,
+      "symbol": "UZX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 75.61,
+      "observations": 32,
+      "symbol": "PHGE"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 75.2,
+      "observations": 31,
+      "symbol": "MLGO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 73.88,
+      "observations": 94,
+      "symbol": "MTVA"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 61.76,
+      "observations": 12,
+      "symbol": "AREB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 60.66,
+      "observations": 164,
+      "symbol": "AUUD"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 60.3,
+      "observations": 30,
+      "symbol": "FSHPR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 60.0,
+      "observations": 64,
+      "symbol": "PHOE"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 59.12,
+      "observations": 31,
+      "symbol": "EMISR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 52.74,
+      "observations": 174,
+      "symbol": "AIIO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 52.56,
+      "observations": 9,
+      "symbol": "PMI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 51.1,
+      "observations": 29,
+      "symbol": "PTIX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 49.82,
+      "observations": 63,
+      "symbol": "SVRN"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 49.72,
+      "observations": 33,
+      "symbol": "CAPS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 48.94,
+      "observations": 6,
+      "symbol": "JUNS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 48.48,
+      "observations": 32,
+      "symbol": "PETZ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 48.4,
+      "observations": 32,
+      "symbol": "SLE"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 46.2,
+      "observations": 51,
+      "symbol": "CELG-RI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 45.99,
+      "observations": 55,
+      "symbol": "OP"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 44.44,
+      "observations": 7,
+      "symbol": "RUBI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 44.07,
+      "observations": 2,
+      "symbol": "JZ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 43.43,
+      "observations": 153,
+      "symbol": "RIBBR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 43.25,
+      "observations": 37,
+      "symbol": "QUCY"
+    }
+  ],
+  "version": "evidence_collection_v2_passive",
+  "week_key": "2026-05-18_2026-05-22",
+  "winner_patterns": [
+    {
+      "avg_gain": 26.567692307692308,
+      "cases": 247,
+      "likely_pattern": "steady_liquidity_followthrough",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 138.7482608695652,
+      "cases": 115,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "gap_chase_risk"
+    },
+    {
+      "avg_gain": 28.234387755102045,
+      "cases": 98,
+      "likely_pattern": "unclassified_winner",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 20.569102564102565,
+      "cases": 78,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 30.712580645161292,
+      "cases": 62,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "gap_chase_risk"
+    },
+    {
+      "avg_gain": 78.90896551724138,
+      "cases": 58,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "gap_followthrough_candidate"
+    },
+    {
+      "avg_gain": 77.93714285714286,
+      "cases": 56,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 19.26132075471698,
+      "cases": 53,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "early_intraday_acceleration"
+    },
+    {
+      "avg_gain": 45.81739130434782,
+      "cases": 46,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 51.098684210526315,
+      "cases": 38,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 19.69151515151515,
+      "cases": 33,
+      "likely_pattern": "steady_liquidity_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 20.24857142857143,
+      "cases": 28,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "gap_followthrough_candidate"
+    }
+  ],
+  "winner_profiles": {
+    "c": 965,
+    "symbols": 690
+  }
+}
