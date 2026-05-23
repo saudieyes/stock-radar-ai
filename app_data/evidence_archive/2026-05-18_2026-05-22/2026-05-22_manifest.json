@@ -1,0 +1,20 @@
+{
+  "compact_sync": true,
+  "generated_at": "2026-05-22 22:45:19",
+  "local_counts_at_sync": {
+    "bar_symbols": 182,
+    "daily_big_movers": 167,
+    "evidence_intraday_bars": 14884,
+    "evidence_runs": 65,
+    "evidence_snapshots": 15441,
+    "evidence_winner_profiles": 80,
+    "snapshot_symbols": 629,
+    "winner_symbols": 80
+  },
+  "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync.",
+  "ok": true,
+  "prune_allowed_after_verify": true,
+  "trade_date": "2026-05-22",
+  "version": "evidence_archive_manifest_v5",
+  "week_key": "2026-05-18_2026-05-22"
+}
