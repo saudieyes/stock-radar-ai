@@ -873,6 +873,26 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
 
+    # Wealth Builder V1d safety: the 30-second live refresh endpoint used to
+    # rebuild visible buckets from the saved snapshot without reapplying the
+    # Early Movement merge and final V1b/V1c safety caps. This caused the UI to
+    # flip from the correct clean scan (Strong=0, Early Movement>0) to an older
+    # live-overlay view (Strong returning, Early Movement=0), especially after
+    # manual Sharia actions or the automatic live timer. Always pass the live
+    # overlay through the same final presentation layer used by /trade-scan.
+    try:
+        overlaid = enrich_stocks_with_early_movement(overlaid)
+    except Exception:
+        pass
+    try:
+        overlaid = _post_early_movement_decision_safety(overlaid)
+    except Exception:
+        pass
+    try:
+        early_movement_payload = build_early_movement_sections(overlaid)
+    except Exception:
+        early_movement_payload = {"count": 0, "early_movement_watchlist": [], "weekly_priority_count": 0, "auto_detected_count": 0, "priority_watch_count": 0}
+
     strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
     gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
@@ -918,11 +938,17 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         "tracking_intelligence": tracking_live_stats,
+        "early_movement_count": int(early_movement_payload.get("count", 0) or 0),
+        "early_movement_weekly_priority_count": int(early_movement_payload.get("weekly_priority_count", 0) or 0),
+        "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
+        "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
+        "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "groups": {
             "strong_entries": _live_bucket_payload(strong, limit),
             "cautious_entries": _live_bucket_payload(cautious, limit),
             "gray_strong": _live_bucket_payload(gray_strong, limit),
             "premarket_setups": _live_bucket_payload(premarket_setups, limit),
+            "early_movement_watchlist": _live_bucket_payload(early_movement_payload.get("early_movement_watchlist", []), limit),
             "watchlist": _live_bucket_payload(watch, limit if include_watch else 1),
         },
     }
