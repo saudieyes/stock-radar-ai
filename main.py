@@ -1810,6 +1810,107 @@ def _trade_scan_cache_ttl_sec(phase: str, prefer_cache: bool = False) -> int:
         return 300 if phase in {"open", "pre_market", "after_hours"} else 900
 
 
+def _dedupe_text_list(values, limit: int = 12):
+    out = []
+    seen = set()
+    for v in values or []:
+        text = str(v or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _post_early_movement_decision_safety(results):
+    """Apply final decision caps after Early Movement classification.
+
+    The first decision pass happens before Early Movement metadata exists.  A
+    stock can therefore become `early_movement.status=no_chase` after it was
+    already labelled Strong.  This final pass is intentionally light: it does
+    not change scores, does not fetch data, and only caps the final decision
+    label/owner action so the UI never says `دخول قوي` and `لا تطارد` on the
+    same card.
+    """
+    out = []
+    for stock in list(results or []):
+        if not isinstance(stock, dict):
+            out.append(stock)
+            continue
+        original_decision = str(stock.get("decision", "مراقبة") or "مراقبة")
+        try:
+            new_decision, safety_reasons = apply_safety_decision_guard(stock, original_decision)
+        except Exception as exc:
+            new_decision, safety_reasons = original_decision, [f"تعذر تطبيق سقف القرار النهائي: {type(exc).__name__}"]
+
+        # Early Movement No-Chase is a hard display cap even if the regular
+        # scoring safety gate did not see a severe enough combination.
+        em = stock.get("early_movement") or {}
+        no_chase = (
+            str(em.get("status", "") or "") == "no_chase"
+            or str(stock.get("no_chase_guard_status", "") or "") == "no_chase"
+            or "لا تطارد" in str(stock.get("no_chase_guard_label", "") or "")
+        )
+        em_reasons = [str(x) for x in (em.get("no_chase_reasons") or stock.get("no_chase_guard_reasons") or []) if str(x).strip()]
+        if no_chase:
+            if original_decision == "دخول قوي":
+                new_decision = "دخول بحذر"
+            # If it is both no-chase and literally sitting on resistance, keep
+            # it as monitoring only until a pullback/reclaim is confirmed.
+            try:
+                res_dist = float(stock.get("nearest_resistance_distance_pct", 999) or 999)
+            except Exception:
+                res_dist = 999.0
+            if res_dist <= 0.75 or any("مقاومة" in r for r in em_reasons):
+                new_decision = "مراقبة"
+            safety_reasons = list(safety_reasons or []) + ["No-Chase يمنع الدخول القوي"] + em_reasons[:3]
+            stock["tier_cap_applied"] = True
+            stock["no_chase_hard_cap"] = True
+            stock["tier_cap_reasons"] = _dedupe_text_list(list(stock.get("tier_cap_reasons") or []) + ["No-Chase يمنع الدخول القوي"] + em_reasons, 8)
+            stock["no_chase_guard_status"] = "no_chase"
+            stock["no_chase_guard_label"] = stock.get("no_chase_guard_label") or "⛔ لا تطارد"
+            stock["execution_gate_status"] = "no_chase"
+            stock["execution_gate_label"] = "⛔ لا تطارد — انتظر pullback صحي أو إعادة تمركز"
+
+        if new_decision != original_decision:
+            stock["decision_before_final_cap"] = original_decision
+            stock["decision"] = new_decision
+            stock["safety_gate_reasons"] = _dedupe_text_list(list(stock.get("safety_gate_reasons") or []) + list(safety_reasons or []), 10)
+            try:
+                stock["execution_status"] = compute_execution_status(
+                    str(stock.get("type", stock.get("trade_type", "")) or ""),
+                    new_decision,
+                    str(stock.get("trend", "") or ""),
+                    float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)) or 0),
+                    float(stock.get("catalyst_score", 0) or 0),
+                    str(stock.get("breakout_quality", "") or ""),
+                )
+            except Exception:
+                pass
+
+        if no_chase:
+            stock["owner_action"] = "⛔ لا تطارد الآن — انتظر pullback صحي أو اختراق/ثبات جديد بسيولة قبل أي دخول."
+            stock["execution_status_ar"] = "لا تطارد ⛔"
+            stock["execution_readiness_label"] = "لا تطارد"
+            stock["execution_readiness_icon"] = "⛔"
+        elif new_decision != original_decision:
+            try:
+                stock["owner_action"] = owner_decision(
+                    new_decision,
+                    str(stock.get("trend", "") or ""),
+                    str(stock.get("breakout_quality", "") or ""),
+                    float(stock.get("effective_volume_ratio", stock.get("volume_ratio", 0)) or 0),
+                    float(stock.get("catalyst_score", 0) or 0),
+                )
+            except Exception:
+                pass
+
+        out.append(stock)
+    return out
+
+
 def _build_trade_scan_response(results, scan_debug, include_all: bool = False, cache_hit: bool = False, cache_age_sec=None, payload_note: str = ""):
     results = _apply_manual_sharia_overrides(list(results or []))
     try:
@@ -1818,6 +1919,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         pass
     try:
         results = enrich_stocks_with_early_movement(results)
+    except Exception:
+        pass
+    try:
+        results = _post_early_movement_decision_safety(results)
     except Exception:
         pass
     early_movement_payload = build_early_movement_sections(results)
