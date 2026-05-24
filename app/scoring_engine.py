@@ -183,6 +183,26 @@ def apply_safety_decision_guard(stock: dict, decision: str) -> tuple[str, list[s
             tier_cap_reasons.append("سيولة غير مستمرة")
             decision = "دخول بحذر"
 
+        # Wealth Builder V1b: a high-risk Strong should not remain in Strong if
+        # the liquidity/post-activation layer says the setup still needs proof.
+        strong_tier = str(stock.get("strong_entry_tier", "") or "")
+        liq_status = str(stock.get("liquidity_persistence_status", "") or "")
+        liq_label = str(stock.get("liquidity_persistence_label", "") or "")
+        post_status = str(stock.get("post_activation_guard_status", "") or "")
+        high_risk_guard_reasons = []
+        if strong_tier == "high_risk":
+            if liq_status in {"weak", "fade", "fading"} or "غير مؤكدة" in liq_label or "ضعفت" in liq_label:
+                high_risk_guard_reasons.append("السيولة غير مؤكدة أو ضعفت")
+            if post_status in {"weak", "failed", "danger"}:
+                high_risk_guard_reasons.append("تأكيد ما بعد التفعيل ضعيف")
+            if str(stock.get("execution_gate_status", "") or "") == "wait_liquidity":
+                high_risk_guard_reasons.append("ينتظر تأكيد السيولة")
+        if decision == "دخول قوي" and high_risk_guard_reasons:
+            reasons.extend(high_risk_guard_reasons[:3])
+            tier_cap_reasons.extend(high_risk_guard_reasons[:3])
+            decision = "مراقبة" if len(set(high_risk_guard_reasons)) >= 2 else "دخول بحذر"
+            stock["high_risk_strong_cap"] = True
+
         if entry > 0 and target_1 > 0:
             target_room_pct = ((target_1 - entry) / entry) * 100
             if decision == "دخول قوي" and target_room_pct < 1.15:
