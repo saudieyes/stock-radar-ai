@@ -1916,6 +1916,67 @@ def _cap_distant_historical_target(stock: dict) -> None:
         return
 
 
+
+def _early_movement_fast_lane_reasons(stock: dict, current_decision: str, no_chase: bool, high_risk_reasons=None) -> list[str]:
+    """Wealth Builder V1c: promote clean early-movement confirmations to Cautious.
+
+    This is a limited pre-open/live-market bridge, not a full Source V2 rewrite.
+    It only upgrades Monitoring -> Cautious when the stock is already in the
+    Early Movement layer and receives live confirmation without no-chase, weak
+    liquidity, or resistance problems.  It never upgrades to Strong.
+    """
+    try:
+        if str(current_decision or "") != "مراقبة":
+            return []
+        if bool(no_chase):
+            return []
+        if high_risk_reasons:
+            return []
+        phase = str(stock.get("market_phase", "") or "").strip()
+        # Do not promote from a closed-market snapshot.  The Monday test should
+        # happen only when pre-market/open/after-hours prices are actually moving.
+        if phase not in {"pre_market", "open", "after_hours"}:
+            return []
+        em = stock.get("early_movement") or {}
+        if not bool(em.get("in_early_movement", False)):
+            return []
+        em_status = str(em.get("status", "") or stock.get("early_movement_status", "") or "")
+        if em_status not in {"priority_watch", "confirmed_watch"}:
+            return []
+
+        # Basic quality/readiness gates.  These are intentionally below Strong
+        # thresholds because the target is Cautious/Close Watch, not Strong.
+        quality = float(stock.get("quality_score", 0) or 0)
+        readiness = float(stock.get("execution_readiness_score", 0) or 0)
+        rr = float(stock.get("rr_1", 0) or 0)
+        volume = float(stock.get("effective_volume_ratio", stock.get("volume_pace_ratio", stock.get("volume_ratio", 0))) or 0)
+        res_dist = float(stock.get("nearest_resistance_distance_pct", 999) or 999)
+        liq_status = str(stock.get("liquidity_persistence_status", "") or "")
+        post_status = str(stock.get("post_activation_guard_status", "") or "")
+        close_res = bool(stock.get("close_resistance_guard_flag", False))
+
+        if quality < 62 or readiness < 50 or rr < 0.75 or volume < 1.0:
+            return []
+        if liq_status in {"weak", "fade", "fading"}:
+            return []
+        if post_status in {"weak", "failed", "danger"}:
+            return []
+        if close_res or (0 <= res_dist <= 1.0):
+            return []
+
+        reasons = ["مرشح مراقبة حركة مبكرة أكد حيًا"]
+        if str(em.get("source", "") or "") in {"both", "weekly_priority"}:
+            reasons.append("داخل قائمة Polygon الأسبوعية")
+        if str(em.get("source", "") or "") in {"both", "auto_detected"}:
+            reasons.append("اكتشاف تلقائي مطابق للنمط")
+        if volume >= 1.15:
+            reasons.append("سيولة داعمة")
+        if readiness >= 55:
+            reasons.append("جاهزية تنفيذ مقبولة")
+        return reasons[:6]
+    except Exception:
+        return []
+
 def _post_early_movement_decision_safety(results):
     """Apply final decision caps after Early Movement classification.
 
@@ -1993,6 +2054,23 @@ def _post_early_movement_decision_safety(results):
             stock["execution_gate_status"] = "wait_liquidity"
             stock["execution_gate_label"] = "⏳ انتظر تأكيد السيولة والثبات قبل الدخول"
 
+        # Wealth Builder V1c: clean Early Movement Fast Lane.
+        # If Strong is zero, users still need a disciplined path to watch early
+        # candidates.  This promotes only clean, live-confirmed early movement
+        # names from Monitoring to Cautious.  It never promotes to Strong.
+        fast_lane_reasons = []
+        try:
+            fast_lane_reasons = _early_movement_fast_lane_reasons(stock, new_decision, no_chase, high_risk_reasons)
+        except Exception:
+            fast_lane_reasons = []
+        if fast_lane_reasons and new_decision == "مراقبة":
+            new_decision = "دخول بحذر"
+            stock["early_movement_fast_lane_applied"] = True
+            stock["early_movement_fast_lane_version"] = "wealth_builder_v1c_live_cautious_only"
+            stock["early_movement_fast_lane_reasons"] = _dedupe_text_list(fast_lane_reasons, 8)
+            stock["execution_gate_status"] = "early_movement_cautious"
+            stock["execution_gate_label"] = "🟠 مراقبة مبكرة مؤكدة — دخول بحذر فقط مع الالتزام بالشروط"
+
         if new_decision != original_decision:
             stock["decision_before_final_cap"] = original_decision
             stock["decision"] = new_decision
@@ -2019,6 +2097,11 @@ def _post_early_movement_decision_safety(results):
             stock["execution_status_ar"] = "انتظار تأكيد ⚠️"
             stock["execution_readiness_label"] = "انتظار تأكيد"
             stock["execution_readiness_icon"] = "⚠️"
+        elif stock.get("early_movement_fast_lane_applied"):
+            stock["owner_action"] = "🟠 ترقية مراقبة مبكرة إلى دخول بحذر — لا تدخل إلا مع استمرار السيولة والثبات وعدم المطاردة."
+            stock["execution_status_ar"] = "دخول بحذر 🟠"
+            stock["execution_readiness_label"] = "دخول بحذر"
+            stock["execution_readiness_icon"] = "🟠"
         elif new_decision != original_decision:
             try:
                 stock["owner_action"] = owner_decision(
@@ -2105,6 +2188,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_weekly_priority_count": int(early_movement_payload.get("weekly_priority_count", 0) or 0),
         "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
         "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
+        "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
         "manual_sharia_approvals_count": len(load_manual_sharia_approvals()),
         "strong_entries": strong[:25],
