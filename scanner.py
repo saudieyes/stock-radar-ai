@@ -6,6 +6,12 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
 
+try:
+    from app.early_movement import get_weekly_priority_symbols
+except Exception:
+    def get_weekly_priority_symbols(include_high_risk: bool = False):
+        return []
+
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
 HTTP_SESSION = requests.Session()
@@ -1966,6 +1972,17 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         + get_seed_universe()
     )
 
+    weekly_priority_symbols = []
+    try:
+        weekly_priority_symbols = [str(x).upper().strip() for x in get_weekly_priority_symbols(include_high_risk=True) if str(x or '').strip()]
+        for ticker in weekly_priority_symbols:
+            if ticker:
+                _add_source_reason(source_reasons, ticker, "قائمة الحركة المبكرة الأسبوعية")
+    except Exception:
+        weekly_priority_symbols = []
+
+    final_universe = unique_keep_order(weekly_priority_symbols + final_universe)
+
     if not final_universe:
         LAST_SOURCE_DIAGNOSTICS = {"engine_version": "source_v3_cached_balanced", "requested_target": requested_max_symbols, "target": max_symbols, "source_mode": "seed_fallback", "reasons": {}, "market_activity_mode": market_activity_mode, "activity_stats": source_activity_stats}
         return get_seed_universe()[:max_symbols]
@@ -1980,6 +1997,8 @@ def get_scan_universe(max_symbols: int = TOTAL_UNIVERSE) -> list[str]:
         "market_activity_mode": market_activity_mode,
         "suggested_dynamic_target": dynamic_target,
         "activity_stats": source_activity_stats,
+        "weekly_priority_count": len(weekly_priority_symbols),
+        "weekly_priority_symbols": weekly_priority_symbols[:60],
         "bucket_counts": {
             "source": len(source_scored),
             "big_caps": len(big_caps_scored),

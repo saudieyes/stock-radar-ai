@@ -174,6 +174,12 @@ from app.source_discovery import (
     get_full_market_scan_interval_sec,
     get_last_dynamic_discovery_status,
 )
+from app.early_movement import (
+    enrich_stocks_with_early_movement,
+    build_early_movement_sections,
+    build_early_movement_static_status,
+    build_early_movement_weekly_report,
+)
 
 app = FastAPI()
 
@@ -1810,6 +1816,11 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         results = enrich_opportunity_intelligence_bulk(results)
     except Exception:
         pass
+    try:
+        results = enrich_stocks_with_early_movement(results)
+    except Exception:
+        pass
+    early_movement_payload = build_early_movement_sections(results)
     scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
@@ -1822,6 +1833,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         and not _is_blocked_sharia(x)
         and not _is_gray_sharia(x)
     ])
+    early_movement_watchlist = early_movement_payload.get("early_movement_watchlist", [])
 
     out = {
         "market_phase": phase,
@@ -1857,6 +1869,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "gray_strong_count": len(gray_strong),
         "premarket_setups_count": len(premarket_setups),
         "watchlist_count": len(watch),
+        "early_movement_count": int(early_movement_payload.get("count", 0) or 0),
+        "early_movement_weekly_priority_count": int(early_movement_payload.get("weekly_priority_count", 0) or 0),
+        "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
+        "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
         "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
         "manual_sharia_approvals_count": len(load_manual_sharia_approvals()),
         "strong_entries": strong[:25],
@@ -1865,6 +1881,8 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "gray_strong": gray_strong[:25],
         "premarket_setups": premarket_setups[:25],
         "watchlist": watch[:50],
+        "early_movement_watchlist": early_movement_watchlist[:30],
+        "early_movement": early_movement_payload,
         "opening_mode_active": is_opening_window(),
         "opening_focus": build_opening_focus(results),
         "all_results": results if include_all else [],
@@ -2827,6 +2845,26 @@ def diagnostics_big_mover_anatomy_endpoint(
     if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
         return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
     return result
+
+
+@app.get("/early-movement/status")
+def early_movement_status_endpoint():
+    return build_early_movement_static_status()
+
+
+@app.get("/early-movement/watchlist")
+def early_movement_watchlist_endpoint():
+    return build_early_movement_static_status()
+
+
+@app.get("/early-movement/report")
+@app.get("/early-movement/weekly-report")
+def early_movement_report_endpoint(format: str = "json"):
+    result = build_early_movement_weekly_report(format=format)
+    if str(format or "json").strip().lower() in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(str(result), media_type="text/plain; charset=utf-8")
+    return result
+
 
 @app.get("/evidence/export.json")
 def evidence_export_json_endpoint(week_key: str = "", trade_date: str = "", limit: int = 10000):
