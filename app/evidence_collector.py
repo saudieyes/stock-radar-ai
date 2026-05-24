@@ -2623,9 +2623,27 @@ def big_mover_anatomy_scan_gap_report(
         where.append("trade_date=?")
         args.append(d)
     where_sql = " WHERE " + " AND ".join(where)
+    # If the current calendar week has not started yet, a plain request can
+    # otherwise return 0 winners.  For diagnostics, default to the latest
+    # completed week that actually has winner profiles, unless the caller
+    # explicitly supplied week_key/trade_date.
+    fallback_note = ""
     with _connect() as conn:
         total = conn.execute(f"SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles {where_sql}", tuple(args)).fetchone()
         rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, universe_limit)).fetchall()
+        if (not rows) and not week_key and not trade_date:
+            latest = conn.execute(
+                "SELECT week_key, COUNT(*) AS c FROM evidence_winner_profiles WHERE winner_change_pct>=? GROUP BY week_key HAVING c>0 ORDER BY week_key DESC LIMIT 1",
+                (th,),
+            ).fetchone()
+            if latest and latest["week_key"]:
+                wk = str(latest["week_key"] or "")
+                where = ["winner_change_pct>=?", "week_key=?"]
+                args = [th, wk]
+                where_sql = " WHERE " + " AND ".join(where)
+                total = conn.execute(f"SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS symbols FROM evidence_winner_profiles {where_sql}", tuple(args)).fetchone()
+                rows = conn.execute(f"SELECT * FROM evidence_winner_profiles {where_sql} ORDER BY winner_change_pct DESC LIMIT ?", (*args, universe_limit)).fetchall()
+                fallback_note = f"لا توجد بيانات رابحين للأسبوع الحالي؛ تم استخدام آخر أسبوع مكتمل متاح: {wk}"
     raw_rows = [dict(r) for r in rows or []]
     universe = _summarize_winner_universe(raw_rows)
     selected_rows = _select_representative_winner_rows(raw_rows, sample_limit=sample_n)
@@ -2715,17 +2733,20 @@ def big_mover_anatomy_scan_gap_report(
         "loss_comparison": loss_cmp,
         "pattern_action_matrix": pattern_matrix,
         "items": detailed_items[:display_limit],
+        "fallback_note": fallback_note,
         "notes": "Read-only diagnostic. V2 analyzes all stored winners up to max_profiles, deep-dives a stratified sample, and compares stored loser patterns. Default makes zero external calls.",
     }
     if str(format or "json").lower() in {"brief", "text", "txt", "chatgpt"}:
         lines = [
             "تقرير Big Mover Anatomy + Historical Pattern + Scan Gap Audit V2",
             f"الأسبوع: {wk}",
+            f"ملاحظة: {fallback_note}" if fallback_note else "",
             f"التاريخ: {d or 'كل الأسبوع'} | الحد: +{safe_round(th,1)}%",
             f"النمط/التاريخ: {result['history_mode']} | تحليل شامل: {len(raw_rows)} من {result['total_matching_profiles']} ملف رابح | عينة تفصيلية: {len(detailed_items)} | المعروض: {result['items_returned']}",
             "",
             "ملخص العينة الشاملة:",
         ]
+        lines = [x for x in lines if str(x).strip()]
         sc = universe.get("source_visibility_counts") or {}
         gb = universe.get("gap_buckets") or {}
         tc = universe.get("tradability_counts") or {}

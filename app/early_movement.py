@@ -482,7 +482,8 @@ def build_early_movement_weekly_report(format: str = "json") -> Any:
             "moved_10pct_plus": len([x for x in rows if x["status"] == "moved_10pct_plus"]),
             "promoted_to_strong": len([x for x in rows if x["status"] == "promoted_to_strong"]),
             "promoted_to_cautious": len([x for x in rows if x["status"] == "promoted_to_cautious"]),
-            "seen_by_tool": len([x for x in rows if x["status"] == "seen_by_tool"]),
+            "seen_by_tool_only": len([x for x in rows if x["status"] == "seen_by_tool"]),
+            "seen_total": len([x for x in rows if _safe_int((x.get("tracking") or {}).get("signal_rows", 0)) > 0]),
             "not_seen_yet": len([x for x in rows if x["status"] == "not_seen_yet"]),
         },
     }
