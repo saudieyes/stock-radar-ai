@@ -1824,6 +1824,98 @@ def _dedupe_text_list(values, limit: int = 12):
     return out
 
 
+def _clean_owner_action_text(text: str, decision: str = "") -> str:
+    """Remove duplicated Arabic guidance fragments and soften stale Strong wording.
+
+    Some upstream layers append the same high-risk sentence more than once.  This
+    cleanup is display-only and avoids confusing messages such as the same warning
+    repeated twice on the card.
+    """
+    try:
+        import re
+        text = str(text or "").strip()
+        if not text:
+            return text
+        # If the final tier is no longer Strong, do not keep wording that says
+        # "Strong entry high risk"; it is now just a high-risk watch/cautious note.
+        if decision != "دخول قوي":
+            text = text.replace("دخول قوي عالي المخاطرة / يحتاج تأكيد", "فرصة عالية المخاطرة / تحتاج تأكيد")
+        parts = re.split(r"(?<=[.!؟])\s+", text)
+        cleaned = []
+        seen = set()
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            key = re.sub(r"\s+", " ", part)
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(part)
+        out = " ".join(cleaned).strip()
+        # Extra guard for exact repeated phrase when punctuation splitting did not catch it.
+        phrase = "⚠️ فرصة عالية المخاطرة / تحتاج تأكيد: انتظر تأكيد السيولة والثبات قبل الدخول."
+        while out.count(phrase) > 1:
+            out = out.replace(phrase + " " + phrase, phrase)
+        phrase2 = "⚠️ دخول قوي عالي المخاطرة / يحتاج تأكيد: انتظر تأكيد السيولة والثبات قبل الدخول."
+        while out.count(phrase2) > 1:
+            out = out.replace(phrase2 + " " + phrase2, phrase2)
+        return out
+    except Exception:
+        return str(text or "")
+
+
+def _cap_distant_historical_target(stock: dict) -> None:
+    """Do not use a far historical/ATH resistance as a practical target.
+
+    V4h correctly separates practical resistance from distant historical levels,
+    but older plan fields may still carry the distant ATH into target_2.  This
+    keeps the historical level as context only and replaces the practical target
+    with a nearer ATR/extension target.
+    """
+    try:
+        if not isinstance(stock, dict):
+            return
+        if not bool(stock.get("major_resistance_is_distant", False)) and not bool(stock.get("price_discovery_zone", False)):
+            return
+        current = float(stock.get("display_price", stock.get("current_price_live", stock.get("current_price", 0))) or 0)
+        target_1 = float(stock.get("target_1", stock.get("display_target_price", 0)) or 0)
+        target_2 = float(stock.get("target_2", 0) or 0)
+        major = float(stock.get("major_resistance", 0) or 0)
+        if current <= 0 or target_2 <= 0:
+            return
+        # If target_2 is effectively the distant historical level, it is not a
+        # near-term execution target.  Keep it in distant_resistance_context.
+        too_far = target_2 >= current * 1.35 or (major and abs(target_2 - major) / max(major, 1.0) <= 0.03 and major >= current * 1.35)
+        if not too_far:
+            return
+        atr_t2 = float(stock.get("atr_target_2_suggestion", 0) or 0)
+        replacement = 0.0
+        if atr_t2 > max(target_1, current) and atr_t2 < target_2:
+            replacement = atr_t2
+        elif target_1 > current:
+            replacement = target_1 * 1.06
+        else:
+            replacement = current * 1.10
+        # Keep the practical target from becoming unrealistically far.
+        replacement = min(replacement, current * 1.22)
+        if replacement <= current or replacement >= target_2:
+            return
+        stock["target_2_before_distant_cap"] = target_2
+        stock["target_2"] = round(replacement, 2)
+        stock["distant_resistance_context"] = major or target_2
+        stock["target_2_capped_due_to_distant_resistance"] = True
+        note = "المقاومة التاريخية البعيدة تُعرض كسياق فقط وليست هدفًا مباشرًا"
+        stock["risk_flags"] = _dedupe_text_list(list(stock.get("risk_flags") or []) + [note], 12)
+        notes = list(stock.get("level_refinement_notes") or [])
+        notes.append(note)
+        stock["level_refinement_notes"] = _dedupe_text_list(notes, 8)
+        if major:
+            stock["major_resistance_label"] = f"مقاومة تاريخية بعيدة قرب {safe_round(major)} — ليست هدفًا مباشرًا"
+    except Exception:
+        return
+
+
 def _post_early_movement_decision_safety(results):
     """Apply final decision caps after Early Movement classification.
 
@@ -1874,6 +1966,33 @@ def _post_early_movement_decision_safety(results):
             stock["execution_gate_status"] = "no_chase"
             stock["execution_gate_label"] = "⛔ لا تطارد — انتظر pullback صحي أو إعادة تمركز"
 
+        # Wealth Builder V1b: a high-risk Strong with weak liquidity or weak
+        # post-activation confirmation is not a clean Strong.  This fixes the
+        # remaining cases where cards said "دخول قوي عالي المخاطرة" and still
+        # stayed in the Strong bucket.
+        high_risk_tier = str(stock.get("strong_entry_tier", "") or "") == "high_risk"
+        liq_status = str(stock.get("liquidity_persistence_status", "") or "")
+        post_status = str(stock.get("post_activation_guard_status", "") or "")
+        liq_label = str(stock.get("liquidity_persistence_label", "") or "")
+        high_risk_reasons = []
+        if high_risk_tier:
+            if liq_status in {"weak", "fade", "fading"} or "غير مؤكدة" in liq_label or "ضعفت" in liq_label:
+                high_risk_reasons.append("السيولة غير مؤكدة أو ضعفت")
+            if post_status in {"weak", "failed", "danger"}:
+                high_risk_reasons.append("تأكيد ما بعد التفعيل ضعيف")
+            if str(stock.get("execution_gate_status", "") or "") == "wait_liquidity":
+                high_risk_reasons.append("ينتظر تأكيد السيولة")
+        if original_decision == "دخول قوي" and high_risk_reasons:
+            # If both the liquidity and post-activation guards are weak, keep it
+            # as monitoring only.  If only one guard is weak, cap to cautious.
+            new_decision = "مراقبة" if len(set(high_risk_reasons)) >= 2 else "دخول بحذر"
+            safety_reasons = list(safety_reasons or []) + high_risk_reasons
+            stock["tier_cap_applied"] = True
+            stock["high_risk_strong_cap"] = True
+            stock["tier_cap_reasons"] = _dedupe_text_list(list(stock.get("tier_cap_reasons") or []) + high_risk_reasons, 8)
+            stock["execution_gate_status"] = "wait_liquidity"
+            stock["execution_gate_label"] = "⏳ انتظر تأكيد السيولة والثبات قبل الدخول"
+
         if new_decision != original_decision:
             stock["decision_before_final_cap"] = original_decision
             stock["decision"] = new_decision
@@ -1895,6 +2014,11 @@ def _post_early_movement_decision_safety(results):
             stock["execution_status_ar"] = "لا تطارد ⛔"
             stock["execution_readiness_label"] = "لا تطارد"
             stock["execution_readiness_icon"] = "⛔"
+        elif original_decision == "دخول قوي" and high_risk_reasons:
+            stock["owner_action"] = "⚠️ ليست دخولًا قويًا نظيفًا الآن — انتظر تأكيد السيولة والثبات بعد التفعيل قبل أي دخول."
+            stock["execution_status_ar"] = "انتظار تأكيد ⚠️"
+            stock["execution_readiness_label"] = "انتظار تأكيد"
+            stock["execution_readiness_icon"] = "⚠️"
         elif new_decision != original_decision:
             try:
                 stock["owner_action"] = owner_decision(
@@ -1906,6 +2030,9 @@ def _post_early_movement_decision_safety(results):
                 )
             except Exception:
                 pass
+
+        _cap_distant_historical_target(stock)
+        stock["owner_action"] = _clean_owner_action_text(stock.get("owner_action", ""), str(stock.get("decision", new_decision) or new_decision))
 
         out.append(stock)
     return out
