@@ -479,6 +479,14 @@
     "symbol": "DOW",
     "updated_at": "2026-05-04 12:10:35"
   },
+  "DRI": {
+    "excluded_at": "2026-05-24 13:04:23",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DRI",
+    "updated_at": "2026-05-24 13:04:23"
+  },
   "DRVN": {
     "excluded_at": "2026-05-18 10:16:44",
     "note": "استبعاد يدوي شرعي",
@@ -815,6 +823,14 @@
     "symbol": "KLXE",
     "updated_at": "2026-04-24 11:40:13"
   },
+  "KVHI": {
+    "excluded_at": "2026-05-22 15:29:24",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "KVHI",
+    "updated_at": "2026-05-22 15:29:24"
+  },
   "LAC": {
     "excluded_at": "2026-04-27 10:04:52",
     "note": "",
@@ -846,6 +862,14 @@
     "source": "manual",
     "symbol": "LEDS",
     "updated_at": "2026-05-19 14:23:52"
+  },
+  "LGND": {
+    "excluded_at": "2026-05-24 13:01:17",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LGND",
+    "updated_at": "2026-05-24 13:01:17"
   },
   "LIFE": {
     "excluded_at": "2026-04-27 17:54:20",
@@ -1150,6 +1174,14 @@
     "source": "manual",
     "symbol": "ROKU",
     "updated_at": "2026-04-27 17:56:54"
+  },
+  "RRGB": {
+    "excluded_at": "2026-05-21 15:13:32",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "RRGB",
+    "updated_at": "2026-05-21 15:13:32"
   },
   "RUM": {
     "excluded_at": "2026-04-27 10:03:13",
