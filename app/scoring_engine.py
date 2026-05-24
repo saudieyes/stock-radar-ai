@@ -124,7 +124,20 @@ def apply_safety_decision_guard(stock: dict, decision: str) -> tuple[str, list[s
         support_strength = str(stock.get("nearest_support_strength", "") or "")
         support_dist = float(stock.get("nearest_support_distance_pct", 999) or 999)
         target_1 = float(stock.get("target_1", 0) or 0)
-        entry = float(stock.get("entry", 0) or 0)
+        entry = float(stock.get("entry", stock.get("display_entry_price", 0)) or 0)
+        current_price = float(stock.get("display_price", stock.get("current_price_live", 0)) or 0)
+        change_pct = float(stock.get("display_change_pct", stock.get("change_vs_prev_close_pct", 0)) or 0)
+        change_from_open_pct = float(stock.get("change_from_open_pct", 0) or 0)
+        execution_readiness_label = str(stock.get("execution_readiness_label", "") or "")
+        liquidity_persistence_score = float(stock.get("liquidity_persistence_score", 0) or 0)
+        no_chase_status = str(stock.get("no_chase_guard_status", "") or "")
+        no_chase_label = str(stock.get("no_chase_guard_label", "") or "")
+        session_position = 0.0
+        try:
+            session_position = float((stock.get("intraday", {}) or {}).get("session_position_pct", stock.get("session_position_pct", 0)) or 0)
+        except Exception:
+            session_position = 0.0
+        tier_cap_reasons = []
 
         if NEWS_SCORE_ENABLED and news_scope == "company" and news_sentiment in {"negative", "legal"} and news_sessions <= NEGATIVE_NEWS_MAX_SESSIONS:
             reasons.append("خبر شركة تحذيري/سلبي حديث")
@@ -133,10 +146,42 @@ def apply_safety_decision_guard(stock: dict, decision: str) -> tuple[str, list[s
             elif news_sessions <= 1:
                 decision = "مراقبة"
 
-        if near_res and res_dist <= 0.45 and res_strength in {"قوي", "قوي جدًا"}:
-            reasons.append(f"قريب جدًا من مقاومة {res_strength} ({safe_round(res_dist)}%)")
+        # V2 Tier Cap: resistance risk is not just a text warning. It caps the
+        # decision tier so "دخول قوي" stays reserved for clean execution.
+        if near_res and res_dist <= 1.50 and res_strength in {"قوي", "قوي جدًا"}:
+            reasons.append(f"قريب من مقاومة {res_strength} ({safe_round(res_dist)}%)")
+            tier_cap_reasons.append("مقاومة قوية قريبة")
             if decision == "دخول قوي":
                 decision = "دخول بحذر"
+            if res_dist <= 0.45 and decision == "دخول بحذر":
+                decision = "مراقبة"
+
+        # No-Chase Hard Cap: a stock cannot remain Strong while the same card
+        # says it is too extended / chase-risk.
+        no_chase_triggers = []
+        if no_chase_status == "no_chase" or "لا تطارد" in no_chase_label:
+            no_chase_triggers.append("حارس عدم المطاردة مفعّل")
+        if "مطاردة" in execution_readiness_label:
+            no_chase_triggers.append("جاهزية التنفيذ تصفه كمطاردة")
+        if change_pct >= 12:
+            no_chase_triggers.append(f"صعود اليوم/آخر سعر كبير ({safe_round(change_pct)}%)")
+        if change_from_open_pct >= 8:
+            no_chase_triggers.append(f"ابتعد عن الافتتاح ({safe_round(change_from_open_pct)}%)")
+        if entry > 0 and current_price > entry * 1.045:
+            no_chase_triggers.append("السعر ابتعد عن منطقة الدخول")
+        if no_chase_triggers:
+            reasons.extend(no_chase_triggers[:3])
+            tier_cap_reasons.extend(no_chase_triggers[:3])
+            if decision == "دخول قوي":
+                decision = "دخول بحذر"
+            # Severe extension + weak intraday position is not a cautious entry; it is monitoring only.
+            if decision == "دخول بحذر" and (change_pct >= 18 or change_from_open_pct >= 12 or (session_position and session_position < 45 and change_pct > 6)):
+                decision = "مراقبة"
+
+        if liquidity_persistence_score and liquidity_persistence_score < 42 and decision == "دخول قوي":
+            reasons.append(f"السيولة غير مستمرة كفاية ({safe_round(liquidity_persistence_score)}/100)")
+            tier_cap_reasons.append("سيولة غير مستمرة")
+            decision = "دخول بحذر"
 
         if entry > 0 and target_1 > 0:
             target_room_pct = ((target_1 - entry) / entry) * 100
@@ -163,7 +208,16 @@ def apply_safety_decision_guard(stock: dict, decision: str) -> tuple[str, list[s
             reasons.append("جودة البيانات ضعيفة ولا يوجد دعم قوي قريب يؤكد الخطة")
             decision = "دخول بحذر"
 
-        return decision, reasons[:5]
+        if tier_cap_reasons:
+            stock["tier_cap_applied"] = True
+            stock["tier_cap_reasons"] = tier_cap_reasons[:6]
+            if no_chase_triggers:
+                stock["no_chase_hard_cap"] = True
+        else:
+            stock.setdefault("tier_cap_applied", False)
+            stock.setdefault("tier_cap_reasons", [])
+
+        return decision, reasons[:7]
     except Exception as exc:
         return decision, [f"تعذر تطبيق بوابة الأمان: {type(exc).__name__}"]
 
