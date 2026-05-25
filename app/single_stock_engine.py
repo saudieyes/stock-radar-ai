@@ -11,6 +11,9 @@ from app.display_contract import enrich_display_meta, display_rank_score
 from app.opportunity_intelligence import enrich_opportunity_intelligence
 from app.early_movement import enrich_stock_with_early_movement
 from app.source_promotion_v2a import enrich_row_source_promotion_v2a
+from app.detection_journal import enrich_stock_with_detection_journal
+from app.source_promotion_engine_v2 import enrich_row_source_promotion_v2
+from app.pre_move_engine import enrich_row_pre_move
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
@@ -72,6 +75,9 @@ def scan_all(debug: bool = False):
         "dynamic_fmp_confirmed": int((source_diag or {}).get("fmp_confirmed", 0) or 0),
         "dynamic_fmp_extended_confirmed": int((source_diag or {}).get("fmp_extended_confirmed", 0) or 0),
         "dynamic_fmp_movers_count": int((source_diag or {}).get("fmp_movers_count", 0) or 0),
+        "dynamic_live_ignition_hot_lane_count": int((source_diag or {}).get("live_ignition_hot_lane_count", 0) or 0),
+        "dynamic_pre_move_engine_v2_count": int((source_diag or {}).get("pre_move_engine_v2_count", 0) or 0),
+        "dynamic_late_mover_review_count": int((source_diag or {}).get("late_mover_review_count", 0) or 0),
         "dynamic_next_scan_interval_sec": int((source_diag or {}).get("next_scan_interval_sec", 0) or 0),
         "dynamic_source_bucket_counts": (source_diag or {}).get("source_bucket_counts", {}),
         "dynamic_price_under_2_deprioritized": int((source_diag or {}).get("price_under_2_deprioritized", 0) or 0),
@@ -134,12 +140,26 @@ def scan_all(debug: bool = False):
                 pass
 
             p = enrich_display_meta(p)
+            # Source / Early Discovery V2: record first detection before Early Movement
+            # decides whether the row is truly early or already moved.
+            try:
+                p = enrich_stock_with_detection_journal(p, source_layer="scan_all_deep_analysis")
+            except Exception:
+                pass
+            try:
+                p = enrich_row_pre_move(p)
+            except Exception:
+                pass
             try:
                 p = enrich_stock_with_early_movement(p)
             except Exception:
                 pass
             try:
                 p = enrich_row_source_promotion_v2a(p)
+            except Exception:
+                pass
+            try:
+                p = enrich_row_source_promotion_v2(p)
             except Exception:
                 pass
             try:

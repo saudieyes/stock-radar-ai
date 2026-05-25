@@ -18,6 +18,12 @@ from app.live_quotes import get_live_quotes
 from app.early_movement import get_weekly_priority_items
 from app.settings import FMP_API_KEY, HTTP_SESSION, POLYGON_API_KEY
 from app.utils import safe_round, to_float
+from app.live_ignition_engine import classify_live_ignition, live_ignition_enabled
+from app.pre_move_engine import analyze_pre_move, pre_move_engine_enabled
+try:
+    from app.detection_journal import record_detection
+except Exception:  # keep source layer resilient if SQLite is unavailable during import
+    record_detection = None
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -366,6 +372,12 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 _add_candidate(candidates, ticker, 16, "near_high", "قريب من قمة اليوم/اختراق")
             if -2.0 <= chg <= 4.5 and close_strength >= 0.62 and 0.015 <= range_pct <= 0.12:
                 _add_candidate(candidates, ticker, 12, "constructive", "تهيئة بنّاءة")
+            try:
+                pre_meta = analyze_pre_move({**(m or {}), "day_change_pct": chg, "source_reason": "polygon_grouped"}) if pre_move_engine_enabled() else {}
+                if pre_meta.get("pre_move_watch_eligible"):
+                    _add_candidate(candidates, ticker, 20 + float(pre_meta.get("pre_move_score", 0) or 0) * 0.15, "pre_move_engine_v2", "Pre-Move Engine V2: " + "، ".join((pre_meta.get("pre_move_reasons") or [])[:2]), {**m, "pre_move_score": pre_meta.get("pre_move_score")})
+            except Exception:
+                pass
 
     # FMP movers are source candidates only; they still pass Sharia and deep analysis later.
     fmp_movers, fmp_movers_source = _fetch_fmp_movers()
@@ -387,6 +399,19 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             if flags.get(key):
                 price_flags[key] += 1
         _add_candidate(candidates, sym, score + pref_score, "fmp_movers", "قائمة رابحين/نشطين من FMP", {"fmp_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume})
+        try:
+            ignition = classify_live_ignition(sym, {"price": price, "change_pct": change_pct, "volume": volume, "dollar_volume": dollar_volume}) if live_ignition_enabled() else {}
+            if ignition.get("hot_lane_eligible"):
+                _add_candidate(candidates, sym, 42 + float(ignition.get("ignition_score", 0) or 0) * 0.25, "live_ignition_hot_lane", "Hot Lane: بداية حركة مبكرة بسيولة", {"live_ignition_score": ignition.get("ignition_score"), "live_ignition_stage": ignition.get("stage_hint"), "fmp_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume})
+                if record_detection is not None:
+                    record_detection(sym, price=price, change_pct=change_pct, source_reason="Live Ignition Hot Lane من FMP movers", source_layer="live_ignition_hot_lane", source_tags=["fmp_movers", "live_ignition_hot_lane"], move_stage="Early Confirmation", early_or_late_detection="early")
+            elif change_pct >= 10:
+                _add_candidate(candidates, sym, 8, "late_mover_review", "متحرك متأخر — استمرار/لا تطارد وليس مراقبة مبكرة", {"late_move_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume})
+                if record_detection is not None:
+                    stage = "Catalyst Spike Review" if change_pct >= 50 else "Extended" if change_pct >= 20 else "Continuation Watch"
+                    record_detection(sym, price=price, change_pct=change_pct, source_reason="FMP mover late review", source_layer="late_mover_review", source_tags=["fmp_movers", "late_mover_review"], move_stage=stage, early_or_late_detection="late")
+        except Exception:
+            pass
         for reason in pref_reasons:
             _add_candidate(candidates, sym, 0, "price_preference", reason)
 
@@ -433,6 +458,16 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         _add_candidate(candidates, sym, live_score + pref_score, "fmp_live_confirmed", "تأكيد سعر حي من FMP", {"live_price": price, "live_change_pct": change_pct, "live_volume": volume})
         if change_pct >= 4.0:
             _add_candidate(candidates, sym, 14, "live_mover", "الحركة الحية مستمرة")
+        try:
+            ignition = classify_live_ignition(sym, {"price": price, "change_pct": change_pct, "volume": volume, "dollar_volume": dollar_volume}) if live_ignition_enabled() else {}
+            if ignition.get("hot_lane_eligible"):
+                _add_candidate(candidates, sym, 46 + float(ignition.get("ignition_score", 0) or 0) * 0.25, "live_ignition_hot_lane", "Hot Lane: بداية حركة مؤكدة بسعر حي", {"live_ignition_score": ignition.get("ignition_score"), "live_ignition_stage": ignition.get("stage_hint"), "live_price": price, "live_change_pct": change_pct, "live_volume": volume})
+                if record_detection is not None:
+                    record_detection(sym, price=price, change_pct=change_pct, source_reason="Live Ignition Hot Lane من FMP live confirmation", source_layer="live_ignition_hot_lane", source_tags=["fmp_live_confirmed", "live_ignition_hot_lane"], move_stage="Early Confirmation", early_or_late_detection="early")
+            elif change_pct >= 10:
+                _add_candidate(candidates, sym, 6, "late_mover_review", "تأكيد حي متأخر — استمرار/لا تطارد", {"late_move_change_pct": change_pct, "live_price": price, "live_volume": volume})
+        except Exception:
+            pass
         for reason in pref_reasons:
             _add_candidate(candidates, sym, 0, "price_preference", reason)
 
@@ -450,7 +485,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Balanced order: V2a gives known weekly-priority names a front-row seat,
     # then today's live/new movers, with the old baseline as support only.
     selected_order = []
+    selected_order += from_source("live_ignition_hot_lane", min(120, max_symbols))
     selected_order += from_source("weekly_priority_watchlist", min(80, max_symbols))
+    selected_order += from_source("pre_move_engine_v2", min(90, max_symbols))
     selected_order += from_source("pre_move_watch", min(40, max_symbols))
     selected_order += from_source("continuation_watch", min(40, max_symbols))
     selected_order += from_source("fmp_live_confirmed", min(140, max_symbols))
@@ -460,6 +497,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     selected_order += from_source("runner", min(120, max_symbols))
     selected_order += from_source("near_high", min(120, max_symbols))
     selected_order += from_source("constructive", min(100, max_symbols))
+    selected_order += from_source("late_mover_review", min(60, max_symbols))
     selected_order += from_source("weekly_high_risk_manual", min(20, max_symbols))
     selected_order += from_source("baseline", min(220, max_symbols))
     selected_order += [r["symbol"] for r in ranked]
@@ -475,9 +513,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             source_bucket_counts[src] = int(source_bucket_counts.get(src, 0) or 0) + 1
 
     diag = {
-        "engine_version": "dynamic_discovery_v1_source_promotion_v2a",
+        "engine_version": "dynamic_discovery_v2_hot_lane_pre_move_stage_aware",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "full_market_light_scan_plus_fmp_confirmation",
+        "dynamic_discovery_mode": "candidate_pool_plus_pre_move_plus_live_ignition_hot_lane",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -501,6 +539,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "fmp_confirm_requested": len(fmp_confirm_symbols),
         "fmp_confirmed": live_confirmed,
         "fmp_extended_confirmed": extended_confirmed,
+        "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
+        "pre_move_engine_v2_count": int(source_bucket_counts.get("pre_move_engine_v2", 0)) if 'source_bucket_counts' in locals() else 0,
+        "late_mover_review_count": int(source_bucket_counts.get("late_mover_review", 0)) if 'source_bucket_counts' in locals() else 0,
         "fmp_quote_diagnostics": fmp_diag,
         "source_bucket_counts": source_bucket_counts,
         "price_under_2_deprioritized": price_flags.get("under_2_deprioritized", 0),

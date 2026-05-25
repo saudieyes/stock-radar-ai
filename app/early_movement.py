@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 from app.settings import DATA_DIR
 from app.sqlite_store import SQLITE_DB_PATH
 
-EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v1_weekly_priority_auto_detected"
+EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_stage_aware_clean_pre_move"
 NY_TZ = ZoneInfo("America/New_York")
 
 # The weekly list is deliberately small. It is the Sharia-filtered user/assistant
@@ -205,12 +205,41 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
     is_weekly = bool(item and not is_high_risk_manual)
     n = _read_stock_numbers(stock)
     auto_ok, auto_pattern, auto_reasons, auto_conf = _is_auto_detected_candidate(stock, n)
+    pre_move_ok = bool(stock.get("pre_move_watch_eligible", False))
+    pre_move_reasons = [str(x) for x in (stock.get("pre_move_reasons") or []) if str(x).strip()]
+    if pre_move_ok and not auto_ok:
+        auto_pattern = "Pre-Move Engine V2"
+        auto_reasons = pre_move_reasons or ["Pre-Move Engine V2 يرى بناء حركة قبل الانفجار"]
+        auto_conf = max(auto_conf, int(_safe_float(stock.get("pre_move_score", 60), 60)))
 
-    if not (is_weekly or is_high_risk_manual or auto_ok):
+    if not (is_weekly or is_high_risk_manual or auto_ok or pre_move_ok):
         return {"in_early_movement": False, "symbol": sym}
 
-    source = "weekly_priority" if is_weekly else "high_risk_manual" if is_high_risk_manual else "auto_detected"
-    if (is_weekly or is_high_risk_manual) and auto_ok:
+    # Source / Early Discovery V2: Early Movement must be a clean pre-move or
+    # early-confirmation list.  If the detection journal says the stock was
+    # first seen after it had already moved +10% or more, it must not appear in
+    # the Early Movement section.  It can still appear elsewhere as
+    # Continuation / Requires Pullback / No-Chase via move_stage fields.
+    stage_meta = stock.get("move_stage_v2") or {}
+    move_stage = str(stage_meta.get("move_stage") or stock.get("move_stage") or "")
+    gain_at_detection = _safe_float(stock.get("gain_at_detection", stage_meta.get("gain_at_detection", n["change"])), n["change"])
+    current_gain = _safe_float(stock.get("current_gain", stage_meta.get("current_gain", n["change"])), n["change"])
+    stage_allows_early = stage_meta.get("stage_allows_early_watch", stock.get("stage_allows_early_watch", True))
+    late_stages = {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "No-Chase", "Catalyst Spike Review"}
+    if gain_at_detection >= 10 or current_gain >= 10 or move_stage in late_stages or stage_allows_early is False:
+        return {
+            "in_early_movement": False,
+            "symbol": sym,
+            "version": EARLY_MOVEMENT_VERSION,
+            "late_movement_excluded": True,
+            "move_stage": move_stage,
+            "gain_at_detection": round(gain_at_detection, 4),
+            "current_gain": round(current_gain, 4),
+            "excluded_reason": "ليس مراقبة مبكرة: السهم متحرك/متأخر عند الاكتشاف أو تجاوز +10%",
+        }
+
+    source = "weekly_priority" if is_weekly else "high_risk_manual" if is_high_risk_manual else "pre_move_engine_v2" if pre_move_ok else "auto_detected"
+    if (is_weekly or is_high_risk_manual) and (auto_ok or pre_move_ok):
         source = "both" if is_weekly else "high_risk_manual_plus_auto"
 
     pattern = str((item or {}).get("pattern") or auto_pattern or "Early Movement Watch")
@@ -222,7 +251,7 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
         if r and r not in reasons:
             reasons.append(r)
 
-    confidence = max(_safe_int((item or {}).get("confidence"), 0), auto_conf if auto_ok else 0)
+    confidence = max(_safe_int((item or {}).get("confidence"), 0), auto_conf if (auto_ok or pre_move_ok) else 0)
     validity_days = _safe_int((item or {}).get("validity_days"), 3 if auto_ok else 5)
 
     no_chase_reasons: list[str] = []
@@ -303,7 +332,8 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
         "recommended_action": recommended_action,
         "summary": summary,
         "is_weekly_priority": bool(is_weekly),
-        "is_auto_detected": bool(auto_ok),
+        "is_auto_detected": bool(auto_ok or pre_move_ok),
+        "is_pre_move_engine_v2": bool(pre_move_ok),
         "is_high_risk_manual": bool(is_high_risk_manual),
     }
 
