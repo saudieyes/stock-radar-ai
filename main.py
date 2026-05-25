@@ -581,6 +581,121 @@ def _live_distance_pct(price: float, ref: float) -> float | None:
         return None
 
 
+def _as_text_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(x).strip() for x in value if str(x).strip()]
+    text = str(value).strip()
+    if not text:
+        return []
+    # Keep Arabic comma-separated summaries useful without over-splitting normal phrases.
+    if "،" in text:
+        return [x.strip() for x in text.split("،") if x.strip()]
+    return [text]
+
+
+def _has_any_phrase(items, phrases: list[str]) -> bool:
+    joined = " | ".join(_as_text_list(items))
+    return any(str(p) and str(p) in joined for p in phrases)
+
+
+def _live_overlay_execution_blockers(row: dict) -> list[str]:
+    """Final safety gate for radar-live-refresh/live overlay.
+
+    Source/Promotion V2a1 correctly blocks promotion when the source layer sees
+    resistance/no-chase/unreliable price. This guard prevents the *live overlay*
+    from re-promoting the same row to Strong/Cautious after V2a1 already blocked it.
+    It is intentionally conservative during pre-market/after-hours because these
+    quotes are useful for monitoring, not execution.
+    """
+    row = row or {}
+    blockers: list[str] = []
+
+    def add(reason: str):
+        if reason and reason not in blockers:
+            blockers.append(reason)
+
+    market_phase = str(row.get("market_phase", "") or "")
+    price_score = safe_round(row.get("price_freshness_score", 99))
+    price_label = str(row.get("price_freshness_label", "") or row.get("price_source_label", "") or "")
+
+    # Any explicit V2a/source-promotion block must dominate live overlay promotion.
+    promo_blocks = _as_text_list(row.get("promotion_block_reasons"))
+    hard_block_phrases = [
+        "No-Chase",
+        "الحركة متأخرة",
+        "قريب جدًا من مقاومة",
+        "اختراق المقاومة القريبة",
+        "السعر اللحظي غير موثوق",
+        "السيولة غير مؤكدة",
+        "تأكيد ما بعد التفعيل ضعيف",
+        "كسر/اختبار دعم",
+    ]
+    for reason in promo_blocks:
+        if any(p in reason for p in hard_block_phrases):
+            add(reason)
+
+    # Do not let pre-market/extended quotes become actionable when the app already
+    # says the price is not reliable enough for execution.
+    if (row.get("price_reliable_for_execution") is False
+        or row.get("live_price_available") is False
+        or price_score <= 40
+        or "غير موثوق" in price_label
+        or "غير كاف" in price_label
+        or "unavailable" in str(row.get("price_source", "") or "").lower()):
+        add("السعر اللحظي غير موثوق")
+
+    # No-chase and near-resistance must control the final visible decision.
+    em = row.get("early_movement") if isinstance(row.get("early_movement"), dict) else {}
+    if str(row.get("early_movement_status", "") or "").lower() == "no_chase" or str(em.get("status", "") or "").lower() == "no_chase":
+        add("No-Chase / الحركة متأخرة")
+    if _as_text_list(row.get("early_movement_no_chase_reasons")) or _as_text_list(row.get("no_chase_reasons")) or _as_text_list(em.get("no_chase_reasons")):
+        add("No-Chase / الحركة متأخرة")
+    if str(row.get("no_chase_guard_status", "") or "").lower() == "no_chase":
+        add("No-Chase / الحركة متأخرة")
+
+    if row.get("close_resistance_guard_flag") is True or str(row.get("execution_gate_status", "") or "") == "wait_resistance_break":
+        add("⏳ انتظر اختراق المقاومة القريبة والثبات فوقها")
+
+    if str(row.get("liquidity_persistence_status", "") or "").lower() == "weak":
+        add("السيولة غير مؤكدة أو لا تبدو مستمرة")
+    if str(row.get("post_activation_guard_status", "") or "").lower() == "weak":
+        add("تأكيد ما بعد التفعيل ضعيف")
+
+    # During pre-market/after-hours, only monitoring is allowed unless another
+    # reliable execution source marks the row executable.
+    if market_phase in {"pre_market", "after_hours"} and row.get("price_reliable_for_execution") is not True:
+        add("السعر اللحظي غير موثوق")
+
+    return blockers
+
+
+def _apply_live_overlay_block(row: dict, blockers: list[str], original_decision: str, base_score: float) -> dict:
+    out = dict(row or {})
+    out["decision"] = "مراقبة"
+    out["effective_decision"] = "مراقبة"
+    out["live_plan_status"] = "live_overlay_blocked"
+    out["live_plan_action"] = "مراقبة فقط حتى تزول موانع الترقية"
+    out["live_plan_reason"] = "، ".join(blockers[:4]) if blockers else "تم منع الترقية الحية احتياطيًا"
+    out["live_plan_adjustment"] = safe_round(min(0.0, safe_round(out.get("live_plan_adjustment", 0)) - 12.0), 2)
+    out["live_overlay_gate_status"] = "blocked"
+    out["live_overlay_block_reasons"] = blockers[:8]
+    # If V2a marked the row promoted earlier, neutralize that flag when final blockers exist.
+    if out.get("source_promotion_v2a_promoted"):
+        out["source_promotion_v2a_promoted_before_live_gate"] = True
+        out.pop("source_promotion_v2a_promoted", None)
+        out.pop("source_promotion_rank_boost", None)
+    current_live_rank = safe_round(out.get("live_rank_score", out.get("display_rank_score", base_score)))
+    out["live_rank_score"] = safe_round(max(0.0, current_live_rank - 12.0), 2)
+    existing = str(out.get("live_rank_reason", "") or "")
+    gate_note = "منع الترقية الحية: " + ("، ".join(blockers[:3]) if blockers else "بوابة حماية")
+    out["live_rank_reason"] = "، ".join([x for x in [existing, gate_note] if x][:5])
+    # Keep the original technical read for diagnostics, but do not show it as actionable.
+    out["live_blocked_original_decision"] = original_decision
+    return out
+
+
 def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
     """Overlay live quote fields without replacing the saved analysis plan.
 
@@ -742,6 +857,7 @@ def _live_plan_validity_guard(row: dict) -> dict:
     base_score = safe_round(out.get("display_rank_score", _stock_score_value(out)), 2)
     dist_entry = _live_distance_pct(live_price, entry) if entry else None
     dist_snapshot = _live_distance_pct(live_price, safe_round(out.get("analysis_snapshot_price", out.get("snapshot_display_price", 0))))
+    live_gate_blockers = _live_overlay_execution_blockers(out)
 
     status = "valid"
     action = "الخطة ما زالت صالحة"
@@ -809,6 +925,16 @@ def _live_plan_validity_guard(row: dict) -> dict:
             new_decision = "دخول بحذر"
             adjustment -= 8
         reasons.append("فرق السعر الحالي عن لقطة التحليل أصبح واضحًا")
+
+    # Final V2a2 live-overlay gate: no live overlay may promote or preserve an
+    # actionable label when V2a/source-promotion or execution safety says to wait.
+    if new_decision in {"دخول قوي", "دخول بحذر"} and live_gate_blockers:
+        blocked = _apply_live_overlay_block(out, live_gate_blockers, original_decision, base_score)
+        # Preserve diagnostic status/reasons from the calculations above.
+        blocked["blocked_live_candidate_decision"] = new_decision
+        blocked["blocked_live_candidate_status"] = status
+        blocked["blocked_live_candidate_reasons"] = reasons[:5]
+        return blocked
 
     if _is_gray_sharia(out) and new_decision == "دخول قوي":
         # Keep technical strength, but route to gray bucket instead of clean strong.
@@ -947,6 +1073,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         "tracking_intelligence": tracking_live_stats,
+        "live_overlay_gate_version": "source_promotion_v2a2_live_overlay_gate",
+        "live_overlay_blocked_count": len([x for x in overlaid if isinstance(x, dict) and x.get("live_overlay_gate_status") == "blocked"]),
         "early_movement_count": int(early_movement_payload.get("count", 0) or 0),
         "early_movement_weekly_priority_count": int(early_movement_payload.get("weekly_priority_count", 0) or 0),
         "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
