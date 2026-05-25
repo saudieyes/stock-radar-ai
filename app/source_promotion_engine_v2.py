@@ -18,7 +18,7 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.move_stage_classifier import apply_move_stage_to_row
 from app.pre_move_engine import enrich_row_pre_move
 
-SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix4_active_pullback_calibration"
+SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix5_conditional_watch_guard"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:
@@ -113,6 +113,24 @@ def _clear_transient_v2_flags(row: dict) -> None:
             row.pop("owner_action", None)
 
 
+def _force_conditional_to_watch(row: dict, reason: str) -> None:
+    """Force non-actionable stages to مراقبة without marking them as No-Chase.
+
+    Requires Pullback / Continuation / Pre-Move are useful watch states, but they
+    are not direct entries.  This prevents an upstream V2a cautious decision from
+    leaking through as دخول بحذر while the final V2 stage says the user must wait.
+    """
+    prior = str(row.get("decision", "") or "")
+    if prior != "مراقبة":
+        row["decision_before_source_promotion_v2"] = prior
+    row["decision"] = "مراقبة"
+    row["signal_strength_label"] = "مراقبة"
+    row["signal_strength_bucket"] = -1
+    row["source_promotion_v2_capped"] = True
+    row["source_promotion_v2_promoted"] = False
+    row["source_promotion_v2_cap_reason"] = reason
+
+
 def _cap_strong_to_cautious(row: dict, reason: str) -> None:
     prior = str(row.get("decision", "") or "")
     if prior == "دخول قوي":
@@ -183,11 +201,11 @@ def enrich_row_source_promotion_v2(row: dict) -> dict:
     elif stage in {"Continuation Watch", "Requires Pullback"} or gain_at_detection >= 10 or peak_gain_seen >= 10:
         row["early_movement_active"] = False
         row["early_movement_excluded_by_v2"] = True
-        if decision == "دخول قوي":
-            # Continuation is not a clean immediate Strong unless the setup is exceptionally clean.
-            clean_continuation = price_reliable and readiness >= 62 and quality >= 76 and volume >= 1.25 and rr >= 0.8 and not blockers and bool(row.get("stage_allows_strong"))
-            if not clean_continuation:
-                _cap_strong_to_cautious(row, "استمرار مشروط وليس دخول قوي نظيف")
+        if decision in {"دخول قوي", "دخول بحذر"}:
+            # Continuation / Requires Pullback are not immediate entries.
+            # A clean setup can later become Active Breakout or Early Confirmation,
+            # but while V2 says pullback/continuation, the visible decision must be مراقبة.
+            _force_conditional_to_watch(row, "استمرار/Requires Pullback — ليست دخولًا مباشرًا")
         row["continuation_watch_active"] = True
         row["continuation_watch_label"] = "🔵 استمرار مشروط"
         row["owner_action"] = row.get("owner_action") or "🔵 استمرار مشروط — لا تدخل إلا بعد ثبات/ pullback / reclaim بسيولة."
@@ -218,9 +236,10 @@ def enrich_row_source_promotion_v2(row: dict) -> dict:
     elif stage == "Pre-Move":
         immediate_list = "pre_move_watch"
         status = "pre_move_watch"
-        # Pre-Move is not an entry. If an older scoring layer called it Strong, cap it.
-        if decision == "دخول قوي" and not bool(row.get("stage_allows_strong")):
-            _cap_strong_to_cautious(row, "Pre-Move ليس دخولًا قويًا حتى يظهر تأكيد حي")
+        # Pre-Move is never an immediate entry.  Do not allow upstream Strong/Cautious
+        # labels to leak into this list.
+        if decision in {"دخول قوي", "دخول بحذر"}:
+            _force_conditional_to_watch(row, "Pre-Move ليس دخولًا حتى يظهر تأكيد حي")
         row.setdefault("owner_action", "🟣 مراقبة مبكرة قبل الحركة — ليست دخولًا الآن حتى يظهر تأكيد حي.")
 
     # Strong final guard: no Strong with unreliable price, late detection, hard blockers.
@@ -243,6 +262,11 @@ def enrich_row_source_promotion_v2(row: dict) -> dict:
             _cap_strong_to_cautious(row, strong_blockers[0])
             row["source_promotion_v2_strong_blockers"] = _dedupe(strong_blockers, 8)
             status = "strong_capped_by_v2"
+
+    # Final non-actionable guard: labels that explicitly mean wait must never
+    # be displayed as دخول بحذر/دخول قوي.
+    if _stage(row) in {"Continuation Watch", "Requires Pullback", "Already Moved", "Extended", "No-Chase", "Catalyst Spike Review", "Pre-Move"} and str(row.get("decision") or "") in {"دخول قوي", "دخول بحذر"}:
+        _force_conditional_to_watch(row, "مرحلة الحركة الحالية ليست دخولًا مباشرًا")
 
     # Display / diagnostics fields.
     row["source_promotion_v2_version"] = SOURCE_PROMOTION_ENGINE_V2_VERSION
