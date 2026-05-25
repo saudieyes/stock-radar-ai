@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 from app.settings import DATA_DIR
 from app.sqlite_store import SQLITE_DB_PATH
 
-EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_stage_aware_clean_pre_move_hotfix3_peak_calibration_hotfix2_peak_guard"
+EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_hotfix6_prior_move_gate"
 NY_TZ = ZoneInfo("America/New_York")
 
 # The weekly list is deliberately small. It is the Sharia-filtered user/assistant
@@ -142,6 +142,77 @@ def _weekly_map(include_high_risk: bool = True) -> dict[str, dict[str, Any]]:
     return {x["symbol"]: x for x in get_weekly_priority_items(include_high_risk=include_high_risk)}
 
 
+
+
+def _weekly_is_clean_pre_move(item: dict | None) -> bool:
+    """Return True only for weekly Polygon names that are meant to be true early/pre-move watches.
+
+    The curated Polygon list intentionally contains both quiet build-up names and
+    high-risk continuation names.  Continuation/High-Risk names should remain
+    visible in the broader source/promotion pipeline, but they must not enter the
+    clean Early Movement list just because the current session is quiet.
+    """
+    if not isinstance(item, dict):
+        return False
+    pattern = str(item.get("pattern") or "").lower()
+    reasons = " ".join(str(x).lower() for x in (item.get("reasons") or []))
+    text = f"{pattern} {reasons}"
+    if any(token in text for token in ["high-risk", "continuation", "already", "large friday", "extended", "no chase", "avoid gap chase", "after-hours follow-through"]):
+        return False
+    return any(token in text for token in ["pre-move", "build-up", "quiet", "early"])
+
+
+def _positive_max(values: list[float]) -> float:
+    out = 0.0
+    for value in values:
+        try:
+            f = float(value or 0)
+        except Exception:
+            continue
+        if f > out:
+            out = f
+    return out
+
+
+def _prior_or_rolling_move_guard(stock: dict, stage_meta: dict | None = None) -> dict[str, Any]:
+    """Detect prior-session / multi-session moves before allowing clean Early Watch.
+
+    Many data providers use different field names.  This guard is intentionally
+    broad and no-API: it only consumes fields already present on the scan row or
+    move-stage metadata.  If a field is missing, it does nothing.
+    """
+    stage_meta = stage_meta or {}
+    prior_fields = [
+        "prior_day_change_pct", "previous_day_change_pct", "prev_day_change_pct",
+        "yesterday_change_pct", "last_day_change_pct", "last_session_change_pct",
+        "previous_session_change_pct", "day_change_pct_prev", "prev_close_change_pct",
+    ]
+    rolling_fields = [
+        "rolling_2d_change_pct", "rolling_3d_change_pct", "rolling_5d_change_pct",
+        "two_day_change_pct", "three_day_change_pct", "five_day_change_pct",
+        "change_2d_pct", "change_3d_pct", "change_5d_pct", "move_2d_pct",
+        "move_3d_pct", "move_5d_pct", "weekly_change_pct",
+    ]
+    gap_fields = [
+        "after_hours_change_pct", "pre_market_change_pct", "gap_from_regular_close_pct",
+        "open_gap_pct", "premarket_change_pct",
+    ]
+    prior_values = [_safe_float(stock.get(k, stage_meta.get(k, 0)), 0) for k in prior_fields]
+    rolling_values = [_safe_float(stock.get(k, stage_meta.get(k, 0)), 0) for k in rolling_fields]
+    gap_values = [_safe_float(stock.get(k, stage_meta.get(k, 0)), 0) for k in gap_fields]
+    prior_peak = _positive_max(prior_values)
+    rolling_peak = _positive_max(rolling_values)
+    gap_peak = _positive_max(gap_values)
+    blocked = bool(prior_peak >= 10.0 or rolling_peak >= 12.0 or gap_peak >= 10.0)
+    return {
+        "blocked": blocked,
+        "prior_session_peak_gain": round(prior_peak, 4),
+        "rolling_session_peak_gain": round(rolling_peak, 4),
+        "gap_or_extended_peak_gain": round(gap_peak, 4),
+        "reason": "تحرك سابق/متعدد الجلسات كبير؛ ليس مراقبة مبكرة نظيفة" if blocked else "",
+    }
+
+
 def _read_stock_numbers(stock: dict) -> dict[str, float]:
     intraday = stock.get("intraday", {}) or {}
     return {
@@ -202,7 +273,13 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
     weekly = _weekly_map(include_high_risk=True)
     item = weekly.get(sym)
     is_high_risk_manual = bool(item and str(item.get("pattern", "")).lower().startswith("high-risk"))
-    is_weekly = bool(item and not is_high_risk_manual)
+    # Weekly Polygon contains both true pre-move names and continuation/no-chase
+    # names. Only true build-up/quiet names are allowed into the clean Early
+    # Movement list by weekly status alone. Continuation names remain in the
+    # source/promotion lane, not in the clean Early Movement section.
+    is_clean_weekly_pre_move = _weekly_is_clean_pre_move(item)
+    is_weekly = bool(item and not is_high_risk_manual and is_clean_weekly_pre_move)
+    is_weekly_priority_symbol = bool(item and not is_high_risk_manual)
     n = _read_stock_numbers(stock)
     auto_ok, auto_pattern, auto_reasons, auto_conf = _is_auto_detected_candidate(stock, n)
     pre_move_ok = bool(stock.get("pre_move_watch_eligible", False))
@@ -212,7 +289,21 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
         auto_reasons = pre_move_reasons or ["Pre-Move Engine V2 يرى بناء حركة قبل الانفجار"]
         auto_conf = max(auto_conf, int(_safe_float(stock.get("pre_move_score", 60), 60)))
 
-    if not (is_weekly or is_high_risk_manual or auto_ok or pre_move_ok):
+    if item and not is_clean_weekly_pre_move:
+        # A curated Polygon continuation/high-risk name should remain in the
+        # priority source lane, but not in the clean Early Movement list.  This
+        # prevents BB/VELO/RDW/CRSR-style names from looking like pre-move
+        # candidates on a quiet session after a prior large move.
+        return {
+            "in_early_movement": False,
+            "symbol": sym,
+            "version": EARLY_MOVEMENT_VERSION,
+            "polygon_weekly_priority": bool(is_weekly_priority_symbol or is_high_risk_manual),
+            "polygon_weekly_stage": str((item or {}).get("pattern") or ""),
+            "excluded_reason": "قائمة Polygon: استمرار/مخاطرة عالية — تعرض في مسار المتابعة/Pullback وليس مراقبة مبكرة نظيفة",
+        }
+
+    if not (is_weekly or auto_ok or pre_move_ok):
         return {"in_early_movement": False, "symbol": sym}
 
     # Source / Early Discovery V2: Early Movement must be a clean pre-move or
@@ -233,8 +324,9 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
         gain_at_detection,
     )
     stage_allows_early = stage_meta.get("stage_allows_early_watch", stock.get("stage_allows_early_watch", True))
+    prior_guard = _prior_or_rolling_move_guard(stock, stage_meta)
     late_stages = {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "No-Chase", "Catalyst Spike Review"}
-    if gain_at_detection >= 10 or current_gain >= 10 or peak_gain_seen >= 10 or move_stage in late_stages or stage_allows_early is False:
+    if gain_at_detection >= 10 or current_gain >= 10 or peak_gain_seen >= 10 or move_stage in late_stages or stage_allows_early is False or prior_guard.get("blocked"):
         return {
             "in_early_movement": False,
             "symbol": sym,
@@ -244,7 +336,12 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
             "gain_at_detection": round(gain_at_detection, 4),
             "current_gain": round(current_gain, 4),
             "peak_gain_seen": round(peak_gain_seen, 4),
-            "excluded_reason": "ليس مراقبة مبكرة: السهم متحرك/متأخر عند الاكتشاف أو تجاوز/لامس +10% خلال الجلسة",
+            "prior_session_peak_gain": prior_guard.get("prior_session_peak_gain"),
+            "rolling_session_peak_gain": prior_guard.get("rolling_session_peak_gain"),
+            "gap_or_extended_peak_gain": prior_guard.get("gap_or_extended_peak_gain"),
+            "polygon_weekly_priority": bool(is_weekly_priority_symbol),
+            "polygon_weekly_stage": str((item or {}).get("pattern") or "") if item else "",
+            "excluded_reason": prior_guard.get("reason") or "ليس مراقبة مبكرة: السهم متحرك/متأخر عند الاكتشاف أو تجاوز/لامس +10% خلال الجلسة",
         }
 
     source = "weekly_priority" if is_weekly else "high_risk_manual" if is_high_risk_manual else "pre_move_engine_v2" if pre_move_ok else "auto_detected"
@@ -341,6 +438,8 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
         "recommended_action": recommended_action,
         "summary": summary,
         "is_weekly_priority": bool(is_weekly),
+        "polygon_weekly_priority": bool(is_weekly_priority_symbol),
+        "polygon_weekly_stage": str((item or {}).get("pattern") or "") if item else "",
         "is_auto_detected": bool(auto_ok or pre_move_ok),
         "is_pre_move_engine_v2": bool(pre_move_ok),
         "is_high_risk_manual": bool(is_high_risk_manual),

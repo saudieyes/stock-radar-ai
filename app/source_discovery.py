@@ -174,6 +174,58 @@ def _score_price_preference(price: float, change_pct: float = 0.0, dollar_volume
     return score, reasons, flags
 
 
+
+
+def _source_move_stage(change_pct: float) -> str:
+    try:
+        change_pct = float(change_pct or 0)
+    except Exception:
+        change_pct = 0.0
+    if change_pct >= 50:
+        return "catalyst_spike_review"
+    if change_pct >= 20:
+        return "extended_late"
+    if change_pct >= 10:
+        return "late_continuation"
+    if change_pct >= 5:
+        return "active_confirmation"
+    if change_pct >= 2:
+        return "early_confirmation"
+    return "pre_move_or_quiet"
+
+
+def _score_fmp_mover_source(change_pct: float, dollar_volume: float) -> tuple[float, str]:
+    """Score FMP movers without rewarding already-large moves as early discovery.
+
+    Older scoring rewarded higher change_pct directly.  For Source / Early
+    Discovery V2, large movers still enter the candidate pool for continuation /
+    no-chase review, but they should not outrank quieter early builders as
+    early opportunities.
+    """
+    try:
+        change_pct = float(change_pct or 0)
+        dollar_volume = float(dollar_volume or 0)
+    except Exception:
+        change_pct, dollar_volume = 0.0, 0.0
+    liquidity_bonus = min(max(dollar_volume, 0) / 120_000_000, 10)
+    stage = _source_move_stage(change_pct)
+    if stage in {"catalyst_spike_review", "extended_late"}:
+        return 4.0 + min(max(dollar_volume, 0) / 200_000_000, 5), stage
+    if stage == "late_continuation":
+        return 9.0 + min(max(dollar_volume, 0) / 180_000_000, 6), stage
+    if stage == "active_confirmation":
+        return 30.0 + liquidity_bonus, stage
+    if stage == "early_confirmation":
+        return 36.0 + liquidity_bonus, stage
+    return 18.0 + min(max(dollar_volume, 0) / 200_000_000, 5), stage
+
+
+def _weekly_priority_is_clean_pre_move(pattern: str, reasons: list | None = None) -> bool:
+    text = (str(pattern or "") + " " + " ".join(str(x) for x in (reasons or []))).lower()
+    if any(token in text for token in ["high-risk", "continuation", "extended", "large friday", "no chase", "avoid gap chase", "after-hours follow-through"]):
+        return False
+    return any(token in text for token in ["pre-move", "build-up", "quiet", "early"])
+
 def _fetch_fmp_movers() -> tuple[list[dict], str]:
     if not (FMP_API_KEY and DYNAMIC_DISCOVERY_USE_FMP_MOVERS):
         return [], "disabled_or_no_key"
@@ -301,12 +353,17 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 weekly_priority_count += 1
                 priority = str((item or {}).get("priority") or "medium")
                 confidence = to_float((item or {}).get("confidence"))
-                score = 62 + min(confidence, 20) + (8 if priority == "high" else 0)
-                _add_candidate(candidates, sym, score, "weekly_priority_watchlist", "قائمة الحركة المبكرة الأسبوعية", {"weekly_pattern": pattern, "weekly_confidence": confidence})
-                if "Pre-Move" in pattern or "Quiet" in pattern:
-                    _add_candidate(candidates, sym, 10, "pre_move_watch", "مرشح ما قبل الحركة من تحليل Polygon")
-                if "Continuation" in pattern:
-                    _add_candidate(candidates, sym, 8, "continuation_watch", "مرشح استمرار من تحليل Polygon")
+                reasons = list((item or {}).get("reasons") or [])
+                clean_pre_move = _weekly_priority_is_clean_pre_move(pattern, reasons)
+                # Keep all curated Polygon names in the priority lane, but do not
+                # let continuation/high-risk names dominate the early-discovery
+                # source just because they came from the manual list.
+                score = (64 + min(confidence, 18) + (8 if priority == "high" else 0)) if clean_pre_move else (34 + min(confidence, 10))
+                _add_candidate(candidates, sym, score, "weekly_priority_watchlist", "قائمة Polygon الأسبوعية ذات أولوية مراقبة", {"weekly_pattern": pattern, "weekly_confidence": confidence, "weekly_clean_pre_move": clean_pre_move})
+                if clean_pre_move:
+                    _add_candidate(candidates, sym, 14, "pre_move_watch", "مرشح ما قبل الحركة من تحليل Polygon")
+                else:
+                    _add_candidate(candidates, sym, 10, "continuation_watch", "مرشح متابعة/Pullback من قائمة Polygon")
     except Exception:
         weekly_priority_count = 0
         weekly_high_risk_count = 0
@@ -362,10 +419,12 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             # Explicit live-discovery buckets: give them names visible in diagnostics/source tags.
             close_strength = float(m.get("close_strength", 0) or 0)
             range_pct = float(m.get("range_pct", 0) or 0)
-            if chg >= 4.0 and close_strength >= 0.60:
-                _add_candidate(candidates, ticker, 22 + min(chg, 18), "top_mover", "متحرك قوي اليوم", m)
-            if chg >= 7.0 and close_strength >= 0.70 and range_pct <= 0.22:
-                _add_candidate(candidates, ticker, 26 + min(chg, 22), "runner", "مرشح استمرار يومي", m)
+            if chg >= 10.0:
+                _add_candidate(candidates, ticker, 8 + min(dollar_volume / 180_000_000, 6), "late_mover_review", "متحرك كبير من Polygon — استمرار/لا تطارد وليس اكتشاف مبكر", {**m, "late_move_change_pct": chg})
+            elif chg >= 4.0 and close_strength >= 0.60:
+                _add_candidate(candidates, ticker, 22 + min(chg, 9), "top_mover", "متحرك قوي مبكر/متوسط اليوم", m)
+            if 7.0 <= chg < 10.0 and close_strength >= 0.70 and range_pct <= 0.22:
+                _add_candidate(candidates, ticker, 26 + min(chg, 10), "runner", "مرشح استمرار يومي قبل المطاردة", m)
             if dollar_volume >= 50_000_000:
                 _add_candidate(candidates, ticker, 10 + min(dollar_volume / 150_000_000, 18), "volume_spike", "سيولة/حجم غير عادي", m)
             if bool(m.get("near_high")) and close_strength >= 0.68:
@@ -393,12 +452,14 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         if price and price < 1.5:
             continue
         fmp_mover_count += 1
-        score = 34.0 + min(max(change_pct, 0), 30) + min(dollar_volume / 80_000_000, 16)
+        score, source_move_stage = _score_fmp_mover_source(change_pct, dollar_volume)
         pref_score, pref_reasons, flags = _score_price_preference(price, change_pct, dollar_volume)
         for key in price_flags:
             if flags.get(key):
                 price_flags[key] += 1
-        _add_candidate(candidates, sym, score + pref_score, "fmp_movers", "قائمة رابحين/نشطين من FMP", {"fmp_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume})
+        mover_source = "fmp_movers" if change_pct < 10 else "late_mover_review"
+        mover_reason = "قائمة رابحين/نشطين من FMP" if change_pct < 10 else "متحرك متأخر من FMP — استمرار/لا تطارد"
+        _add_candidate(candidates, sym, score + pref_score, mover_source, mover_reason, {"fmp_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume, "source_move_stage": source_move_stage})
         try:
             ignition = classify_live_ignition(sym, {"price": price, "change_pct": change_pct, "volume": volume, "dollar_volume": dollar_volume}) if live_ignition_enabled() else {}
             if ignition.get("hot_lane_eligible"):
@@ -439,13 +500,16 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         change_pct = to_float((quote or {}).get("change_pct"))
         volume = to_float((quote or {}).get("volume"))
         dollar_volume = price * volume if volume > 0 else 0.0
+        live_stage = _source_move_stage(change_pct)
         live_score = 8.0
-        if change_pct >= 2.0:
-            live_score += 10.0
-        if change_pct >= 5.0:
+        if 2.0 <= change_pct < 5.0:
             live_score += 12.0
-        if change_pct >= 10.0:
-            live_score += 10.0
+        elif 5.0 <= change_pct < 10.0:
+            live_score += 20.0
+        elif change_pct >= 10.0:
+            # Keep late movers visible for review, but do not let live-confirmed
+            # +10% names outrank early builders as fresh opportunities.
+            live_score += 2.0
         if bool((quote or {}).get("extended_hours")):
             live_score += 8.0
             extended_confirmed += 1
