@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix2_peak_guard"
+MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix3_peak_calibration"
 NY_TZ = ZoneInfo("America/New_York")
 
 
@@ -302,9 +302,9 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
 
     # Convert to No-Chase when the execution context is unsafe, even if raw gain
     # sits in a less severe band.
-    if existing_no_chase or (close_resistance and max_gain_basis >= 5.0) or (entry_distance > 6.0 and max_gain_basis >= 5.0):
+    if existing_no_chase or (close_resistance and max_gain_basis >= 5.0) or (entry_distance != 999.0 and entry_distance > 6.0 and max_gain_basis >= 5.0):
         if stage in {"Active Breakout", "Early Confirmation", "Continuation Watch", "Requires Pullback", "Extended", "Catalyst Spike Review"}:
-            if stage in {"Extended", "Catalyst Spike Review"} or max_gain_basis >= 12.0 or close_resistance or entry_distance > 6.0:
+            if stage in {"Extended", "Catalyst Spike Review"} or max_gain_basis >= 12.0 or close_resistance or (entry_distance != 999.0 and entry_distance > 6.0):
                 stage = "No-Chase"
                 label = "⛔ لا تطارد"
                 early_or_late = "late_no_chase" if max_gain_basis >= 10.0 else "no_chase"

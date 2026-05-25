@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 from app.settings import DATA_DIR
 from app.sqlite_store import SQLITE_DB_PATH
 
-EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_stage_aware_clean_pre_move_hotfix2_peak_guard"
+EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_stage_aware_clean_pre_move_hotfix3_peak_calibration_hotfix2_peak_guard"
 NY_TZ = ZoneInfo("America/New_York")
 
 # The weekly list is deliberately small. It is the Sharia-filtered user/assistant

@@ -18,7 +18,7 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.move_stage_classifier import apply_move_stage_to_row
 from app.pre_move_engine import enrich_row_pre_move
 
-SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix2_peak_guard"
+SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix3_peak_calibration"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:
@@ -80,19 +80,37 @@ def _cap_to_watch(row: dict, reason: str) -> None:
 
 
 def _clear_transient_v2_flags(row: dict) -> None:
-    """Remove stale flags before re-applying V2 to cached rows.
+    """Remove stale V2 flags before re-applying governance to cached rows.
 
-    Cached trade-scan snapshots may already contain source_promotion_v2_promoted
-    from an earlier pass.  If the same row is later capped to No-Chase, leaving
-    the old flag in place makes diagnostics report a No-Chase row as promoted.
+    Cached trade-scan snapshots may already contain V2 no-chase/continuation
+    fields from a previous pass.  Hotfix 3 must let a clean sub-10% setup be
+    re-evaluated as Active Breakout/Early Confirmation instead of being trapped
+    forever by a prior V2 hard cap.
     """
+    had_v2 = bool(row.get("source_promotion_v2_status") or row.get("source_promotion_v2_version"))
     for key in (
         "source_promotion_v2_capped",
         "source_promotion_v2_promoted",
         "source_promotion_v2_cap_reason",
         "source_promotion_v2_strong_blockers",
+        "source_promotion_v2_status",
+        "source_promotion_v2_list",
+        "source_promotion_v2_summary",
+        "source_promotion_v2_reasons",
+        "source_promotion_v2_peak_gain_seen",
+        "early_movement_excluded_by_v2",
+        "continuation_watch_active",
+        "continuation_watch_label",
     ):
         row.pop(key, None)
+    if had_v2:
+        # These fields may have been injected by V2 itself on a prior cached pass.
+        # Remove them so _no_chase_existing() only sees fresh upstream guards.
+        for key in ("no_chase_guard_status", "no_chase_guard_label", "no_chase_guard_reasons"):
+            row.pop(key, None)
+        owner_action = str(row.get("owner_action") or "")
+        if "لا تطارد الآن" in owner_action or "استمرار مشروط" in owner_action or "مراقبة مبكرة قبل الحركة" in owner_action:
+            row.pop("owner_action", None)
 
 
 def _cap_strong_to_cautious(row: dict, reason: str) -> None:

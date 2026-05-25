@@ -23,7 +23,7 @@ from app.move_stage_classifier import (
     extract_price,
 )
 
-DETECTION_JOURNAL_VERSION = "source_early_discovery_v2_detection_journal_2026_05_25_hotfix2_peak_guard"
+DETECTION_JOURNAL_VERSION = "source_early_discovery_v2_detection_journal_2026_05_25_hotfix3_peak_calibration"
 NY_TZ = ZoneInfo("America/New_York")
 _LOCK = threading.RLock()
 _INIT_DONE = False
@@ -118,6 +118,28 @@ def _late_stage_name(stage: Any) -> bool:
     return str(stage or "") in {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "No-Chase", "Catalyst Spike Review"}
 
 
+def _hard_late_movement_stage(stage: Any) -> bool:
+    """Stages that prove the stock already made a large move.
+
+    Generic No-Chase can happen below +10% because of resistance, stale price,
+    or execution risk.  That should block immediate entry, but it must not set
+    the same persistent late_seen_flag used to keep +10% intraday runners out
+    of Pre-Move for the rest of the session.
+    """
+    return str(stage or "") in {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "Catalyst Spike Review"}
+
+
+def _is_hard_late_observation(change_pct: float, move_stage: Any, peak_gain: float | None = None) -> bool:
+    peak = _safe_float(peak_gain, change_pct)
+    if change_pct >= 10 or peak >= 10:
+        return True
+    # A hard late movement stage is only trusted as a persistent late marker
+    # when the numeric move also confirms it. This avoids permanently locking
+    # clean +5% to +9% active setups into No-Chase because of a temporary
+    # resistance/no-chase label.
+    return _hard_late_movement_stage(move_stage) and max(change_pct, peak) >= 10
+
+
 def _peak_from_journal(journal: dict[str, Any], fallback: float = 0.0) -> float:
     if not isinstance(journal, dict):
         return fallback
@@ -136,6 +158,22 @@ def _late_peak_is_fresh(journal: dict[str, Any]) -> bool:
     if _same_ny_day(late_ts):
         return True
     return _age_seconds(str(late_ts or "")) <= 20 * 60 * 60
+
+
+def _late_peak_lock_is_fresh(journal: dict[str, Any]) -> bool:
+    """True only for a fresh +10% or greater intraday peak lock.
+
+    Hotfix 2 correctly added peak memory, but rows that were merely No-Chase
+    around +5% to +9% were also saved with late_seen_flag=1.  This helper keeps
+    the +10% protection while allowing sub-10% setups to recover into Active
+    Breakout/Early Confirmation when conditions are clean.
+    """
+    return bool(
+        isinstance(journal, dict)
+        and _safe_float(journal.get("late_seen_flag"), 0)
+        and _peak_from_journal(journal, 0.0) >= 10
+        and _late_peak_is_fresh(journal)
+    )
 
 
 def _merge_journal_current_gain(stock: dict, journal: dict[str, Any], row_change_pct: float) -> None:
@@ -297,8 +335,8 @@ def record_detection(
                             __import__("json").dumps(source_tags or [], ensure_ascii=False)[:800],
                             change_pct,
                             now if change_pct > 0 else None,
-                            1 if (change_pct >= 10 or _late_stage_name(move_stage)) else 0,
-                            now if (change_pct >= 10 or _late_stage_name(move_stage)) else None,
+                            1 if _is_hard_late_observation(change_pct, move_stage, change_pct) else 0,
+                            now if _is_hard_late_observation(change_pct, move_stage, change_pct) else None,
                             now,
                         ),
                     )
@@ -306,8 +344,8 @@ def record_detection(
                     existing_dict = _row_to_dict(existing)
                     prev_peak = _peak_from_journal(existing_dict, 0.0)
                     new_peak = max(prev_peak, change_pct)
-                    incoming_late = change_pct >= 10 or _late_stage_name(move_stage)
-                    existing_late_fresh = bool(_safe_float(existing_dict.get("late_seen_flag"), 0)) and _late_peak_is_fresh(existing_dict)
+                    incoming_late = _is_hard_late_observation(change_pct, move_stage, new_peak)
+                    existing_late_fresh = _late_peak_lock_is_fresh(existing_dict)
                     peak_crossed_late = new_peak >= 10 and (_same_ny_day(existing_dict.get("peak_gain_time")) or incoming_late)
                     needs_peak_update = new_peak > (prev_peak + 0.05) or incoming_late or peak_crossed_late
                     needs_transition_update = (decision_text == "دخول بحذر" and not existing["first_cautious_time"]) or (decision_text == "دخول قوي" and not existing["first_strong_time"])
@@ -334,8 +372,8 @@ def record_detection(
                         "early_or_late_detection": stored_early_late,
                         "peak_gain_seen": new_peak,
                         "peak_gain_time": now if new_peak > prev_peak + 0.05 else (existing_dict.get("peak_gain_time") or now if new_peak > 0 else None),
-                        "late_seen_flag": 1 if (existing_late_fresh or incoming_late or peak_crossed_late or new_peak >= 10) else int(_safe_float(existing_dict.get("late_seen_flag"), 0)),
-                        "late_seen_time": now if (incoming_late or (new_peak >= 10 and new_peak > prev_peak + 0.05)) else existing_dict.get("late_seen_time"),
+                        "late_seen_flag": 1 if (existing_late_fresh or incoming_late or peak_crossed_late or new_peak >= 10) else 0,
+                        "late_seen_time": now if (incoming_late or (new_peak >= 10 and new_peak > prev_peak + 0.05)) else (existing_dict.get("late_seen_time") if existing_late_fresh else None),
                         "updated_at": now,
                     }
                     if decision_text == "دخول بحذر" and not existing["first_cautious_time"]:
@@ -387,8 +425,8 @@ def enrich_stock_with_detection_journal(stock: dict, source_layer: str = "scan_r
         stock["peak_gain_seen"] = peak_gain
         stock["intraday_peak_gain"] = peak_gain if _late_peak_is_fresh(journal) else _safe_float(stock.get("intraday_peak_gain"), 0.0)
         stock["peak_gain_time"] = journal.get("peak_gain_time")
-        stock["late_seen_flag"] = bool(_safe_float(journal.get("late_seen_flag"), 0))
-        stock["late_seen_time"] = journal.get("late_seen_time")
+        stock["late_seen_flag"] = _late_peak_lock_is_fresh(journal)
+        stock["late_seen_time"] = journal.get("late_seen_time") if stock["late_seen_flag"] else None
         _merge_journal_current_gain(stock, journal, change_pct)
         stock["first_source_reason"] = journal.get("first_source_reason")
         stock["first_source_layer"] = journal.get("first_source_layer")
@@ -410,7 +448,7 @@ def detection_journal_status(limit: int = 20) -> dict[str, Any]:
         with _connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM detection_journal").fetchone()[0]
             late = conn.execute("SELECT COUNT(*) FROM detection_journal WHERE COALESCE(gain_at_detection,0) >= 10").fetchone()[0]
-            late_seen = conn.execute("SELECT COUNT(*) FROM detection_journal WHERE COALESCE(late_seen_flag,0)=1").fetchone()[0]
+            late_seen = conn.execute("SELECT COUNT(*) FROM detection_journal WHERE COALESCE(late_seen_flag,0)=1 AND MAX(COALESCE(peak_gain_seen,0), COALESCE(current_gain,0), COALESCE(gain_at_detection,0)) >= 10").fetchone()[0]
             rows = conn.execute(
                 "SELECT symbol, first_detected_time, first_detected_price, gain_at_detection, current_gain, peak_gain_seen, peak_gain_time, late_seen_flag, late_seen_time, move_stage, early_or_late_detection, times_seen FROM detection_journal ORDER BY updated_at DESC LIMIT ?",
                 (int(max(1, min(limit, 100))),),
