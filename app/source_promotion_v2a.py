@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-SOURCE_PROMOTION_V2A_VERSION = "source_promotion_engine_v2a_evidence_aware_fastlane"
+SOURCE_PROMOTION_V2A_VERSION = "source_promotion_engine_v2a1_block_consistency"
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -120,6 +120,14 @@ def _block_reasons(row: dict) -> list[str]:
         reasons.append("قريب جدًا من مقاومة")
     if bool(row.get("support_broken_flag")):
         reasons.append("كسر/اختبار دعم يحتاج استعادة واضحة")
+    phase = str(row.get("market_phase", "") or "")
+    price_source = str(row.get("price_source", "") or "")
+    price_label = str(row.get("price_source_label", "") or "")
+    if phase in {"pre_market", "open", "after_hours"}:
+        price_reliable = bool(row.get("price_reliable_for_execution"))
+        live_available = bool(row.get("live_price_available"))
+        if (not price_reliable) and ((not live_available) or "unavailable" in price_source or "غير متاحة" in price_label or "غير موثوق" in price_label):
+            reasons.append("السعر اللحظي غير موثوق")
     if _safe_float(row.get("display_change_pct", row.get("change_vs_prev_close_pct", 0)), 0) >= 12:
         reasons.append("ارتفع كثيرًا مقارنة بسعر آخر إغلاق")
     if str(row.get("execution_gate_status", "") or "") in {"wait_liquidity", "wait_resistance_break"}:
@@ -178,6 +186,24 @@ def _promotion_pressure(row: dict, lane: str, blockers: list[str]) -> float:
 def enrich_row_source_promotion_v2a(row: dict) -> dict:
     if not isinstance(row, dict):
         return row
+
+    # V2a1 consistency guard:
+    # This function may run more than once on the same payload: /trade-scan,
+    # live refresh, single-stock, or diagnostics.  If a previous pass promoted a
+    # row and a later pass adds blocker metadata (near resistance, unreliable
+    # extended-hours price, weak liquidity, etc.), the row must not keep a stale
+    # `source_promotion_v2a_promoted=true` flag or stay Cautious only because of
+    # that stale flag.  Re-evaluate from the pre-promotion decision first.
+    prior_promoted = bool(row.get("source_promotion_v2a_promoted"))
+    prior_decision = str(row.get("decision_before_source_promotion_v2a") or "")
+    if prior_promoted and prior_decision and str(row.get("decision", "") or "") == "دخول بحذر":
+        row["decision"] = prior_decision
+    for stale_key in (
+        "source_promotion_v2a_promoted",
+        "source_promotion_rank_boost",
+    ):
+        row.pop(stale_key, None)
+
     lane = _lane_from_row(row)
     blockers = _block_reasons(row)
     ready = _ready_reasons(row)
@@ -188,8 +214,16 @@ def enrich_row_source_promotion_v2a(row: dict) -> dict:
     status = "source_observed"
     if blockers:
         status = "promotion_blocked"
+        if prior_promoted and prior_decision:
+            row["decision_before_source_promotion_v2a"] = prior_decision
+            row["decision"] = prior_decision
+            decision = prior_decision
+            row["owner_action"] = "👀 مراقبة فقط — توجد موانع ترقية واضحة؛ انتظر زوالها قبل أي دخول."
+            row["execution_gate_status"] = row.get("execution_gate_status") or "promotion_blocked"
+            row["execution_gate_label"] = row.get("execution_gate_label") or "⏳ انتظر زوال موانع الترقية"
     elif lane in {"weekly_priority_plus_auto", "auto_detected_early_movement", "weekly_priority", "live_mover", "fast_momentum"} and pressure >= 52:
         status = "close_watch"
+
     if live and not blockers and pressure >= 62 and decision == "مراقبة":
         # Conservative live-only lift: only to Cautious, never to Strong.
         row["decision_before_source_promotion_v2a"] = decision
@@ -205,8 +239,9 @@ def enrich_row_source_promotion_v2a(row: dict) -> dict:
 
     if lane in {"weekly_priority", "weekly_priority_plus_auto", "auto_detected_early_movement"} and decision in {"مراقبة", "دخول بحذر"}:
         try:
-            row["display_rank_score"] = round(_safe_float(row.get("display_rank_score", 0)) + (8 if not blockers else 2), 2)
-            row["source_promotion_rank_boost"] = 8 if not blockers else 2
+            boost = 8 if not blockers else 0
+            row["display_rank_score"] = round(_safe_float(row.get("display_rank_score", 0)) + boost, 2)
+            row["source_promotion_rank_boost"] = boost
         except Exception:
             pass
 
@@ -265,7 +300,7 @@ def summarize_source_promotion_v2a(rows: list[dict]) -> dict[str, Any]:
             "pressure": row.get("promotion_pressure_score"),
             "summary": row.get("promotion_summary", ""),
         }
-        if row.get("source_promotion_v2a_promoted"):
+        if row.get("source_promotion_v2a_promoted") and status == "promoted_to_cautious_live" and not row.get("promotion_block_reasons"):
             promoted.append(compact)
         elif status == "close_watch":
             close_watch.append(compact)
