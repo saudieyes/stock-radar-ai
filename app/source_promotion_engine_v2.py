@@ -18,7 +18,7 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.move_stage_classifier import apply_move_stage_to_row
 from app.pre_move_engine import enrich_row_pre_move
 
-SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25"
+SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix1"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:
@@ -75,7 +75,24 @@ def _cap_to_watch(row: dict, reason: str) -> None:
     row["signal_strength_label"] = "مراقبة"
     row["signal_strength_bucket"] = -1
     row["source_promotion_v2_capped"] = True
+    row["source_promotion_v2_promoted"] = False
     row["source_promotion_v2_cap_reason"] = reason
+
+
+def _clear_transient_v2_flags(row: dict) -> None:
+    """Remove stale flags before re-applying V2 to cached rows.
+
+    Cached trade-scan snapshots may already contain source_promotion_v2_promoted
+    from an earlier pass.  If the same row is later capped to No-Chase, leaving
+    the old flag in place makes diagnostics report a No-Chase row as promoted.
+    """
+    for key in (
+        "source_promotion_v2_capped",
+        "source_promotion_v2_promoted",
+        "source_promotion_v2_cap_reason",
+        "source_promotion_v2_strong_blockers",
+    ):
+        row.pop(key, None)
 
 
 def _cap_strong_to_cautious(row: dict, reason: str) -> None:
@@ -86,12 +103,15 @@ def _cap_strong_to_cautious(row: dict, reason: str) -> None:
         row["signal_strength_label"] = "بحذر"
         row["signal_strength_bucket"] = 0
         row["source_promotion_v2_capped"] = True
+        row["source_promotion_v2_promoted"] = False
         row["source_promotion_v2_cap_reason"] = reason
 
 
 def enrich_row_source_promotion_v2(row: dict) -> dict:
     if not isinstance(row, dict) or not source_promotion_engine_v2_enabled():
         return row
+
+    _clear_transient_v2_flags(row)
 
     # Make the row self-contained: journal + movement stage + pre-move metadata.
     try:
@@ -235,7 +255,12 @@ def summarize_source_promotion_v2(rows: list[dict]) -> dict[str, Any]:
         }
         if row.get("source_promotion_v2_capped"):
             capped.append(compact)
-        if row.get("source_promotion_v2_promoted"):
+        if (
+            row.get("source_promotion_v2_promoted")
+            and not row.get("source_promotion_v2_capped")
+            and str(row.get("source_promotion_v2_status") or "")
+            in {"early_confirmation_promoted_to_cautious", "active_breakout_promoted_to_cautious"}
+        ):
             promoted.append(compact)
     return {
         "version": SOURCE_PROMOTION_ENGINE_V2_VERSION,

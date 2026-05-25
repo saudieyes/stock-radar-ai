@@ -23,7 +23,7 @@ from app.move_stage_classifier import (
     extract_price,
 )
 
-DETECTION_JOURNAL_VERSION = "source_early_discovery_v2_detection_journal_2026_05_25"
+DETECTION_JOURNAL_VERSION = "source_early_discovery_v2_detection_journal_2026_05_25_hotfix1"
 NY_TZ = ZoneInfo("America/New_York")
 _LOCK = threading.RLock()
 _INIT_DONE = False
@@ -79,6 +79,51 @@ def _age_seconds(ts: str) -> float:
         return max(0.0, (datetime.now(NY_TZ) - dt).total_seconds())
     except Exception:
         return 999999.0
+
+
+def _journal_current_gain_is_fresh(journal: dict[str, Any]) -> bool:
+    """Return True when the journal current_gain is safe to reuse.
+
+    During diagnostics/live-refresh, cached scan rows can carry a zero change
+    even after a live pass recorded a non-zero current_gain in SQLite.  Reuse the
+    journal value only when it was seen recently or on the same New York trading
+    date; otherwise a prior-session spike could incorrectly cap tomorrow's row.
+    """
+    if not isinstance(journal, dict) or not journal:
+        return False
+    ts = str(journal.get("last_seen_time") or journal.get("updated_at") or "").strip()
+    if not ts:
+        return False
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=NY_TZ)
+        now = datetime.now(NY_TZ)
+        if dt.date() == now.date():
+            return True
+        return 0 <= (now - dt).total_seconds() <= 20 * 60 * 60
+    except Exception:
+        return _age_seconds(ts) <= 20 * 60 * 60
+
+
+def _merge_journal_current_gain(stock: dict, journal: dict[str, Any], row_change_pct: float) -> None:
+    """Overlay fresh journal current_gain when the row appears stale/zero.
+
+    This is the hotfix for cases like IMAX in diagnostics: the journal had
+    current_gain=15.47 and move_stage=No-Chase, while the sampled row still had
+    current_gain/display_change_pct=0 and was reclassified as Pre-Move.
+    """
+    if not isinstance(stock, dict) or not isinstance(journal, dict) or not journal:
+        return
+    journal_gain = _safe_float(journal.get("current_gain"), row_change_pct)
+    stock["journal_recorded_current_gain"] = journal_gain
+    stock["journal_last_seen_time"] = journal.get("last_seen_time") or journal.get("updated_at")
+    if abs(row_change_pct) < 0.05 and abs(journal_gain) >= 1.0 and _journal_current_gain_is_fresh(journal):
+        # Only this fresh overlay field is consumed by extract_change_pct.
+        # A stale prior-session journal value remains visible for diagnostics
+        # as journal_recorded_current_gain, but it will not classify tomorrow's
+        # stock as late unless a fresh scan confirms it again.
+        stock["journal_current_gain"] = journal_gain
+        stock["current_gain"] = journal_gain
+        stock["journal_current_gain_applied"] = True
 
 
 def _connect() -> sqlite3.Connection:
@@ -264,6 +309,7 @@ def enrich_stock_with_detection_journal(stock: dict, source_layer: str = "scan_r
         stock["first_detected_time"] = journal.get("first_detected_time")
         stock["first_detected_price"] = journal.get("first_detected_price")
         stock["gain_at_detection"] = _safe_float(journal.get("gain_at_detection"), change_pct)
+        _merge_journal_current_gain(stock, journal, change_pct)
         stock["first_source_reason"] = journal.get("first_source_reason")
         stock["first_source_layer"] = journal.get("first_source_layer")
         stock["first_watch_time"] = journal.get("first_watch_time")

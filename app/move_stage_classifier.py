@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25"
+MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix1"
 NY_TZ = ZoneInfo("America/New_York")
 
 
@@ -90,6 +90,13 @@ def extract_change_pct(row: dict) -> float:
             "fmp_change_pct",
             "live_change_pct",
             "day_change_pct",
+            # Hotfix: rows rebuilt from cached snapshots may temporarily carry
+            # display/live change as 0 while the detection journal has the latest
+            # observed intraday gain.  Keep current_gain after explicit live fields
+            # so real quote fields win, but the journal can still prevent a late
+            # mover from being relabelled as Pre-Move.
+            "current_gain",
+            "journal_current_gain",
         ],
         0.0,
     )
