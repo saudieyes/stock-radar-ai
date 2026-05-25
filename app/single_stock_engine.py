@@ -10,6 +10,7 @@ from app.news_engine import get_news_bundle, news_scope_label
 from app.display_contract import enrich_display_meta, display_rank_score
 from app.opportunity_intelligence import enrich_opportunity_intelligence
 from app.early_movement import enrich_stock_with_early_movement
+from app.source_promotion_v2a import enrich_row_source_promotion_v2a
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
@@ -135,6 +136,10 @@ def scan_all(debug: bool = False):
             p = enrich_display_meta(p)
             try:
                 p = enrich_stock_with_early_movement(p)
+            except Exception:
+                pass
+            try:
+                p = enrich_row_source_promotion_v2a(p)
             except Exception:
                 pass
             try:
@@ -319,6 +324,10 @@ def build_single_stock_response(symbol: str):
             trade_plan = enrich_display_meta(trade_plan)
             try:
                 trade_plan = enrich_stock_with_early_movement(trade_plan)
+            except Exception:
+                pass
+            try:
+                trade_plan = enrich_row_source_promotion_v2a(trade_plan)
             except Exception:
                 pass
             try:

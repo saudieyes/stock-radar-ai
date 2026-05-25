@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import scanner as _scanner
 from app.live_quotes import get_live_quotes
+from app.early_movement import get_weekly_priority_items
 from app.settings import FMP_API_KEY, HTTP_SESSION, POLYGON_API_KEY
 from app.utils import safe_round, to_float
 
@@ -273,6 +274,37 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     market_date, grouped_map, source_mode = _scanner._select_grouped_market_map()
     market_activity_mode, suggested_target, activity_stats = _scanner._classify_source_market_activity(grouped_map or {})
 
+    # Source / Promotion V2a: explicitly inject the curated Early Movement
+    # watchlist into the dynamic discovery source.  Previously it usually arrived
+    # indirectly through the old baseline bucket; now diagnostics and ordering
+    # know it is a weekly-priority/monitoring source, while it still passes the
+    # Sharia prefilter and deep analysis like every other symbol.
+    weekly_priority_count = 0
+    weekly_high_risk_count = 0
+    try:
+        for item in get_weekly_priority_items(include_high_risk=True) or []:
+            sym = str((item or {}).get("symbol") or "").upper().strip()
+            if not sym:
+                continue
+            pattern = str((item or {}).get("pattern") or "Early Movement Watch")
+            is_high_risk = pattern.lower().startswith("high-risk")
+            if is_high_risk:
+                weekly_high_risk_count += 1
+                _add_candidate(candidates, sym, 36, "weekly_high_risk_manual", "مراقبة يدوية عالية المخاطر من قائمة الحركة المبكرة", {"weekly_pattern": pattern})
+            else:
+                weekly_priority_count += 1
+                priority = str((item or {}).get("priority") or "medium")
+                confidence = to_float((item or {}).get("confidence"))
+                score = 62 + min(confidence, 20) + (8 if priority == "high" else 0)
+                _add_candidate(candidates, sym, score, "weekly_priority_watchlist", "قائمة الحركة المبكرة الأسبوعية", {"weekly_pattern": pattern, "weekly_confidence": confidence})
+                if "Pre-Move" in pattern or "Quiet" in pattern:
+                    _add_candidate(candidates, sym, 10, "pre_move_watch", "مرشح ما قبل الحركة من تحليل Polygon")
+                if "Continuation" in pattern:
+                    _add_candidate(candidates, sym, 8, "continuation_watch", "مرشح استمرار من تحليل Polygon")
+    except Exception:
+        weekly_priority_count = 0
+        weekly_high_risk_count = 0
+
     # Keep the old engine as one bucket only. It no longer owns the entire source list.
     old_baseline_limit = min(260, max(120, int(max_symbols * 0.38)))
     old_baseline = []
@@ -415,8 +447,12 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 break
         return selected
 
-    # Balanced order: today's live/new movers first, old baseline is support not the whole source.
+    # Balanced order: V2a gives known weekly-priority names a front-row seat,
+    # then today's live/new movers, with the old baseline as support only.
     selected_order = []
+    selected_order += from_source("weekly_priority_watchlist", min(80, max_symbols))
+    selected_order += from_source("pre_move_watch", min(40, max_symbols))
+    selected_order += from_source("continuation_watch", min(40, max_symbols))
     selected_order += from_source("fmp_live_confirmed", min(140, max_symbols))
     selected_order += from_source("fmp_movers", min(120, max_symbols))
     selected_order += from_source("top_mover", min(160, max_symbols))
@@ -424,6 +460,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     selected_order += from_source("runner", min(120, max_symbols))
     selected_order += from_source("near_high", min(120, max_symbols))
     selected_order += from_source("constructive", min(100, max_symbols))
+    selected_order += from_source("weekly_high_risk_manual", min(20, max_symbols))
     selected_order += from_source("baseline", min(220, max_symbols))
     selected_order += [r["symbol"] for r in ranked]
     selected_order += _scanner.get_seed_universe()
@@ -438,7 +475,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             source_bucket_counts[src] = int(source_bucket_counts.get(src, 0) or 0) + 1
 
     diag = {
-        "engine_version": "dynamic_discovery_v1",
+        "engine_version": "dynamic_discovery_v1_source_promotion_v2a",
         "dynamic_discovery_enabled": True,
         "dynamic_discovery_mode": "full_market_light_scan_plus_fmp_confirmation",
         "requested_target": int(max_symbols),
@@ -469,6 +506,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "price_under_2_deprioritized": price_flags.get("under_2_deprioritized", 0),
         "price_under_2_exception": price_flags.get("under_2_exception", 0),
         "price_over_300_deprioritized": price_flags.get("over_300_deprioritized", 0),
+        "weekly_priority_injected_count": int(weekly_priority_count),
+        "weekly_high_risk_injected_count": int(weekly_high_risk_count),
         "baseline_old_engine_count": len(old_baseline),
         "baseline_error": baseline_error,
         "elapsed_sec": elapsed,
