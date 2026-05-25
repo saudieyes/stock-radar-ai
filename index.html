@@ -2831,6 +2831,17 @@
       return `<span class="badge ${cls}">${safeText(label)}</span>`;
     }
 
+    function moveStageBadge(stock) {
+      if (!stock) return '';
+      const label = String(stock.move_stage_label || stock.move_stage || '').trim();
+      if (!label) return '';
+      const stage = String(stock.move_stage || '').trim();
+      let cls = 'badge-stage';
+      if (stage === 'No-Chase' || stage === 'Extended' || stage === 'Catalyst Spike Review') cls = 'badge-news-neg';
+      else if (stage === 'Continuation Watch' || stage === 'Requires Pullback') cls = 'badge-cautious';
+      return `<span class="badge ${cls}">${safeText(label)}</span>`;
+    }
+
     function renderReasonsList(value) {
       const arr = Array.isArray(value) ? value : [];
       if (!arr.length) return '';
@@ -3689,6 +3700,9 @@
       details.push(detailBox('شرح الجاهزية', safeText(stock.execution_readiness_detail || ''), true));
       details.push(detailBox('تصنيف دخول قوي', safeText(stock.strong_entry_tier_label || '')));
       details.push(detailBox('مراقبة الحركة المبكرة', `${safeText(stock.early_movement_status_label || '')}${stock.early_movement_confidence_score !== undefined ? ' — ' + formatNumber(stock.early_movement_confidence_score) + '/100' : ''}<br>${safeText(stock.early_movement_pattern || '')}<br>${safeText(stock.early_movement_summary || '')}<br>${renderReasonsList(stock.early_movement_reasons)}`, true));
+      details.push(detailBox('مرحلة الحركة V2', `${safeText(stock.move_stage_label || stock.move_stage || '')}<br>${safeText(stock.source_promotion_v2_summary || stock.move_stage_action || '')}<br>${renderReasonsList(stock.stage_reasons)}${renderReasonsList(stock.stage_blockers)}`, true));
+      details.push(detailBox('ذاكرة الاكتشاف', `${stock.first_detected_time ? 'أول اكتشاف: ' + safeText(stock.first_detected_time) + '<br>' : ''}${stock.first_detected_price !== undefined ? 'سعر أول اكتشاف: ' + formatNumber(stock.first_detected_price) + '<br>' : ''}${stock.gain_at_detection !== undefined ? 'نسبة أول اكتشاف: ' + formatNumber(stock.gain_at_detection) + '%<br>' : ''}${stock.current_gain !== undefined ? 'الحركة الحالية: ' + formatNumber(stock.current_gain) + '%<br>' : ''}${stock.early_or_late_detection ? 'الحالة: ' + safeText(stock.early_or_late_detection) : ''}`, true));
+      details.push(detailBox('Pre-Move V2', `${safeText(stock.pre_move_label || '')}${stock.pre_move_score !== undefined ? ' — ' + formatNumber(stock.pre_move_score) + '/100' : ''}<br>${renderReasonsList(stock.pre_move_reasons)}${renderReasonsList(stock.pre_move_invalid_reasons)}`, true));
       details.push(detailBox('تطابق نمط خسارة متكرر', `${safeText(stock.pattern_risk_label || '')}${stock.pattern_risk_score !== undefined ? ' — ' + formatNumber(stock.pattern_risk_score) + '/100' : ''}<br><small>هذا الرقم يقيس شبه السهم بنمط خسارة مركّب، ولا يعني أن خطة الاختراق نفسها آمنة. الاختراق يحتاج تأكيد السعر والسيولة بعد التفعيل.</small><br>${renderReasonsList(stock.pattern_risk_reasons)}`, true));
       details.push(detailBox('استمرار السيولة', `${safeText(stock.liquidity_persistence_label || '')}${stock.liquidity_persistence_score !== undefined ? ' — ' + formatNumber(stock.liquidity_persistence_score) + '/100' : ''}<br>${renderReasonsList(stock.liquidity_persistence_reasons)}`, true));
       details.push(detailBox('تحديث السيولة عند نقطة الدخول', liquidityCheckBlock(stock.symbol), true));
@@ -3806,6 +3820,7 @@
               ${phaseBadge(stock.market_phase_label)}
               ${strengthBadge(stock)}
               ${intelligenceBadge(stock)}
+              ${moveStageBadge(stock)}
               ${earlyMovementBadge(stock)}
               ${planBadge(stock)}
               ${stageBadge(stock)}
@@ -4133,7 +4148,7 @@
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
         ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious' })}
-        ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة مراقبة مستقلة من تحليل Polygon/الأنماط + مرشحي الأداة التلقائيين. ليست توصية شراء ولا تغيّر Strong/Cautious وحدها.' })}
+        ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط. الأسهم فوق +10% عند الاكتشاف تنتقل إلى استمرار/لا تطارد ولا تظهر هنا.' })}
         ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section', grayStrong, { tone: 'gray', orderedText: 'أسهم قوية فنيًا لكنها تحتاج حسمًا شرعيًا قبل التنفيذ.' })}
         ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section', watch, { tone: 'watch' })}
         ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section', premarket, { tone: 'open', orderedText: 'فرص تهيئة مبكرة تظهر قبل الافتتاح وأول الجلسة.' })}

@@ -185,6 +185,16 @@ from app.source_promotion_v2a import (
     summarize_source_promotion_v2a,
     build_source_promotion_v2a_report,
 )
+from app.detection_journal import (
+    init_detection_journal_db,
+    enrich_rows_with_detection_journal,
+    detection_journal_status,
+)
+from app.source_promotion_engine_v2 import (
+    enrich_rows_source_promotion_v2,
+    summarize_source_promotion_v2,
+)
+from app.pre_move_engine import enrich_row_pre_move
 
 app = FastAPI()
 
@@ -192,6 +202,11 @@ try:
     init_db()
 except Exception as exc:
     print(f"SQLITE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+
+try:
+    init_detection_journal_db()
+except Exception as exc:
+    print(f"DETECTION_JOURNAL_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
 try:
     init_tracking_intelligence_db()
@@ -1012,11 +1027,23 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     # manual Sharia actions or the automatic live timer. Always pass the live
     # overlay through the same final presentation layer used by /trade-scan.
     try:
+        overlaid = enrich_rows_with_detection_journal(overlaid, source_layer="radar_live_refresh")
+    except Exception:
+        pass
+    try:
+        overlaid = [enrich_row_pre_move(x) if isinstance(x, dict) else x for x in overlaid]
+    except Exception:
+        pass
+    try:
         overlaid = enrich_stocks_with_early_movement(overlaid)
     except Exception:
         pass
     try:
         overlaid = enrich_rows_source_promotion_v2a(overlaid)
+    except Exception:
+        pass
+    try:
+        overlaid = enrich_rows_source_promotion_v2(overlaid)
     except Exception:
         pass
     try:
@@ -1082,6 +1109,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "source_promotion_v2a": summarize_source_promotion_v2a(overlaid),
         "source_promotion_v2a_promoted_count": len([x for x in overlaid if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
+        "source_early_discovery_v2": summarize_source_promotion_v2(overlaid),
         "groups": {
             "strong_entries": _live_bucket_payload(strong, limit),
             "cautious_entries": _live_bucket_payload(cautious, limit),
@@ -2108,6 +2136,14 @@ def _early_movement_fast_lane_reasons(stock: dict, current_decision: str, no_cha
         em_status = str(em.get("status", "") or stock.get("early_movement_status", "") or "")
         if em_status not in {"priority_watch", "confirmed_watch"}:
             return []
+        # Source / Early Discovery V2: Pre-Move Watch is not an immediate entry
+        # list.  The old fast-lane bridge may only promote rows that the V2 stage
+        # classifier says are already Early Confirmation or Active Breakout.
+        move_stage = str(stock.get("move_stage", "") or (stock.get("move_stage_v2") or {}).get("move_stage", "") or "")
+        if move_stage not in {"Early Confirmation", "Active Breakout"}:
+            return []
+        if float(stock.get("gain_at_detection", stock.get("display_change_pct", 0)) or 0) >= 10:
+            return []
 
         # Basic quality/readiness gates.  These are intentionally below Strong
         # thresholds because the target is Cautious/Close Watch, not Strong.
@@ -2293,11 +2329,23 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     except Exception:
         pass
     try:
+        results = enrich_rows_with_detection_journal(results, source_layer="trade_scan_response")
+    except Exception:
+        pass
+    try:
+        results = [enrich_row_pre_move(x) if isinstance(x, dict) else x for x in results]
+    except Exception:
+        pass
+    try:
         results = enrich_stocks_with_early_movement(results)
     except Exception:
         pass
     try:
         results = enrich_rows_source_promotion_v2a(results)
+    except Exception:
+        pass
+    try:
+        results = enrich_rows_source_promotion_v2(results)
     except Exception:
         pass
     try:
@@ -2360,6 +2408,8 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "source_promotion_v2a": summarize_source_promotion_v2a(results),
         "source_promotion_v2a_promoted_count": len([x for x in results if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
+        "source_early_discovery_v2": summarize_source_promotion_v2(results),
+        "detection_journal": detection_journal_status(limit=12),
         "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
         "manual_sharia_approvals_count": len(load_manual_sharia_approvals()),
         "strong_entries": strong[:25],
@@ -2391,6 +2441,9 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "fmp_confirmed": int(scan_debug.get("dynamic_fmp_confirmed", 0) or 0),
             "fmp_extended_confirmed": int(scan_debug.get("dynamic_fmp_extended_confirmed", 0) or 0),
             "fmp_movers_count": int(scan_debug.get("dynamic_fmp_movers_count", 0) or 0),
+            "live_ignition_hot_lane_count": int(scan_debug.get("dynamic_live_ignition_hot_lane_count", 0) or 0),
+            "pre_move_engine_v2_count": int(scan_debug.get("dynamic_pre_move_engine_v2_count", 0) or 0),
+            "late_mover_review_count": int(scan_debug.get("dynamic_late_mover_review_count", 0) or 0),
             "next_scan_interval_sec": int(scan_debug.get("dynamic_next_scan_interval_sec", 0) or 0),
             "source_bucket_counts": scan_debug.get("dynamic_source_bucket_counts", {}),
             "price_under_2_deprioritized": int(scan_debug.get("dynamic_price_under_2_deprioritized", 0) or 0),
@@ -2443,12 +2496,54 @@ def diagnostics_source_promotion_v2a(format: str = "json"):
     try:
         rows = _apply_manual_sharia_overrides(list(rows or []))
         rows = enrich_opportunity_intelligence_bulk(rows)
+        rows = enrich_rows_with_detection_journal(rows, source_layer="diagnostics_source_promotion")
+        rows = [enrich_row_pre_move(x) if isinstance(x, dict) else x for x in rows]
         rows = enrich_stocks_with_early_movement(rows)
         rows = enrich_rows_source_promotion_v2a(rows)
+        rows = enrich_rows_source_promotion_v2(rows)
         rows = _post_early_movement_decision_safety(rows)
     except Exception:
         pass
     return build_source_promotion_v2a_report(rows, format=format)
+
+
+@app.get("/diagnostics/source-early-discovery-v2")
+def diagnostics_source_early_discovery_v2(limit: int = 50):
+    snap = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snap.get("rows", []) if isinstance(snap, dict) else []
+    try:
+        rows = _apply_manual_sharia_overrides(list(rows or []))
+        rows = enrich_opportunity_intelligence_bulk(rows)
+        rows = enrich_rows_with_detection_journal(rows, source_layer="diagnostics_source_early_discovery_v2")
+        rows = [enrich_row_pre_move(x) if isinstance(x, dict) else x for x in rows]
+        rows = enrich_stocks_with_early_movement(rows)
+        rows = enrich_rows_source_promotion_v2a(rows)
+        rows = enrich_rows_source_promotion_v2(rows)
+        rows = _post_early_movement_decision_safety(rows)
+    except Exception:
+        pass
+    safe_limit = max(1, min(int(limit or 50), 100))
+    return {
+        "ok": True,
+        "summary": summarize_source_promotion_v2(rows),
+        "detection_journal": detection_journal_status(limit=safe_limit),
+        "rows_sample": [
+            {
+                "symbol": x.get("symbol"),
+                "decision": x.get("decision"),
+                "move_stage": x.get("move_stage"),
+                "move_stage_label": x.get("move_stage_label"),
+                "gain_at_detection": x.get("gain_at_detection"),
+                "current_gain": x.get("current_gain"),
+                "first_detected_time": x.get("first_detected_time"),
+                "early_movement_active": x.get("early_movement_active"),
+                "source_promotion_v2_status": x.get("source_promotion_v2_status"),
+                "source_promotion_v2_list": x.get("source_promotion_v2_list"),
+            }
+            for x in (rows or [])[:safe_limit]
+            if isinstance(x, dict)
+        ],
+    }
 
 
 @app.get("/trade-scan")
