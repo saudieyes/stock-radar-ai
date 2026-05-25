@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 from app.settings import DATA_DIR
 from app.sqlite_store import SQLITE_DB_PATH
 
-EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_stage_aware_clean_pre_move"
+EARLY_MOVEMENT_VERSION = "early_movement_watchlist_v2_stage_aware_clean_pre_move_hotfix2_peak_guard"
 NY_TZ = ZoneInfo("America/New_York")
 
 # The weekly list is deliberately small. It is the Sharia-filtered user/assistant
@@ -224,9 +224,17 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
     move_stage = str(stage_meta.get("move_stage") or stock.get("move_stage") or "")
     gain_at_detection = _safe_float(stock.get("gain_at_detection", stage_meta.get("gain_at_detection", n["change"])), n["change"])
     current_gain = _safe_float(stock.get("current_gain", stage_meta.get("current_gain", n["change"])), n["change"])
+    peak_gain_seen = max(
+        _safe_float(stock.get("peak_gain_seen", 0), 0),
+        _safe_float(stock.get("intraday_peak_gain", 0), 0),
+        _safe_float(stage_meta.get("peak_gain_seen", 0), 0),
+        _safe_float(stage_meta.get("max_gain_basis", 0), 0),
+        current_gain,
+        gain_at_detection,
+    )
     stage_allows_early = stage_meta.get("stage_allows_early_watch", stock.get("stage_allows_early_watch", True))
     late_stages = {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "No-Chase", "Catalyst Spike Review"}
-    if gain_at_detection >= 10 or current_gain >= 10 or move_stage in late_stages or stage_allows_early is False:
+    if gain_at_detection >= 10 or current_gain >= 10 or peak_gain_seen >= 10 or move_stage in late_stages or stage_allows_early is False:
         return {
             "in_early_movement": False,
             "symbol": sym,
@@ -235,7 +243,8 @@ def classify_early_movement(stock: dict) -> dict[str, Any]:
             "move_stage": move_stage,
             "gain_at_detection": round(gain_at_detection, 4),
             "current_gain": round(current_gain, 4),
-            "excluded_reason": "ليس مراقبة مبكرة: السهم متحرك/متأخر عند الاكتشاف أو تجاوز +10%",
+            "peak_gain_seen": round(peak_gain_seen, 4),
+            "excluded_reason": "ليس مراقبة مبكرة: السهم متحرك/متأخر عند الاكتشاف أو تجاوز/لامس +10% خلال الجلسة",
         }
 
     source = "weekly_priority" if is_weekly else "high_risk_manual" if is_high_risk_manual else "pre_move_engine_v2" if pre_move_ok else "auto_detected"

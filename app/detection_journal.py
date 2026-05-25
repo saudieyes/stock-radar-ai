@@ -23,7 +23,7 @@ from app.move_stage_classifier import (
     extract_price,
 )
 
-DETECTION_JOURNAL_VERSION = "source_early_discovery_v2_detection_journal_2026_05_25_hotfix1"
+DETECTION_JOURNAL_VERSION = "source_early_discovery_v2_detection_journal_2026_05_25_hotfix2_peak_guard"
 NY_TZ = ZoneInfo("America/New_York")
 _LOCK = threading.RLock()
 _INIT_DONE = False
@@ -104,6 +104,40 @@ def _journal_current_gain_is_fresh(journal: dict[str, Any]) -> bool:
         return _age_seconds(ts) <= 20 * 60 * 60
 
 
+def _same_ny_day(ts: Any) -> bool:
+    try:
+        if not ts:
+            return False
+        dt = datetime.strptime(str(ts), "%Y-%m-%d %H:%M:%S").replace(tzinfo=NY_TZ)
+        return dt.date() == datetime.now(NY_TZ).date()
+    except Exception:
+        return False
+
+
+def _late_stage_name(stage: Any) -> bool:
+    return str(stage or "") in {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "No-Chase", "Catalyst Spike Review"}
+
+
+def _peak_from_journal(journal: dict[str, Any], fallback: float = 0.0) -> float:
+    if not isinstance(journal, dict):
+        return fallback
+    return max(
+        _safe_float(journal.get("peak_gain_seen"), fallback),
+        _safe_float(journal.get("current_gain"), fallback),
+        _safe_float(journal.get("gain_at_detection"), fallback),
+        fallback,
+    )
+
+
+def _late_peak_is_fresh(journal: dict[str, Any]) -> bool:
+    if not isinstance(journal, dict) or not journal:
+        return False
+    late_ts = journal.get("late_seen_time") or journal.get("peak_gain_time") or journal.get("last_seen_time") or journal.get("updated_at")
+    if _same_ny_day(late_ts):
+        return True
+    return _age_seconds(str(late_ts or "")) <= 20 * 60 * 60
+
+
 def _merge_journal_current_gain(stock: dict, journal: dict[str, Any], row_change_pct: float) -> None:
     """Overlay fresh journal current_gain when the row appears stale/zero.
 
@@ -161,12 +195,26 @@ def init_detection_journal_db() -> dict[str, Any]:
                     early_or_late_detection TEXT,
                     times_seen INTEGER DEFAULT 0,
                     source_tags_json TEXT,
+                    peak_gain_seen REAL DEFAULT 0,
+                    peak_gain_time TEXT,
+                    late_seen_flag INTEGER DEFAULT 0,
+                    late_seen_time TEXT,
                     updated_at TEXT
                 )
                 """
             )
+            existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(detection_journal)").fetchall()}
+            for col_name, col_sql in {
+                "peak_gain_seen": "REAL DEFAULT 0",
+                "peak_gain_time": "TEXT",
+                "late_seen_flag": "INTEGER DEFAULT 0",
+                "late_seen_time": "TEXT",
+            }.items():
+                if col_name not in existing_cols:
+                    conn.execute(f"ALTER TABLE detection_journal ADD COLUMN {col_name} {col_sql}")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_detection_journal_stage ON detection_journal(move_stage)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_detection_journal_updated ON detection_journal(updated_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_detection_journal_late_seen ON detection_journal(late_seen_flag, late_seen_time)")
             conn.commit()
         _INIT_DONE = True
     return {"ok": True, "version": DETECTION_JOURNAL_VERSION, "db_path": str(SQLITE_DB_PATH)}
@@ -227,8 +275,9 @@ def record_detection(
                             symbol, first_detected_time, first_detected_price, gain_at_detection,
                             first_source_reason, first_source_layer, first_watch_time, first_cautious_time,
                             first_strong_time, last_seen_time, last_seen_price, current_gain, move_stage,
-                            early_or_late_detection, times_seen, source_tags_json, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                            early_or_late_detection, times_seen, source_tags_json, peak_gain_seen, peak_gain_time,
+                            late_seen_flag, late_seen_time, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             sym,
@@ -246,22 +295,47 @@ def record_detection(
                             str(move_stage or "")[:80],
                             str(early_or_late_detection or "")[:80],
                             __import__("json").dumps(source_tags or [], ensure_ascii=False)[:800],
+                            change_pct,
+                            now if change_pct > 0 else None,
+                            1 if (change_pct >= 10 or _late_stage_name(move_stage)) else 0,
+                            now if (change_pct >= 10 or _late_stage_name(move_stage)) else None,
                             now,
                         ),
                     )
                 else:
+                    existing_dict = _row_to_dict(existing)
+                    prev_peak = _peak_from_journal(existing_dict, 0.0)
+                    new_peak = max(prev_peak, change_pct)
+                    incoming_late = change_pct >= 10 or _late_stage_name(move_stage)
+                    existing_late_fresh = bool(_safe_float(existing_dict.get("late_seen_flag"), 0)) and _late_peak_is_fresh(existing_dict)
+                    peak_crossed_late = new_peak >= 10 and (_same_ny_day(existing_dict.get("peak_gain_time")) or incoming_late)
+                    needs_peak_update = new_peak > (prev_peak + 0.05) or incoming_late or peak_crossed_late
                     needs_transition_update = (decision_text == "دخول بحذر" and not existing["first_cautious_time"]) or (decision_text == "دخول قوي" and not existing["first_strong_time"])
                     recent_update = _age_seconds(existing["updated_at"] or existing["last_seen_time"] or "") < _update_throttle_sec()
-                    if recent_update and not needs_transition_update:
+                    if recent_update and not needs_transition_update and not needs_peak_update:
                         conn.commit()
                         row = conn.execute("SELECT * FROM detection_journal WHERE symbol=?", (sym,)).fetchone()
                         return _row_to_dict(row)
+
+                    stored_stage = str(move_stage or existing["move_stage"] or "")[:80]
+                    stored_early_late = str(early_or_late_detection or existing["early_or_late_detection"] or "")[:80]
+                    if existing_late_fresh and not incoming_late and change_pct < 10:
+                        # Do not let a stale/zero row downgrade a symbol that already
+                        # moved strongly earlier in the same trading day.  It may calm
+                        # down, but it is no longer a clean Pre-Move candidate today.
+                        stored_stage = "Continuation Watch" if prev_peak < 20 else "No-Chase"
+                        stored_early_late = "late_peak_seen"
+
                     updates = {
                         "last_seen_time": now,
                         "last_seen_price": price,
                         "current_gain": change_pct,
-                        "move_stage": str(move_stage or existing["move_stage"] or "")[:80],
-                        "early_or_late_detection": str(early_or_late_detection or existing["early_or_late_detection"] or "")[:80],
+                        "move_stage": stored_stage,
+                        "early_or_late_detection": stored_early_late,
+                        "peak_gain_seen": new_peak,
+                        "peak_gain_time": now if new_peak > prev_peak + 0.05 else (existing_dict.get("peak_gain_time") or now if new_peak > 0 else None),
+                        "late_seen_flag": 1 if (existing_late_fresh or incoming_late or peak_crossed_late or new_peak >= 10) else int(_safe_float(existing_dict.get("late_seen_flag"), 0)),
+                        "late_seen_time": now if (incoming_late or (new_peak >= 10 and new_peak > prev_peak + 0.05)) else existing_dict.get("late_seen_time"),
                         "updated_at": now,
                     }
                     if decision_text == "دخول بحذر" and not existing["first_cautious_time"]:
@@ -309,6 +383,12 @@ def enrich_stock_with_detection_journal(stock: dict, source_layer: str = "scan_r
         stock["first_detected_time"] = journal.get("first_detected_time")
         stock["first_detected_price"] = journal.get("first_detected_price")
         stock["gain_at_detection"] = _safe_float(journal.get("gain_at_detection"), change_pct)
+        peak_gain = _peak_from_journal(journal, max(change_pct, _safe_float(stock.get("gain_at_detection"), 0.0)))
+        stock["peak_gain_seen"] = peak_gain
+        stock["intraday_peak_gain"] = peak_gain if _late_peak_is_fresh(journal) else _safe_float(stock.get("intraday_peak_gain"), 0.0)
+        stock["peak_gain_time"] = journal.get("peak_gain_time")
+        stock["late_seen_flag"] = bool(_safe_float(journal.get("late_seen_flag"), 0))
+        stock["late_seen_time"] = journal.get("late_seen_time")
         _merge_journal_current_gain(stock, journal, change_pct)
         stock["first_source_reason"] = journal.get("first_source_reason")
         stock["first_source_layer"] = journal.get("first_source_layer")
@@ -330,8 +410,9 @@ def detection_journal_status(limit: int = 20) -> dict[str, Any]:
         with _connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM detection_journal").fetchone()[0]
             late = conn.execute("SELECT COUNT(*) FROM detection_journal WHERE COALESCE(gain_at_detection,0) >= 10").fetchone()[0]
+            late_seen = conn.execute("SELECT COUNT(*) FROM detection_journal WHERE COALESCE(late_seen_flag,0)=1").fetchone()[0]
             rows = conn.execute(
-                "SELECT symbol, first_detected_time, first_detected_price, gain_at_detection, current_gain, move_stage, early_or_late_detection, times_seen FROM detection_journal ORDER BY updated_at DESC LIMIT ?",
+                "SELECT symbol, first_detected_time, first_detected_price, gain_at_detection, current_gain, peak_gain_seen, peak_gain_time, late_seen_flag, late_seen_time, move_stage, early_or_late_detection, times_seen FROM detection_journal ORDER BY updated_at DESC LIMIT ?",
                 (int(max(1, min(limit, 100))),),
             ).fetchall()
         return {
@@ -341,6 +422,7 @@ def detection_journal_status(limit: int = 20) -> dict[str, Any]:
             "enabled": detection_journal_enabled(),
             "total_symbols": int(total or 0),
             "late_at_detection_count": int(late or 0),
+            "late_seen_count": int(late_seen or 0),
             "recent": [dict(r) for r in rows],
         }
     except Exception as exc:

@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix1"
+MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix2_peak_guard"
 NY_TZ = ZoneInfo("America/New_York")
 
 
@@ -45,6 +45,39 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _same_ny_day(ts: Any) -> bool:
+    try:
+        if not ts:
+            return False
+        dt = datetime.strptime(str(ts), "%Y-%m-%d %H:%M:%S").replace(tzinfo=NY_TZ)
+        return dt.date() == datetime.now(NY_TZ).date()
+    except Exception:
+        return False
+
+
+def _fresh_peak_value(row: dict, journal: dict) -> float:
+    """Return the strongest same-day / fresh movement seen by V2.
+
+    This prevents a stock that already ran +10% intraday from being relabelled
+    Pre-Move when a later cached row has current_gain=0.
+    """
+    candidates = [
+        _safe_float(row.get("intraday_peak_gain"), 0.0),
+        _safe_float(row.get("peak_gain_seen"), 0.0),
+        _safe_float(journal.get("peak_gain_seen"), 0.0) if isinstance(journal, dict) else 0.0,
+    ]
+    peak_time = None
+    if isinstance(journal, dict):
+        peak_time = journal.get("late_seen_time") or journal.get("peak_gain_time") or journal.get("last_seen_time") or journal.get("updated_at")
+    peak_time = peak_time or row.get("late_seen_time") or row.get("peak_gain_time") or row.get("journal_last_seen_time")
+    fresh = _same_ny_day(peak_time)
+    late_flag = bool(_safe_bool(row.get("late_seen_flag"), False) or (isinstance(journal, dict) and _safe_bool(journal.get("late_seen_flag"), False)))
+    peak = max(candidates or [0.0])
+    if fresh or (late_flag and peak >= 10):
+        return peak
+    return 0.0
 
 
 def _first_number(row: dict, keys: list[str], default: float = 0.0) -> float:
@@ -170,7 +203,8 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
         journal.get("gain_at_detection", row.get("gain_at_detection", current_gain)),
         current_gain,
     )
-    max_gain_basis = max(current_gain, gain_at_detection)
+    peak_gain_seen = _fresh_peak_value(row, journal)
+    max_gain_basis = max(current_gain, gain_at_detection, peak_gain_seen)
     entry_distance = _distance_from_entry_pct(row, price)
     res_dist = _resistance_distance_pct(row)
     support_dist = _support_distance_pct(row)
@@ -200,6 +234,8 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
         reasons.append(f"أول اكتشاف عند {round(gain_at_detection, 2)}%")
     if current_gain:
         reasons.append(f"الحركة الحالية {round(current_gain, 2)}%")
+    if peak_gain_seen >= 10 and peak_gain_seen > max(current_gain, gain_at_detection):
+        reasons.append(f"أعلى حركة شوهدت اليوم {round(peak_gain_seen, 2)}%")
 
     if not price_reliable:
         blockers.append("السعر غير موثوق للتنفيذ")
@@ -312,6 +348,7 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
         "early_or_late_detection": early_or_late,
         "gain_at_detection": round(gain_at_detection, 4),
         "current_gain": round(current_gain, 4),
+        "peak_gain_seen": round(peak_gain_seen, 4),
         "max_gain_basis": round(max_gain_basis, 4),
         "distance_from_entry_pct": round(entry_distance, 4) if entry_distance != 999.0 else None,
         "nearest_resistance_distance_pct_v2": round(res_dist, 4) if res_dist != 999.0 else None,
@@ -337,6 +374,7 @@ def apply_move_stage_to_row(row: dict, journal: dict | None = None) -> dict:
         "early_or_late_detection",
         "gain_at_detection",
         "current_gain",
+        "peak_gain_seen",
         "max_gain_basis",
         "stage_allows_early_watch",
         "stage_allows_hot_lane",

@@ -18,7 +18,7 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.move_stage_classifier import apply_move_stage_to_row
 from app.pre_move_engine import enrich_row_pre_move
 
-SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix1"
+SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix2_peak_guard"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:
@@ -131,6 +131,13 @@ def enrich_row_source_promotion_v2(row: dict) -> dict:
     decision = str(row.get("decision", "مراقبة") or "مراقبة")
     gain_at_detection = _safe_float(row.get("gain_at_detection", 0), 0)
     current_gain = _safe_float(row.get("current_gain", row.get("display_change_pct", 0)), 0)
+    peak_gain_seen = max(
+        _safe_float(row.get("peak_gain_seen", 0), 0),
+        _safe_float(row.get("intraday_peak_gain", 0), 0),
+        _safe_float(row.get("max_gain_basis", 0), 0),
+        current_gain,
+        gain_at_detection,
+    )
     readiness = _safe_float(row.get("execution_readiness_score", 0), 0)
     quality = _safe_float(row.get("quality_score", 0), 0)
     volume = _safe_float(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", 0))), 0)
@@ -145,15 +152,19 @@ def enrich_row_source_promotion_v2(row: dict) -> dict:
     late_stages = {"Continuation Watch", "Already Moved", "Extended", "Requires Pullback", "No-Chase", "Catalyst Spike Review"}
     hard_no_chase_stages = {"Extended", "No-Chase", "Catalyst Spike Review"}
 
-    if stage in hard_no_chase_stages or gain_at_detection >= 20 or current_gain >= 25:
+    if stage in hard_no_chase_stages or gain_at_detection >= 20 or current_gain >= 25 or peak_gain_seen >= 25:
         _cap_to_watch(row, "الحركة متأخرة أو ممتدة — لا تطارد")
+        row["early_movement_active"] = False
+        row["early_movement_excluded_by_v2"] = True
         row["no_chase_guard_status"] = "no_chase"
         row["no_chase_guard_label"] = "⛔ لا تطارد"
         row["no_chase_guard_reasons"] = _dedupe(list(row.get("no_chase_guard_reasons") or []) + ["الحركة متأخرة عند الاكتشاف", f"gain_at_detection={round(gain_at_detection,2)}%"], 8)
         row["owner_action"] = "⛔ لا تطارد الآن — انتظر pullback صحي أو إعادة تمركز قبل أي دخول."
         status = "hard_no_chase_cap"
         immediate_list = "no_chase"
-    elif stage in {"Continuation Watch", "Requires Pullback"} or gain_at_detection >= 10:
+    elif stage in {"Continuation Watch", "Requires Pullback"} or gain_at_detection >= 10 or peak_gain_seen >= 10:
+        row["early_movement_active"] = False
+        row["early_movement_excluded_by_v2"] = True
         if decision == "دخول قوي":
             # Continuation is not a clean immediate Strong unless the setup is exceptionally clean.
             clean_continuation = price_reliable and readiness >= 62 and quality >= 76 and volume >= 1.25 and rr >= 0.8 and not blockers and bool(row.get("stage_allows_strong"))
@@ -220,7 +231,8 @@ def enrich_row_source_promotion_v2(row: dict) -> dict:
     row["source_promotion_v2_status"] = status
     row["source_promotion_v2_list"] = immediate_list
     row["move_stage_label"] = label
-    row["source_promotion_v2_summary"] = f"{label} — اكتشاف أولي {round(gain_at_detection, 2)}%، الحالي {round(current_gain, 2)}%."
+    row["source_promotion_v2_summary"] = f"{label} — اكتشاف أولي {round(gain_at_detection, 2)}%، الحالي {round(current_gain, 2)}%، أعلى مرصود {round(peak_gain_seen, 2)}%."
+    row["source_promotion_v2_peak_gain_seen"] = round(peak_gain_seen, 4)
     row["source_promotion_v2_reasons"] = _dedupe(reasons + blockers, 10)
     try:
         row["display_rank_score"] = round(_safe_float(row.get("display_rank_score", row.get("quality_score", 0)), 0) + _safe_float(row.get("stage_rank_adjustment", 0), 0), 2)
@@ -251,6 +263,7 @@ def summarize_source_promotion_v2(rows: list[dict]) -> dict[str, Any]:
             "move_stage": row.get("move_stage"),
             "gain_at_detection": row.get("gain_at_detection"),
             "current_gain": row.get("current_gain"),
+            "peak_gain_seen": row.get("peak_gain_seen") or row.get("intraday_peak_gain") or row.get("source_promotion_v2_peak_gain_seen"),
             "status": row.get("source_promotion_v2_status"),
         }
         if row.get("source_promotion_v2_capped"):
