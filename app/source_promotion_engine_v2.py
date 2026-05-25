@@ -18,7 +18,7 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.move_stage_classifier import apply_move_stage_to_row
 from app.pre_move_engine import enrich_row_pre_move
 
-SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix3_peak_calibration"
+SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix4_active_pullback_calibration"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:

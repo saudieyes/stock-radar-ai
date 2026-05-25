@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix3_peak_calibration"
+MOVE_STAGE_VERSION = "source_early_discovery_v2_move_stage_2026_05_25_hotfix4_active_pullback_calibration"
 NY_TZ = ZoneInfo("America/New_York")
 
 
@@ -269,7 +269,7 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
         allows_early_watch = False
         action = "ليس دخولًا مباشرًا؛ يحتاج ثبات، pullback صحي، أو reclaim بسيولة."
         rank_adjust -= 8
-        if close_resistance or existing_no_chase or entry_distance > 5.5:
+        if close_resistance or existing_no_chase or (entry_distance != 999.0 and entry_distance > 5.5):
             stage = "Requires Pullback"
             label = "⏳ يحتاج Pullback"
             action = "انتظر pullback أو اختراق/ثبات جديد قبل أي دخول."
@@ -300,11 +300,15 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
         action = "مرشح قبل الحركة؛ ليس دخولًا الآن حتى يظهر تأكيد حي."
         rank_adjust += 4
 
-    # Convert to No-Chase when the execution context is unsafe, even if raw gain
-    # sits in a less severe band.
-    if existing_no_chase or (close_resistance and max_gain_basis >= 5.0) or (entry_distance != 999.0 and entry_distance > 6.0 and max_gain_basis >= 5.0):
+    # Convert unsafe execution context carefully.  Hotfix 4 keeps the hard
+    # +10% peak guard, but avoids treating every clean sub-10% active move as
+    # permanent No-Chase merely because resistance/entry metadata is incomplete
+    # or temporarily conservative.  Under +10%, resistance/entry issues become
+    # Requires Pullback unless an upstream *explicit* no-chase guard exists.
+    unsafe_pullback_context = (close_resistance and max_gain_basis >= 5.0) or (entry_distance != 999.0 and entry_distance > 6.0 and max_gain_basis >= 5.0)
+    if existing_no_chase or unsafe_pullback_context:
         if stage in {"Active Breakout", "Early Confirmation", "Continuation Watch", "Requires Pullback", "Extended", "Catalyst Spike Review"}:
-            if stage in {"Extended", "Catalyst Spike Review"} or max_gain_basis >= 12.0 or close_resistance or (entry_distance != 999.0 and entry_distance > 6.0):
+            if stage in {"Extended", "Catalyst Spike Review"} or max_gain_basis >= 12.0 or existing_no_chase:
                 stage = "No-Chase"
                 label = "⛔ لا تطارد"
                 early_or_late = "late_no_chase" if max_gain_basis >= 10.0 else "no_chase"
@@ -314,6 +318,16 @@ def classify_move_stage(row: dict, journal: dict | None = None) -> dict[str, Any
                 allows_strong = False
                 action = "لا تدخل الآن؛ انتظر pullback/إعادة تمركز أو اختراق جديد مؤكد."
                 rank_adjust -= 18
+            elif max_gain_basis < 10.0:
+                stage = "Requires Pullback"
+                label = "⏳ يحتاج Pullback"
+                early_or_late = "pullback_required"
+                allows_early_watch = False
+                allows_hot_lane = False
+                allows_cautious = False
+                allows_strong = False
+                action = "الحركة نشطة لكنها غير نظيفة للتنفيذ الآن؛ انتظر pullback/ثبات/reclaim قبل الدخول."
+                rank_adjust -= 6
 
     # Execution permissions: strict and explicit.
     if stage in {"Early Confirmation", "Active Breakout"}:
