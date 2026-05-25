@@ -180,6 +180,11 @@ from app.early_movement import (
     build_early_movement_static_status,
     build_early_movement_weekly_report,
 )
+from app.source_promotion_v2a import (
+    enrich_rows_source_promotion_v2a,
+    summarize_source_promotion_v2a,
+    build_source_promotion_v2a_report,
+)
 
 app = FastAPI()
 
@@ -885,6 +890,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = enrich_rows_source_promotion_v2a(overlaid)
+    except Exception:
+        pass
+    try:
         overlaid = _post_early_movement_decision_safety(overlaid)
     except Exception:
         pass
@@ -943,6 +952,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
         "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
         "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
+        "source_promotion_v2a": summarize_source_promotion_v2a(overlaid),
+        "source_promotion_v2a_promoted_count": len([x for x in overlaid if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
         "groups": {
             "strong_entries": _live_bucket_payload(strong, limit),
             "cautious_entries": _live_bucket_payload(cautious, limit),
@@ -2158,6 +2169,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     except Exception:
         pass
     try:
+        results = enrich_rows_source_promotion_v2a(results)
+    except Exception:
+        pass
+    try:
         results = _post_early_movement_decision_safety(results)
     except Exception:
         pass
@@ -2215,6 +2230,8 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
         "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
         "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
+        "source_promotion_v2a": summarize_source_promotion_v2a(results),
+        "source_promotion_v2a_promoted_count": len([x for x in results if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
         "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
         "manual_sharia_approvals_count": len(load_manual_sharia_approvals()),
         "strong_entries": strong[:25],
@@ -2289,6 +2306,21 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
             }
     return out
+
+
+@app.get("/diagnostics/source-promotion-v2a")
+def diagnostics_source_promotion_v2a(format: str = "json"):
+    snap = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snap.get("rows", []) if isinstance(snap, dict) else []
+    try:
+        rows = _apply_manual_sharia_overrides(list(rows or []))
+        rows = enrich_opportunity_intelligence_bulk(rows)
+        rows = enrich_stocks_with_early_movement(rows)
+        rows = enrich_rows_source_promotion_v2a(rows)
+        rows = _post_early_movement_decision_safety(rows)
+    except Exception:
+        pass
+    return build_source_promotion_v2a_report(rows, format=format)
 
 
 @app.get("/trade-scan")
