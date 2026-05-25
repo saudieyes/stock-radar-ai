@@ -2202,10 +2202,14 @@ def _post_early_movement_decision_safety(results):
         # Early Movement No-Chase is a hard display cap even if the regular
         # scoring safety gate did not see a severe enough combination.
         em = stock.get("early_movement") or {}
+        move_stage_v2_name = str((stock.get("move_stage_v2") or {}).get("move_stage") or stock.get("move_stage") or "")
+        v2_no_chase_stage = move_stage_v2_name in {"No-Chase", "Extended", "Catalyst Spike Review"}
         no_chase = (
             str(em.get("status", "") or "") == "no_chase"
             or str(stock.get("no_chase_guard_status", "") or "") == "no_chase"
             or "لا تطارد" in str(stock.get("no_chase_guard_label", "") or "")
+            or v2_no_chase_stage
+            or str(stock.get("source_promotion_v2_status", "") or "") == "hard_no_chase_cap"
         )
         em_reasons = [str(x) for x in (em.get("no_chase_reasons") or stock.get("no_chase_guard_reasons") or []) if str(x).strip()]
         if no_chase:
@@ -2535,6 +2539,9 @@ def diagnostics_source_early_discovery_v2(limit: int = 50):
                 "move_stage_label": x.get("move_stage_label"),
                 "gain_at_detection": x.get("gain_at_detection"),
                 "current_gain": x.get("current_gain"),
+                "journal_current_gain": x.get("journal_current_gain"),
+                "journal_recorded_current_gain": x.get("journal_recorded_current_gain"),
+                "journal_current_gain_applied": x.get("journal_current_gain_applied"),
                 "first_detected_time": x.get("first_detected_time"),
                 "early_movement_active": x.get("early_movement_active"),
                 "source_promotion_v2_status": x.get("source_promotion_v2_status"),
