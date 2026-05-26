@@ -655,6 +655,14 @@
     "symbol": "FUBO",
     "updated_at": "2026-05-01 14:37:10"
   },
+  "FWONK": {
+    "excluded_at": "2026-05-26 10:37:14",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "FWONK",
+    "updated_at": "2026-05-26 10:37:14"
+  },
   "GCTS": {
     "excluded_at": "2026-05-18 10:22:31",
     "note": "استبعاد يدوي شرعي",
@@ -1342,6 +1350,14 @@
     "source": "manual",
     "symbol": "VAC",
     "updated_at": "2026-05-20 14:38:25"
+  },
+  "VIVO": {
+    "excluded_at": "2026-05-26 10:36:28",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "VIVO",
+    "updated_at": "2026-05-26 10:36:28"
   },
   "VSH": {
     "excluded_at": "2026-05-13 13:28:46",
