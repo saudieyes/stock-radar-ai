@@ -799,6 +799,14 @@
     "symbol": "HUN",
     "updated_at": "2026-05-01 06:38:30"
   },
+  "IAC": {
+    "excluded_at": "2026-05-26 15:56:56",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "IAC",
+    "updated_at": "2026-05-26 15:56:56"
+  },
   "IART": {
     "excluded_at": "2026-05-06 18:12:10",
     "note": "استبعاد يدوي شرعي",
@@ -1078,6 +1086,14 @@
     "source": "manual",
     "symbol": "NOV",
     "updated_at": "2026-04-29 22:12:20"
+  },
+  "NTCT": {
+    "excluded_at": "2026-05-26 17:38:39",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "NTCT",
+    "updated_at": "2026-05-26 17:38:39"
   },
   "NUTX": {
     "excluded_at": "2026-05-01 14:08:58",
