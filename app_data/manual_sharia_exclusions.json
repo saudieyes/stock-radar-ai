@@ -127,6 +127,14 @@
     "symbol": "ATRO",
     "updated_at": "2026-05-18 14:55:55"
   },
+  "AVT": {
+    "excluded_at": "2026-05-26 19:03:07",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "AVT",
+    "updated_at": "2026-05-26 19:03:07"
+  },
   "AXTI": {
     "excluded_at": "2026-04-27 11:00:10",
     "note": "",
@@ -702,6 +710,14 @@
     "source": "manual",
     "symbol": "GSIT",
     "updated_at": "2026-04-26 19:06:02"
+  },
+  "H": {
+    "excluded_at": "2026-05-26 19:02:22",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "H",
+    "updated_at": "2026-05-26 19:02:22"
   },
   "HBM": {
     "excluded_at": "2026-05-26 10:45:16",
