@@ -431,6 +431,14 @@
     "symbol": "DELL",
     "updated_at": "2026-05-06 10:56:13"
   },
+  "DGXX": {
+    "excluded_at": "2026-05-26 10:26:27",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DGXX",
+    "updated_at": "2026-05-26 10:26:27"
+  },
   "DINO": {
     "excluded_at": "2026-04-29 22:01:29",
     "note": "استبعاد يدوي شرعي",
@@ -1262,6 +1270,14 @@
     "source": "manual",
     "symbol": "SIDU",
     "updated_at": "2026-05-26 07:39:39"
+  },
+  "SOUN": {
+    "excluded_at": "2026-05-26 10:29:13",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "SOUN",
+    "updated_at": "2026-05-26 10:29:13"
   },
   "STUB": {
     "excluded_at": "2026-05-18 10:25:51",
