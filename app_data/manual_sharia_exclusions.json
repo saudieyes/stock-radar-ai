@@ -447,6 +447,14 @@
     "symbol": "DJT",
     "updated_at": "2026-04-27 12:42:34"
   },
+  "DLLL": {
+    "excluded_at": "2026-05-26 07:40:38",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DLLL",
+    "updated_at": "2026-05-26 07:40:38"
+  },
   "DNA": {
     "excluded_at": "2026-05-04 11:20:15",
     "note": "استبعاد يدوي شرعي",
@@ -1159,6 +1167,22 @@
     "symbol": "QBTS",
     "updated_at": "2026-04-27 10:57:45"
   },
+  "QCML": {
+    "excluded_at": "2026-05-26 07:42:18",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "QCML",
+    "updated_at": "2026-05-26 07:42:18"
+  },
+  "RGTX": {
+    "excluded_at": "2026-05-26 07:41:52",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "RGTX",
+    "updated_at": "2026-05-26 07:41:52"
+  },
   "RMAX": {
     "excluded_at": "2026-04-27 05:44:57",
     "note": "",
@@ -1223,6 +1247,14 @@
     "symbol": "SHIM",
     "updated_at": "2026-04-27 17:54:55"
   },
+  "SIDU": {
+    "excluded_at": "2026-05-26 07:39:39",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "SIDU",
+    "updated_at": "2026-05-26 07:39:39"
+  },
   "STUB": {
     "excluded_at": "2026-05-18 10:25:51",
     "note": "استبعاد يدوي شرعي",
@@ -1230,6 +1262,14 @@
     "source": "manual",
     "symbol": "STUB",
     "updated_at": "2026-05-18 10:25:51"
+  },
+  "SVRN": {
+    "excluded_at": "2026-05-26 07:41:28",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "SVRN",
+    "updated_at": "2026-05-26 07:41:28"
   },
   "SWK": {
     "excluded_at": "2026-05-21 15:07:48",
