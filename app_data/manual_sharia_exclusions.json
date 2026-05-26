@@ -703,6 +703,14 @@
     "symbol": "GSIT",
     "updated_at": "2026-04-26 19:06:02"
   },
+  "HBM": {
+    "excluded_at": "2026-05-26 10:45:16",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "HBM",
+    "updated_at": "2026-05-26 10:45:16"
+  },
   "HELE": {
     "excluded_at": "2026-04-20 21:46:20",
     "note": "",
