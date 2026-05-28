@@ -671,6 +671,14 @@
     "symbol": "FWONK",
     "updated_at": "2026-05-26 10:37:14"
   },
+  "GAP": {
+    "excluded_at": "2026-05-28 10:09:11",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "GAP",
+    "updated_at": "2026-05-28 10:09:11"
+  },
   "GCTS": {
     "excluded_at": "2026-05-18 10:22:31",
     "note": "استبعاد يدوي شرعي",
@@ -1294,6 +1302,14 @@
     "source": "manual",
     "symbol": "SEGG",
     "updated_at": "2026-05-18 10:22:05"
+  },
+  "SERV": {
+    "excluded_at": "2026-05-28 10:08:26",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "SERV",
+    "updated_at": "2026-05-28 10:08:26"
   },
   "SFM": {
     "excluded_at": "2026-05-18 15:10:20",
