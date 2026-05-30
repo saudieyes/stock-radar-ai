@@ -2327,6 +2327,18 @@
   </div>
 
   <script>
+    try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (_) {}
+    window.__initialDecisionViewRestored = false;
+    function restoreInitialDecisionView() {
+      if (window.__initialDecisionViewRestored) return;
+      if (window.location.hash && window.location.hash !== '#content') return;
+      window.__initialDecisionViewRestored = true;
+      setTimeout(() => {
+        const target = document.getElementById('content') || document.getElementById('marketMoodSection') || document.body;
+        if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'auto', block: 'start' });
+        else window.scrollTo({ top: 0, behavior: 'auto' });
+      }, 80);
+    }
     function escapeHtml(value) {
       return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -5198,6 +5210,7 @@
 
     async function loadAll(manual=false) {
       await Promise.allSettled([loadMarketMood(true), loadScan(!!manual)]);
+      restoreInitialDecisionView();
     }
 
     initThemeMode();
@@ -5461,15 +5474,31 @@
     filterModernDetails(btn.dataset.filter || 'all');
   });
 
-  // Preserve scroll around sharia actions that re-render the radar.
+  // Preserve scroll around Sharia actions that re-render parts of the radar.
+  // Restore more than once because cards may reflow after API calls/live overlays.
   function preserveScrollWrapper(name){
     const original = window[name];
     if (typeof original !== 'function' || original.__preserveScroll) return;
     const wrapped = async function(){
-      const y = window.scrollY;
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      const activeCard = (this && this.closest) ? this.closest('.card') : null;
+      const activeSymbol = activeCard ? String(activeCard.dataset.symbol || '') : '';
+      const activeTop = activeCard ? activeCard.getBoundingClientRect().top : null;
       const args = arguments;
+      const restore = () => {
+        try {
+          if (activeSymbol && window.CSS && CSS.escape) {
+            const card = document.querySelector(`.card[data-symbol="${CSS.escape(activeSymbol)}"]`);
+            if (card && activeTop !== null) {
+              const delta = card.getBoundingClientRect().top - activeTop;
+              if (Math.abs(delta) > 2) { window.scrollBy({ top: delta, behavior: 'auto' }); return; }
+            }
+          }
+          window.scrollTo({ top: y, behavior: 'auto' });
+        } catch (_) { window.scrollTo({ top: y, behavior: 'auto' }); }
+      };
       try { return await original.apply(this, args); }
-      finally { setTimeout(() => window.scrollTo({ top: y, behavior: 'auto' }), 120); }
+      finally { [80, 250, 700].forEach(ms => setTimeout(restore, ms)); }
     };
     wrapped.__preserveScroll = true;
     window[name] = wrapped;

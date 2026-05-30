@@ -194,6 +194,9 @@ from app.source_promotion_engine_v2 import (
     enrich_rows_source_promotion_v2,
     summarize_source_promotion_v2,
 )
+from app.final_decision_engine import apply_final_decisions
+from app.telegram_alerts import maybe_send_buy_now_alerts, telegram_alert_status
+from app.system_cost_health import build_system_cost_health
 from app.pre_move_engine import enrich_row_pre_move
 
 app = FastAPI()
@@ -514,6 +517,17 @@ def health():
         "live_quotes_enabled": bool(LIVE_QUOTES_ENABLED),
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
     }
+
+
+@app.get("/telegram-alerts/status")
+def telegram_alerts_status_endpoint():
+    return telegram_alert_status()
+
+
+@app.get("/system-cost-health")
+@app.get("/diagnostics/system-cost-health")
+def system_cost_health_endpoint():
+    return build_system_cost_health()
 
 
 @app.get("/runtime-diagnostics")
@@ -1051,6 +1065,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = apply_final_decisions(overlaid)
+    except Exception:
+        pass
+    try:
         early_movement_payload = build_early_movement_sections(overlaid)
     except Exception:
         early_movement_payload = {"count": 0, "early_movement_watchlist": [], "weekly_priority_count": 0, "auto_detected_count": 0, "priority_watch_count": 0}
@@ -1077,6 +1095,11 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception as exc:
         tracking_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
+    try:
+        telegram_live_stats = maybe_send_buy_now_alerts(strong, source="radar_live_refresh")
+    except Exception as exc:
+        telegram_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
     updated_at_raw = str(snapshot.get("updated_at", "") or "") if isinstance(snapshot, dict) else ""
     snapshot_age_sec = None
     try:
@@ -1100,6 +1123,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         "tracking_intelligence": tracking_live_stats,
+        "telegram_alerts": telegram_live_stats,
         "live_overlay_gate_version": "source_promotion_v2a2_live_overlay_gate",
         "live_overlay_blocked_count": len([x for x in overlaid if isinstance(x, dict) and x.get("live_overlay_gate_status") == "blocked"]),
         "early_movement_count": int(early_movement_payload.get("count", 0) or 0),
@@ -2356,6 +2380,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         results = _post_early_movement_decision_safety(results)
     except Exception:
         pass
+    try:
+        results = apply_final_decisions(results)
+    except Exception:
+        pass
     early_movement_payload = build_early_movement_sections(results)
     scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
@@ -2463,6 +2491,11 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         },
     }
 
+    try:
+        out["telegram_alerts"] = maybe_send_buy_now_alerts(strong, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+    except Exception as exc:
+        out["telegram_alerts"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
     # Tracking Intelligence V1 is intentionally passive: full-scan snapshots only,
     # SQLite writes only, no extra API calls, and no changes to decision/Sharia/price logic.
     if not cache_hit:
@@ -2506,6 +2539,7 @@ def diagnostics_source_promotion_v2a(format: str = "json"):
         rows = enrich_rows_source_promotion_v2a(rows)
         rows = enrich_rows_source_promotion_v2(rows)
         rows = _post_early_movement_decision_safety(rows)
+        rows = apply_final_decisions(rows)
     except Exception:
         pass
     return build_source_promotion_v2a_report(rows, format=format)
@@ -2524,6 +2558,7 @@ def diagnostics_source_early_discovery_v2(limit: int = 50):
         rows = enrich_rows_source_promotion_v2a(rows)
         rows = enrich_rows_source_promotion_v2(rows)
         rows = _post_early_movement_decision_safety(rows)
+        rows = apply_final_decisions(rows)
     except Exception:
         pass
     safe_limit = max(1, min(int(limit or 50), 100))
@@ -2551,6 +2586,10 @@ def diagnostics_source_early_discovery_v2(limit: int = 50):
                 "early_movement_active": x.get("early_movement_active"),
                 "source_promotion_v2_status": x.get("source_promotion_v2_status"),
                 "source_promotion_v2_list": x.get("source_promotion_v2_list"),
+                "final_decision_code": x.get("final_decision_code"),
+                "final_decision_label": x.get("final_decision_label"),
+                "final_decision_blockers": x.get("final_decision_blockers"),
+                "owner_action": x.get("owner_action"),
             }
             for x in (rows or [])[:safe_limit]
             if isinstance(x, dict)

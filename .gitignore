@@ -1,0 +1,7 @@
+# Runtime/large generated data should not be deployed with code
+app_data/evidence_archive/
+app_data/weekly_tracking_archive/
+app_data/*.sqlite3
+app_data/*.sqlite3-*
+__pycache__/
+*.pyc
