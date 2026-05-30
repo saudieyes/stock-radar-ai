@@ -1,0 +1,653 @@
+{
+  "ok": true,
+  "version": "weekly_priority_watchlist_official_launch_2026_05_30",
+  "updated_at": "2026-05-30",
+  "source": "polygon_week2_full_reanalysis_user_sharia_filtered",
+  "notes": "Official weekly lane. Not buy-now; final_decision_engine must confirm live entry.",
+  "weekly_priority": [
+    {
+      "symbol": "DRS",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 82,
+      "entry_zone_low": 48.5216,
+      "entry_zone_high": 49.0038,
+      "stop_invalidation": 46.8233,
+      "target1_area": 51.944,
+      "no_chase_above": 52.9241,
+      "week_close": 48.76,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "JOBY",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 81,
+      "entry_zone_low": 12.1514,
+      "entry_zone_high": 12.3701,
+      "stop_invalidation": 11.7261,
+      "target1_area": 13.1123,
+      "no_chase_above": 12.9271,
+      "week_close": 11.91,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، حجم أعلى من المعتاد، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "AMRZ",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 80,
+      "entry_zone_low": 53.9051,
+      "entry_zone_high": 54.5614,
+      "stop_invalidation": 52.0184,
+      "target1_area": 57.8351,
+      "no_chase_above": 58.9264,
+      "week_close": 54.29,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "QS",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 78,
+      "entry_zone_low": 9.1162,
+      "entry_zone_high": 9.2803,
+      "stop_invalidation": 8.7971,
+      "target1_area": 9.8371,
+      "no_chase_above": 9.7577,
+      "week_close": 8.99,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "ITRN",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 78,
+      "entry_zone_low": 65.0902,
+      "entry_zone_high": 65.7973,
+      "stop_invalidation": 62.812,
+      "target1_area": 69.7452,
+      "no_chase_above": 71.0611,
+      "week_close": 65.47,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "NTRA",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 75,
+      "entry_zone_low": 221.711,
+      "entry_zone_high": 224.4969,
+      "stop_invalidation": 213.9511,
+      "target1_area": 237.9667,
+      "no_chase_above": 242.4567,
+      "week_close": 223.38,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "FSTR",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 73,
+      "entry_zone_low": 41.9936,
+      "entry_zone_high": 42.7495,
+      "stop_invalidation": 40.5238,
+      "target1_area": 45.3145,
+      "no_chase_above": 44.6534,
+      "week_close": 41.14,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، حجم أعلى من المعتاد"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "GHM",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "high",
+      "validity_days": 5,
+      "confidence": 72,
+      "entry_zone_low": 99.0632,
+      "entry_zone_high": 100.7713,
+      "stop_invalidation": 95.596,
+      "target1_area": 106.8176,
+      "no_chase_above": 108.8331,
+      "week_close": 100.27,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "PATH",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 68,
+      "entry_zone_low": 11.7934,
+      "entry_zone_high": 12.0057,
+      "stop_invalidation": 11.3806,
+      "target1_area": 12.726,
+      "no_chase_above": 12.7046,
+      "week_close": 11.705,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "RIO",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 65,
+      "entry_zone_low": 106.94,
+      "entry_zone_high": 108.8649,
+      "stop_invalidation": 103.1971,
+      "target1_area": 115.3968,
+      "no_chase_above": 115.4757,
+      "week_close": 106.39,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "ASUR",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 65,
+      "entry_zone_low": 9.0275,
+      "entry_zone_high": 9.2532,
+      "stop_invalidation": 8.7115,
+      "target1_area": 9.8083,
+      "no_chase_above": 9.9934,
+      "week_close": 9.25,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "CTSH",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 65,
+      "entry_zone_low": 55.0933,
+      "entry_zone_high": 56.0338,
+      "stop_invalidation": 53.165,
+      "target1_area": 59.3958,
+      "no_chase_above": 60.5165,
+      "week_close": 55.755,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "KNX",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 64,
+      "entry_zone_low": 75.8086,
+      "entry_zone_high": 75.9981,
+      "stop_invalidation": 73.1553,
+      "target1_area": 80.558,
+      "no_chase_above": 82.0779,
+      "week_close": 75.62,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم، إغلاق الجمعة قوي"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "NAVN",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 64,
+      "entry_zone_low": 21.1934,
+      "entry_zone_high": 21.4969,
+      "stop_invalidation": 20.4516,
+      "target1_area": 22.7868,
+      "no_chase_above": 23.2167,
+      "week_close": 21.39,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "PCVX",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 64,
+      "entry_zone_low": 51.021,
+      "entry_zone_high": 51.6771,
+      "stop_invalidation": 49.2353,
+      "target1_area": 54.7777,
+      "no_chase_above": 55.8113,
+      "week_close": 51.42,
+      "reasons": [
+        "إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "FLS",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 63,
+      "entry_zone_low": 75.7609,
+      "entry_zone_high": 75.9076,
+      "stop_invalidation": 73.1093,
+      "target1_area": 80.4621,
+      "no_chase_above": 81.9803,
+      "week_close": 75.53,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "SPXC",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 63,
+      "entry_zone_low": 216.8292,
+      "entry_zone_high": 217.9945,
+      "stop_invalidation": 209.2402,
+      "target1_area": 231.0742,
+      "no_chase_above": 235.4341,
+      "week_close": 216.91,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "MIDD",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 61,
+      "entry_zone_low": 155.1911,
+      "entry_zone_high": 155.785,
+      "stop_invalidation": 149.7594,
+      "target1_area": 165.1322,
+      "no_chase_above": 168.2479,
+      "week_close": 155.01,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد، إغلاق الجمعة قوي"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "BROS",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 61,
+      "entry_zone_low": 57.963,
+      "entry_zone_high": 58.2649,
+      "stop_invalidation": 55.9343,
+      "target1_area": 61.7608,
+      "no_chase_above": 62.9261,
+      "week_close": 57.975,
+      "reasons": [
+        "إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "NKE",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 61,
+      "entry_zone_low": 47.1716,
+      "entry_zone_high": 48.0207,
+      "stop_invalidation": 45.5206,
+      "target1_area": 50.9019,
+      "no_chase_above": 50.178,
+      "week_close": 46.23,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "BVN",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 60,
+      "entry_zone_low": 36.6606,
+      "entry_zone_high": 37.0795,
+      "stop_invalidation": 35.3774,
+      "target1_area": 39.3042,
+      "no_chase_above": 40.0458,
+      "week_close": 36.895,
+      "reasons": [
+        "إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "THRM",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 58,
+      "entry_zone_low": 34.8707,
+      "entry_zone_high": 35.4984,
+      "stop_invalidation": 33.6502,
+      "target1_area": 37.6283,
+      "no_chase_above": 37.658,
+      "week_close": 34.695,
+      "reasons": [
+        "مرشح أسبوعي غير ممتد"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "MDXG",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 57,
+      "entry_zone_low": 3.6897,
+      "entry_zone_high": 3.7034,
+      "stop_invalidation": 3.5605,
+      "target1_area": 3.9256,
+      "no_chase_above": 3.9997,
+      "week_close": 3.685,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "INNV",
+      "pattern": "Quiet Accumulation / Support Buy",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 57,
+      "entry_zone_low": 7.5419,
+      "entry_zone_high": 7.6078,
+      "stop_invalidation": 7.2779,
+      "target1_area": 8.0643,
+      "no_chase_above": 8.2165,
+      "week_close": 7.57,
+      "reasons": [
+        "تجميع هادئ/شراء قرب دعم، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    }
+  ],
+  "high_risk_manual": [
+    {
+      "symbol": "SHOP",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 67,
+      "entry_zone_low": 117.7342,
+      "entry_zone_high": 119.394,
+      "stop_invalidation": 113.6135,
+      "target1_area": 126.5576,
+      "no_chase_above": 128.9455,
+      "week_close": 118.8,
+      "reasons": [
+        "إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا، حركة أسبوعية مرتفعة"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "TRNS",
+      "pattern": "Continuation Watch",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 64,
+      "entry_zone_low": 82.8372,
+      "entry_zone_high": 84.9082,
+      "stop_invalidation": 79.9379,
+      "target1_area": 90.0026,
+      "no_chase_above": 91.7008,
+      "week_close": 84.7,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا، حركة أسبوعية مرتفعة"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "ILMN",
+      "pattern": "Continuation Watch",
+      "priority": "medium",
+      "validity_days": 5,
+      "confidence": 63,
+      "entry_zone_low": 163.2728,
+      "entry_zone_high": 163.7748,
+      "stop_invalidation": 157.5582,
+      "target1_area": 173.6013,
+      "no_chase_above": 176.8768,
+      "week_close": 162.96,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، إغلاق الجمعة قوي"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "PSN",
+      "pattern": "Continuation Watch",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 62,
+      "entry_zone_low": 59.3113,
+      "entry_zone_high": 59.4156,
+      "stop_invalidation": 57.2354,
+      "target1_area": 62.9805,
+      "no_chase_above": 64.1688,
+      "week_close": 59.12,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "AMR",
+      "pattern": "Continuation Watch",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 61,
+      "entry_zone_low": 202.6055,
+      "entry_zone_high": 206.2524,
+      "stop_invalidation": 195.5143,
+      "target1_area": 218.6275,
+      "no_chase_above": 215.3868,
+      "week_close": 198.44,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، حجم أعلى من المعتاد"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "HCC",
+      "pattern": "Continuation Watch",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 58,
+      "entry_zone_low": 96.1,
+      "entry_zone_high": 97.8298,
+      "stop_invalidation": 92.7365,
+      "target1_area": 103.6996,
+      "no_chase_above": 102.6029,
+      "week_close": 94.53,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، حجم أعلى من المعتاد"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "TOMZ",
+      "pattern": "Continuation Watch",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 56,
+      "entry_zone_low": 0.9256,
+      "entry_zone_high": 0.9346,
+      "stop_invalidation": 0.8932,
+      "target1_area": 0.9907,
+      "no_chase_above": 1.0094,
+      "week_close": 0.93,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا، حركة أسبوعية مرتفعة"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "PRIM",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 54,
+      "entry_zone_low": 126.606,
+      "entry_zone_high": 128.8849,
+      "stop_invalidation": 122.1748,
+      "target1_area": 136.618,
+      "no_chase_above": 136.5759,
+      "week_close": 125.83,
+      "reasons": [
+        "حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "ASAN",
+      "pattern": "Continuation Watch",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 54,
+      "entry_zone_low": 7.5586,
+      "entry_zone_high": 7.7234,
+      "stop_invalidation": 7.294,
+      "target1_area": 8.1868,
+      "no_chase_above": 8.3413,
+      "week_close": 7.685,
+      "reasons": [
+        "استمرار مشروط لا مطاردة، حجم أعلى من المعتاد، إغلاق الجمعة قوي، إغلاق فوق VWAP تقريبًا، حركة أسبوعية مرتفعة"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    },
+    {
+      "symbol": "APH",
+      "pattern": "Weekly Priority / Pre-Move",
+      "priority": "low",
+      "validity_days": 5,
+      "confidence": 54,
+      "entry_zone_low": 148.2971,
+      "entry_zone_high": 149.5038,
+      "stop_invalidation": 143.1067,
+      "target1_area": 158.474,
+      "no_chase_above": 161.4641,
+      "week_close": 148.76,
+      "reasons": [
+        "إغلاق فوق VWAP تقريبًا"
+      ],
+      "source": "polygon_week2_full_reanalysis_sharia_filtered",
+      "week_key": "2026-05-25_2026-05-29"
+    }
+  ],
+  "manual_sharia_excluded": [
+    "ACHR",
+    "ALIT",
+    "AP",
+    "ASTL",
+    "ASTS",
+    "BG",
+    "BH",
+    "CLW",
+    "CMC",
+    "CNNE",
+    "CRSP",
+    "DLTR",
+    "GE",
+    "GENI",
+    "HY",
+    "NET",
+    "RCUS",
+    "SCKT",
+    "SLQT",
+    "SLS",
+    "SNX",
+    "SYPR",
+    "TKR",
+    "ULBI",
+    "VEEV",
+    "VHI",
+    "VRNS",
+    "WOOF"
+  ]
+}
