@@ -112,7 +112,16 @@ def prune_week_data(week_key: str) -> dict:
                 except Exception as exc:
                     deleted[table] = f"ERROR: {type(exc).__name__}: {str(exc)[:120]}"
             conn.commit()
-        return {"ok": True, "week_key": week_key, "deleted": deleted, "pruned_at_riyadh": _now_riyadh()}
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            try:
+                conn.execute("VACUUM")
+            except Exception:
+                # VACUUM may fail inside some transaction/WAL states; pruning still succeeded.
+                pass
+        return {"ok": True, "week_key": week_key, "deleted": deleted, "vacuum_attempted": True, "pruned_at_riyadh": _now_riyadh()}
     except Exception as exc:
         return {"ok": False, "week_key": week_key, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "deleted": deleted}
 

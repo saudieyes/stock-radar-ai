@@ -549,20 +549,23 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Balanced order: V2a gives known weekly-priority names a front-row seat,
     # then today's live/new movers, with the old baseline as support only.
     selected_order = []
+    # Official launch source order: early/prepared lanes first, then live ignition,
+    # then constructive liquidity.  Late movers stay visible for review, but they
+    # must never crowd out early builders or weekly-priority names.
+    selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
+    selected_order += from_source("pre_move_engine_v2", min(120, max_symbols))
+    selected_order += from_source("pre_move_watch", min(70, max_symbols))
     selected_order += from_source("live_ignition_hot_lane", min(120, max_symbols))
-    selected_order += from_source("weekly_priority_watchlist", min(80, max_symbols))
-    selected_order += from_source("pre_move_engine_v2", min(90, max_symbols))
-    selected_order += from_source("pre_move_watch", min(40, max_symbols))
-    selected_order += from_source("continuation_watch", min(40, max_symbols))
-    selected_order += from_source("fmp_live_confirmed", min(140, max_symbols))
-    selected_order += from_source("fmp_movers", min(120, max_symbols))
-    selected_order += from_source("top_mover", min(160, max_symbols))
-    selected_order += from_source("volume_spike", min(150, max_symbols))
-    selected_order += from_source("runner", min(120, max_symbols))
-    selected_order += from_source("near_high", min(120, max_symbols))
-    selected_order += from_source("constructive", min(100, max_symbols))
-    selected_order += from_source("late_mover_review", min(60, max_symbols))
-    selected_order += from_source("weekly_high_risk_manual", min(20, max_symbols))
+    selected_order += from_source("constructive", min(120, max_symbols))
+    selected_order += from_source("near_high", min(100, max_symbols))
+    selected_order += from_source("volume_spike", min(110, max_symbols))
+    selected_order += from_source("runner", min(90, max_symbols))
+    selected_order += from_source("fmp_live_confirmed", min(120, max_symbols))
+    selected_order += from_source("fmp_movers", min(80, max_symbols))
+    selected_order += from_source("continuation_watch", min(35, max_symbols))
+    selected_order += from_source("weekly_high_risk_manual", min(15, max_symbols))
+    selected_order += from_source("late_mover_review", min(25, max_symbols))
+    selected_order += from_source("top_mover", min(60, max_symbols))
     selected_order += from_source("baseline", min(220, max_symbols))
     selected_order += [r["symbol"] for r in ranked]
     selected_order += _scanner.get_seed_universe()
@@ -577,7 +580,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             source_bucket_counts[src] = int(source_bucket_counts.get(src, 0) or 0) + 1
 
     diag = {
-        "engine_version": "dynamic_discovery_v2_hot_lane_pre_move_stage_aware",
+        "engine_version": "dynamic_discovery_v3_official_lane_order_cost_safe",
         "dynamic_discovery_enabled": True,
         "dynamic_discovery_mode": "candidate_pool_plus_pre_move_plus_live_ignition_hot_lane",
         "requested_target": int(max_symbols),

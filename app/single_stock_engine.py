@@ -14,6 +14,7 @@ from app.source_promotion_v2a import enrich_row_source_promotion_v2a
 from app.detection_journal import enrich_stock_with_detection_journal
 from app.source_promotion_engine_v2 import enrich_row_source_promotion_v2
 from app.pre_move_engine import enrich_row_pre_move
+from app.final_decision_engine import apply_final_decision
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
@@ -176,6 +177,10 @@ def scan_all(debug: bool = False):
                         p["decision"] = "مراقبة"
                         p["signal_strength_label"] = "مراقبة"
                         p["signal_strength_bucket"] = -1
+            except Exception:
+                pass
+            try:
+                p = apply_final_decision(p)
             except Exception:
                 pass
             try:
@@ -348,6 +353,14 @@ def build_single_stock_response(symbol: str):
                 pass
             try:
                 trade_plan = enrich_row_source_promotion_v2a(trade_plan)
+            except Exception:
+                pass
+            try:
+                trade_plan = enrich_row_source_promotion_v2(trade_plan)
+            except Exception:
+                pass
+            try:
+                trade_plan = apply_final_decision(trade_plan)
             except Exception:
                 pass
             try:

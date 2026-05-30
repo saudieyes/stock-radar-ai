@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-PRE_MOVE_ENGINE_VERSION = "source_early_discovery_v2_pre_move_engine_2026_05_25"
+PRE_MOVE_ENGINE_VERSION = "pre_move_engine_official_prior_move_accumulation_2026_05_30"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:
@@ -51,12 +51,20 @@ def analyze_pre_move(row: dict) -> dict[str, Any]:
     readiness = _first(row, ["execution_readiness_score"], 0.0)
     quality = _first(row, ["quality_score", "display_rank_score"], 0.0)
     res_dist = _first(row, ["nearest_resistance_distance_pct", "distance_to_resistance_pct"], 999.0)
+    support_dist = _first(row, ["nearest_support_distance_pct", "support_distance_pct", "distance_to_support_pct"], 999.0)
+    prior_day = _first(row, ["prior_day_change_pct", "previous_day_change_pct", "last_session_change_pct"], 0.0)
+    rolling_3d = _first(row, ["rolling_3d_change_pct", "three_day_change_pct", "last_3d_change_pct"], 0.0)
+    weekly = _first(row, ["weekly_change_pct", "week_change_pct", "five_day_change_pct"], 0.0)
+    monthly = _first(row, ["monthly_change_pct", "month_change_pct", "twenty_day_change_pct"], 0.0)
     trend = str(row.get("trend", "") or "")
     source_text = " ".join([str(x) for x in (row.get("source_reason_tags") or row.get("sources") or [])]) + " " + str(row.get("source_reason", "") or "")
 
     score = 0.0
     reasons: list[str] = []
     invalid: list[str] = []
+
+    if prior_day >= 12 or rolling_3d >= 18 or weekly >= 20 or monthly >= 35:
+        invalid.append("ارتفع كثيرًا سابقًا — ليس Pre-Move نظيف")
 
     if change > 8.0:
         invalid.append(f"الحركة الحالية كبيرة لمراقبة مبكرة ({round(change, 2)}%)")
@@ -82,6 +90,9 @@ def analyze_pre_move(row: dict) -> dict[str, Any]:
     if trend in {"صاعد", "صاعد قوي"}:
         score += 10
         reasons.append("اتجاه داعم")
+    if 0 <= support_dist <= 2.5:
+        score += 12
+        reasons.append("قريب من دعم/منطقة شراء يمكن ضبط وقفها")
     if 1.0 <= res_dist <= 7.0:
         score += 10
         reasons.append("قريب من منطقة اختراق بدون ملاصقة مقاومة")
@@ -93,9 +104,9 @@ def analyze_pre_move(row: dict) -> dict[str, Any]:
     if quality >= 60:
         score += 8
         reasons.append("جودة فنية مقبولة")
-    if any(w in source_text.lower() for w in ["pre_move", "constructive", "near_high", "weekly_priority", "breakout"]):
-        score += 10
-        reasons.append("مصدر المنبع يشير إلى بناء/اختراق قريب")
+    if any(w in source_text.lower() for w in ["quiet accumulation", "support buy", "pre-gap", "pre_move", "constructive", "near_high", "weekly_priority", "breakout"]):
+        score += 12
+        reasons.append("مصدر المنبع يشير إلى بناء/تجميع أو اختراق قريب")
 
     eligible = bool(score >= 42 and not invalid)
     label = "🟣 مراقبة مبكرة قبل الحركة" if eligible else "غير مؤهل لمراقبة مبكرة نظيفة"

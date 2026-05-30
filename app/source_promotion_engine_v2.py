@@ -18,7 +18,7 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.move_stage_classifier import apply_move_stage_to_row
 from app.pre_move_engine import enrich_row_pre_move
 
-SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_root_early_discovery_2026_05_25_hotfix5_conditional_watch_guard"
+SOURCE_PROMOTION_ENGINE_V2_VERSION = "source_promotion_engine_v2_official_pre_final_decision_2026_05_30"
 
 
 def _env_bool(name: str, default: bool = True) -> bool:
@@ -307,11 +307,15 @@ def summarize_source_promotion_v2(rows: list[dict]) -> dict[str, Any]:
             "current_gain": row.get("current_gain"),
             "peak_gain_seen": row.get("peak_gain_seen") or row.get("intraday_peak_gain") or row.get("source_promotion_v2_peak_gain_seen"),
             "status": row.get("source_promotion_v2_status"),
+            "final_decision_code": row.get("final_decision_code"),
+            "final_decision_label": row.get("final_decision_label"),
+            "final_decision_blockers": row.get("final_decision_blockers"),
         }
         if row.get("source_promotion_v2_capped"):
             capped.append(compact)
         if (
             row.get("source_promotion_v2_promoted")
+            and str(row.get("decision") or "") in {"دخول بحذر", "دخول قوي"}
             and not row.get("source_promotion_v2_capped")
             and str(row.get("source_promotion_v2_status") or "")
             in {"early_confirmation_promoted_to_cautious", "active_breakout_promoted_to_cautious"}

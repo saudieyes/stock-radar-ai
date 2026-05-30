@@ -125,10 +125,13 @@ INCOME_DATA = load_latest(DATA_DIR / "income_statement.csv")
 
 
 def initialize_reference_data():
-    sector_data = load_sector()
-    companies_data = load_companies()
-    balance_data = load_latest(DATA_DIR / "balance_sheet.csv")
-    income_data = load_latest(DATA_DIR / "income_statement.csv")
-    return sector_data, companies_data, balance_data, income_data
+    """Return the already-loaded reference dictionaries.
+
+    Older main.py versions called this at startup and reloaded every large CSV a
+    second time, raising the Railway memory baseline.  The module globals above
+    are the single source of truth for reference data; callers should receive
+    references to the same dictionaries, not fresh copies.
+    """
+    return SECTOR_DATA, COMPANIES_DATA, BALANCE_DATA, INCOME_DATA
 
 
