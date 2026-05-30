@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v1_2026_05_30"
+FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v1_2026_05_30a"
 
 BUY_NOW = "BUY_NOW"
 WAIT_TRIGGER = "WAIT_TRIGGER"
@@ -193,10 +193,17 @@ def apply_final_decision(row: dict) -> dict:
     non_actionable_stages = {
         "Pre-Move", "Continuation Watch", "Requires Pullback", "Already Moved", "Extended", "No-Chase", "Catalyst Spike Review"
     }
+    # IMPORTANT: do not infer NO_CHASE from owner_action/execution labels.
+    # Those labels may already be stale from an upstream/previous decision pass and
+    # caused clean Pre-Move rows to become "لا تطارد" even when current/peak gain
+    # was tiny.  Only explicit no-chase guards, hard late stages, or objectively
+    # extended movement are allowed to cap the final decision.
+    explicit_no_chase_status = _txt(out.get("no_chase_guard_status")).lower() == "no_chase"
+    explicit_no_chase_label = _has_text(out, ["no_chase_guard_label"], "لا تطارد", "مطاردة")
     hard_no_chase = (
         stage in {"Extended", "No-Chase", "Catalyst Spike Review"}
-        or _txt(out.get("no_chase_guard_status")) == "no_chase"
-        or _has_text(out, ["no_chase_guard_label", "owner_action", "execution_readiness_label"], "لا تطارد", "مطاردة")
+        or explicit_no_chase_status
+        or explicit_no_chase_label
         or gain_at_detection >= 20
         or current_gain >= 25
         or peak_gain >= 25
