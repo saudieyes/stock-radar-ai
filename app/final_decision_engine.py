@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v1_2026_05_30a"
+FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v1_2026_05_30b"
 
 BUY_NOW = "BUY_NOW"
 WAIT_TRIGGER = "WAIT_TRIGGER"
@@ -200,14 +200,27 @@ def apply_final_decision(row: dict) -> dict:
     # extended movement are allowed to cap the final decision.
     explicit_no_chase_status = _txt(out.get("no_chase_guard_status")).lower() == "no_chase"
     explicit_no_chase_label = _has_text(out, ["no_chase_guard_label"], "لا تطارد", "مطاردة")
-    hard_no_chase = (
+    # Pre-Move is a preparation/watch state.  It must never inherit stale
+    # upstream "لا تطارد" wording unless the objective movement itself is
+    # already extended.  This is the core protection against the old layered
+    # behavior: clean Pre-Move rows such as GHM/CIEN/NUE were being capped as
+    # NO_CHASE because an older label/action still contained "لا تطارد".
+    clean_pre_move = (
+        stage == "Pre-Move"
+        and gain_at_detection < 5.0
+        and current_gain < 8.0
+        and peak_gain < 10.0
+        and not bool(out.get("late_seen_flag"))
+    )
+
+    objective_extended = (
         stage in {"Extended", "No-Chase", "Catalyst Spike Review"}
-        or explicit_no_chase_status
-        or explicit_no_chase_label
         or gain_at_detection >= 20
         or current_gain >= 25
         or peak_gain >= 25
     )
+    explicit_no_chase = (explicit_no_chase_status or explicit_no_chase_label) and not clean_pre_move
+    hard_no_chase = objective_extended or explicit_no_chase
 
     code = WATCH
     final_decision = original_decision
@@ -334,3 +347,4 @@ def apply_final_decision(row: dict) -> dict:
 
 def apply_final_decisions(rows: list[dict]) -> list[dict]:
     return [apply_final_decision(x) if isinstance(x, dict) else x for x in (rows or [])]
+
