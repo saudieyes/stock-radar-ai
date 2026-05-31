@@ -752,7 +752,7 @@
       "volume": 0.0
     }
   ],
-  "exported_at": "2026-05-31 01:36:15",
+  "exported_at": "2026-05-31 01:36:35",
   "manifest": {
     "local_counts_at_sync": {
       "bar_symbols": 0,
@@ -772,6 +772,7 @@
   },
   "market_fear": {
     "badge": "⚪",
+    "cache_hit": true,
     "captured_at": "2026-05-31 01:36:15",
     "captured_ts": 1780205775.1661394,
     "change_pct": -2.67,
