@@ -170,6 +170,7 @@ from app.evidence_collector import (
     evidence_retention_prune_execute,
     evidence_retention_sqlite_compact_status,
     evidence_retention_sqlite_compact_execute,
+    evidence_retention_sqlite_table_size_report,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -3581,6 +3582,12 @@ def evidence_retention_prune_execute_endpoint(week_key: str = "", trade_date: st
         confirm=confirm,
         include_snapshots=bool(include_snapshots),
     )
+
+
+@app.post("/evidence/retention/sqlite-table-size-report")
+@app.get("/evidence/retention/sqlite-table-size-report")
+def evidence_retention_sqlite_table_size_report_endpoint(limit: int = 30, include_indexes: bool = True):
+    return evidence_retention_sqlite_table_size_report(limit=limit, include_indexes=bool(include_indexes))
 
 
 @app.post("/evidence/retention/sqlite-compact-status")
