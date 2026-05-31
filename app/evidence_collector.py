@@ -19,6 +19,7 @@ import io
 import json
 import os
 import sqlite3
+import shutil
 import threading
 import time
 import uuid
@@ -4386,6 +4387,329 @@ def evidence_retention_prune_execute(
     }
     try:
         set_json("evidence_last_retention_prune_execute", result)
+    except Exception:
+        pass
+    return result
+
+
+SQLITE_COMPACT_REQUIRED_CONFIRM = "COMPACT_SQLITE_AFTER_PRUNE"
+SQLITE_COMPACT_MIN_FREE_RATIO_DEFAULT = 1.10
+SQLITE_COMPACT_MIN_FREE_BUFFER_MB_DEFAULT = 128.0
+
+
+def _safe_file_mb(path: str) -> float:
+    try:
+        if path and os.path.exists(path):
+            return round(os.path.getsize(path) / (1024 * 1024), 2)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _sqlite_storage_snapshot() -> dict:
+    """Return SQLite file and disk-space information without changing data."""
+    db_path = str(SQLITE_DB_PATH or "")
+    db_dir = os.path.dirname(db_path) or "."
+    out = {
+        "db_path": db_path,
+        "db_exists": bool(db_path and os.path.exists(db_path)),
+        "db_mb": _safe_file_mb(db_path),
+        "wal_mb": _safe_file_mb(f"{db_path}-wal"),
+        "shm_mb": _safe_file_mb(f"{db_path}-shm"),
+        "total_sqlite_files_mb": 0.0,
+        "data_dir": db_dir,
+        "data_dir_total_mb": 0.0,
+        "data_dir_used_mb": 0.0,
+        "data_dir_free_mb": 0.0,
+        "error": "",
+    }
+    try:
+        out["total_sqlite_files_mb"] = round(float(out.get("db_mb") or 0.0) + float(out.get("wal_mb") or 0.0) + float(out.get("shm_mb") or 0.0), 2)
+        usage = shutil.disk_usage(db_dir)
+        out.update({
+            "data_dir_total_mb": round(float(usage.total) / (1024 * 1024), 2),
+            "data_dir_used_mb": round(float(usage.used) / (1024 * 1024), 2),
+            "data_dir_free_mb": round(float(usage.free) / (1024 * 1024), 2),
+        })
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+    return out
+
+
+def _sqlite_page_snapshot() -> dict:
+    """Return SQLite page statistics used to estimate reclaimable space."""
+    out = {
+        "ok": False,
+        "page_count": 0,
+        "freelist_count": 0,
+        "page_size": 0,
+        "estimated_reclaimable_mb": 0.0,
+        "journal_mode": "",
+        "auto_vacuum": "",
+        "error": "",
+    }
+    if not SQLITE_ENABLED:
+        out["error"] = "sqlite_disabled"
+        return out
+    if not os.path.exists(str(SQLITE_DB_PATH)):
+        out["error"] = "sqlite_db_missing"
+        return out
+    try:
+        with sqlite3.connect(str(SQLITE_DB_PATH), timeout=15, check_same_thread=False) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=15000")
+            page_count = int((conn.execute("PRAGMA page_count").fetchone() or [0])[0] or 0)
+            freelist_count = int((conn.execute("PRAGMA freelist_count").fetchone() or [0])[0] or 0)
+            page_size = int((conn.execute("PRAGMA page_size").fetchone() or [0])[0] or 0)
+            journal_mode = str((conn.execute("PRAGMA journal_mode").fetchone() or [""])[0] or "")
+            auto_vacuum = str((conn.execute("PRAGMA auto_vacuum").fetchone() or [""])[0] or "")
+        out.update({
+            "ok": True,
+            "page_count": page_count,
+            "freelist_count": freelist_count,
+            "page_size": page_size,
+            "estimated_reclaimable_mb": round((freelist_count * page_size) / (1024 * 1024), 2) if page_size else 0.0,
+            "journal_mode": journal_mode,
+            "auto_vacuum": auto_vacuum,
+            "error": "",
+        })
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+    return out
+
+
+def _sqlite_table_counts_snapshot() -> dict:
+    """Count rows by table for before/after compact verification."""
+    out: dict[str, int] = {}
+    if not SQLITE_ENABLED or not os.path.exists(str(SQLITE_DB_PATH)):
+        return out
+    try:
+        with sqlite3.connect(str(SQLITE_DB_PATH), timeout=15, check_same_thread=False) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=15000")
+            rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+            for row in rows:
+                name = str(row["name"] if isinstance(row, sqlite3.Row) else row[0])
+                if not name or name.startswith("sqlite_"):
+                    continue
+                try:
+                    out[name] = int(conn.execute(f"SELECT COUNT(*) AS c FROM {name}").fetchone()["c"] or 0)
+                except Exception:
+                    out[name] = -1
+    except Exception:
+        pass
+    return out
+
+
+def _sqlite_compact_safety_status(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    min_free_ratio: float | None = None,
+    min_free_buffer_mb: float | None = None,
+) -> dict:
+    """Build the shared safety decision used by compact status and execute."""
+    ratio = float(min_free_ratio if min_free_ratio is not None else SQLITE_COMPACT_MIN_FREE_RATIO_DEFAULT)
+    ratio = max(1.0, min(ratio, 3.0))
+    buffer_mb = float(min_free_buffer_mb if min_free_buffer_mb is not None else SQLITE_COMPACT_MIN_FREE_BUFFER_MB_DEFAULT)
+    buffer_mb = max(0.0, min(buffer_mb, 2048.0))
+    storage = _sqlite_storage_snapshot()
+    pages = _sqlite_page_snapshot()
+    dry = evidence_retention_prune_dry_run(
+        week_key=week_key,
+        trade_date=trade_date,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+    )
+    db_mb = float(storage.get("db_mb") or 0.0)
+    total_sqlite_mb = float(storage.get("total_sqlite_files_mb") or 0.0)
+    free_mb = float(storage.get("data_dir_free_mb") or 0.0)
+    # SQLite VACUUM may need a temporary copy of the database. Use the larger
+    # of the main DB and total SQLite files so a large WAL cannot hide risk.
+    size_for_safety_mb = max(db_mb, total_sqlite_mb)
+    required_free_mb = round((size_for_safety_mb * ratio) + buffer_mb, 2) if size_for_safety_mb > 0 else 0.0
+    default_remaining = int(dry.get("default_delete_candidate_total_rows") or 0)
+    verification_ok = bool((dry.get("verification") or {}).get("ok") if require_verified else True)
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if not SQLITE_ENABLED:
+        blockers.append("sqlite_disabled")
+    if not bool(storage.get("db_exists")):
+        blockers.append("sqlite_db_missing")
+    if not bool(dry.get("ok")):
+        blockers.append("dry_run_failed")
+    if require_verified and not verification_ok:
+        blockers.append("github_verification_not_ok")
+    if default_remaining > 0:
+        blockers.append("default_prune_candidates_still_remaining")
+    if size_for_safety_mb <= 0:
+        blockers.append("sqlite_file_size_unknown")
+    if free_mb < required_free_mb:
+        blockers.append("not_enough_free_disk_space_for_safe_vacuum")
+    if float(pages.get("estimated_reclaimable_mb") or 0.0) <= 1.0:
+        warnings.append("estimated_reclaimable_space_is_small")
+
+    return {
+        "ok": True,
+        "version": "sqlite_compact_status_v1_safe_guarded",
+        "generated_at": _now_text(),
+        "sqlite_enabled": bool(SQLITE_ENABLED),
+        "require_verified": bool(require_verified),
+        "week_key": str(dry.get("week_key") or week_key or ""),
+        "trade_date": str(dry.get("trade_date") or trade_date or "")[:10],
+        "keep_days": int(keep_days if keep_days is not None else EVIDENCE_RETENTION_KEEP_DAYS),
+        "storage": storage,
+        "page_stats": pages,
+        "dry_run_summary": {
+            "ok": bool(dry.get("ok")),
+            "verification_ok": bool(dry.get("verification_ok")),
+            "default_delete_candidate_total_rows": default_remaining,
+            "default_delete_candidate_rows_by_table": dry.get("default_delete_candidate_rows_by_table", {}),
+            "protected_candidate_total_rows": int(dry.get("protected_candidate_total_rows") or 0),
+            "protected_candidate_rows_require_include_snapshots": dry.get("protected_candidate_rows_require_include_snapshots", {}),
+        },
+        "safety_thresholds": {
+            "min_free_ratio": ratio,
+            "min_free_buffer_mb": buffer_mb,
+            "size_for_safety_mb": round(size_for_safety_mb, 2),
+            "required_free_mb": required_free_mb,
+            "actual_free_mb": free_mb,
+        },
+        "can_compact": len(blockers) == 0,
+        "blockers": blockers,
+        "warnings": warnings,
+        "required_confirm": SQLITE_COMPACT_REQUIRED_CONFIRM,
+        "notes": "فحص فقط. لا يتم ضغط SQLite هنا. الضغط يحتاج رابط التنفيذ وكلمة التأكيد الصريحة.",
+    }
+
+
+def evidence_retention_sqlite_compact_status(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    min_free_ratio: float | None = None,
+    min_free_buffer_mb: float | None = None,
+) -> dict:
+    """Return whether it is safe to run SQLite VACUUM. This never changes data."""
+    result = _sqlite_compact_safety_status(
+        week_key=week_key,
+        trade_date=trade_date,
+        keep_days=keep_days,
+        require_verified=require_verified,
+        min_free_ratio=min_free_ratio,
+        min_free_buffer_mb=min_free_buffer_mb,
+    )
+    try:
+        set_json("evidence_last_sqlite_compact_status", result)
+    except Exception:
+        pass
+    return result
+
+
+def evidence_retention_sqlite_compact_execute(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+    min_free_ratio: float | None = None,
+    min_free_buffer_mb: float | None = None,
+) -> dict:
+    """Run SQLite VACUUM only after all safety checks pass.
+
+    This does not delete rows. It only rebuilds the SQLite file to return free
+    pages to Railway storage after a previously verified prune.
+    """
+    if str(confirm or "").strip() != SQLITE_COMPACT_REQUIRED_CONFIRM:
+        return {
+            "ok": False,
+            "executed": False,
+            "error": "confirmation_required",
+            "required_confirm": SQLITE_COMPACT_REQUIRED_CONFIRM,
+            "notes": "لم يتم ضغط SQLite.",
+        }
+
+    status_before = _sqlite_compact_safety_status(
+        week_key=week_key,
+        trade_date=trade_date,
+        keep_days=keep_days,
+        require_verified=require_verified,
+        min_free_ratio=min_free_ratio,
+        min_free_buffer_mb=min_free_buffer_mb,
+    )
+    if not bool(status_before.get("can_compact")):
+        result = {
+            "ok": False,
+            "executed": False,
+            "error": "compact_safety_check_failed",
+            "status_before": status_before,
+            "notes": "لم يتم ضغط SQLite لأن فحص الأمان لم ينجح.",
+        }
+        try:
+            set_json("evidence_last_sqlite_compact_execute", result)
+        except Exception:
+            pass
+        return result
+
+    counts_before = _sqlite_table_counts_snapshot()
+    storage_before = _sqlite_storage_snapshot()
+    pages_before = _sqlite_page_snapshot()
+    started_at = _now_text()
+    error = ""
+    executed = False
+    try:
+        with _LOCK:
+            conn = sqlite3.connect(str(SQLITE_DB_PATH), timeout=90, check_same_thread=False, isolation_level=None)
+            try:
+                conn.execute("PRAGMA busy_timeout=90000")
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("VACUUM")
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("PRAGMA optimize")
+                executed = True
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {str(exc)[:220]}"
+
+    storage_after = _sqlite_storage_snapshot()
+    pages_after = _sqlite_page_snapshot()
+    counts_after = _sqlite_table_counts_snapshot()
+    counts_match = bool(counts_before == counts_after) if counts_before and counts_after else False
+    db_mb_before = float(storage_before.get("db_mb") or 0.0)
+    db_mb_after = float(storage_after.get("db_mb") or 0.0)
+    total_mb_before = float(storage_before.get("total_sqlite_files_mb") or 0.0)
+    total_mb_after = float(storage_after.get("total_sqlite_files_mb") or 0.0)
+    result = {
+        "ok": bool(executed and not error and counts_match),
+        "executed": bool(executed),
+        "version": "sqlite_compact_execute_v1_safe_guarded",
+        "started_at": started_at,
+        "finished_at": _now_text(),
+        "error": error,
+        "status_before": status_before,
+        "storage_before": storage_before,
+        "storage_after": storage_after,
+        "page_stats_before": pages_before,
+        "page_stats_after": pages_after,
+        "db_mb_before": db_mb_before,
+        "db_mb_after": db_mb_after,
+        "db_mb_reclaimed": round(db_mb_before - db_mb_after, 2),
+        "total_sqlite_files_mb_before": total_mb_before,
+        "total_sqlite_files_mb_after": total_mb_after,
+        "total_sqlite_files_mb_reclaimed": round(total_mb_before - total_mb_after, 2),
+        "counts_match": counts_match,
+        "table_counts_before": counts_before,
+        "table_counts_after": counts_after,
+        "notes": "تم ضغط SQLite فقط بدون حذف صفوف." if executed and counts_match and not error else "راجع الخطأ أو اختلاف العدّادات قبل أي خطوة أخرى.",
+    }
+    try:
+        set_json("evidence_last_sqlite_compact_execute", result)
     except Exception:
         pass
     return result
