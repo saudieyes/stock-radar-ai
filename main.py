@@ -168,6 +168,8 @@ from app.evidence_collector import (
     evidence_retention_verify_github,
     evidence_retention_prune_dry_run,
     evidence_retention_prune_execute,
+    evidence_retention_sqlite_compact_status,
+    evidence_retention_sqlite_compact_execute,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -3578,6 +3580,48 @@ def evidence_retention_prune_execute_endpoint(week_key: str = "", trade_date: st
         require_verified=bool(require_verified),
         confirm=confirm,
         include_snapshots=bool(include_snapshots),
+    )
+
+
+@app.post("/evidence/retention/sqlite-compact-status")
+@app.get("/evidence/retention/sqlite-compact-status")
+def evidence_retention_sqlite_compact_status_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    min_free_ratio: float | None = None,
+    min_free_buffer_mb: float | None = None,
+):
+    return evidence_retention_sqlite_compact_status(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+        min_free_ratio=min_free_ratio,
+        min_free_buffer_mb=min_free_buffer_mb,
+    )
+
+
+@app.post("/evidence/retention/sqlite-compact-execute")
+@app.get("/evidence/retention/sqlite-compact-execute")
+def evidence_retention_sqlite_compact_execute_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+    min_free_ratio: float | None = None,
+    min_free_buffer_mb: float | None = None,
+):
+    return evidence_retention_sqlite_compact_execute(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+        confirm=confirm,
+        min_free_ratio=min_free_ratio,
+        min_free_buffer_mb=min_free_buffer_mb,
     )
 
 
