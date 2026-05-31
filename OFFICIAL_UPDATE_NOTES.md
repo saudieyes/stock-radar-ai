@@ -17,3 +17,9 @@ Final Strong Entry rule:
 
 
 Fix4 scroll stability: preserve radar scroll after Sharia exclude/approve/restore and after full scan completion.
+
+
+## Fix5 final scroll stability
+- Manual Sharia approve/exclude/restore no longer rebuilds or removes radar cards immediately. It marks the card locally and keeps layout height stable, preventing bottom-page jumps.
+- Full scan no longer collapses existing radar content into a loading box when data already exists.
+- Automatic periodic full refresh is skipped when the user is deep in the page to avoid unexpected scroll jumps while reading or using Sharia lists.

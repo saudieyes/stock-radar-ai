@@ -2086,6 +2086,31 @@
     .card-liquidity-inline{width:100%;padding:8px 10px;border-radius:12px;background:rgba(148,163,184,.10);border:1px solid rgba(148,163,184,.25)}
     .card-liquidity-inline:empty{display:none}
 
+
+    /* Fix5: final scroll-stable manual Sharia actions.
+       Do not rebuild/remove cards on approve/exclude; keep layout height stable and mark locally. */
+    .card.manual-sharia-local-updated {
+      position: relative;
+      opacity: .78;
+      filter: saturate(.78);
+      border-color: rgba(220, 38, 38, .45) !important;
+    }
+    .manual-sharia-local-banner {
+      margin: 10px 0;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(20, 184, 166, .35);
+      background: rgba(20, 184, 166, .10);
+      color: var(--text-strong);
+      font-weight: 900;
+      line-height: 1.7;
+    }
+    .manual-sharia-local-updated .soft-danger,
+    .manual-sharia-local-updated .soft-approve,
+    .manual-sharia-local-updated button[data-manual-sharia-action="1"] {
+      display: none !important;
+    }
+
   </style>
 </head>
 <body>
@@ -3863,8 +3888,8 @@
             <button class="soft-approve" onclick="addToWatchlist('${safeText(stock.symbol)}', ${Number(displayPrice || 0)})">📌 للمراقبة</button>
             <button class="ghost" onclick="refreshLiquidityCheck('${safeText(stock.symbol)}')">🔄 تحديث السيولة</button>
             <div class="liquidity-check-result card-liquidity-inline" data-liquidity-result="${safeText(stock.symbol)}"></div>
-            ${stock.sharia_manual_excluded ? `<button class="ghost" onclick="restoreShariaSymbol('${safeText(stock.symbol)}', this)">↩️ إعادة السهم</button>` : `<button class="soft-danger" onclick="excludeShariaSymbol('${safeText(stock.symbol)}', this)">🚫 استبعاد شرعي</button>`}
-            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button class="soft-approve" onclick="approveShariaSymbol('${safeText(stock.symbol)}', this)">✅ اعتماده شرعيًا</button>` : ''}
+            ${stock.sharia_manual_excluded ? `<button type="button" class="ghost" data-manual-sharia-action="1" onclick="restoreShariaSymbol('${safeText(stock.symbol)}', this)">↩️ إعادة السهم</button>` : `<button type="button" class="soft-danger" data-manual-sharia-action="1" onclick="excludeShariaSymbol('${safeText(stock.symbol)}', this)">🚫 استبعاد شرعي</button>`}
+            ${(stock.sharia_is_gray || String(stock.sharia_status || '').toLowerCase() === 'gray') ? `<button type="button" class="soft-approve" data-manual-sharia-action="1" onclick="approveShariaSymbol('${safeText(stock.symbol)}', this)">✅ اعتماده شرعيًا</button>` : ''}
           </div>
 
           ${cardNavBottom}
@@ -4759,10 +4784,15 @@
     }
 
     async function loadScan(force=false) {
-      const uiState = window.__scanData ? preserveScanUiState() : null;
-      document.getElementById('content').innerHTML = force
-        ? '<div class="loading">جاري الفحص الكامل...</div>'
-        : '<div class="loading">جاري عرض آخر فحص محفوظ وتحديث الأسعار...</div>';
+      const hadScan = !!window.__scanData;
+      const uiState = hadScan ? preserveScanUiState() : null;
+      // Fix5: if there is already content on screen, do not collapse the radar into a loading box.
+      // Collapsing the page height is what caused mobile browsers to jump to the bottom after scans.
+      if (!hadScan) {
+        document.getElementById('content').innerHTML = force
+          ? '<div class="loading">جاري الفحص الكامل...</div>'
+          : '<div class="loading">جاري عرض آخر فحص محفوظ وتحديث الأسعار...</div>';
+      }
       const btn = document.getElementById('refreshScanBtn');
       const oldText = btn ? btn.textContent : '';
       if (btn) { btn.textContent = force ? '⏳ فحص كامل...' : '⏳ تحميل سريع...'; btn.classList.add('refreshing'); btn.disabled = true; }
@@ -4790,6 +4820,10 @@
       if (window.__periodicFullScanBusy) return;
       if (currentlyOpenDetailKeys().length) return;
       if (userIsReadingRadarCard()) return;
+      // Fix5: do not auto-rebuild while the user is deep in the page, even outside cards
+      // such as the Sharia/manual lists. Manual refresh still works from the top controls.
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      if (y > 260) return;
       window.__periodicFullScanBusy = true;
       try {
         await loadScan(true);
@@ -4853,18 +4887,71 @@
       } catch (e) {}
     }
 
+    function freezeCardLayoutForManualSharia(symbol, triggerEl=null, label='تم تحديث الحالة الشرعية يدويًا') {
+      const clean = String(symbol || '').trim().toUpperCase();
+      const cards = Array.from(document.querySelectorAll(`.card[data-symbol="${CSS.escape(clean)}"]`));
+      const touched = cards.length ? cards : ((triggerEl && triggerEl.closest) ? [triggerEl.closest('.card[data-symbol]')].filter(Boolean) : []);
+      touched.forEach(card => {
+        try {
+          const h = Math.ceil(card.getBoundingClientRect().height || card.offsetHeight || 0);
+          if (h > 80 && !card.dataset.manualShariaFrozenHeight) {
+            card.dataset.manualShariaFrozenHeight = String(h);
+            card.style.minHeight = `${h}px`;
+          }
+          card.classList.add('manual-sharia-local-updated');
+          let banner = card.querySelector('.manual-sharia-local-banner');
+          if (!banner) {
+            banner = document.createElement('div');
+            banner.className = 'manual-sharia-local-banner';
+            const actions = card.querySelector('.card-actions');
+            if (actions && actions.parentNode) actions.parentNode.insertBefore(banner, actions);
+            else card.insertBefore(banner, card.firstChild);
+          }
+          banner.textContent = label;
+          card.querySelectorAll('[data-manual-sharia-action="1"]').forEach(btn => {
+            btn.disabled = true;
+            btn.style.display = 'none';
+          });
+        } catch (_) {}
+      });
+    }
+
+    function updateScanDataForManualShariaOnly(symbol, action='exclude') {
+      // Update memory data for next non-destructive render, but do not redraw cards now.
+      const clean = String(symbol || '').trim().toUpperCase();
+      if (!clean || !window.__scanData) return;
+      const mark = (item) => {
+        if (!item || String(item.symbol || '').toUpperCase() !== clean) return item;
+        if (action === 'exclude') {
+          item.sharia_manual_excluded = true;
+          item.sharia_status = 'manual_excluded';
+          item.sharia_label = 'مستبعد يدويًا';
+        } else if (action === 'approve') {
+          item.sharia_status = 'manual_approved';
+          item.sharia_label = 'متوافق يدويًا';
+          item.sharia_is_gray = false;
+        } else if (action === 'restore') {
+          item.sharia_manual_excluded = false;
+        }
+        return item;
+      };
+      ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','all_results','opening_focus'].forEach(key => {
+        if (Array.isArray(window.__scanData[key])) window.__scanData[key].forEach(mark);
+      });
+    }
+
     async function excludeShariaSymbol(symbol, triggerEl=null) {
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
-      const scrollAnchor = captureStableScrollAnchor(triggerEl, clean);
       if (!confirm(`استبعاد ${clean} يدويًا من الفرص الشرعية؟`)) return;
+      freezeCardLayoutForManualSharia(clean, triggerEl, `✅ تم استبعاد ${clean} شرعيًا. سيبقى مكانك ثابتًا، وسيختفي من القوائم في التحديث/الفحص التالي.`);
+      updateScanDataForManualShariaOnly(clean, 'exclude');
       try {
         await apiFetch('/sharia-exclusions/add', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: clean })
         });
-        removeSymbolFromVisibleScan(clean);
         const section = document.getElementById('shariaExcludedContent');
         if (section && !section.classList.contains('hidden-section')) {
           loadShariaExcluded();
@@ -4876,21 +4963,16 @@
             countEl.textContent = `${current + 1} سهم`;
           }
         }
-        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
-        if (singleSymbol === clean) {
-          scanSingleStock();
-        }
       } catch (e) {
         alert('تعذر استبعاد السهم يدويًا');
-      } finally {
-        scheduleStableScrollRestore(scrollAnchor);
       }
     }
 
     async function restoreShariaSymbol(symbol, triggerEl=null) {
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
-      const scrollAnchor = captureStableScrollAnchor(triggerEl, clean);
+      freezeCardLayoutForManualSharia(clean, triggerEl, `✅ تمت إعادة ${clean}. سيظهر في مكانه الصحيح بعد الفحص التالي.`);
+      updateScanDataForManualShariaOnly(clean, 'restore');
       try {
         const res = await apiFetch('/sharia-exclusions/remove', {
           method: 'POST',
@@ -4899,18 +4981,13 @@
         });
         const data = await res.json().catch(() => ({}));
         if (data && data.ok === false) throw new Error(data.error || 'restore_failed');
-
-        // Fast UI action: do not reload the full 190-symbol scan here.
-        // The symbol will be recategorized on the next manual/full scan.
-        loadShariaExcluded();
-        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
-        if (singleSymbol === clean) {
-          scanSingleStock();
+        const section = document.getElementById('shariaExcludedContent');
+        if (section && !section.classList.contains('hidden-section')) {
+          loadShariaExcluded();
+          section.dataset.loaded = '1';
         }
       } catch (e) {
         alert('تعذر إعادة السهم');
-      } finally {
-        scheduleStableScrollRestore(scrollAnchor);
       }
     }
 
@@ -4939,8 +5016,9 @@
     async function approveShariaSymbol(symbol, triggerEl=null) {
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
-      const scrollAnchor = captureStableScrollAnchor(triggerEl, clean);
       if (!confirm(`اعتماد ${clean} كمتوافق يدويًا؟\n\nاستخدم هذا الزر فقط للأسهم الرمادية/غير المحسومة بعد مراجعتك، وليس للأسهم المرفوضة صراحة بسبب نشاط أو نسب مالية.`)) return;
+      freezeCardLayoutForManualSharia(clean, triggerEl, `✅ تم اعتماد ${clean} شرعيًا يدويًا. سيبقى مكانك ثابتًا، وسيعاد ترتيبه في الفحص التالي.`);
+      updateScanDataForManualShariaOnly(clean, 'approve');
       try {
         const res = await apiFetch('/sharia-approvals/add', {
           method: 'POST',
@@ -4949,19 +5027,8 @@
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'approval_failed');
-
-        // Do not run a full /trade-scan here; it is too slow during active use.
-        // Remove from gray UI now; next scan will place it in its proper bucket.
-        fastRemoveApprovedGraySymbol(clean);
-
-        const singleSymbol = (document.getElementById('singleSymbol')?.value || '').trim().toUpperCase();
-        if (singleSymbol === clean) {
-          scanSingleStock();
-        }
       } catch (e) {
         alert('تعذر اعتماد السهم شرعيًا يدويًا');
-      } finally {
-        scheduleStableScrollRestore(scrollAnchor);
       }
     }
 
@@ -5015,7 +5082,7 @@
             <div class="portfolio-note-line"><b>سبب الشرعية:</b> ${safeText(item.sharia_reason || 'مستبعد يدويًا من قائمتك الشرعية')}</div>
             <div class="mini-actions">
               <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
-              <button class="ghost" onclick="restoreShariaSymbol('${safeText(item.symbol)}', this)">↩️ إعادة السهم</button>
+              <button type="button" class="ghost" data-manual-sharia-action="1" onclick="restoreShariaSymbol('${safeText(item.symbol)}', this)">↩️ إعادة السهم</button>
             </div>
           </div>`).join('');
         document.getElementById('shariaExcludedContent').innerHTML = `<div class="sharia-card-list">${cards}</div>`;
