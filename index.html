@@ -2355,14 +2355,21 @@
     try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (_) {}
     window.__initialDecisionViewRestored = false;
     function restoreInitialDecisionView() {
-      if (window.__initialDecisionViewRestored) return;
-      if (window.location.hash && window.location.hash !== '#content') return;
+      // لا نستخدم أي تمرير تلقائي عند التحميل. المتصفح يبقى في مكانه، والتنقل يحدث فقط عند ضغط المستخدم.
       window.__initialDecisionViewRestored = true;
-      setTimeout(() => {
-        const target = document.getElementById('content') || document.getElementById('marketMoodSection') || document.body;
-        if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'auto', block: 'start' });
-        else window.scrollTo({ top: 0, behavior: 'auto' });
-      }, 80);
+    }
+
+    function elementNeedsScroll(el, margin = 84) {
+      if (!el || !el.getBoundingClientRect) return false;
+      const rect = el.getBoundingClientRect();
+      const viewH = window.innerHeight || document.documentElement.clientHeight || 0;
+      return rect.top < margin || rect.bottom > Math.max(margin + 80, viewH - margin);
+    }
+
+    function scrollElementIntoViewIfNeeded(el, opts = {}) {
+      if (!el || !el.scrollIntoView) return;
+      if (!elementNeedsScroll(el, Number(opts.margin || 84))) return;
+      el.scrollIntoView({ behavior: opts.behavior || 'smooth', block: opts.block || 'start' });
     }
     function escapeHtml(value) {
       return String(value ?? "")
@@ -3103,8 +3110,8 @@
       if (panel && !panel.open) panel.open = true;
       await loadAnalystSnapshot(clean, true);
       const el = document.getElementById(analystDomId(clean));
-      if (el && el.scrollIntoView) {
-        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+      if (el) {
+        setTimeout(() => scrollElementIntoViewIfNeeded(el, { behavior: 'smooth', block: 'center' }), 80);
       }
     }
 
@@ -3472,6 +3479,22 @@
     }
 
     const SECTION_DEFAULT_LIMIT = 5;
+    const RADAR_SECTION_CONTENT_IDS = [
+      'strong-section-content',
+      'cautious-section-content',
+      'early-movement-section-content',
+      'premarket-section-content',
+      'gray-strong-section-content',
+      'watch-section-content'
+    ];
+    const RADAR_SCAN_GROUP_KEYS = [
+      'strong_entries',
+      'cautious_entries',
+      'early_movement_watchlist',
+      'premarket_setups',
+      'gray_strong',
+      'watchlist'
+    ];
 
     function renderSectionItems(contentId, showAll=false) {
       const el = document.getElementById(contentId);
@@ -3576,7 +3599,7 @@
     function openByNav(sectionId, contentId='') {
       if (contentId) ensureSectionOpen(contentId);
       const el = document.getElementById(sectionId);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (el) scrollElementIntoViewIfNeeded(el, { behavior: 'smooth', block: 'start' });
       setFloatingQuickNavOpen(false);
     }
 
@@ -3598,7 +3621,7 @@
       if (!container) return;
       const cards = Array.from(container.querySelectorAll('.card'));
       if (!cards.length) {
-        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        scrollElementIntoViewIfNeeded(container, { behavior: 'smooth', block: 'start' });
         return;
       }
       let idx = Number(window.__sectionCursor[contentId] || 0);
@@ -3607,7 +3630,7 @@
       else if (direction === 'next') idx = Math.min(cards.length - 1, idx + 1);
       else if (direction === 'prev') idx = Math.max(0, idx - 1);
       window.__sectionCursor[contentId] = idx;
-      cards[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollElementIntoViewIfNeeded(cards[idx], { behavior: 'smooth', block: 'start' });
     }
 
     function jumpSectionCardFrom(contentId, currentIndex, direction) {
@@ -4157,7 +4180,7 @@
       const snap = notice?.dataset?.snapshotAt || window.__pendingSourceSnapshotAt || '';
       hideSourceDiscoveryNotice(snap);
       window.__pendingSourceSnapshotAt = '';
-      await loadScan(false);
+      await loadScan(false, { applyImmediately: true });
       await pollSourceDiscoveryStatus(true);
     }
 
@@ -4205,6 +4228,78 @@
       window.__scanData.opening_focus = [...(data?.opening_focus || [])];
       window.__scanData.top_ranked = [...(data?.top_ranked || [])];
       window.__scanData.all_results = [...(data?.all_results || [])];
+    }
+
+    function scanGroupSymbols(data, key) {
+      return (Array.isArray(data?.[key]) ? data[key] : [])
+        .map(item => String(item?.symbol || '').toUpperCase().trim())
+        .filter(Boolean)
+        .join('|');
+    }
+
+    function scanListSignature(data) {
+      if (!data) return '';
+      return RADAR_SCAN_GROUP_KEYS.map(key => `${key}:${scanGroupSymbols(data, key)}`).join('||');
+    }
+
+    function visibleRadarIsInUse() {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      return currentlyOpenDetailKeys().length > 0 || userIsReadingRadarCard() || y > 260;
+    }
+
+    function ensureRadarPendingNotice() {
+      let el = document.getElementById('radarPendingNotice');
+      if (el) return el;
+      el = document.createElement('div');
+      el.id = 'radarPendingNotice';
+      el.style.cssText = 'position:fixed;left:14px;right:14px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:12010;display:none;max-width:560px;margin:0 auto;background:var(--panel-bg);border:1px solid var(--detail-btn-border);border-radius:18px;box-shadow:0 14px 36px rgba(0,0,0,.22);padding:12px;direction:rtl;color:var(--text-main);';
+      document.body.appendChild(el);
+      return el;
+    }
+
+    function hideRadarPendingNotice() {
+      const el = document.getElementById('radarPendingNotice');
+      if (el) el.style.display = 'none';
+    }
+
+    function showRadarPendingNotice(data, reason='scan') {
+      const el = ensureRadarPendingNotice();
+      const isError = reason === 'error';
+      const updated = data?.analysis_updated_at || data?.updated_at || data?.full_market_scan_status?.last_scan_at || 'الآن';
+      const strong = Number(data?.strong_entries_count ?? (data?.strong_entries || []).length ?? 0);
+      const cautious = Number(data?.cautious_entries_count ?? (data?.cautious_entries || []).length ?? 0);
+      const early = Number(data?.early_movement_count ?? (data?.early_movement_watchlist || []).length ?? 0);
+      el.innerHTML = isError ? `
+        <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">⚠️ تعذر تحميل التحديث الجديد</div>
+        <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
+          بقيت النتائج الحالية كما هي، ولم أعد رسم الصفحة أو أغير مكانك.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <button class="ghost" type="button" onclick="hideRadarPendingNotice()">إغلاق</button>
+        </div>` : `
+        <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">✅ اكتمل تحديث جديد بدون تحريك الصفحة</div>
+        <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
+          وصلت نتائج جديدة، لكن لم أعد رسم القوائم حتى لا يتغير مكانك أثناء القراءة.<br>
+          آخر تحديث: <b>${safeText(updated)}</b> • دخول قوي: ${formatNumber(strong)} • دخول بحذر: ${formatNumber(cautious)} • مراقبة مبكرة: ${formatNumber(early)}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <button class="primary" type="button" onclick="applyPendingScanData()">عرض النتائج الجديدة</button>
+          <button class="ghost" type="button" onclick="hideRadarPendingNotice()">لاحقًا</button>
+        </div>`;
+      el.dataset.reason = reason;
+      el.style.display = 'block';
+    }
+
+    function applyPendingScanData() {
+      const data = window.__pendingScanData;
+      if (!data) { hideRadarPendingNotice(); return; }
+      const uiState = preserveScanUiState();
+      setScanData(data);
+      window.__pendingScanData = null;
+      hideRadarPendingNotice();
+      renderScanData();
+      restoreScanUiState(uiState);
+      requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
     }
 
     function renderScanData() {
@@ -4333,26 +4428,43 @@
       }
     }
 
-    function applyRadarLivePayload(payload) {
-      if (!payload || payload.ok === false || !payload.groups) return false;
-      const mapGroup = (name) => ((payload.groups[name] && payload.groups[name].items) || []);
-      window.__scanData = window.__scanData || {};
-      window.__scanData.strong_entries = mapGroup('strong_entries');
-      window.__scanData.cautious_entries = mapGroup('cautious_entries');
-      window.__scanData.gray_strong = mapGroup('gray_strong');
-      window.__scanData.premarket_setups = mapGroup('premarket_setups');
-      window.__scanData.early_movement_watchlist = mapGroup('early_movement_watchlist');
-      window.__scanData.watchlist = mapGroup('watchlist');
-      window.__scanData.strong_entries_count = payload.groups.strong_entries?.count || window.__scanData.strong_entries.length;
-      window.__scanData.cautious_entries_count = payload.groups.cautious_entries?.count || window.__scanData.cautious_entries.length;
-      window.__scanData.gray_strong_count = payload.groups.gray_strong?.count || window.__scanData.gray_strong.length;
-      window.__scanData.premarket_setups_count = payload.groups.premarket_setups?.count || window.__scanData.premarket_setups.length;
-      window.__scanData.early_movement_count = payload.groups.early_movement_watchlist?.count || window.__scanData.early_movement_watchlist.length;
-      window.__scanData.watchlist_count = payload.groups.watchlist?.count || window.__scanData.watchlist.length;
+    function radarLiveItemsBySymbol(payload) {
+      const out = {};
+      const groups = payload?.groups || {};
+      Object.keys(groups).forEach(name => {
+        ((groups[name] && groups[name].items) || []).forEach(item => {
+          const s = String(item?.symbol || '').toUpperCase().trim();
+          if (!s) return;
+          out[s] = item;
+        });
+      });
+      return out;
+    }
+
+    function mergeRadarLivePricesIntoScanData(payload) {
+      if (!payload || payload.ok === false || !payload.groups || !window.__scanData) return false;
+      const liveBySymbol = radarLiveItemsBySymbol(payload);
+      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','opening_focus','all_results'];
+      let changed = false;
+      keys.forEach(key => {
+        (window.__scanData[key] || []).forEach(item => {
+          const s = String(item?.symbol || '').toUpperCase().trim();
+          const live = liveBySymbol[s];
+          if (!s || !live) return;
+          ['current_price_live','live_price','display_price','current_price','display_change_pct','change_vs_prev_close_pct','change_pct','change_from_open_pct','live_change_pct_reliable','change_pct_reliable','price_source','price_source_label','price_freshness_label','last_price_update_label','live_price_available'].forEach(field => {
+            if (live[field] !== undefined && live[field] !== null && live[field] !== '') item[field] = live[field];
+          });
+          changed = true;
+        });
+      });
       window.__scanData.market_phase_label = payload.market_phase_label || window.__scanData.market_phase_label;
       window.__scanData.updated_at = payload.live_updated_at || window.__scanData.updated_at;
-      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.gray_strong_count + window.__scanData.premarket_setups_count + (window.__scanData.early_movement_count || 0) + window.__scanData.watchlist_count;
-      return true;
+      return changed;
+    }
+
+    function applyRadarLivePayload(payload) {
+      // التحديث الحي لا يعيد رسم القوائم. يدمج السعر/النسبة فقط داخل البيانات الحالية ثم يحدث DOM مباشرة.
+      return mergeRadarLivePricesIntoScanData(payload);
     }
 
 
@@ -4520,25 +4632,12 @@
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
-        const uiState = preserveScanUiState();
         const res = await apiFetch(`/radar-live-refresh?limit=120&_=${Date.now()}`);
         const data = await res.json();
         const changed = data.ok && applyRadarLivePayload(data);
 
         if (changed) {
-          const reading = silent && (userIsReadingRadarCard() || currentlyOpenDetailKeys().length);
-          if (reading) {
-            // أثناء قراءة بطاقة أو فتح "تحليل شامل": لا نعيد بناء الصفحة ولا نغيّر مكانك.
-            // نحدث السعر والنسبة والمصدر داخل نفس البطاقة فقط.
-            updateVisibleLivePriceDomFromScanData();
-          } else {
-            renderScanData();
-            restoreScanUiState(uiState);
-            requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
-          }
-
-          // Always run a light DOM price pass after applying the live payload. It does not rebuild
-          // the page and only touches price/change/source text inside existing radar cards.
+          // التحديث الحي يلمس السعر/النسبة/مصدر السعر فقط، ولا يعيد بناء القوائم.
           updateVisibleLivePriceDomFromScanData();
 
           const updated = document.getElementById('heroUpdated');
@@ -4572,7 +4671,7 @@
     }
 
     function currentlyOpenSectionKeys() {
-      return ['strong-section-content','cautious-section-content','premarket-section-content','gray-strong-section-content','watch-section-content']
+      return RADAR_SECTION_CONTENT_IDS
         .filter(id => { const el = document.getElementById(id); return el && !isSectionHidden(id); });
     }
 
@@ -4620,7 +4719,7 @@
       return {
         sections: currentlyOpenSectionKeys(),
         details: currentlyOpenDetailKeys(),
-        showAll: ['strong-section-content','cautious-section-content','premarket-section-content','gray-strong-section-content','watch-section-content']
+        showAll: RADAR_SECTION_CONTENT_IDS
           .filter(id => { const el = document.getElementById(id); return el && el.dataset.showAll === '1'; }),
         scrollY: window.scrollY || document.documentElement.scrollTop || 0,
         activeCard: currentVisibleCardAnchor()
@@ -4724,9 +4823,8 @@
     }
 
     function scheduleStableScrollRestore(anchor) {
-      if (!anchor) return;
-      window.__stableScrollLockUntil = Date.now() + 1200;
-      [0, 40, 120, 280, 650, 1100].forEach(ms => setTimeout(() => restoreStableScrollAnchor(anchor), ms));
+      // تم إيقاف محاولات التمرير المتكررة. أي تغيير في الصفحة يجب أن يحافظ على مكان المستخدم بدون فرض scroll.
+      return;
     }
 
     function applyLiveQuotesToScan(quotes) {
@@ -4783,11 +4881,11 @@
       } catch(e) {}
     }
 
-    async function loadScan(force=false) {
+    async function loadScan(force=false, options={}) {
       const hadScan = !!window.__scanData;
+      const explicitApply = Boolean(options && options.applyImmediately);
       const uiState = hadScan ? preserveScanUiState() : null;
-      // Fix5: if there is already content on screen, do not collapse the radar into a loading box.
-      // Collapsing the page height is what caused mobile browsers to jump to the bottom after scans.
+      // إذا كانت هناك نتائج على الشاشة، لا نختصر ارتفاع الصفحة إلى صندوق تحميل.
       if (!hadScan) {
         document.getElementById('content').innerHTML = force
           ? '<div class="loading">جاري الفحص الكامل...</div>'
@@ -4800,13 +4898,28 @@
         const qs = force ? 'force=true' : 'prefer_cache=true';
         const res = await apiFetch(`/trade-scan?${qs}&_=${Date.now()}`);
         const data = await res.json();
+        const oldSignature = scanListSignature(window.__scanData);
+        const newSignature = scanListSignature(data);
+        const shouldDefer = hadScan && !force && !explicitApply && (visibleRadarIsInUse() || oldSignature !== newSignature);
+        if (shouldDefer) {
+          window.__pendingScanData = data;
+          showRadarPendingNotice(data, 'scan');
+          // لا نعيد رسم القوائم. نكتفي بتحديث السعر الحي على البطاقات الحالية.
+          refreshLiveQuotesForScan(true);
+          return;
+        }
         setScanData(data);
+        hideRadarPendingNotice();
         renderScanData();
         if (uiState) restoreScanUiState(uiState);
         refreshLiveQuotesForScan(true);
       } catch (e) {
-        document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
-        document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
+        if (!hadScan) {
+          document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
+          document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
+        } else {
+          showRadarPendingNotice(window.__scanData || {}, 'error');
+        }
       } finally {
         if (btn) { btn.textContent = oldText || '🔄 تحديث النتائج'; btn.classList.remove('refreshing'); btn.disabled = false; }
       }
@@ -5009,7 +5122,7 @@
         + (window.__scanData.premarket_setups || []).length
         + (window.__scanData.gray_strong || []).length
         + (window.__scanData.watchlist || []).length;
-      renderScanData();
+      showRadarPendingNotice(window.__scanData, 'manual-sharia');
       return true;
     }
 
@@ -5642,7 +5755,18 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
   else install();
-  setInterval(() => hidePositionSizeBlocks(document), 2500);
+  let hideRiskPanelFrame = 0;
+  const scheduleHideRiskPanels = () => {
+    if (hideRiskPanelFrame) return;
+    hideRiskPanelFrame = requestAnimationFrame(() => {
+      hideRiskPanelFrame = 0;
+      hidePositionSizeBlocks(document);
+    });
+  };
+  try {
+    const obs = new MutationObserver(scheduleHideRiskPanels);
+    obs.observe(document.body, { childList: true, subtree: true });
+  } catch (_) {}
 })();
 </script>
 
@@ -5676,7 +5800,18 @@
   }
   const run = () => { stripHtmlPercentArtifacts(); keepPortfolioAnalystsVisible(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
-  setInterval(run, 2500);
+  let portfolioPatchFrame = 0;
+  const scheduleRun = () => {
+    if (portfolioPatchFrame) return;
+    portfolioPatchFrame = requestAnimationFrame(() => {
+      portfolioPatchFrame = 0;
+      run();
+    });
+  };
+  try {
+    const obs = new MutationObserver(scheduleRun);
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  } catch (_) {}
 })();
 </script>
 
