@@ -1,11 +1,11 @@
 {
   "archive_manifest": {
     "compact_sync": true,
-    "evidence_json_original_bytes_estimate": 4061417,
+    "evidence_json_original_bytes_estimate": 4061440,
     "evidence_json_original_path": "app_data/evidence_archive/2026-05-18_2026-05-22/2026-05-18_evidence.json",
     "evidence_json_parts": [
       {
-        "bytes_estimate": 2320225,
+        "bytes_estimate": 2320250,
         "contains_daily_big_movers": true,
         "label": "json_part_001",
         "path": "app_data/evidence_archive/2026-05-18_2026-05-22/2026-05-18_evidence_part_001.json",
@@ -14,7 +14,7 @@
     ],
     "evidence_json_split": true,
     "evidence_json_split_target_bytes": 2550000,
-    "generated_at": "2026-05-31 02:09:29",
+    "generated_at": "2026-05-31 02:09:59",
     "local_counts_at_sync": {
       "bar_symbols": 349,
       "daily_big_movers": 172,
