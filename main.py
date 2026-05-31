@@ -172,6 +172,8 @@ from app.evidence_collector import (
     evidence_retention_sqlite_compact_execute,
     evidence_retention_sqlite_table_size_report,
     evidence_snapshots_payload_report,
+    evidence_snapshots_raw_json_slim_dry_run,
+    evidence_snapshots_raw_json_slim_execute,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -3599,6 +3601,38 @@ def evidence_snapshots_payload_report_endpoint(week_key: str = "", trade_date: s
         trade_date=trade_date or None,
         limit=limit,
         heavy_threshold_kb=heavy_threshold_kb,
+    )
+
+
+@app.post("/evidence/retention/evidence-snapshots-raw-json-slim-dry-run")
+@app.get("/evidence/retention/evidence-snapshots-raw-json-slim-dry-run")
+def evidence_snapshots_raw_json_slim_dry_run_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    require_verified: bool = True,
+    limit: int = 20,
+):
+    return evidence_snapshots_raw_json_slim_dry_run(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        require_verified=bool(require_verified),
+        limit=limit,
+    )
+
+
+@app.post("/evidence/retention/evidence-snapshots-raw-json-slim-execute")
+@app.get("/evidence/retention/evidence-snapshots-raw-json-slim-execute")
+def evidence_snapshots_raw_json_slim_execute_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    require_verified: bool = True,
+    confirm: str = "",
+):
+    return evidence_snapshots_raw_json_slim_execute(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        require_verified=bool(require_verified),
+        confirm=confirm,
     )
 
 
