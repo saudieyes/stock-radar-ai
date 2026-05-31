@@ -5536,7 +5536,7 @@
     ],
     "evidence_json_split": true,
     "evidence_json_split_target_bytes": 2550000,
-    "generated_at": "2026-05-31 02:06:07",
+    "generated_at": "2026-05-31 02:06:33",
     "local_counts_at_sync": {
       "bar_symbols": 184,
       "daily_big_movers": 170,
