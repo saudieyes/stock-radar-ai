@@ -4626,6 +4626,84 @@
       requestAnimationFrame(() => requestAnimationFrame(restoreScroll));
     }
 
+
+    function captureStableScrollAnchor(triggerEl=null, removedSymbol='') {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      const clean = String(removedSymbol || '').toUpperCase().trim();
+      const bySymbol = clean && window.CSS && CSS.escape ? document.querySelector(`.card[data-symbol="${CSS.escape(clean)}"]`) : null;
+      const sourceCard = (triggerEl && triggerEl.closest) ? triggerEl.closest('.card[data-symbol]') : bySymbol;
+      const visibleCards = Array.from(document.querySelectorAll('.card[data-symbol]'));
+      let anchorCard = null;
+      if (sourceCard) {
+        const sameList = sourceCard.closest('.cards') || sourceCard.parentElement;
+        const localCards = sameList ? Array.from(sameList.querySelectorAll('.card[data-symbol]')) : visibleCards;
+        const idx = localCards.indexOf(sourceCard);
+        if (idx >= 0) {
+          anchorCard = localCards.slice(idx + 1).find(c => String(c.dataset.symbol || '').toUpperCase() !== clean)
+            || localCards.slice(0, idx).reverse().find(c => String(c.dataset.symbol || '').toUpperCase() !== clean)
+            || null;
+        }
+      }
+      if (!anchorCard) {
+        const preferredTop = Math.max(80, window.innerHeight * 0.18);
+        let best = null, bestDist = Infinity;
+        visibleCards.forEach(card => {
+          const sym = String(card.dataset.symbol || '').toUpperCase();
+          if (clean && sym === clean) return;
+          const rect = card.getBoundingClientRect();
+          if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+          const d = Math.abs(rect.top - preferredTop);
+          if (d < bestDist) { bestDist = d; best = card; }
+        });
+        anchorCard = best;
+      }
+      if (anchorCard) {
+        const rect = anchorCard.getBoundingClientRect();
+        return {
+          type: 'card',
+          symbol: anchorCard.dataset.symbol || '',
+          sectionKey: anchorCard.dataset.sectionKey || '',
+          cardIndex: anchorCard.dataset.cardIndex || '',
+          top: rect.top,
+          y
+        };
+      }
+      const section = sourceCard ? sourceCard.closest('.section') : null;
+      if (section && section.id) {
+        return { type: 'section', id: section.id, top: section.getBoundingClientRect().top, y };
+      }
+      return { type: 'y', y };
+    }
+
+    function restoreStableScrollAnchor(anchor) {
+      if (!anchor) return;
+      try {
+        let targetEl = null;
+        if (anchor.type === 'card' && anchor.symbol && window.CSS && CSS.escape) {
+          const selector = `.card[data-symbol="${CSS.escape(anchor.symbol)}"]${anchor.sectionKey ? `[data-section-key="${CSS.escape(anchor.sectionKey)}"]` : ''}`;
+          targetEl = document.querySelector(selector);
+          if (!targetEl && anchor.cardIndex) targetEl = document.querySelector(`.card[data-card-index="${CSS.escape(String(anchor.cardIndex))}"]`);
+        } else if (anchor.type === 'section' && anchor.id) {
+          targetEl = document.getElementById(anchor.id);
+        }
+        if (targetEl) {
+          const rect = targetEl.getBoundingClientRect();
+          const targetY = Math.max(0, (window.scrollY || document.documentElement.scrollTop || 0) + rect.top - Number(anchor.top || 0));
+          window.scrollTo({ top: targetY, behavior: 'auto' });
+          return;
+        }
+        if (Number.isFinite(Number(anchor.y))) window.scrollTo({ top: Math.max(0, Number(anchor.y || 0)), behavior: 'auto' });
+      } catch (_) {
+        if (Number.isFinite(Number(anchor?.y))) window.scrollTo({ top: Math.max(0, Number(anchor.y || 0)), behavior: 'auto' });
+      }
+    }
+
+    function scheduleStableScrollRestore(anchor) {
+      if (!anchor) return;
+      window.__stableScrollLockUntil = Date.now() + 1200;
+      [0, 40, 120, 280, 650, 1100].forEach(ms => setTimeout(() => restoreStableScrollAnchor(anchor), ms));
+    }
+
     function applyLiveQuotesToScan(quotes) {
       if (!window.__scanData || !quotes) return false;
       let changed = false;
@@ -4681,6 +4759,7 @@
     }
 
     async function loadScan(force=false) {
+      const uiState = window.__scanData ? preserveScanUiState() : null;
       document.getElementById('content').innerHTML = force
         ? '<div class="loading">جاري الفحص الكامل...</div>'
         : '<div class="loading">جاري عرض آخر فحص محفوظ وتحديث الأسعار...</div>';
@@ -4693,6 +4772,7 @@
         const data = await res.json();
         setScanData(data);
         renderScanData();
+        if (uiState) restoreScanUiState(uiState);
         refreshLiveQuotesForScan(true);
       } catch (e) {
         document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
@@ -4773,72 +4853,10 @@
       } catch (e) {}
     }
 
-    function createUiScrollRestorer(triggerEl=null) {
-      const y = window.scrollY || document.documentElement.scrollTop || 0;
-      const maxScroll = () => Math.max(0, (document.documentElement.scrollHeight || document.body.scrollHeight || 0) - window.innerHeight);
-      const el = triggerEl && typeof triggerEl.closest === 'function' ? triggerEl : (document.activeElement && typeof document.activeElement.closest === 'function' ? document.activeElement : null);
-      const card = el ? el.closest('.card[data-symbol], .sharia-card, .portfolio-card, .watchlist-card') : null;
-      const section = card ? card.closest('.section') : null;
-      const sectionId = section ? String(section.id || '') : '';
-      const cardTop = card ? card.getBoundingClientRect().top : null;
-      const symbol = card && card.dataset ? String(card.dataset.symbol || '') : '';
-      let nextSymbol = '';
-      let prevSymbol = '';
-      try {
-        if (card && card.parentElement) {
-          const siblings = Array.from(card.parentElement.querySelectorAll('.card[data-symbol]'));
-          const idx = siblings.indexOf(card);
-          if (idx >= 0) {
-            nextSymbol = String(siblings[idx + 1]?.dataset?.symbol || '');
-            prevSymbol = String(siblings[idx - 1]?.dataset?.symbol || '');
-          }
-        }
-      } catch (_) {}
-      const findCard = (sym) => {
-        try {
-          if (!sym || !window.CSS || !CSS.escape) return null;
-          return document.querySelector(`.card[data-symbol="${CSS.escape(sym)}"]`);
-        } catch (_) { return null; }
-      };
-      return function restoreUiScroll() {
-        try {
-          let anchor = findCard(symbol) || findCard(nextSymbol) || findCard(prevSymbol);
-          if (anchor && cardTop !== null) {
-            const nowY = window.scrollY || document.documentElement.scrollTop || 0;
-            const target = nowY + anchor.getBoundingClientRect().top - Number(cardTop || 0);
-            window.scrollTo({ top: Math.max(0, Math.min(target, maxScroll())), behavior: 'auto' });
-            return;
-          }
-          if (sectionId) {
-            const sec = document.getElementById(sectionId);
-            if (sec) {
-              const rect = sec.getBoundingClientRect();
-              // Keep the user near the same section instead of allowing the browser to clamp to page bottom.
-              if (rect.top < -80 || rect.top > window.innerHeight - 80) {
-                const nowY = window.scrollY || document.documentElement.scrollTop || 0;
-                const target = nowY + rect.top - 90;
-                window.scrollTo({ top: Math.max(0, Math.min(target, maxScroll())), behavior: 'auto' });
-                return;
-              }
-            }
-          }
-          window.scrollTo({ top: Math.max(0, Math.min(Number(y || 0), maxScroll())), behavior: 'auto' });
-        } catch (_) {
-          try { window.scrollTo({ top: Math.max(0, Math.min(Number(y || 0), maxScroll())), behavior: 'auto' }); } catch (_) {}
-        }
-      };
-    }
-
-    function scheduleUiScrollRestore(restorer) {
-      if (typeof restorer !== 'function') return;
-      [0, 60, 160, 350, 800, 1400].forEach(ms => setTimeout(restorer, ms));
-    }
-    window.__makeUiScrollRestorer = createUiScrollRestorer;
-
     async function excludeShariaSymbol(symbol, triggerEl=null) {
-      const restoreScroll = createUiScrollRestorer(triggerEl);
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
+      const scrollAnchor = captureStableScrollAnchor(triggerEl, clean);
       if (!confirm(`استبعاد ${clean} يدويًا من الفرص الشرعية؟`)) return;
       try {
         await apiFetch('/sharia-exclusions/add', {
@@ -4865,14 +4883,14 @@
       } catch (e) {
         alert('تعذر استبعاد السهم يدويًا');
       } finally {
-        scheduleUiScrollRestore(restoreScroll);
+        scheduleStableScrollRestore(scrollAnchor);
       }
     }
 
     async function restoreShariaSymbol(symbol, triggerEl=null) {
-      const restoreScroll = createUiScrollRestorer(triggerEl);
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
+      const scrollAnchor = captureStableScrollAnchor(triggerEl, clean);
       try {
         const res = await apiFetch('/sharia-exclusions/remove', {
           method: 'POST',
@@ -4892,7 +4910,7 @@
       } catch (e) {
         alert('تعذر إعادة السهم');
       } finally {
-        scheduleUiScrollRestore(restoreScroll);
+        scheduleStableScrollRestore(scrollAnchor);
       }
     }
 
@@ -4919,9 +4937,9 @@
     }
 
     async function approveShariaSymbol(symbol, triggerEl=null) {
-      const restoreScroll = createUiScrollRestorer(triggerEl);
       const clean = (symbol || '').trim().toUpperCase();
       if (!clean) return;
+      const scrollAnchor = captureStableScrollAnchor(triggerEl, clean);
       if (!confirm(`اعتماد ${clean} كمتوافق يدويًا؟\n\nاستخدم هذا الزر فقط للأسهم الرمادية/غير المحسومة بعد مراجعتك، وليس للأسهم المرفوضة صراحة بسبب نشاط أو نسب مالية.`)) return;
       try {
         const res = await apiFetch('/sharia-approvals/add', {
@@ -4943,7 +4961,7 @@
       } catch (e) {
         alert('تعذر اعتماد السهم شرعيًا يدويًا');
       } finally {
-        scheduleUiScrollRestore(restoreScroll);
+        scheduleStableScrollRestore(scrollAnchor);
       }
     }
 
@@ -5547,21 +5565,7 @@
 
   // Preserve scroll around Sharia actions that re-render parts of the radar.
   // Restore more than once because cards may reflow after API calls/live overlays.
-  function preserveScrollWrapper(name){
-    const original = window[name];
-    if (typeof original !== 'function' || original.__preserveScroll) return;
-    const wrapped = async function(){
-      const args = arguments;
-      const triggerEl = (args && args.length > 1 && args[1] && typeof args[1].closest === 'function') ? args[1] : ((this && this.closest) ? this : null);
-      const restore = (typeof window.__makeUiScrollRestorer === 'function')
-        ? window.__makeUiScrollRestorer(triggerEl)
-        : (() => { const y = window.scrollY || document.documentElement.scrollTop || 0; return () => window.scrollTo({ top: y, behavior: 'auto' }); })();
-      try { return await original.apply(this, args); }
-      finally { [80, 250, 700, 1300].forEach(ms => setTimeout(restore, ms)); }
-    };
-    wrapped.__preserveScroll = true;
-    window[name] = wrapped;
-  }
+  function preserveScrollWrapper(name){ return; }
 
   function install(){
     hidePositionSizeBlocks(document);
