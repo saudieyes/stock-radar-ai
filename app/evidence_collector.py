@@ -4166,8 +4166,17 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
         "exists": bool(isinstance(manifest_fetch, dict) and manifest_fetch.get("exists")),
         "readable": isinstance(manifest_data, dict),
         "counts_present": bool(manifest_counts),
+        "verification_mode": "manifest_counts" if manifest_ok else "failed",
         "error": manifest_fetch.get("error", "") if isinstance(manifest_fetch, dict) else "fetch_failed",
     }
+
+    # GitHub's Contents API may return metadata but omit inline file content for
+    # files larger than about 1 MB. The compact evidence archive can be several
+    # MB, so requiring full JSON parsing here creates a false verification
+    # failure even when the file exists and the manifest counts match exactly.
+    # Safety rule: the large evidence file may pass by metadata + manifest counts;
+    # all smaller supporting JSON files must still be readable JSON.
+    counts_ok_precheck = all(bool(v.get("ok")) for v in count_checks.values()) if count_checks else False
     for name in ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json", "market_fear_json"]:
         path = paths.get(name) or ""
         if not path:
@@ -4175,13 +4184,26 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
             continue
         fetch = fetch_json_file(path)
         data = fetch.get("data") if isinstance(fetch, dict) else None
+        fetch_ok = bool(isinstance(fetch, dict) and fetch.get("ok"))
+        exists = bool(isinstance(fetch, dict) and fetch.get("exists"))
+        sha = str(fetch.get("sha", "") if isinstance(fetch, dict) else "")
+        readable = data is not None
+        metadata_ok = bool(fetch_ok and exists and sha)
+        manifest_verified_large_file = bool(name == "evidence_json" and metadata_ok and manifest_ok and counts_ok_precheck)
         checks[name] = {
             "name": name,
             "path": path,
-            "ok": bool(isinstance(fetch, dict) and fetch.get("ok") and fetch.get("exists") and data is not None),
-            "exists": bool(isinstance(fetch, dict) and fetch.get("exists")),
-            "readable": data is not None,
-            "sha": fetch.get("sha", "") if isinstance(fetch, dict) else "",
+            "ok": bool(fetch_ok and exists and (readable or manifest_verified_large_file)),
+            "exists": exists,
+            "readable": readable,
+            "sha": sha,
+            "verification_mode": (
+                "readable_json"
+                if readable
+                else "metadata_plus_manifest_counts_no_large_download"
+                if manifest_verified_large_file
+                else "failed"
+            ),
             "error": fetch.get("error", "") if isinstance(fetch, dict) else "fetch_failed",
         }
     if include_csv and paths.get("evidence_csv"):
@@ -4205,7 +4227,7 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     ok = bool(files_ok and counts_ok)
     result = {
         "ok": ok,
-        "version": "retention_verify_github_v5_manifest_no_large_downloads",
+        "version": "retention_verify_github_v5c_manifest_metadata_safe",
         "configured": True,
         "week_key": wk,
         "trade_date": td,
@@ -4221,7 +4243,7 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
         "manifest_counts_at_sync": manifest_counts,
         "count_checks": count_checks,
         "checks": checks,
-        "notes": "Verification only. No Railway deletion is performed here. Uses manifest to avoid huge downloads.",
+        "notes": "Verification only. No Railway deletion is performed here. Uses manifest and metadata for large archive files to avoid huge downloads.",
     }
     try:
         set_json("evidence_last_retention_verify", result)
@@ -4244,10 +4266,21 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
         "daily_big_movers": _sqlite_count("daily_big_movers", "WHERE trade_date < ?", (cutoff,)),
         "evidence_runs": _sqlite_count("evidence_runs", "WHERE trade_date < ? AND week_key != ?", (cutoff, wk)),
     }
-    would_delete = bool((not require_verified or verify.get("ok")) and any(v > 0 for v in candidates.values()))
+    default_delete_candidates = {
+        "evidence_intraday_bars": int(candidates.get("evidence_intraday_bars", 0)),
+        "daily_big_movers": int(candidates.get("daily_big_movers", 0)),
+        "evidence_runs": int(candidates.get("evidence_runs", 0)),
+    }
+    protected_candidates_require_include_snapshots = {
+        "evidence_snapshots": int(candidates.get("evidence_snapshots", 0)),
+        "evidence_winner_profiles": int(candidates.get("evidence_winner_profiles", 0)),
+    }
+    default_delete_total = int(sum(default_delete_candidates.values()))
+    protected_total = int(sum(protected_candidates_require_include_snapshots.values()))
+    would_delete = bool((not require_verified or verify.get("ok")) and default_delete_total > 0)
     result = {
         "ok": True,
-        "version": "retention_prune_dry_run_v5b_verified_no_delete",
+        "version": "retention_prune_dry_run_v5c_verified_no_delete",
         "week_key": wk,
         "trade_date": td,
         "generated_at": _now_text(),
@@ -4258,6 +4291,10 @@ def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: st
         "verification": verify,
         "candidate_rows_by_table": candidates,
         "candidate_total_rows": int(sum(candidates.values())),
+        "default_delete_candidate_rows_by_table": default_delete_candidates,
+        "default_delete_candidate_total_rows": default_delete_total,
+        "protected_candidate_rows_require_include_snapshots": protected_candidates_require_include_snapshots,
+        "protected_candidate_total_rows": protected_total,
         "would_delete_if_future_prune_enabled": bool(would_delete),
         "deleted_rows": 0,
         "prune_enabled_now": bool(EVIDENCE_RETENTION_PRUNE_ENABLED),
