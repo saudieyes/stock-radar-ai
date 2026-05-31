@@ -97,6 +97,17 @@ EVIDENCE_HTTP_TIMEOUT_SEC = _env_float("EVIDENCE_HTTP_TIMEOUT_SEC", 9.0)
 EVIDENCE_RETENTION_KEEP_DAYS = _env_int("EVIDENCE_RETENTION_KEEP_DAYS", 14)
 EVIDENCE_RETENTION_PRUNE_ENABLED = _env_bool("EVIDENCE_RETENTION_PRUNE_ENABLED", False)
 EVIDENCE_RETENTION_REQUIRE_VERIFY = _env_bool("EVIDENCE_RETENTION_REQUIRE_VERIFY", True)
+# V1: after a verified GitHub archive, run the safe maintenance steps automatically:
+# verify archive -> slim raw_json for that one trade date -> optionally remove local
+# archive files from the Railway filesystem. It never deletes SQLite rows and never
+# changes trading decisions. Smart compact remains guarded and disabled by default.
+EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED = _env_bool("EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED", True)
+EVIDENCE_AUTO_RAW_JSON_SLIM_ENABLED = _env_bool("EVIDENCE_AUTO_RAW_JSON_SLIM_ENABLED", True)
+EVIDENCE_AUTO_LOCAL_ARCHIVE_CLEANUP_ENABLED = _env_bool("EVIDENCE_AUTO_LOCAL_ARCHIVE_CLEANUP_ENABLED", True)
+EVIDENCE_AUTO_SMART_COMPACT_ENABLED = _env_bool("EVIDENCE_AUTO_SMART_COMPACT_ENABLED", False)
+EVIDENCE_AUTO_SMART_COMPACT_MIN_DB_MB = _env_float("EVIDENCE_AUTO_SMART_COMPACT_MIN_DB_MB", 1024.0)
+EVIDENCE_AUTO_SMART_COMPACT_MIN_RECLAIMABLE_MB = _env_float("EVIDENCE_AUTO_SMART_COMPACT_MIN_RECLAIMABLE_MB", 500.0)
+EVIDENCE_AUTO_MAINTENANCE_STATE_VERSION = "v1"
 
 # Railway stability guard. Defaults are intentionally conservative because the
 # evidence archive can become large enough to cause GitHub timeouts, high egress,
@@ -2917,7 +2928,7 @@ def evidence_auto_sync_status() -> dict:
     last = get_json("evidence_last_auto_sync", {})
     return {
         "ok": True,
-        "version": "evidence_auto_sync_v5c_riyadh_daily_once_github_fallback",
+        "version": "evidence_auto_sync_v5f_riyadh_daily_once_with_retention_maintenance",
         "enabled": bool(EVIDENCE_GITHUB_AUTO_SYNC_ENABLED),
         "github_configured": bool(is_github_sync_configured()),
         "now_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2935,7 +2946,11 @@ def evidence_auto_sync_status() -> dict:
         "auto_backfill_store_bars": bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
         "sync_include_csv_default": bool(EVIDENCE_SYNC_INCLUDE_CSV_DEFAULT),
         "attempt_state": ("incomplete_or_crashed" if isinstance(attempted, dict) and attempted.get("attempted") and attempted.get("ok") is None else ("finished" if isinstance(attempted, dict) and attempted.get("attempted") else "none")),
-        "notes": "Daily Evidence sync exports compact GitHub files only, default 05:45 Riyadh. GitHub Contents API fallback avoids Git Data API 404. Railway deletion/pruning remains disabled unless the guarded prune-execute endpoint is called manually with confirmation.",
+        "auto_retention_maintenance_enabled": bool(EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED),
+        "auto_raw_json_slim_enabled": bool(EVIDENCE_AUTO_RAW_JSON_SLIM_ENABLED),
+        "auto_local_archive_cleanup_enabled": bool(EVIDENCE_AUTO_LOCAL_ARCHIVE_CLEANUP_ENABLED),
+        "auto_smart_compact_enabled": bool(EVIDENCE_AUTO_SMART_COMPACT_ENABLED),
+        "notes": "Daily Evidence sync exports compact GitHub files at 05:45 Riyadh, then automatically verifies GitHub, slims raw_json for that archived date, and cleans local archive files. Railway row deletion remains disabled; smart compact remains guarded.",
     }
 
 
@@ -2984,17 +2999,32 @@ def run_evidence_auto_sync(force: bool = False, dry_run: bool = False, include_c
             store_bars=bool(EVIDENCE_AUTO_BACKFILL_STORE_BARS),
         )
     sync = sync_evidence_to_github(week_key=wk, trade_date=trade_date, include_csv=include_csv)
+    maintenance = {"ok": True, "skipped": True, "reason": "auto_retention_maintenance_disabled_or_sync_failed"}
+    if bool(sync.get("ok")) and bool(EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED):
+        try:
+            maintenance = run_evidence_retention_auto_maintenance(
+                force=True,
+                dry_run=False,
+                week_key=wk,
+                trade_date=trade_date,
+                sync_first=False,
+                cleanup_local=bool(EVIDENCE_AUTO_LOCAL_ARCHIVE_CLEANUP_ENABLED),
+                include_smart_compact=False,
+            )
+        except Exception as exc:
+            maintenance = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
     result = {
         "ok": bool(sync.get("ok")),
-        "version": "evidence_daily_auto_sync_v5c_compact_once_daily",
+        "version": "evidence_daily_auto_sync_v5f_with_auto_retention_maintenance",
         "trade_date": trade_date,
         "week_key": wk,
         "ran_at_riyadh": _riyadh_dt().strftime("%Y-%m-%d %H:%M:%S"),
         "reason": reason,
         "backfill": backfill,
         "sync": sync,
+        "auto_retention_maintenance": maintenance,
         "pruned_railway": False,
-        "notes": "GitHub sync only. One automatic attempt per trade_date; no Railway deletion is performed by daily auto-sync.",
+        "notes": "GitHub sync ثم صيانة آمنة: verify + raw_json slim + cleanup local archive. لا حذف من SQLite ولا تغيير للقرار.",
     }
     try:
         if attempt_key:
@@ -5661,6 +5691,443 @@ def evidence_retention_sqlite_smart_compact_execute(
     }
     try:
         set_json("evidence_last_sqlite_smart_compact_execute", result)
+    except Exception:
+        pass
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Auto Retention Maintenance V1 (safe post-archive automation)
+# ---------------------------------------------------------------------------
+
+AUTO_RETENTION_MAINTENANCE_VERSION = "auto_retention_maintenance_v1_post_archive_safe"
+LOCAL_ARCHIVE_CLEANUP_CONFIRM = "CLEAN_VERIFIED_LOCAL_ARCHIVE"
+
+
+def _auto_maintenance_state_key(trade_date: str, kind: str = "done") -> str:
+    td = str(trade_date or "")[:10]
+    return f"evidence_auto_retention_maintenance_{kind}_{EVIDENCE_AUTO_MAINTENANCE_STATE_VERSION}_{td}"
+
+
+def _archive_root_abs() -> str:
+    return os.path.abspath(os.path.join(os.getcwd(), EVIDENCE_GITHUB_ARCHIVE_PATH))
+
+
+def _safe_local_archive_path(relative_path: str) -> str:
+    """Return a safe local archive path under app_data/evidence_archive, or ''."""
+    rel = str(relative_path or "").strip().lstrip("/")
+    if not rel:
+        return ""
+    abs_path = os.path.abspath(os.path.join(os.getcwd(), rel))
+    root = _archive_root_abs()
+    try:
+        common = os.path.commonpath([root, abs_path])
+    except Exception:
+        return ""
+    if common != root:
+        return ""
+    return abs_path
+
+
+def _verified_archive_relative_paths(verify: dict, week_key: str, trade_date: str) -> list[dict]:
+    """Collect exact local archive file paths for one verified date.
+
+    This includes split evidence parts from the verification result. The function
+    only returns relative archive paths; deletion functions still re-check the
+    filesystem path is inside EVIDENCE_GITHUB_ARCHIVE_PATH.
+    """
+    base_paths = _archive_paths_for(week_key, trade_date)
+    seen: set[str] = set()
+    out: list[dict] = []
+
+    def add(label: str, path: str) -> None:
+        rel = str(path or "").strip().lstrip("/")
+        if not rel or rel in seen:
+            return
+        if not rel.startswith(f"{EVIDENCE_GITHUB_ARCHIVE_PATH}/") and rel != EVIDENCE_GITHUB_ARCHIVE_PATH:
+            return
+        seen.add(rel)
+        out.append({"label": str(label or "archive_file"), "relative_path": rel})
+
+    checks = verify.get("checks") if isinstance(verify, dict) else {}
+    for key, default_path in base_paths.items():
+        check = checks.get(key) if isinstance(checks, dict) else None
+        add(key, (check or {}).get("path") if isinstance(check, dict) else default_path)
+        if isinstance(check, dict) and isinstance(check.get("parts"), list):
+            for part in check.get("parts") or []:
+                if isinstance(part, dict):
+                    add(str(part.get("label") or f"{key}_part"), str(part.get("path") or ""))
+    # Also include sync-style paths if the verifier carried normalized paths.
+    for key, path in (verify.get("paths") or {}).items() if isinstance(verify, dict) and isinstance(verify.get("paths"), dict) else []:
+        add(str(key), str(path or ""))
+    return out
+
+
+def evidence_local_archive_cleanup_dry_run(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    require_verified: bool = True,
+) -> dict:
+    """Read-only report for local archive files that can be removed from Railway.
+
+    This removes only local files under app_data/evidence_archive after GitHub
+    verification. It does not delete GitHub archives and does not touch SQLite.
+    """
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    td = str(target.get("trade_date") or _today_text())[:10]
+    verify = evidence_retention_verify_github(wk, td, include_csv=False) if require_verified else {"ok": True, "skipped": True, "paths": _archive_paths_for(wk, td), "checks": {}}
+    files = []
+    total_mb = 0.0
+    if bool(verify.get("ok")):
+        for item in _verified_archive_relative_paths(verify, wk, td):
+            rel = str(item.get("relative_path") or "")
+            abs_path = _safe_local_archive_path(rel)
+            exists = bool(abs_path and os.path.isfile(abs_path))
+            size_mb = _safe_file_mb(abs_path) if exists else 0.0
+            total_mb += size_mb
+            files.append({
+                "label": item.get("label", ""),
+                "relative_path": rel,
+                "local_path": abs_path,
+                "exists_locally": exists,
+                "size_mb": size_mb,
+                "safe_path": bool(abs_path),
+            })
+    blockers = []
+    if require_verified and not bool(verify.get("ok")):
+        blockers.append("github_verification_failed")
+    result = {
+        "ok": True,
+        "version": "local_archive_cleanup_v1_dry_run_verified_only",
+        "generated_at": _now_text(),
+        "week_key": wk,
+        "trade_date": td,
+        "require_verified": bool(require_verified),
+        "verification_ok": bool(verify.get("ok")),
+        "verification": verify,
+        "archive_root": _archive_root_abs(),
+        "will_delete_sqlite_rows": False,
+        "will_change_decision_logic": False,
+        "will_touch_telegram": False,
+        "will_delete_github_files": False,
+        "can_execute_after_approval": bool(not blockers),
+        "blockers": blockers,
+        "candidate_files": files,
+        "candidate_file_count": len([f for f in files if f.get("exists_locally")]),
+        "estimated_local_mb_to_free": round(total_mb, 2),
+        "required_confirm": LOCAL_ARCHIVE_CLEANUP_CONFIRM,
+        "notes_ar": "فحص فقط. يحذف التنفيذ الملفات المحلية المؤرشفة بعد تحقق GitHub فقط، ولا يحذف أي صف من SQLite.",
+    }
+    try:
+        set_json("evidence_last_local_archive_cleanup_dry_run", result)
+    except Exception:
+        pass
+    return result
+
+
+def _prune_empty_archive_dirs(start_dir: str) -> list[dict]:
+    removed: list[dict] = []
+    root = _archive_root_abs()
+    cur = os.path.abspath(start_dir or "")
+    try:
+        common = os.path.commonpath([root, cur])
+    except Exception:
+        return removed
+    if common != root:
+        return removed
+    while cur and cur != root and cur.startswith(root):
+        try:
+            if os.path.isdir(cur) and not os.listdir(cur):
+                os.rmdir(cur)
+                removed.append({"path": cur, "ok": True})
+                cur = os.path.dirname(cur)
+                continue
+        except Exception as exc:
+            removed.append({"path": cur, "ok": False, "error": f"{type(exc).__name__}: {str(exc)[:140]}"})
+        break
+    return removed
+
+
+def evidence_local_archive_cleanup_execute(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+) -> dict:
+    """Delete verified local archive files only; never touches SQLite or GitHub."""
+    if str(confirm or "").strip() != LOCAL_ARCHIVE_CLEANUP_CONFIRM:
+        return {
+            "ok": False,
+            "executed": False,
+            "error": "confirmation_required",
+            "required_confirm": LOCAL_ARCHIVE_CLEANUP_CONFIRM,
+            "notes_ar": "لم يتم حذف أي ملف محلي.",
+        }
+    dry = evidence_local_archive_cleanup_dry_run(week_key=week_key, trade_date=trade_date, require_verified=require_verified)
+    if not bool(dry.get("can_execute_after_approval")):
+        result = {
+            "ok": False,
+            "executed": False,
+            "error": "dry_run_not_executable",
+            "dry_run": dry,
+            "notes_ar": "لم يتم حذف أي ملف محلي لأن الفحص غير قابل للتنفيذ.",
+        }
+        try:
+            set_json("evidence_last_local_archive_cleanup_execute", result)
+        except Exception:
+            pass
+        return result
+    deleted = []
+    errors = []
+    dirs_touched: set[str] = set()
+    for f in dry.get("candidate_files") or []:
+        if not isinstance(f, dict) or not f.get("exists_locally"):
+            continue
+        path = str(f.get("local_path") or "")
+        if not path or not os.path.isfile(path):
+            continue
+        safe = _safe_local_archive_path(str(f.get("relative_path") or ""))
+        if not safe or os.path.abspath(path) != safe:
+            errors.append({"path": path, "error": "unsafe_path_skipped"})
+            continue
+        size_mb = _safe_file_mb(path)
+        try:
+            os.remove(path)
+            deleted.append({"relative_path": f.get("relative_path", ""), "local_path": path, "size_mb": size_mb, "ok": True})
+            dirs_touched.add(os.path.dirname(path))
+        except Exception as exc:
+            errors.append({"path": path, "error": f"{type(exc).__name__}: {str(exc)[:180]}"})
+    removed_dirs = []
+    for d in sorted(dirs_touched, key=len, reverse=True):
+        removed_dirs.extend(_prune_empty_archive_dirs(d))
+    result = {
+        "ok": bool(not errors),
+        "executed": True,
+        "version": "local_archive_cleanup_v1_execute_verified_only",
+        "executed_at": _now_text(),
+        "week_key": dry.get("week_key"),
+        "trade_date": dry.get("trade_date"),
+        "deleted_file_count": len(deleted),
+        "deleted_mb": round(sum(float(x.get("size_mb") or 0.0) for x in deleted), 2),
+        "deleted_files": deleted,
+        "removed_empty_dirs": removed_dirs,
+        "errors": errors,
+        "dry_run": {k: v for k, v in dry.items() if k not in {"verification", "candidate_files"}},
+        "will_delete_sqlite_rows": False,
+        "will_delete_github_files": False,
+        "will_change_decision_logic": False,
+        "notes_ar": "تم حذف ملفات الأرشيف المحلية المؤكدة من Railway فقط. GitHub و SQLite لم يتأثرا." if not errors else "تم حذف بعض الملفات المحلية، وظهرت أخطاء في أخرى.",
+    }
+    try:
+        set_json("evidence_last_local_archive_cleanup_execute", result)
+    except Exception:
+        pass
+    return result
+
+
+def evidence_retention_auto_maintenance_status(week_key: str | None = None, trade_date: str | None = None) -> dict:
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    td = str(target.get("trade_date") or _today_text())[:10]
+    done_key = _auto_maintenance_state_key(td, "done")
+    attempt_key = _auto_maintenance_state_key(td, "attempted")
+    done = get_json(done_key, {}) if td else {}
+    attempted = get_json(attempt_key, {}) if td else {}
+    last = get_json("evidence_last_auto_retention_maintenance", {})
+    last_sync = get_json("evidence_last_github_sync", {})
+    last_sync_matches = bool(isinstance(last_sync, dict) and last_sync.get("ok") and str(last_sync.get("week_key") or "") == wk and str(last_sync.get("trade_date") or "")[:10] == td)
+    due_now = bool(
+        EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED
+        and is_github_sync_configured()
+        and last_sync_matches
+        and not (isinstance(done, dict) and done.get("ok"))
+        and not (isinstance(attempted, dict) and attempted.get("attempted"))
+    )
+    return {
+        "ok": True,
+        "version": AUTO_RETENTION_MAINTENANCE_VERSION,
+        "enabled": bool(EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED),
+        "github_configured": bool(is_github_sync_configured()),
+        "target": {
+            "week_key": wk,
+            "trade_date": td,
+            "target_source": target.get("target_source"),
+            "used_last_successful_sync": bool(target.get("used_last_successful_sync")),
+            "explicit_target_requested": bool(target.get("explicit_target_requested")),
+        },
+        "last_github_sync_matches_target": last_sync_matches,
+        "due_now": due_now,
+        "state_version": EVIDENCE_AUTO_MAINTENANCE_STATE_VERSION,
+        "already_done_for_trade_date": bool(isinstance(done, dict) and done.get("ok")),
+        "already_attempted_for_trade_date": bool(isinstance(attempted, dict) and attempted.get("attempted")),
+        "last_done_for_trade_date": done if isinstance(done, dict) else {},
+        "last_attempt_for_trade_date": attempted if isinstance(attempted, dict) else {},
+        "last_maintenance": last if isinstance(last, dict) else {},
+        "steps_enabled": {
+            "sync_first": False,
+            "verify_github": True,
+            "raw_json_slim": bool(EVIDENCE_AUTO_RAW_JSON_SLIM_ENABLED),
+            "local_archive_cleanup": bool(EVIDENCE_AUTO_LOCAL_ARCHIVE_CLEANUP_ENABLED),
+            "smart_compact_auto": bool(EVIDENCE_AUTO_SMART_COMPACT_ENABLED),
+        },
+        "notes_ar": "الصيانة التلقائية تعمل بعد نجاح الأرشفة: تحقق GitHub ثم تصغير raw_json ثم تنظيف الملفات المحلية. لا حذف من SQLite ولا تغيير للقرار.",
+    }
+
+
+def run_evidence_retention_auto_maintenance(
+    force: bool = False,
+    dry_run: bool = False,
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    sync_first: bool = False,
+    cleanup_local: bool | None = None,
+    include_smart_compact: bool = False,
+    compact_confirm: str = "",
+) -> dict:
+    """Run safe post-archive maintenance for one trade date.
+
+    Normal automatic path after daily GitHub sync:
+      verify GitHub -> slim evidence_snapshots.raw_json -> cleanup local archive files.
+
+    It does not prune SQLite rows and does not compact SQLite unless explicitly
+    requested with the existing smart-compact confirmation.
+    """
+    if cleanup_local is None:
+        cleanup_local = bool(EVIDENCE_AUTO_LOCAL_ARCHIVE_CLEANUP_ENABLED)
+    status = evidence_retention_auto_maintenance_status(week_key=week_key, trade_date=trade_date)
+    wk = str((status.get("target") or {}).get("week_key") or _current_week_key() or "current")
+    td = str((status.get("target") or {}).get("trade_date") or _today_text())[:10]
+    done_key = _auto_maintenance_state_key(td, "done")
+    attempt_key = _auto_maintenance_state_key(td, "attempted")
+
+    if not force and not EVIDENCE_AUTO_RETENTION_MAINTENANCE_ENABLED:
+        return {"ok": True, "skipped": True, "reason": "auto_maintenance_disabled", "status": status}
+    if not force and bool((get_json(done_key, {}) or {}).get("ok")):
+        return {"ok": True, "skipped": True, "reason": "already_maintained", "trade_date": td, "previous_result": get_json(done_key, {})}
+    if not force and bool((get_json(attempt_key, {}) or {}).get("attempted")):
+        return {"ok": True, "skipped": True, "reason": "already_attempted", "trade_date": td, "previous_attempt": get_json(attempt_key, {})}
+
+    if dry_run:
+        verify = evidence_retention_verify_github(wk, td, include_csv=False)
+        slim = evidence_snapshots_raw_json_slim_dry_run(wk, td, require_verified=True, limit=5) if bool(verify.get("ok")) else {"ok": False, "skipped": True, "reason": "verify_failed"}
+        cleanup = evidence_local_archive_cleanup_dry_run(wk, td, require_verified=True) if bool(verify.get("ok")) and cleanup_local else {"ok": True, "skipped": True, "reason": "local_cleanup_disabled"}
+        compact = evidence_retention_sqlite_smart_compact_status(wk, td, keep_days=EVIDENCE_RETENTION_KEEP_DAYS, require_verified=True, min_reclaimable_mb=EVIDENCE_AUTO_SMART_COMPACT_MIN_RECLAIMABLE_MB) if (include_smart_compact or EVIDENCE_AUTO_SMART_COMPACT_ENABLED) else {"ok": True, "skipped": True, "reason": "smart_compact_not_requested"}
+        return {
+            "ok": True,
+            "dry_run": True,
+            "version": AUTO_RETENTION_MAINTENANCE_VERSION,
+            "week_key": wk,
+            "trade_date": td,
+            "would_sync_first": bool(sync_first),
+            "verify_github": verify,
+            "raw_json_slim_dry_run": slim,
+            "local_archive_cleanup_dry_run": cleanup,
+            "smart_compact_status": compact,
+            "will_delete_sqlite_rows": False,
+            "will_change_decision_logic": False,
+            "notes_ar": "فحص فقط. لا تعديل ولا حذف.",
+        }
+
+    try:
+        set_json(attempt_key, {"attempted": True, "ok": None, "week_key": wk, "trade_date": td, "started_at": _now_text()})
+    except Exception:
+        pass
+
+    sync_result = {"ok": True, "skipped": True, "reason": "sync_first_false"}
+    if sync_first:
+        sync_result = sync_evidence_to_github(week_key=wk, trade_date=td, include_csv=False)
+
+    verify = evidence_retention_verify_github(wk, td, include_csv=False)
+    slim_dry = {}
+    slim_execute = {"ok": True, "skipped": True, "reason": "raw_json_slim_disabled"}
+    cleanup_execute = {"ok": True, "skipped": True, "reason": "local_cleanup_disabled"}
+    compact_status = {"ok": True, "skipped": True, "reason": "smart_compact_not_requested"}
+    compact_execute = {"ok": True, "skipped": True, "reason": "smart_compact_not_requested"}
+    errors: list[str] = []
+
+    if not bool(sync_result.get("ok")):
+        errors.append("sync_first_failed")
+    if not bool(verify.get("ok")):
+        errors.append("github_verification_failed")
+    else:
+        if EVIDENCE_AUTO_RAW_JSON_SLIM_ENABLED:
+            slim_dry = evidence_snapshots_raw_json_slim_dry_run(wk, td, require_verified=True, limit=5)
+            if bool(slim_dry.get("can_execute_after_approval")):
+                slim_execute = evidence_snapshots_raw_json_slim_execute(wk, td, require_verified=True, confirm=SNAPSHOT_RAW_JSON_SLIM_CONFIRM)
+            else:
+                slim_execute = {
+                    "ok": True,
+                    "executed": False,
+                    "skipped": True,
+                    "reason": "no_raw_json_candidates_or_not_needed",
+                    "dry_run": {k: slim_dry.get(k) for k in ["ok", "candidate_rows", "blockers", "estimated_raw_json_mb_before"]},
+                }
+        if cleanup_local:
+            cleanup_execute = evidence_local_archive_cleanup_execute(wk, td, require_verified=True, confirm=LOCAL_ARCHIVE_CLEANUP_CONFIRM)
+        if include_smart_compact or EVIDENCE_AUTO_SMART_COMPACT_ENABLED:
+            compact_status = evidence_retention_sqlite_smart_compact_status(
+                wk,
+                td,
+                keep_days=EVIDENCE_RETENTION_KEEP_DAYS,
+                require_verified=True,
+                min_reclaimable_mb=EVIDENCE_AUTO_SMART_COMPACT_MIN_RECLAIMABLE_MB,
+            )
+            db_mb = float(((compact_status.get("storage") or {}).get("db_mb") or 0.0)) if isinstance(compact_status, dict) else 0.0
+            should_compact = bool(compact_status.get("can_smart_compact")) and db_mb >= float(EVIDENCE_AUTO_SMART_COMPACT_MIN_DB_MB or 0.0)
+            if should_compact:
+                if EVIDENCE_AUTO_SMART_COMPACT_ENABLED:
+                    compact_execute = evidence_retention_sqlite_smart_compact_execute(
+                        wk,
+                        td,
+                        keep_days=EVIDENCE_RETENTION_KEEP_DAYS,
+                        require_verified=True,
+                        confirm=SQLITE_SMART_COMPACT_REQUIRED_CONFIRM,
+                        min_reclaimable_mb=EVIDENCE_AUTO_SMART_COMPACT_MIN_RECLAIMABLE_MB,
+                    )
+                elif str(compact_confirm or "").strip() == SQLITE_SMART_COMPACT_REQUIRED_CONFIRM:
+                    compact_execute = evidence_retention_sqlite_smart_compact_execute(
+                        wk,
+                        td,
+                        keep_days=EVIDENCE_RETENTION_KEEP_DAYS,
+                        require_verified=True,
+                        confirm=compact_confirm,
+                        min_reclaimable_mb=EVIDENCE_AUTO_SMART_COMPACT_MIN_RECLAIMABLE_MB,
+                    )
+                else:
+                    compact_execute = {"ok": True, "executed": False, "skipped": True, "reason": "compact_confirmation_not_provided"}
+            else:
+                compact_execute = {"ok": True, "executed": False, "skipped": True, "reason": "smart_compact_not_needed_or_not_safe", "status": {"can_smart_compact": compact_status.get("can_smart_compact"), "blockers": compact_status.get("blockers", [])}}
+
+    slim_ok = bool(slim_execute.get("ok")) or str(slim_execute.get("reason") or "") == "no_raw_json_candidates_or_not_needed"
+    cleanup_ok = bool(cleanup_execute.get("ok"))
+    compact_ok = bool(compact_execute.get("ok"))
+    ok = bool((not errors) and slim_ok and cleanup_ok and compact_ok)
+    result = {
+        "ok": ok,
+        "version": AUTO_RETENTION_MAINTENANCE_VERSION,
+        "executed": True,
+        "finished_at": _now_text(),
+        "week_key": wk,
+        "trade_date": td,
+        "sync_first": sync_result,
+        "verify_github": verify,
+        "raw_json_slim_dry_run": slim_dry,
+        "raw_json_slim_execute": slim_execute,
+        "local_archive_cleanup_execute": cleanup_execute,
+        "smart_compact_status": compact_status,
+        "smart_compact_execute": compact_execute,
+        "errors": errors,
+        "will_delete_sqlite_rows": False,
+        "will_change_decision_logic": False,
+        "will_touch_telegram": False,
+        "notes_ar": "تمت الصيانة الآمنة بعد الأرشفة: تحقق GitHub، تصغير raw_json عند الحاجة، وتنظيف الأرشيف المحلي." if ok else "لم تكتمل الصيانة الآمنة؛ راجع errors والخطوات.",
+    }
+    try:
+        set_json(attempt_key, {"attempted": True, "ok": ok, "week_key": wk, "trade_date": td, "finished_at": result.get("finished_at"), "errors": errors})
+        if ok:
+            set_json(done_key, result)
+        set_json("evidence_last_auto_retention_maintenance", result)
     except Exception:
         pass
     return result
