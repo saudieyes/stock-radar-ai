@@ -2,7 +2,7 @@
   "archive_header": {
     "compact": true,
     "daily_big_movers_location": "part_001 only",
-    "exported_at": "2026-05-31 02:09:16",
+    "exported_at": "2026-05-31 02:09:47",
     "manifest": {
       "local_counts_at_sync": {
         "bar_symbols": 349,
@@ -22,6 +22,7 @@
     },
     "market_fear": {
       "badge": "⚪",
+      "cache_hit": true,
       "captured_at": "2026-05-31 02:09:17",
       "captured_ts": 1780207756.5275378,
       "change_pct": -2.67,
@@ -789,7 +790,7 @@
       }
     ],
     "ok": true,
-    "original_evidence_json_bytes": 4061417,
+    "original_evidence_json_bytes": 4061440,
     "split_archive": true,
     "split_reason": "evidence_json_exceeded_safe_github_file_size",
     "trade_date": "2026-05-18",
