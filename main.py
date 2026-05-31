@@ -170,6 +170,8 @@ from app.evidence_collector import (
     evidence_retention_prune_execute,
     evidence_retention_sqlite_compact_status,
     evidence_retention_sqlite_compact_execute,
+    evidence_retention_sqlite_smart_compact_status,
+    evidence_retention_sqlite_smart_compact_execute,
     evidence_retention_sqlite_table_size_report,
     evidence_snapshots_payload_report,
     evidence_snapshots_raw_json_slim_dry_run,
@@ -3675,6 +3677,48 @@ def evidence_retention_sqlite_compact_execute_endpoint(
         confirm=confirm,
         min_free_ratio=min_free_ratio,
         min_free_buffer_mb=min_free_buffer_mb,
+    )
+
+
+@app.post("/evidence/retention/sqlite-smart-compact-status")
+@app.get("/evidence/retention/sqlite-smart-compact-status")
+def evidence_retention_sqlite_smart_compact_status_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    output_buffer_mb: float | None = None,
+    min_reclaimable_mb: float | None = None,
+):
+    return evidence_retention_sqlite_smart_compact_status(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+        output_buffer_mb=output_buffer_mb,
+        min_reclaimable_mb=min_reclaimable_mb,
+    )
+
+
+@app.post("/evidence/retention/sqlite-smart-compact-execute")
+@app.get("/evidence/retention/sqlite-smart-compact-execute")
+def evidence_retention_sqlite_smart_compact_execute_endpoint(
+    week_key: str = "",
+    trade_date: str = "",
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+    output_buffer_mb: float | None = None,
+    min_reclaimable_mb: float | None = None,
+):
+    return evidence_retention_sqlite_smart_compact_execute(
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+        confirm=confirm,
+        output_buffer_mb=output_buffer_mb,
+        min_reclaimable_mb=min_reclaimable_mb,
     )
 
 
