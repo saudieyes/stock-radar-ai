@@ -4371,7 +4371,12 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
         sha = str(fetch.get("sha", "") if isinstance(fetch, dict) else "")
         readable = data is not None
         metadata_ok = bool(fetch_ok and exists and sha)
-        manifest_verified_large_file = bool(name == "evidence_json" and metadata_ok and manifest_ok and counts_ok_precheck)
+        # GitHub may return only metadata for large JSON files through the
+        # Contents API. We already protect deletion/slimming with manifest
+        # counts, so large archive files can pass by metadata + manifest counts
+        # when the file exists and has a SHA. Keep smaller support files readable.
+        large_manifest_verified_names = {"evidence_json", "winner_profiles_json"}
+        manifest_verified_large_file = bool(name in large_manifest_verified_names and metadata_ok and manifest_ok and counts_ok_precheck)
         checks[name] = {
             "name": name,
             "path": path,
@@ -4409,7 +4414,7 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     ok = bool(files_ok and counts_ok)
     result = {
         "ok": ok,
-        "version": "retention_verify_github_v5d_split_manifest_safe",
+        "version": "retention_verify_github_v5e_large_winner_profiles_safe",
         "configured": True,
         "week_key": wk,
         "trade_date": td,
@@ -4425,7 +4430,7 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
         "manifest_counts_at_sync": manifest_counts,
         "count_checks": count_checks,
         "checks": checks,
-        "notes": "Verification only. No Railway deletion is performed here. Supports split evidence archives and uses manifest/metadata to avoid huge downloads.",
+        "notes": "Verification only. No Railway deletion is performed here. Supports split evidence archives and uses manifest/metadata for large evidence/winner profile files to avoid huge downloads.",
     }
     try:
         set_json("evidence_last_retention_verify", result)
