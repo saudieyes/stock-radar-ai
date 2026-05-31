@@ -2371,6 +2371,28 @@
       if (!elementNeedsScroll(el, Number(opts.margin || 84))) return;
       el.scrollIntoView({ behavior: opts.behavior || 'smooth', block: opts.block || 'start' });
     }
+
+    function scrollToElementByUserAction(el, opts = {}) {
+      // هذا التمرير مسموح فقط لأنه ناتج عن ضغط المستخدم على زر تنقل واضح.
+      // نعتمد حسابًا مباشرًا بدل scrollIntoView حتى لا يتوقف الهاتف في منتصف الطريق عند وجود قوائم مفتوحة.
+      if (!el || !el.getBoundingClientRect) return;
+      const margin = Number(opts.margin || 88);
+      const behavior = opts.behavior || 'smooth';
+      const go = (mode='smooth') => {
+        const rect = el.getBoundingClientRect();
+        const currentY = window.scrollY || document.documentElement.scrollTop || 0;
+        const targetY = Math.max(0, currentY + rect.top - margin);
+        window.scrollTo({ top: targetY, behavior: mode });
+      };
+      go(behavior);
+      // تصحيح خفيف بعد تمدد الأقسام أو اختلاف سلوك smooth scroll في Android.
+      const correctIfFar = () => {
+        const rect = el.getBoundingClientRect();
+        if (Math.abs(rect.top - margin) > 36) go('auto');
+      };
+      window.setTimeout(correctIfFar, 320);
+      window.setTimeout(correctIfFar, 720);
+    }
     function escapeHtml(value) {
       return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -3599,7 +3621,7 @@
     function openByNav(sectionId, contentId='') {
       if (contentId) ensureSectionOpen(contentId);
       const el = document.getElementById(sectionId);
-      if (el) scrollElementIntoViewIfNeeded(el, { behavior: 'smooth', block: 'start' });
+      if (el) scrollToElementByUserAction(el, { behavior: 'smooth', margin: 88 });
       setFloatingQuickNavOpen(false);
     }
 
@@ -4165,7 +4187,7 @@
           window.__sourceDiscoveryStatus = normalized;
           if (data.new_snapshot_available) {
             window.__pendingSourceSnapshotAt = String(data.latest_snapshot_at || '1');
-            showSourceDiscoveryNotice(normalized);
+            prepareLatestScanDataFromCompletedScan(normalized, 'scan');
           }
           renderSourceDiscoveryPanel({ sourceStatus: normalized });
         }
@@ -4179,8 +4201,12 @@
       const notice = document.getElementById('sourceDiscoveryNotice');
       const snap = notice?.dataset?.snapshotAt || window.__pendingSourceSnapshotAt || '';
       hideSourceDiscoveryNotice(snap);
+      if (window.__pendingScanData) {
+        applyPendingScanData();
+      } else {
+        await loadScan(false, { applyImmediately: true });
+      }
       window.__pendingSourceSnapshotAt = '';
-      await loadScan(false, { applyImmediately: true });
       await pollSourceDiscoveryStatus(true);
     }
 
@@ -4262,6 +4288,47 @@
       if (el) el.style.display = 'none';
     }
 
+    function radarScreenIsSafeForImmediateApply() {
+      // إذا كان المستخدم في أعلى الرادار ولا توجد تفاصيل مفتوحة، يمكن تطبيق نتائج المسح فورًا.
+      // إذا كان يقرأ بطاقة أو داخل قوائم عميقة، نعرض إشعارًا فقط حتى لا نقفز به.
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      return !currentlyOpenDetailKeys().length && !userIsReadingRadarCard() && y <= 260;
+    }
+
+    async function prepareLatestScanDataFromCompletedScan(status={}, reason='scan') {
+      // عند اكتمال مسح الخلفية، لا ننتظر دورة تحديث لاحقة.
+      // نجلب اللقطة الجديدة فورًا: نطبقها مباشرة إذا كان المستخدم في أعلى الصفحة، أو نخزنها كجاهزة إذا كان يقرأ.
+      if (window.__prepareLatestScanBusy) return;
+      const snapshotAt = String(status?.latest_snapshot_at || status?.snapshot_at || window.__pendingSourceSnapshotAt || '').trim();
+      if (snapshotAt && window.__lastPreparedScanSnapshotAt === snapshotAt) return;
+      window.__prepareLatestScanBusy = true;
+      try {
+        const res = await apiFetch(`/trade-scan?prefer_cache=true&_=${Date.now()}`);
+        const data = await res.json();
+        if (!data || data.ok === false) return;
+        if (radarScreenIsSafeForImmediateApply()) {
+          const uiState = preserveScanUiState();
+          setScanData(data);
+          window.__pendingScanData = null;
+          hideRadarPendingNotice();
+          hideSourceDiscoveryNotice(snapshotAt);
+          renderScanData();
+          restoreScanUiState(uiState);
+          requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+        } else {
+          window.__pendingScanData = data;
+          hideSourceDiscoveryNotice(snapshotAt);
+          showRadarPendingNotice(data, reason);
+          refreshLiveQuotesForScan(true);
+        }
+        if (snapshotAt) window.__lastPreparedScanSnapshotAt = snapshotAt;
+      } catch (_) {
+        showSourceDiscoveryNotice(status || {});
+      } finally {
+        window.__prepareLatestScanBusy = false;
+      }
+    }
+
     function showRadarPendingNotice(data, reason='scan') {
       const el = ensureRadarPendingNotice();
       const isError = reason === 'error';
@@ -4296,7 +4363,9 @@
       const uiState = preserveScanUiState();
       setScanData(data);
       window.__pendingScanData = null;
+      window.__pendingSourceSnapshotAt = '';
       hideRadarPendingNotice();
+      hideSourceDiscoveryNotice();
       renderScanData();
       restoreScanUiState(uiState);
       requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
@@ -5488,7 +5557,7 @@
     window.__marketMoodTimer = window.setInterval(() => loadMarketMood(true), 300000);
     window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 30000);
     window.__portfolioLiveTimer = window.setInterval(() => refreshPortfolioLiveQuotes(), 30000);
-    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 15000);
+    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 8000);
     window.__sourceDiscoveryTickTimer = window.setInterval(() => tickSourceDiscoveryPanel(), 1000);
     loadAll();
     pollSourceDiscoveryStatus(true);
