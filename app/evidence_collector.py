@@ -4714,6 +4714,223 @@ def evidence_retention_sqlite_compact_execute(
         pass
     return result
 
+
+SQLITE_TABLE_SIZE_REPORT_VERSION = "sqlite_table_size_report_v1_read_only"
+
+
+def _quote_sqlite_identifier(name: str) -> str:
+    """Quote an SQLite identifier safely for read-only diagnostics."""
+    cleaned = str(name or "").replace('"', '""')
+    return f'"{cleaned}"'
+
+
+def _sqlite_table_safety_label(name: str) -> dict:
+    """Return a simple Arabic safety label for known tables.
+
+    This is advisory only; it never authorizes deletion. Any cleanup must get a
+    separate dry-run/execute guard later.
+    """
+    t = str(name or "")
+    protected = {
+        "auth_users", "kv_store", "portfolio_positions", "portfolio_transactions",
+        "manual_sharia_approvals", "manual_sharia_exclusions",
+    }
+    default_cleanable = {"evidence_intraday_bars", "daily_big_movers", "evidence_runs"}
+    protected_evidence = {"evidence_snapshots", "evidence_winner_profiles"}
+    learning_tracking = {
+        "tracking_signal_events", "tracking_signals", "tracking_weekly_insights",
+        "signal_transitions", "detection_journal",
+    }
+    missed_learning = {
+        "missed_pre_move_snapshots", "missed_seen_symbols", "missed_source_candidates",
+        "missed_symbol_timeline", "missed_weekly_movers",
+    }
+    if t in default_cleanable:
+        return {
+            "safety_level": "low_risk_after_archive",
+            "safety_label_ar": "أقل خطورة بعد الأرشفة",
+            "recommendation_ar": "يمكن دراسته للتنظيف لاحقًا فقط عبر dry-run وحماية GitHub، وليس من هذا التقرير.",
+        }
+    if t in protected_evidence:
+        return {
+            "safety_level": "protected_evidence",
+            "safety_label_ar": "محمي حاليًا",
+            "recommendation_ar": "لا يحذف الآن لأنه يدخل في التعلم والتحقق، إلا بخطة منفصلة وموافقة صريحة.",
+        }
+    if t in learning_tracking:
+        return {
+            "safety_level": "protected_tracking",
+            "safety_label_ar": "مهم للتتبع والتعلم",
+            "recommendation_ar": "لا يحذف الآن حتى لا نخسر سجل الأداء والنتائج.",
+        }
+    if t in missed_learning:
+        return {
+            "safety_level": "diagnostic_learning_review_needed",
+            "safety_label_ar": "تشخيصي/تعلمي يحتاج مراجعة",
+            "recommendation_ar": "قد يكون كبيرًا، لكن لا يحذف إلا بعد تقرير عمر البيانات وفائدتها.",
+        }
+    if t == "live_quotes":
+        return {
+            "safety_level": "cache_review_needed",
+            "safety_label_ar": "كاش أسعار يحتاج سياسة احتفاظ",
+            "recommendation_ar": "لا يحذف الآن؛ يمكن لاحقًا وضع احتفاظ قصير إذا ثبت أنه كبير.",
+        }
+    if t in protected or t.startswith("sqlite_"):
+        return {
+            "safety_level": "do_not_delete",
+            "safety_label_ar": "لا يحذف",
+            "recommendation_ar": "جدول حساس أو نظامي.",
+        }
+    return {
+        "safety_level": "unknown_review_required",
+        "safety_label_ar": "غير مصنف — يحتاج مراجعة",
+        "recommendation_ar": "قراءة فقط الآن؛ لا يوجد إذن حذف لهذا الجدول.",
+    }
+
+
+def evidence_retention_sqlite_table_size_report(limit: int = 30, include_indexes: bool = True) -> dict:
+    """Read-only SQLite table/index size report.
+
+    Uses SQLite's dbstat virtual table when available. It does not write,
+    delete, compact, or change PRAGMAs beyond a busy timeout.
+    """
+    lim = max(5, min(int(limit or 30), 200))
+    storage = _sqlite_storage_snapshot()
+    page_stats = _sqlite_page_snapshot()
+    result: dict[str, Any] = {
+        "ok": False,
+        "version": SQLITE_TABLE_SIZE_REPORT_VERSION,
+        "generated_at": _now_text(),
+        "sqlite_enabled": bool(SQLITE_ENABLED),
+        "storage": storage,
+        "page_stats": page_stats,
+        "dbstat_available": False,
+        "limit": lim,
+        "include_indexes": bool(include_indexes),
+        "tables": [],
+        "indexes": [],
+        "top_tables": [],
+        "summary_ar": "فحص قراءة فقط. لا يوجد حذف ولا ضغط هنا.",
+        "next_action_ar": "راجع أكبر الجداول أولًا، ثم نبني dry-run آمن للجدول المناسب إذا احتجنا.",
+        "error": "",
+    }
+    if not SQLITE_ENABLED:
+        result["error"] = "sqlite_disabled"
+        return result
+    if not os.path.exists(str(SQLITE_DB_PATH)):
+        result["error"] = "sqlite_db_missing"
+        return result
+
+    try:
+        with sqlite3.connect(str(SQLITE_DB_PATH), timeout=20, check_same_thread=False) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=20000")
+            master_rows = conn.execute(
+                """
+                SELECT name, type, tbl_name
+                FROM sqlite_master
+                WHERE type IN ('table','index')
+                ORDER BY type, name
+                """
+            ).fetchall()
+            master: dict[str, dict] = {}
+            table_names: list[str] = []
+            index_names: list[str] = []
+            for row in master_rows:
+                name = str(row["name"] or "")
+                typ = str(row["type"] or "")
+                tbl = str(row["tbl_name"] or "")
+                master[name] = {"type": typ, "table": tbl}
+                if typ == "table" and not name.startswith("sqlite_"):
+                    table_names.append(name)
+                elif typ == "index" and not name.startswith("sqlite_"):
+                    index_names.append(name)
+
+            # Row counts are useful even if dbstat is unavailable.
+            row_counts: dict[str, int] = {}
+            for name in table_names:
+                try:
+                    row_counts[name] = int(conn.execute(f"SELECT COUNT(*) AS c FROM {_quote_sqlite_identifier(name)}").fetchone()["c"] or 0)
+                except Exception:
+                    row_counts[name] = -1
+
+            dbstat_by_name: dict[str, dict] = {}
+            dbstat_error = ""
+            try:
+                for row in conn.execute("SELECT name, SUM(pgsize) AS bytes, COUNT(*) AS pages FROM dbstat GROUP BY name"):
+                    n = str(row["name"] or "")
+                    dbstat_by_name[n] = {
+                        "bytes": int(row["bytes"] or 0),
+                        "pages": int(row["pages"] or 0),
+                    }
+                result["dbstat_available"] = True
+            except Exception as exc:
+                dbstat_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+
+            index_bytes_by_table: dict[str, int] = {}
+            index_pages_by_table: dict[str, int] = {}
+            indexes_out: list[dict] = []
+            for idx in index_names:
+                meta = master.get(idx, {})
+                tbl = str(meta.get("table") or "")
+                stat = dbstat_by_name.get(idx, {})
+                b = int(stat.get("bytes") or 0)
+                pages = int(stat.get("pages") or 0)
+                if tbl:
+                    index_bytes_by_table[tbl] = index_bytes_by_table.get(tbl, 0) + b
+                    index_pages_by_table[tbl] = index_pages_by_table.get(tbl, 0) + pages
+                if include_indexes:
+                    indexes_out.append({
+                        "index": idx,
+                        "table": tbl,
+                        "index_mb": round(b / (1024 * 1024), 2) if b else 0.0,
+                        "pages": pages,
+                    })
+
+            tables_out: list[dict] = []
+            for name in table_names:
+                stat = dbstat_by_name.get(name, {})
+                table_bytes = int(stat.get("bytes") or 0)
+                table_pages = int(stat.get("pages") or 0)
+                idx_bytes = int(index_bytes_by_table.get(name, 0) or 0)
+                idx_pages = int(index_pages_by_table.get(name, 0) or 0)
+                total_bytes = table_bytes + idx_bytes
+                safety = _sqlite_table_safety_label(name)
+                tables_out.append({
+                    "table": name,
+                    "rows": int(row_counts.get(name, -1)),
+                    "table_mb": round(table_bytes / (1024 * 1024), 2) if table_bytes else 0.0,
+                    "index_mb": round(idx_bytes / (1024 * 1024), 2) if idx_bytes else 0.0,
+                    "total_mb": round(total_bytes / (1024 * 1024), 2) if total_bytes else 0.0,
+                    "table_pages": table_pages,
+                    "index_pages": idx_pages,
+                    "total_pages": table_pages + idx_pages,
+                    **safety,
+                })
+
+            tables_out.sort(key=lambda x: (float(x.get("total_mb") or 0.0), int(x.get("rows") or 0)), reverse=True)
+            indexes_out.sort(key=lambda x: float(x.get("index_mb") or 0.0), reverse=True)
+            result.update({
+                "ok": True,
+                "error": dbstat_error,
+                "tables": tables_out[:lim],
+                "top_tables": tables_out[:min(10, lim)],
+                "indexes": indexes_out[:lim] if include_indexes else [],
+                "table_count": len(tables_out),
+                "index_count": len(indexes_out),
+                "known_total_reported_mb": round(sum(float(x.get("total_mb") or 0.0) for x in tables_out), 2),
+                "summary_ar": "تم إنشاء تقرير حجم الجداول بنجاح. هذا فحص قراءة فقط ولا يغير قاعدة البيانات.",
+            })
+            if not result["dbstat_available"]:
+                result["summary_ar"] = "تم عرض عدد الصفوف، لكن حجم الجداول غير متاح لأن dbstat غير متوفر في SQLite. لا يوجد حذف هنا."
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {str(exc)[:220]}"
+    try:
+        set_json("evidence_last_sqlite_table_size_report", result)
+    except Exception:
+        pass
+    return result
+
 def _daily_auto_sync_due(session: str) -> bool:
     """Compatibility wrapper used by the background worker.
 
