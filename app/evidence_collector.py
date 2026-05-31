@@ -4253,6 +4253,318 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     return result
 
 
+
+SNAPSHOT_RAW_JSON_SLIM_CONFIRM = "SLIM_ARCHIVED_SNAPSHOT_RAW_JSON"
+SNAPSHOT_RAW_JSON_SLIM_MARKER_VERSION = "snapshot_raw_json_slim_v1_archived_in_github"
+
+
+def _bytes_to_mb(value: Any) -> float:
+    try:
+        return round(float(value or 0) / (1024 * 1024), 2)
+    except Exception:
+        return 0.0
+
+
+def _snapshot_raw_json_slim_marker(week_key: str, trade_date: str) -> str:
+    """Small marker replacing heavy raw_json after the full payload is archived."""
+    marker = {
+        "slimmed": True,
+        "version": SNAPSHOT_RAW_JSON_SLIM_MARKER_VERSION,
+        "reason": "تم تصغير raw_json داخل SQLite بعد تحقق أرشيف GitHub. البيانات الكاملة محفوظة في GitHub archive.",
+        "archive_week_key": str(week_key or ""),
+        "archive_trade_date": str(trade_date or "")[:10],
+        "slimmed_at": _now_text(),
+        "preserved_columns_note": "الأعمدة المهمة في evidence_snapshots بقيت كما هي؛ تم تصغير raw_json فقط.",
+    }
+    return _json_dumps(marker)
+
+
+def _snapshot_raw_json_candidate_where() -> str:
+    """Rows that still contain the original heavy payload, not a previous slim marker."""
+    return (
+        "week_key=? AND trade_date=? "
+        "AND COALESCE(raw_json, '') NOT IN ('', '{}') "
+        "AND raw_json NOT LIKE '%snapshot_raw_json_slim_v1_archived_in_github%'"
+    )
+
+
+def evidence_snapshots_raw_json_slim_dry_run(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    require_verified: bool = True,
+    limit: int = 20,
+) -> dict:
+    """Read-only plan for shrinking archived evidence_snapshots.raw_json.
+
+    This does not delete rows, does not update SQLite, and does not run VACUUM.
+    It only confirms GitHub archive safety and estimates how much raw JSON could
+    be removed from SQLite for a single verified trade date.
+    """
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or "").strip()
+    td = str(target.get("trade_date") or "")[:10]
+    verify = evidence_retention_verify_github(wk, td, include_csv=False) if require_verified else {"ok": True, "skipped": True}
+    lim = max(1, min(100, int(limit or 20)))
+    marker_text = _snapshot_raw_json_slim_marker(wk, td)
+    marker_len = len(marker_text.encode("utf-8"))
+    out = {
+        "ok": True,
+        "version": "evidence_snapshots_raw_json_slim_dry_run_v1_read_only",
+        "generated_at": _now_text(),
+        "week_key": wk,
+        "trade_date": td,
+        "require_verified": bool(require_verified),
+        "verification_ok": bool(verify.get("ok")),
+        "verification": verify,
+        "required_confirm_for_execute": SNAPSHOT_RAW_JSON_SLIM_CONFIRM,
+        "storage_before": _sqlite_storage_snapshot(),
+        "page_stats_before": _sqlite_page_snapshot(),
+        "changes_now": {
+            "will_modify_sqlite": False,
+            "will_delete_rows": False,
+            "will_run_vacuum": False,
+            "columns_to_slim": ["raw_json"],
+            "columns_preserved": [
+                "symbol", "week_key", "trade_date", "captured_at", "captured_at_text", "session",
+                "source_group", "signal_bucket", "decision", "sharia_status", "plan_family", "price",
+                "previous_close", "change_pct", "volume", "dollar_volume", "entry_price",
+                "target_price", "stop_loss", "support_price", "resistance_price",
+                "liquidity_score", "momentum_acceleration_score", "pattern_risk_score",
+                "risk_tags_json", "success_tags_json", "polygon_summary_json",
+            ],
+        },
+        "safety_rules_ar": [
+            "هذا فحص فقط ولا يعدل البيانات.",
+            "التصغير المقترح يخص raw_json فقط ولا يحذف الصفوف.",
+            "لا يتم التنفيذ إلا بعد تحقق GitHub archive وكلمة تأكيد صريحة.",
+            "لا يتم لمس snapshots لأيام أخرى من هذا الرابط.",
+            "لا يتم تشغيل VACUUM في هذه الخطوة.",
+        ],
+    }
+    if require_verified and not verify.get("ok"):
+        out.update({
+            "can_execute_after_approval": False,
+            "blockers": ["github_verification_failed"],
+            "candidate_rows": 0,
+            "estimated_raw_json_mb_before": 0.0,
+            "estimated_marker_mb_after": 0.0,
+            "estimated_reclaimable_payload_mb": 0.0,
+            "notes_ar": "لا يمكن التنفيذ لأن أرشيف GitHub غير متحقق.",
+        })
+        try:
+            set_json("evidence_last_snapshot_raw_json_slim_dry_run", out)
+        except Exception:
+            pass
+        return out
+
+    try:
+        init_evidence_db()
+        with _connect() as conn:
+            where_sql = _snapshot_raw_json_candidate_where()
+            total = conn.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS rows,
+                    COUNT(DISTINCT symbol) AS symbols,
+                    COALESCE(SUM(LENGTH(raw_json)),0) AS raw_bytes,
+                    COALESCE(AVG(LENGTH(raw_json)),0) AS avg_raw_bytes,
+                    COALESCE(MAX(LENGTH(raw_json)),0) AS max_raw_bytes,
+                    MIN(captured_at_text) AS first_capture,
+                    MAX(captured_at_text) AS last_capture
+                FROM evidence_snapshots
+                WHERE {where_sql}
+                """,
+                (wk, td),
+            ).fetchone()
+            by_session = conn.execute(
+                f"""
+                SELECT session AS value,
+                       COUNT(*) AS rows,
+                       COUNT(DISTINCT symbol) AS symbols,
+                       COALESCE(SUM(LENGTH(raw_json)),0) AS raw_bytes,
+                       COALESCE(AVG(LENGTH(raw_json)),0) AS avg_raw_bytes,
+                       COALESCE(MAX(LENGTH(raw_json)),0) AS max_raw_bytes
+                FROM evidence_snapshots
+                WHERE {where_sql}
+                GROUP BY session
+                ORDER BY raw_bytes DESC
+                """,
+                (wk, td),
+            ).fetchall()
+            by_bucket = conn.execute(
+                f"""
+                SELECT signal_bucket AS value,
+                       COUNT(*) AS rows,
+                       COUNT(DISTINCT symbol) AS symbols,
+                       COALESCE(SUM(LENGTH(raw_json)),0) AS raw_bytes,
+                       COALESCE(AVG(LENGTH(raw_json)),0) AS avg_raw_bytes,
+                       COALESCE(MAX(LENGTH(raw_json)),0) AS max_raw_bytes
+                FROM evidence_snapshots
+                WHERE {where_sql}
+                GROUP BY signal_bucket
+                ORDER BY raw_bytes DESC
+                LIMIT 20
+                """,
+                (wk, td),
+            ).fetchall()
+            samples = conn.execute(
+                f"""
+                SELECT id, symbol, captured_at_text, session, source_group, signal_bucket, decision,
+                       change_pct, LENGTH(raw_json) AS raw_bytes
+                FROM evidence_snapshots
+                WHERE {where_sql}
+                ORDER BY raw_bytes DESC, captured_at DESC
+                LIMIT ?
+                """,
+                (wk, td, lim),
+            ).fetchall()
+    except Exception as exc:
+        out.update({"ok": False, "error": str(exc), "can_execute_after_approval": False})
+        return out
+
+    candidate_rows = int(total["rows"] or 0) if total else 0
+    raw_bytes = int(total["raw_bytes"] or 0) if total else 0
+    marker_bytes_total = int(candidate_rows * marker_len)
+    reclaim_bytes = max(0, raw_bytes - marker_bytes_total)
+
+    def _group_rows(rows):
+        items = []
+        for r in rows or []:
+            rb = int(r["raw_bytes"] or 0)
+            items.append({
+                "value": str(r["value"] or ""),
+                "rows": int(r["rows"] or 0),
+                "symbols": int(r["symbols"] or 0),
+                "raw_json_mb": _bytes_to_mb(rb),
+                "avg_raw_json_kb": round(float(r["avg_raw_bytes"] or 0) / 1024.0, 2),
+                "max_raw_json_kb": round(float(r["max_raw_bytes"] or 0) / 1024.0, 2),
+            })
+        return items
+
+    out.update({
+        "can_execute_after_approval": bool(candidate_rows > 0 and (not require_verified or verify.get("ok"))),
+        "blockers": [] if candidate_rows > 0 else ["no_raw_json_candidates_for_this_date"],
+        "candidate_rows": candidate_rows,
+        "candidate_symbols": int(total["symbols"] or 0) if total else 0,
+        "first_capture": str(total["first_capture"] or "") if total else "",
+        "last_capture": str(total["last_capture"] or "") if total else "",
+        "estimated_raw_json_mb_before": _bytes_to_mb(raw_bytes),
+        "estimated_marker_mb_after": _bytes_to_mb(marker_bytes_total),
+        "estimated_reclaimable_payload_mb": _bytes_to_mb(reclaim_bytes),
+        "avg_raw_json_kb": round(float(total["avg_raw_bytes"] or 0) / 1024.0, 2) if total else 0.0,
+        "max_raw_json_kb": round(float(total["max_raw_bytes"] or 0) / 1024.0, 2) if total else 0.0,
+        "marker_example": marker_text,
+        "by_session": _group_rows(by_session),
+        "by_signal_bucket": _group_rows(by_bucket),
+        "sample_largest_rows": [
+            {
+                "id": int(r["id"] or 0),
+                "symbol": str(r["symbol"] or ""),
+                "captured_at_text": str(r["captured_at_text"] or ""),
+                "session": str(r["session"] or ""),
+                "source_group": str(r["source_group"] or ""),
+                "signal_bucket": str(r["signal_bucket"] or ""),
+                "decision": str(r["decision"] or ""),
+                "change_pct": safe_round(r["change_pct"] or 0),
+                "raw_json_kb": round(float(r["raw_bytes"] or 0) / 1024.0, 2),
+            }
+            for r in samples or []
+        ],
+        "notes_ar": "هذا dry-run فقط. إذا وافقت لاحقًا، التنفيذ سيصغر raw_json لهذا اليوم المؤرشف فقط ولن يحذف الصفوف أو يشغل VACUUM.",
+    })
+    try:
+        set_json("evidence_last_snapshot_raw_json_slim_dry_run", out)
+    except Exception:
+        pass
+    return out
+
+
+def evidence_snapshots_raw_json_slim_execute(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+) -> dict:
+    """Guarded execution for shrinking raw_json for one verified trade date.
+
+    It does not delete rows and does not run VACUUM. It replaces raw_json with a
+    small archive marker only after GitHub verification and explicit confirmation.
+    """
+    if str(confirm or "").strip() != SNAPSHOT_RAW_JSON_SLIM_CONFIRM:
+        return {
+            "ok": False,
+            "version": "evidence_snapshots_raw_json_slim_execute_v1_guarded",
+            "executed": False,
+            "error": "confirmation_required",
+            "required_confirm": SNAPSHOT_RAW_JSON_SLIM_CONFIRM,
+            "notes_ar": "لم يتم تعديل أي بيانات لأن كلمة التأكيد غير موجودة أو غير صحيحة.",
+        }
+    dry = evidence_snapshots_raw_json_slim_dry_run(week_key=week_key, trade_date=trade_date, require_verified=require_verified, limit=10)
+    if not dry.get("ok") or not dry.get("can_execute_after_approval"):
+        return {
+            "ok": False,
+            "version": "evidence_snapshots_raw_json_slim_execute_v1_guarded",
+            "executed": False,
+            "error": "dry_run_not_executable",
+            "dry_run": dry,
+            "notes_ar": "لم يتم تعديل أي بيانات لأن dry-run غير قابل للتنفيذ.",
+        }
+
+    wk = str(dry.get("week_key") or "")
+    td = str(dry.get("trade_date") or "")[:10]
+    marker_text = _snapshot_raw_json_slim_marker(wk, td)
+    where_sql = _snapshot_raw_json_candidate_where()
+    before_rows = int(dry.get("candidate_rows") or 0)
+    before_raw_mb = float(dry.get("estimated_raw_json_mb_before") or 0.0)
+    storage_before = _sqlite_storage_snapshot()
+    pages_before = _sqlite_page_snapshot()
+    try:
+        with _LOCK:
+            init_evidence_db()
+            with _connect() as conn:
+                cur = conn.execute(f"UPDATE evidence_snapshots SET raw_json=? WHERE {where_sql}", (marker_text, wk, td))
+                updated = int(cur.rowcount if cur.rowcount is not None else 0)
+                conn.commit()
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                except Exception:
+                    pass
+    except Exception as exc:
+        return {
+            "ok": False,
+            "version": "evidence_snapshots_raw_json_slim_execute_v1_guarded",
+            "executed": False,
+            "error": str(exc),
+            "dry_run": dry,
+            "notes_ar": "حدث خطأ أثناء التصغير، ولم يتم تشغيل VACUUM.",
+        }
+
+    after = evidence_snapshots_raw_json_slim_dry_run(week_key=wk, trade_date=td, require_verified=require_verified, limit=10)
+    result = {
+        "ok": True,
+        "version": "evidence_snapshots_raw_json_slim_execute_v1_guarded",
+        "executed": True,
+        "executed_at": _now_text(),
+        "week_key": wk,
+        "trade_date": td,
+        "updated_rows": int(updated),
+        "candidate_rows_before": before_rows,
+        "estimated_raw_json_mb_before": before_raw_mb,
+        "candidate_rows_after": int(after.get("candidate_rows") or 0),
+        "estimated_raw_json_mb_after_candidates": float(after.get("estimated_raw_json_mb_before") or 0.0),
+        "storage_before": storage_before,
+        "storage_after": _sqlite_storage_snapshot(),
+        "page_stats_before": pages_before,
+        "page_stats_after": _sqlite_page_snapshot(),
+        "dry_run_after": after,
+        "notes_ar": "تم تصغير raw_json فقط لهذا اليوم المؤرشف. لم يتم حذف صفوف ولم يتم تشغيل VACUUM؛ نقص حجم الملف الفعلي يحتاج compact لاحقًا إذا أصبحت المساحة آمنة.",
+    }
+    try:
+        set_json("evidence_last_snapshot_raw_json_slim_execute", result)
+    except Exception:
+        pass
+    return result
+
 def evidence_retention_prune_dry_run(week_key: str | None = None, trade_date: str | None = None, keep_days: int | None = None, require_verified: bool = True) -> dict:
     """Show what could be pruned later. This function never deletes data."""
     target = _resolve_retention_archive_target(week_key, trade_date)
