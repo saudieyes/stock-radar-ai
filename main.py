@@ -176,6 +176,10 @@ from app.evidence_collector import (
     evidence_snapshots_payload_report,
     evidence_snapshots_raw_json_slim_dry_run,
     evidence_snapshots_raw_json_slim_execute,
+    evidence_retention_auto_maintenance_status,
+    run_evidence_retention_auto_maintenance,
+    evidence_local_archive_cleanup_dry_run,
+    evidence_local_archive_cleanup_execute,
 )
 from app.source_discovery import (
     dynamic_discovery_enabled,
@@ -3552,6 +3556,47 @@ def evidence_auto_sync_status_endpoint():
 @app.get("/evidence/auto-sync/run")
 def evidence_auto_sync_run_endpoint(force: bool = False, dry_run: bool = False, include_csv: bool = False):
     return run_evidence_auto_sync(force=bool(force), dry_run=bool(dry_run), include_csv=bool(include_csv))
+
+
+@app.get("/evidence/retention/auto-maintenance/status")
+def evidence_retention_auto_maintenance_status_endpoint(week_key: str = "", trade_date: str = ""):
+    return evidence_retention_auto_maintenance_status(week_key=week_key or None, trade_date=trade_date or None)
+
+
+@app.post("/evidence/retention/auto-maintenance/run")
+@app.get("/evidence/retention/auto-maintenance/run")
+def evidence_retention_auto_maintenance_run_endpoint(
+    force: bool = False,
+    dry_run: bool = False,
+    week_key: str = "",
+    trade_date: str = "",
+    sync_first: bool = False,
+    cleanup_local: bool = True,
+    include_smart_compact: bool = False,
+    compact_confirm: str = "",
+):
+    return run_evidence_retention_auto_maintenance(
+        force=bool(force),
+        dry_run=bool(dry_run),
+        week_key=week_key or None,
+        trade_date=trade_date or None,
+        sync_first=bool(sync_first),
+        cleanup_local=bool(cleanup_local),
+        include_smart_compact=bool(include_smart_compact),
+        compact_confirm=compact_confirm,
+    )
+
+
+@app.post("/evidence/retention/local-archive-cleanup-dry-run")
+@app.get("/evidence/retention/local-archive-cleanup-dry-run")
+def evidence_local_archive_cleanup_dry_run_endpoint(week_key: str = "", trade_date: str = "", require_verified: bool = True):
+    return evidence_local_archive_cleanup_dry_run(week_key=week_key or None, trade_date=trade_date or None, require_verified=bool(require_verified))
+
+
+@app.post("/evidence/retention/local-archive-cleanup-execute")
+@app.get("/evidence/retention/local-archive-cleanup-execute")
+def evidence_local_archive_cleanup_execute_endpoint(week_key: str = "", trade_date: str = "", require_verified: bool = True, confirm: str = ""):
+    return evidence_local_archive_cleanup_execute(week_key=week_key or None, trade_date=trade_date or None, require_verified=bool(require_verified), confirm=confirm)
 
 
 @app.get("/evidence/liquidity-check")
