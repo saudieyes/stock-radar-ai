@@ -4894,6 +4894,14 @@ SQLITE_COMPACT_REQUIRED_CONFIRM = "COMPACT_SQLITE_AFTER_PRUNE"
 SQLITE_COMPACT_MIN_FREE_RATIO_DEFAULT = 1.10
 SQLITE_COMPACT_MIN_FREE_BUFFER_MB_DEFAULT = 128.0
 
+# V2 smart compact uses VACUUM INTO to create only the expected compact file
+# instead of requiring free space for a full second copy of the bloated DB.
+# It is still manual/guarded and never deletes rows.
+SQLITE_SMART_COMPACT_REQUIRED_CONFIRM = "SMART_COMPACT_SQLITE_V2"
+SQLITE_SMART_COMPACT_MIN_RECLAIMABLE_MB = _env_float("SQLITE_SMART_COMPACT_MIN_RECLAIMABLE_MB", 100.0)
+SQLITE_SMART_COMPACT_OUTPUT_BUFFER_MB = _env_float("SQLITE_SMART_COMPACT_OUTPUT_BUFFER_MB", 256.0)
+SQLITE_SMART_COMPACT_MAX_EXPECTED_OUTPUT_MB = _env_float("SQLITE_SMART_COMPACT_MAX_EXPECTED_OUTPUT_MB", 2048.0)
+
 
 def _safe_file_mb(path: str) -> float:
     try:
@@ -5208,6 +5216,451 @@ def evidence_retention_sqlite_compact_execute(
     }
     try:
         set_json("evidence_last_sqlite_compact_execute", result)
+    except Exception:
+        pass
+    return result
+
+
+SQLITE_SMART_COMPACT_STATUS_VERSION = "sqlite_smart_compact_v2_status_vacuum_into_safe"
+SQLITE_SMART_COMPACT_EXECUTE_VERSION = "sqlite_smart_compact_v2_execute_vacuum_into_guarded"
+
+
+def _sqlite_version_tuple(text: str) -> tuple[int, int, int]:
+    """Parse an SQLite version string safely."""
+    parts: list[int] = []
+    for item in str(text or "").split(".")[:3]:
+        try:
+            parts.append(int(item))
+        except Exception:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2])
+
+
+def _sqlite_quick_check_for_path(path: str) -> dict:
+    """Run PRAGMA quick_check on a SQLite file path."""
+    out = {"ok": False, "path": str(path or ""), "result": "", "error": ""}
+    if not path or not os.path.exists(path):
+        out["error"] = "sqlite_file_missing"
+        return out
+    try:
+        with sqlite3.connect(str(path), timeout=30, check_same_thread=False) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            result = str((conn.execute("PRAGMA quick_check").fetchone() or [""])[0] or "")
+        out.update({"ok": result.lower() == "ok", "result": result, "error": ""})
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:220]}"
+    return out
+
+
+def _sqlite_table_counts_for_path(path: str) -> dict:
+    """Count rows by table for an arbitrary SQLite DB path."""
+    out: dict[str, int] = {}
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with sqlite3.connect(str(path), timeout=30, check_same_thread=False) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=30000")
+            rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+            for row in rows:
+                name = str(row["name"] if isinstance(row, sqlite3.Row) else row[0])
+                if not name or name.startswith("sqlite_"):
+                    continue
+                try:
+                    qname = _quote_sqlite_identifier(name) if "_quote_sqlite_identifier" in globals() else '"' + name.replace('"', '""') + '"'
+                    out[name] = int(conn.execute(f"SELECT COUNT(*) AS c FROM {qname}").fetchone()["c"] or 0)
+                except Exception:
+                    out[name] = -1
+    except Exception:
+        pass
+    return out
+
+
+def _sqlite_remove_sidecar_files(db_path: str) -> dict:
+    """Remove stale WAL/SHM sidecar files after a clean checkpoint."""
+    removed: list[str] = []
+    errors: list[str] = []
+    for suffix in ("-wal", "-shm"):
+        side_path = f"{db_path}{suffix}"
+        try:
+            if os.path.exists(side_path):
+                os.remove(side_path)
+                removed.append(side_path)
+        except Exception as exc:
+            errors.append(f"{side_path}: {type(exc).__name__}: {str(exc)[:160]}")
+    return {"removed": removed, "errors": errors}
+
+
+def _sqlite_smart_compact_status(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    output_buffer_mb: float | None = None,
+    min_reclaimable_mb: float | None = None,
+) -> dict:
+    """Safer smart compact decision using estimated compact output size.
+
+    This differs from the old VACUUM status: the old path assumes SQLite needs
+    free space for a full duplicate of the current bloated DB. This V2 path uses
+    VACUUM INTO, so it needs enough free space for the *expected compact output*
+    plus a buffer. It still requires GitHub verification and zero default prune
+    candidates before allowing execution.
+    """
+    storage = _sqlite_storage_snapshot()
+    pages = _sqlite_page_snapshot()
+    dry = evidence_retention_prune_dry_run(
+        week_key=week_key,
+        trade_date=trade_date,
+        keep_days=keep_days,
+        require_verified=bool(require_verified),
+    )
+    db_path = str(storage.get("db_path") or SQLITE_DB_PATH or "")
+    free_mb = float(storage.get("data_dir_free_mb") or 0.0)
+    page_count = int(pages.get("page_count") or 0)
+    freelist_count = int(pages.get("freelist_count") or 0)
+    page_size = int(pages.get("page_size") or 0)
+    used_pages = max(0, page_count - freelist_count)
+    estimated_output_mb = round((used_pages * page_size) / (1024 * 1024), 2) if page_size else 0.0
+    estimated_reclaimable_mb = float(pages.get("estimated_reclaimable_mb") or 0.0)
+    buffer_mb = float(output_buffer_mb if output_buffer_mb is not None else SQLITE_SMART_COMPACT_OUTPUT_BUFFER_MB)
+    buffer_mb = max(64.0, min(buffer_mb, 2048.0))
+    min_reclaim = float(min_reclaimable_mb if min_reclaimable_mb is not None else SQLITE_SMART_COMPACT_MIN_RECLAIMABLE_MB)
+    min_reclaim = max(0.0, min(min_reclaim, 4096.0))
+    required_free_mb = round(estimated_output_mb + buffer_mb, 2) if estimated_output_mb > 0 else 0.0
+    default_remaining = int(dry.get("default_delete_candidate_total_rows") or 0)
+    verification_ok = bool((dry.get("verification") or {}).get("ok") if require_verified else True)
+    sqlite_version = str(sqlite3.sqlite_version)
+    vacuum_into_supported = _sqlite_version_tuple(sqlite_version) >= (3, 27, 0)
+    tmp_path = f"{db_path}.smart_compact_v2_tmp" if db_path else ""
+    backup_path_example = f"{db_path}.smart_compact_v2_backup_YYYYMMDD_HHMMSS" if db_path else ""
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if not SQLITE_ENABLED:
+        blockers.append("sqlite_disabled")
+    if not bool(storage.get("db_exists")):
+        blockers.append("sqlite_db_missing")
+    if not bool(pages.get("ok")):
+        blockers.append("sqlite_page_stats_failed")
+    if not bool(dry.get("ok")):
+        blockers.append("dry_run_failed")
+    if require_verified and not verification_ok:
+        blockers.append("github_verification_not_ok")
+    if default_remaining > 0:
+        blockers.append("default_prune_candidates_still_remaining")
+    if not vacuum_into_supported:
+        blockers.append("sqlite_vacuum_into_not_supported")
+    if estimated_output_mb <= 0:
+        blockers.append("estimated_compact_output_unknown")
+    if estimated_output_mb > SQLITE_SMART_COMPACT_MAX_EXPECTED_OUTPUT_MB:
+        blockers.append("estimated_compact_output_too_large_for_smart_compact")
+    if free_mb < required_free_mb:
+        blockers.append("not_enough_free_disk_space_for_vacuum_into")
+    if estimated_reclaimable_mb < min_reclaim:
+        blockers.append("estimated_reclaimable_space_below_minimum")
+    if os.path.exists(tmp_path):
+        warnings.append("old_smart_compact_tmp_file_exists_and_will_be_removed_on_execute")
+    if float(storage.get("wal_mb") or 0.0) > 128.0:
+        warnings.append("wal_file_is_large_checkpoint_will_run_before_compact")
+
+    return {
+        "ok": True,
+        "version": SQLITE_SMART_COMPACT_STATUS_VERSION,
+        "generated_at": _now_text(),
+        "sqlite_enabled": bool(SQLITE_ENABLED),
+        "sqlite_version": sqlite_version,
+        "vacuum_into_supported": bool(vacuum_into_supported),
+        "require_verified": bool(require_verified),
+        "week_key": str(dry.get("week_key") or week_key or ""),
+        "trade_date": str(dry.get("trade_date") or trade_date or "")[:10],
+        "keep_days": int(keep_days if keep_days is not None else EVIDENCE_RETENTION_KEEP_DAYS),
+        "storage": storage,
+        "page_stats": pages,
+        "dry_run_summary": {
+            "ok": bool(dry.get("ok")),
+            "verification_ok": bool(dry.get("verification_ok")),
+            "default_delete_candidate_total_rows": default_remaining,
+            "default_delete_candidate_rows_by_table": dry.get("default_delete_candidate_rows_by_table", {}),
+            "protected_candidate_total_rows": int(dry.get("protected_candidate_total_rows") or 0),
+            "protected_candidate_rows_require_include_snapshots": dry.get("protected_candidate_rows_require_include_snapshots", {}),
+        },
+        "smart_compact_estimate": {
+            "current_db_mb": float(storage.get("db_mb") or 0.0),
+            "current_total_sqlite_files_mb": float(storage.get("total_sqlite_files_mb") or 0.0),
+            "page_count": page_count,
+            "freelist_count": freelist_count,
+            "used_pages_after_compact_estimate": used_pages,
+            "estimated_compact_output_mb": estimated_output_mb,
+            "estimated_reclaimable_mb": estimated_reclaimable_mb,
+            "estimated_db_mb_after_compact": estimated_output_mb,
+            "estimated_db_mb_reclaimed": round(float(storage.get("db_mb") or 0.0) - estimated_output_mb, 2),
+        },
+        "safety_thresholds": {
+            "output_buffer_mb": buffer_mb,
+            "min_reclaimable_mb": min_reclaim,
+            "required_free_mb_for_vacuum_into": required_free_mb,
+            "actual_free_mb": free_mb,
+            "max_expected_output_mb": SQLITE_SMART_COMPACT_MAX_EXPECTED_OUTPUT_MB,
+        },
+        "paths": {
+            "db_path": db_path,
+            "tmp_path": tmp_path,
+            "backup_path_example": backup_path_example,
+        },
+        "can_smart_compact": len(blockers) == 0,
+        "blockers": blockers,
+        "warnings": warnings,
+        "required_confirm": SQLITE_SMART_COMPACT_REQUIRED_CONFIRM,
+        "will_delete_rows": False,
+        "will_change_decision_logic": False,
+        "will_touch_telegram": False,
+        "notes_ar": "فحص فقط. لا ضغط ولا حذف. إذا نجح، التنفيذ سينشئ نسخة SQLite مضغوطة مؤقتة ثم يتحقق منها قبل الاستبدال.",
+        "automation_note_ar": "بعد نجاح هذا المسار يمكن لاحقًا جعل sync ثم verify ثم raw_json slim يعمل تلقائيًا بعد الأرشفة، أما الضغط فيبقى أسبوعيًا/يدويًا أو مشروطًا لأنه يبدّل ملف SQLite.",
+    }
+
+
+def evidence_retention_sqlite_smart_compact_status(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    output_buffer_mb: float | None = None,
+    min_reclaimable_mb: float | None = None,
+) -> dict:
+    result = _sqlite_smart_compact_status(
+        week_key=week_key,
+        trade_date=trade_date,
+        keep_days=keep_days,
+        require_verified=require_verified,
+        output_buffer_mb=output_buffer_mb,
+        min_reclaimable_mb=min_reclaimable_mb,
+    )
+    try:
+        set_json("evidence_last_sqlite_smart_compact_status", result)
+    except Exception:
+        pass
+    return result
+
+
+def _sqlite_execute_vacuum_into(tmp_path: str) -> dict:
+    """Create a compact SQLite file using VACUUM INTO."""
+    out = {"ok": False, "tmp_path": tmp_path, "quick_check_source": {}, "error": ""}
+    quoted_tmp = str(tmp_path or "").replace("'", "''")
+    try:
+        with sqlite3.connect(str(SQLITE_DB_PATH), timeout=120, check_same_thread=False, isolation_level=None) as conn:
+            conn.execute("PRAGMA busy_timeout=120000")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            source_check = str((conn.execute("PRAGMA quick_check").fetchone() or [""])[0] or "")
+            out["quick_check_source"] = {"ok": source_check.lower() == "ok", "result": source_check}
+            if source_check.lower() != "ok":
+                out["error"] = "source_quick_check_failed"
+                return out
+            conn.execute(f"VACUUM INTO '{quoted_tmp}'")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            out["ok"] = True
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:260]}"
+    return out
+
+
+def evidence_retention_sqlite_smart_compact_execute(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    keep_days: int | None = None,
+    require_verified: bool = True,
+    confirm: str = "",
+    output_buffer_mb: float | None = None,
+    min_reclaimable_mb: float | None = None,
+) -> dict:
+    """Run smart SQLite compact with VACUUM INTO and guarded swap.
+
+    This never deletes table rows. It creates a compact DB beside the old DB,
+    verifies quick_check and table counts, swaps only after verification, then
+    deletes the old bloated backup to actually reclaim Railway volume space.
+    """
+    if str(confirm or "").strip() != SQLITE_SMART_COMPACT_REQUIRED_CONFIRM:
+        return {
+            "ok": False,
+            "executed": False,
+            "error": "confirmation_required",
+            "required_confirm": SQLITE_SMART_COMPACT_REQUIRED_CONFIRM,
+            "notes_ar": "لم يتم ضغط SQLite.",
+        }
+
+    status_before = _sqlite_smart_compact_status(
+        week_key=week_key,
+        trade_date=trade_date,
+        keep_days=keep_days,
+        require_verified=require_verified,
+        output_buffer_mb=output_buffer_mb,
+        min_reclaimable_mb=min_reclaimable_mb,
+    )
+    if not bool(status_before.get("can_smart_compact")):
+        result = {
+            "ok": False,
+            "executed": False,
+            "error": "smart_compact_safety_check_failed",
+            "status_before": status_before,
+            "notes_ar": "لم يتم ضغط SQLite لأن فحص الأمان لم ينجح.",
+        }
+        try:
+            set_json("evidence_last_sqlite_smart_compact_execute", result)
+        except Exception:
+            pass
+        return result
+
+    db_path = str(SQLITE_DB_PATH)
+    db_dir = os.path.dirname(db_path) or "."
+    started_at = _now_text()
+    stamp = datetime.now(RIYADH_TZ).strftime("%Y%m%d_%H%M%S")
+    tmp_path = os.path.join(db_dir, f"{os.path.basename(db_path)}.smart_compact_v2_tmp")
+    backup_path = os.path.join(db_dir, f"{os.path.basename(db_path)}.smart_compact_v2_backup_{stamp}")
+    counts_before = _sqlite_table_counts_snapshot()
+    storage_before = _sqlite_storage_snapshot()
+    pages_before = _sqlite_page_snapshot()
+    steps: list[dict] = []
+    errors: list[str] = []
+    executed = False
+    swapped = False
+    backup_deleted = False
+    restored_backup = False
+    tmp_size_mb = 0.0
+
+    try:
+        with _LOCK:
+            # Clean only our own deterministic temp file from a prior failed run.
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                    steps.append({"step": "remove_old_tmp", "ok": True, "path": tmp_path})
+            except Exception as exc:
+                errors.append(f"remove_old_tmp_failed: {type(exc).__name__}: {str(exc)[:180]}")
+
+            vacuum_result = _sqlite_execute_vacuum_into(tmp_path)
+            steps.append({"step": "vacuum_into", **vacuum_result})
+            if not bool(vacuum_result.get("ok")):
+                raise RuntimeError(str(vacuum_result.get("error") or "vacuum_into_failed"))
+            tmp_size_mb = _safe_file_mb(tmp_path)
+            tmp_quick = _sqlite_quick_check_for_path(tmp_path)
+            steps.append({"step": "quick_check_tmp", **tmp_quick})
+            if not bool(tmp_quick.get("ok")):
+                raise RuntimeError("tmp_quick_check_failed")
+            tmp_counts = _sqlite_table_counts_for_path(tmp_path)
+            counts_match_tmp = bool(counts_before == tmp_counts) if counts_before and tmp_counts else False
+            steps.append({"step": "table_counts_tmp", "ok": counts_match_tmp, "counts_match": counts_match_tmp})
+            if not counts_match_tmp:
+                raise RuntimeError("tmp_table_counts_mismatch")
+
+            # Ensure source WAL is clean before moving files.
+            try:
+                with sqlite3.connect(db_path, timeout=60, check_same_thread=False, isolation_level=None) as conn:
+                    conn.execute("PRAGMA busy_timeout=60000")
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception as exc:
+                raise RuntimeError(f"source_checkpoint_before_swap_failed: {type(exc).__name__}: {str(exc)[:180]}")
+            sidecars_before = _sqlite_remove_sidecar_files(db_path)
+            steps.append({"step": "remove_sidecars_before_swap", "ok": not sidecars_before.get("errors"), **sidecars_before})
+            if sidecars_before.get("errors"):
+                raise RuntimeError("remove_sidecars_before_swap_failed")
+
+            os.replace(db_path, backup_path)
+            steps.append({"step": "move_old_db_to_backup", "ok": True, "backup_path": backup_path})
+            os.replace(tmp_path, db_path)
+            swapped = True
+            steps.append({"step": "move_tmp_to_db", "ok": True, "db_path": db_path})
+
+            # Re-enable WAL and verify the newly swapped DB before deleting backup.
+            try:
+                with sqlite3.connect(db_path, timeout=60, check_same_thread=False, isolation_level=None) as conn:
+                    conn.execute("PRAGMA busy_timeout=60000")
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    new_check = str((conn.execute("PRAGMA quick_check").fetchone() or [""])[0] or "")
+                    conn.execute("PRAGMA optimize")
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                steps.append({"step": "verify_new_db", "ok": new_check.lower() == "ok", "quick_check": new_check})
+                if new_check.lower() != "ok":
+                    raise RuntimeError("new_db_quick_check_failed")
+            except Exception as exc:
+                raise RuntimeError(f"new_db_verify_failed: {type(exc).__name__}: {str(exc)[:220]}")
+
+            counts_after_swap = _sqlite_table_counts_snapshot()
+            counts_match_after_swap = bool(counts_before == counts_after_swap) if counts_before and counts_after_swap else False
+            steps.append({"step": "table_counts_after_swap", "ok": counts_match_after_swap, "counts_match": counts_match_after_swap})
+            if not counts_match_after_swap:
+                raise RuntimeError("new_db_table_counts_mismatch")
+
+            try:
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+                    backup_deleted = True
+                sidecars_after = _sqlite_remove_sidecar_files(db_path)
+                steps.append({"step": "delete_backup_and_sidecars", "ok": not sidecars_after.get("errors"), "backup_deleted": backup_deleted, **sidecars_after})
+                if sidecars_after.get("errors"):
+                    errors.extend(sidecars_after.get("errors") or [])
+            except Exception as exc:
+                errors.append(f"backup_delete_failed: {type(exc).__name__}: {str(exc)[:180]}")
+            executed = True
+    except Exception as exc:
+        errors.append(f"{type(exc).__name__}: {str(exc)[:260]}")
+        # Attempt to restore backup if swap had already happened and backup remains.
+        try:
+            if swapped and os.path.exists(backup_path):
+                try:
+                    if os.path.exists(db_path):
+                        os.remove(db_path)
+                except Exception:
+                    pass
+                os.replace(backup_path, db_path)
+                restored_backup = True
+                steps.append({"step": "restore_backup_after_failure", "ok": True, "backup_path": backup_path})
+        except Exception as restore_exc:
+            errors.append(f"restore_backup_failed: {type(restore_exc).__name__}: {str(restore_exc)[:220]}")
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+    storage_after = _sqlite_storage_snapshot()
+    pages_after = _sqlite_page_snapshot()
+    counts_after = _sqlite_table_counts_snapshot()
+    counts_match = bool(counts_before == counts_after) if counts_before and counts_after else False
+    db_mb_before = float(storage_before.get("db_mb") or 0.0)
+    db_mb_after = float(storage_after.get("db_mb") or 0.0)
+    total_mb_before = float(storage_before.get("total_sqlite_files_mb") or 0.0)
+    total_mb_after = float(storage_after.get("total_sqlite_files_mb") or 0.0)
+    result = {
+        "ok": bool(executed and not errors and counts_match),
+        "executed": bool(executed),
+        "version": SQLITE_SMART_COMPACT_EXECUTE_VERSION,
+        "started_at": started_at,
+        "finished_at": _now_text(),
+        "errors": errors,
+        "restored_backup_after_failure": bool(restored_backup),
+        "backup_deleted_after_success": bool(backup_deleted),
+        "tmp_size_mb": tmp_size_mb,
+        "status_before": status_before,
+        "steps": steps,
+        "storage_before": storage_before,
+        "storage_after": storage_after,
+        "page_stats_before": pages_before,
+        "page_stats_after": pages_after,
+        "db_mb_before": db_mb_before,
+        "db_mb_after": db_mb_after,
+        "db_mb_reclaimed": round(db_mb_before - db_mb_after, 2),
+        "total_sqlite_files_mb_before": total_mb_before,
+        "total_sqlite_files_mb_after": total_mb_after,
+        "total_sqlite_files_mb_reclaimed": round(total_mb_before - total_mb_after, 2),
+        "counts_match": counts_match,
+        "table_counts_before": counts_before,
+        "table_counts_after": counts_after,
+        "will_delete_rows": False,
+        "notes_ar": "تم ضغط SQLite بطريقة VACUUM INTO بدون حذف صفوف." if executed and not errors and counts_match else "لم يكتمل الضغط الآمن؛ راجع errors وsteps قبل أي إجراء آخر.",
+    }
+    try:
+        set_json("evidence_last_sqlite_smart_compact_execute", result)
     except Exception:
         pass
     return result
