@@ -4931,6 +4931,253 @@ def evidence_retention_sqlite_table_size_report(limit: int = 30, include_indexes
         pass
     return result
 
+
+def _payload_size_expr(columns: list[str]) -> str:
+    """Build a SQLite expression that sums text byte lengths safely."""
+    parts = []
+    for col in columns:
+        safe_col = _quote_sqlite_identifier(str(col))
+        parts.append(f"COALESCE(LENGTH({safe_col}),0)")
+    return " + ".join(parts) if parts else "0"
+
+
+def evidence_snapshots_payload_report(
+    week_key: str | None = None,
+    trade_date: str | None = None,
+    limit: int = 30,
+    heavy_threshold_kb: int = 100,
+) -> dict:
+    """Read-only report explaining why evidence_snapshots is large.
+
+    This report does not delete, compact, or update anything. It measures the
+    heavy JSON payload columns so we can decide later whether to safely slim
+    archived snapshots while keeping the useful scalar columns.
+    """
+    lim = max(5, min(int(limit or 30), 100))
+    threshold_bytes = max(1, int(heavy_threshold_kb or 100)) * 1024
+    payload_cols = ["raw_json", "polygon_summary_json", "risk_tags_json", "success_tags_json"]
+    payload_expr = _payload_size_expr(payload_cols)
+    target = _resolve_retention_archive_target(week_key, trade_date)
+    wk = str(target.get("week_key") or _current_week_key() or "current")
+    td = str(target.get("trade_date") or _today_text())[:10]
+    cutoff14 = _retention_cutoff_date(14)
+    result = {
+        "ok": False,
+        "version": "evidence_snapshots_payload_report_v1_read_only",
+        "generated_at": _now_text(),
+        "sqlite_enabled": bool(SQLITE_ENABLED),
+        "target_week_key": wk,
+        "target_trade_date": td,
+        "retention_target": {
+            "target_source": target.get("target_source"),
+            "used_last_successful_sync": bool(target.get("used_last_successful_sync")),
+            "explicit_target_requested": bool(target.get("explicit_target_requested")),
+            "note": target.get("note", ""),
+        },
+        "storage": _sqlite_storage_snapshot(),
+        "page_stats": _sqlite_page_snapshot(),
+        "payload_columns_checked": payload_cols,
+        "heavy_threshold_kb": int(heavy_threshold_kb or 100),
+        "limit": lim,
+        "summary_ar": "فحص قراءة فقط؛ لا حذف ولا ضغط ولا تعديل للبيانات.",
+        "next_action_ar": "إذا ثبت أن raw_json هو السبب، نبني dry-run لتصغير JSON المؤرشف فقط بعد موافقة صريحة.",
+        "error": "",
+    }
+    if not SQLITE_ENABLED:
+        result["error"] = "sqlite_disabled"
+        return result
+    try:
+        init_evidence_db()
+        with sqlite3.connect(str(SQLITE_DB_PATH), timeout=30, check_same_thread=False) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=30000")
+            total = conn.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS rows,
+                    COUNT(DISTINCT symbol) AS symbols,
+                    COUNT(DISTINCT trade_date) AS trade_dates,
+                    COUNT(DISTINCT week_key) AS week_keys,
+                    MIN(trade_date) AS min_trade_date,
+                    MAX(trade_date) AS max_trade_date,
+                    MIN(captured_at_text) AS first_capture,
+                    MAX(captured_at_text) AS last_capture,
+                    COALESCE(SUM(LENGTH(raw_json)),0) AS raw_bytes,
+                    COALESCE(SUM(LENGTH(polygon_summary_json)),0) AS polygon_bytes,
+                    COALESCE(SUM(LENGTH(risk_tags_json)),0) AS risk_bytes,
+                    COALESCE(SUM(LENGTH(success_tags_json)),0) AS success_bytes,
+                    COALESCE(SUM({payload_expr}),0) AS payload_bytes,
+                    COALESCE(AVG({payload_expr}),0) AS avg_payload_bytes,
+                    COALESCE(MAX({payload_expr}),0) AS max_payload_bytes,
+                    SUM(CASE WHEN ({payload_expr}) >= ? THEN 1 ELSE 0 END) AS heavy_rows
+                FROM evidence_snapshots
+                """,
+                (threshold_bytes,),
+            ).fetchone()
+
+            def _mb(v) -> float:
+                return round(float(v or 0) / (1024 * 1024), 2)
+
+            total_payload = {
+                "rows": int(total["rows"] or 0),
+                "symbols": int(total["symbols"] or 0),
+                "trade_dates": int(total["trade_dates"] or 0),
+                "week_keys": int(total["week_keys"] or 0),
+                "min_trade_date": total["min_trade_date"] or "",
+                "max_trade_date": total["max_trade_date"] or "",
+                "first_capture": total["first_capture"] or "",
+                "last_capture": total["last_capture"] or "",
+                "raw_json_mb": _mb(total["raw_bytes"]),
+                "polygon_summary_mb": _mb(total["polygon_bytes"]),
+                "risk_tags_mb": _mb(total["risk_bytes"]),
+                "success_tags_mb": _mb(total["success_bytes"]),
+                "json_payload_mb": _mb(total["payload_bytes"]),
+                "avg_payload_kb": round(float(total["avg_payload_bytes"] or 0) / 1024, 2),
+                "max_payload_kb": round(float(total["max_payload_bytes"] or 0) / 1024, 2),
+                "heavy_rows_over_threshold": int(total["heavy_rows"] or 0),
+            }
+
+            def _group_report(group_col: str, where_sql: str = "", args: tuple = ()) -> list[dict]:
+                group_id = _quote_sqlite_identifier(group_col)
+                sql = f"""
+                    SELECT
+                        {group_id} AS group_value,
+                        COUNT(*) AS rows,
+                        COUNT(DISTINCT symbol) AS symbols,
+                        MIN(captured_at_text) AS first_capture,
+                        MAX(captured_at_text) AS last_capture,
+                        COALESCE(SUM(LENGTH(raw_json)),0) AS raw_bytes,
+                        COALESCE(SUM(LENGTH(polygon_summary_json)),0) AS polygon_bytes,
+                        COALESCE(SUM({payload_expr}),0) AS payload_bytes,
+                        COALESCE(AVG({payload_expr}),0) AS avg_payload_bytes,
+                        COALESCE(MAX({payload_expr}),0) AS max_payload_bytes
+                    FROM evidence_snapshots
+                    {where_sql}
+                    GROUP BY {group_id}
+                    ORDER BY payload_bytes DESC, rows DESC
+                    LIMIT ?
+                """
+                out = []
+                for row in conn.execute(sql, (*args, lim)).fetchall():
+                    out.append({
+                        "value": row["group_value"] or "",
+                        "rows": int(row["rows"] or 0),
+                        "symbols": int(row["symbols"] or 0),
+                        "first_capture": row["first_capture"] or "",
+                        "last_capture": row["last_capture"] or "",
+                        "raw_json_mb": _mb(row["raw_bytes"]),
+                        "polygon_summary_mb": _mb(row["polygon_bytes"]),
+                        "json_payload_mb": _mb(row["payload_bytes"]),
+                        "avg_payload_kb": round(float(row["avg_payload_bytes"] or 0) / 1024, 2),
+                        "max_payload_kb": round(float(row["max_payload_bytes"] or 0) / 1024, 2),
+                    })
+                return out
+
+            def _candidate(where_sql: str, args: tuple = ()) -> dict:
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        COUNT(*) AS rows,
+                        COUNT(DISTINCT symbol) AS symbols,
+                        COALESCE(SUM(LENGTH(raw_json)),0) AS raw_bytes,
+                        COALESCE(SUM(LENGTH(polygon_summary_json)),0) AS polygon_bytes,
+                        COALESCE(SUM({payload_expr}),0) AS payload_bytes,
+                        SUM(CASE WHEN ({payload_expr}) >= ? THEN 1 ELSE 0 END) AS heavy_rows
+                    FROM evidence_snapshots
+                    {where_sql}
+                    """,
+                    (threshold_bytes, *args),
+                ).fetchone()
+                return {
+                    "rows": int(row["rows"] or 0),
+                    "symbols": int(row["symbols"] or 0),
+                    "raw_json_mb": _mb(row["raw_bytes"]),
+                    "polygon_summary_mb": _mb(row["polygon_bytes"]),
+                    "json_payload_mb": _mb(row["payload_bytes"]),
+                    "heavy_rows_over_threshold": int(row["heavy_rows"] or 0),
+                }
+
+            top_heavy = []
+            for row in conn.execute(
+                f"""
+                SELECT id, week_key, trade_date, captured_at_text, session, symbol, source_group,
+                       signal_bucket, decision, change_pct,
+                       LENGTH(raw_json) AS raw_bytes,
+                       LENGTH(polygon_summary_json) AS polygon_bytes,
+                       ({payload_expr}) AS payload_bytes
+                FROM evidence_snapshots
+                ORDER BY payload_bytes DESC
+                LIMIT ?
+                """,
+                (lim,),
+            ).fetchall():
+                top_heavy.append({
+                    "id": int(row["id"] or 0),
+                    "week_key": row["week_key"] or "",
+                    "trade_date": row["trade_date"] or "",
+                    "captured_at_text": row["captured_at_text"] or "",
+                    "session": row["session"] or "",
+                    "symbol": row["symbol"] or "",
+                    "source_group": row["source_group"] or "",
+                    "signal_bucket": row["signal_bucket"] or "",
+                    "decision": row["decision"] or "",
+                    "change_pct": round(float(row["change_pct"] or 0), 2),
+                    "raw_json_kb": round(float(row["raw_bytes"] or 0) / 1024, 2),
+                    "polygon_summary_kb": round(float(row["polygon_bytes"] or 0) / 1024, 2),
+                    "payload_kb": round(float(row["payload_bytes"] or 0) / 1024, 2),
+                })
+
+            by_trade_date = _group_report("trade_date")
+            by_week_key = _group_report("week_key")
+            by_session = _group_report("session")
+            target_candidate = _candidate("WHERE week_key=? AND trade_date=?", (wk, td))
+            old_14_candidate = _candidate("WHERE trade_date < ?", (cutoff14,))
+            current_week_candidate = _candidate("WHERE week_key=?", (wk,))
+
+            # Estimate how much of the table is JSON payload vs SQLite table size.
+            table_report = evidence_retention_sqlite_table_size_report(limit=30, include_indexes=True)
+            snapshot_table_mb = 0.0
+            for item in (table_report.get("tables") or []):
+                if isinstance(item, dict) and item.get("table") == "evidence_snapshots":
+                    snapshot_table_mb = float(item.get("table_mb") or 0.0)
+                    break
+            json_share_pct = round((float(total_payload.get("json_payload_mb") or 0.0) / snapshot_table_mb * 100.0), 2) if snapshot_table_mb > 0 else 0.0
+
+            result.update({
+                "ok": True,
+                "snapshot_table_mb": snapshot_table_mb,
+                "json_payload_share_of_snapshot_table_pct": json_share_pct,
+                "totals": total_payload,
+                "by_trade_date": by_trade_date,
+                "by_week_key": by_week_key,
+                "by_session": by_session,
+                "top_heavy_rows": top_heavy,
+                "candidate_policy_preview": {
+                    "verified_target_day": target_candidate,
+                    "current_week": current_week_candidate,
+                    "older_than_14_days": old_14_candidate,
+                    "all_snapshots": {
+                        "rows": total_payload["rows"],
+                        "symbols": total_payload["symbols"],
+                        "json_payload_mb": total_payload["json_payload_mb"],
+                        "raw_json_mb": total_payload["raw_json_mb"],
+                        "polygon_summary_mb": total_payload["polygon_summary_mb"],
+                    },
+                },
+                "interpretation_ar": (
+                    "إذا كانت نسبة json_payload عالية، فالحل القادم ليس حذف الصفوف، بل تصغير الحقول الثقيلة "
+                    "مثل raw_json بعد التأكد من أن الأرقام المهمة محفوظة في الأعمدة العادية والأرشيف موجود في GitHub."
+                ),
+                "next_action_ar": "أرسل هذا التقرير، وبعده نقرر هل نبني dry-run لتصغير raw_json المؤرشف فقط أم نوقف هنا.",
+            })
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
+    try:
+        set_json("evidence_last_snapshots_payload_report", result)
+    except Exception:
+        pass
+    return result
+
 def _daily_auto_sync_due(session: str) -> bool:
     """Compatibility wrapper used by the background worker.
 
