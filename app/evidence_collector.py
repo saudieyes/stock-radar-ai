@@ -3815,6 +3815,119 @@ def _compact_evidence_archive_payload(week_key: str, trade_date: str) -> dict:
     }
 
 
+
+def _github_archive_max_file_bytes(default: int = 3000000) -> int:
+    try:
+        return max(250000, int(float(os.getenv("GITHUB_BATCH_MAX_FILE_BYTES", str(default)) or default)))
+    except Exception:
+        return int(default)
+
+
+def _archive_json_bytes(content: Any) -> int:
+    try:
+        return len(json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8"))
+    except Exception:
+        return len(str(content or "").encode("utf-8"))
+
+
+def _split_compact_evidence_archive_payload(compact_payload: dict, *, week_key: str, trade_date: str, base_path: str) -> dict:
+    """Split oversized compact evidence archives into readable JSON parts.
+
+    GitHub Contents API and Railway memory/egress guards intentionally block
+    oversized files. Some busy days can make the compact evidence archive exceed
+    the per-file safety limit even after raw payloads are removed. This splitter
+    keeps the archive useful by writing multiple small JSON files and recording
+    them in the manifest. It does not change SQLite, decisions, scores, or any
+    trading logic.
+    """
+    wk = str(week_key or "")
+    td = str(trade_date or "")[:10]
+    max_file_bytes = _github_archive_max_file_bytes()
+    target_bytes = max(200000, min(int(max_file_bytes * 0.85), max_file_bytes - 150000))
+    original_bytes = _archive_json_bytes(compact_payload)
+    if original_bytes <= target_bytes:
+        return {
+            "split": False,
+            "files": [{"label": "json", "path": base_path, "content": compact_payload, "is_json": True}],
+            "paths": [],
+            "original_bytes": original_bytes,
+            "target_bytes": target_bytes,
+            "max_file_bytes": max_file_bytes,
+        }
+
+    snapshots = compact_payload.get("snapshots_sample") if isinstance(compact_payload.get("snapshots_sample"), list) else []
+    daily_big_movers = compact_payload.get("daily_big_movers") if isinstance(compact_payload.get("daily_big_movers"), list) else []
+    header = {
+        k: v
+        for k, v in compact_payload.items()
+        if k not in {"snapshots_sample", "winner_profiles", "daily_big_movers"}
+    }
+    header["split_archive"] = True
+    header["split_reason"] = "evidence_json_exceeded_safe_github_file_size"
+    header["winner_profiles_location"] = "separate winner_profiles archive file"
+    header["daily_big_movers_location"] = "part_001 only"
+    header["original_evidence_json_bytes"] = original_bytes
+
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+
+    def make_part(rows: list[dict], part_index: int, part_count: int, include_daily: bool = False) -> dict:
+        payload = {
+            "ok": True,
+            "version": "evidence_compact_archive_split_part_v1",
+            "week_key": wk,
+            "trade_date": td,
+            "split_group": "evidence_json",
+            "part_index": int(part_index),
+            "part_count": int(part_count),
+            "archive_header": header,
+            "snapshots_sample": rows,
+            "daily_big_movers": daily_big_movers if include_daily else [],
+            "notes_ar": "جزء من أرشيف Evidence المقسم لتجنب ملف GitHub كبير. لا يحتوي raw_json الثقيل ولا يغير SQLite أو القرار.",
+        }
+        return payload
+
+    for row in snapshots:
+        test_rows = current + [row]
+        test_payload = make_part(test_rows, 1, 999, include_daily=(not chunks))
+        if current and _archive_json_bytes(test_payload) > target_bytes:
+            chunks.append(current)
+            current = [row]
+        else:
+            current = test_rows
+    if current or not chunks:
+        chunks.append(current)
+
+    part_count = len(chunks)
+    files = []
+    part_meta = []
+    stem = base_path[:-5] if base_path.endswith(".json") else base_path
+    for idx, rows in enumerate(chunks, start=1):
+        part_path = f"{stem}_part_{idx:03d}.json"
+        payload = make_part(rows, idx, part_count, include_daily=(idx == 1))
+        b = _archive_json_bytes(payload)
+        files.append({"label": f"json_part_{idx:03d}", "path": part_path, "content": payload, "is_json": True})
+        part_meta.append({
+            "label": f"json_part_{idx:03d}",
+            "path": part_path,
+            "bytes_estimate": int(b),
+            "snapshot_rows": len(rows),
+            "contains_daily_big_movers": bool(idx == 1 and daily_big_movers),
+        })
+
+    return {
+        "split": True,
+        "files": files,
+        "paths": [m["path"] for m in part_meta],
+        "parts": part_meta,
+        "part_count": part_count,
+        "original_bytes": original_bytes,
+        "target_bytes": target_bytes,
+        "max_file_bytes": max_file_bytes,
+        "snapshot_rows_total": len(snapshots),
+    }
+
+
 def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None = None, include_csv: bool | None = None) -> dict:
     wk = str(week_key or _current_week_key() or "current")
     d = str(trade_date or _today_text())[:10]
@@ -3843,16 +3956,26 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
 
     local_counts = _evidence_local_counts_for_archive(wk, d)
     compact_payload = _compact_evidence_archive_payload(wk, d) if EVIDENCE_GITHUB_COMPACT_SYNC else export_evidence_json(week_key=wk, trade_date=d, limit=EVIDENCE_SYNC_SAMPLE_ROWS)
+    split_info = _split_compact_evidence_archive_payload(compact_payload, week_key=wk, trade_date=d, base_path=json_path)
+    if split_info.get("split"):
+        paths["json_parts"] = list(split_info.get("paths") or [])
+        paths["json_original"] = json_path
+
     manifest = {
         "ok": True,
-        "version": "evidence_archive_manifest_v5",
+        "version": "evidence_archive_manifest_v5d_split_safe",
         "week_key": wk,
         "trade_date": d,
         "generated_at": _now_text(),
         "compact_sync": bool(EVIDENCE_GITHUB_COMPACT_SYNC),
         "local_counts_at_sync": local_counts,
         "prune_allowed_after_verify": True,
-        "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync.",
+        "evidence_json_split": bool(split_info.get("split")),
+        "evidence_json_original_path": json_path,
+        "evidence_json_parts": split_info.get("parts", []) if split_info.get("split") else [],
+        "evidence_json_original_bytes_estimate": int(split_info.get("original_bytes") or 0),
+        "evidence_json_split_target_bytes": int(split_info.get("target_bytes") or 0),
+        "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync. Oversized evidence archives may be split into safe JSON parts.",
     }
     summary = weekly_evidence_summary(week_key=wk, format="json")
     if isinstance(summary, dict):
@@ -3866,7 +3989,7 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     }
     files = [
         {"label": "manifest", "path": manifest_path, "content": manifest, "is_json": True},
-        {"label": "json", "path": json_path, "content": compact_payload, "is_json": True},
+        *list(split_info.get("files") or []),
         {"label": "summary", "path": summary_path, "content": summary, "is_json": True},
         {"label": "winner_profiles", "path": winners_path, "content": {"ok": True, "version": "winner_profiles_compact_v5", "week_key": wk, "trade_date": d, "manifest": manifest, "items": _compact_winner_profile_rows_for_sync(wk, d)}, "is_json": True},
         {"label": "pattern_readiness", "path": readiness_path, "content": pattern_readiness_report(week_key=wk, format="json"), "is_json": True},
@@ -3892,25 +4015,42 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
                         "configured": True,
                         "path": item.get("path", ""),
                         "branch": batch.get("branch", ""),
-                        "commit_sha": commit_sha,
+                        "commit_sha": item.get("commit_sha", commit_sha),
                         "bytes": item.get("bytes", 0),
-                        "synced_at": batch.get("synced_at", ""),
+                        "synced_at": item.get("synced_at", batch.get("synced_at", "")),
                     }
+        if split_info.get("split"):
+            synced_parts = [file_results.get(str(p.get("label") or ""), {}) for p in split_info.get("parts", []) or []]
+            file_results["json"] = {
+                "ok": all(bool(p.get("ok")) for p in synced_parts) if synced_parts else False,
+                "configured": True,
+                "split": True,
+                "path": json_path,
+                "parts": split_info.get("parts", []),
+                "part_count": int(split_info.get("part_count") or 0),
+                "original_bytes_estimate": int(split_info.get("original_bytes") or 0),
+                "bytes": sum(int((p or {}).get("bytes") or 0) for p in synced_parts),
+                "synced_at": batch.get("synced_at", ""),
+            }
     else:
         for item in files:
             label = str(item.get("label") or "")
             if label:
                 file_results[label] = {"ok": False, "configured": True, "path": item.get("path", ""), "error": batch.get("error", "batch_sync_failed")}
+        if split_info.get("split"):
+            file_results["json"] = {"ok": False, "configured": True, "split": True, "path": json_path, "parts": split_info.get("parts", []), "error": batch.get("error", "batch_sync_failed")}
 
     results = {
         "ok": bool(batch.get("ok")),
-        "version": "evidence_github_sync_v5c_contents_fallback_compact",
+        "version": "evidence_github_sync_v5d_split_large_archives",
         "week_key": wk,
         "trade_date": d,
         "paths": paths,
         "local_counts_at_sync": local_counts,
         "compact_sync": bool(EVIDENCE_GITHUB_COMPACT_SYNC),
         "include_csv": bool(include_csv),
+        "evidence_json_split": bool(split_info.get("split")),
+        "evidence_json_split_info": {k: v for k, v in split_info.items() if k not in {"files"}},
         "batch_commit": bool(batch.get("method") == "git_data_batch"),
         "github_sync_method": batch.get("method", ""),
         "batch": batch,
@@ -3921,7 +4061,6 @@ def sync_evidence_to_github(week_key: str | None = None, trade_date: str | None 
     except Exception:
         pass
     return results
-
 
 # ---------------------------------------------------------------------------
 # Retention Guard V4b (safe, no deletion by default)
@@ -4178,7 +4317,49 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     # Safety rule: the large evidence file may pass by metadata + manifest counts;
     # all smaller supporting JSON files must still be readable JSON.
     counts_ok_precheck = all(bool(v.get("ok")) for v in count_checks.values()) if count_checks else False
+    manifest_evidence_parts = []
+    if isinstance(manifest_data, dict):
+        raw_parts = manifest_data.get("evidence_json_parts") or []
+        if isinstance(raw_parts, list):
+            manifest_evidence_parts = [p for p in raw_parts if isinstance(p, dict) and str(p.get("path") or "")]
     for name in ["evidence_json", "summary_json", "winner_profiles_json", "pattern_readiness_json", "pattern_lab_json", "market_fear_json"]:
+        if name == "evidence_json" and manifest_evidence_parts:
+            part_checks = []
+            for part in manifest_evidence_parts:
+                part_path = str(part.get("path") or "")
+                fetch = fetch_json_file(part_path)
+                data = fetch.get("data") if isinstance(fetch, dict) else None
+                fetch_ok = bool(isinstance(fetch, dict) and fetch.get("ok"))
+                exists = bool(isinstance(fetch, dict) and fetch.get("exists"))
+                sha = str(fetch.get("sha", "") if isinstance(fetch, dict) else "")
+                readable = data is not None
+                metadata_ok = bool(fetch_ok and exists and sha)
+                part_checks.append({
+                    "label": part.get("label", ""),
+                    "path": part_path,
+                    "ok": metadata_ok,
+                    "exists": exists,
+                    "readable": readable,
+                    "sha": sha,
+                    "bytes_estimate": part.get("bytes_estimate", 0),
+                    "snapshot_rows": part.get("snapshot_rows", 0),
+                    "verification_mode": "readable_json" if readable else "metadata_plus_manifest_counts_no_large_download" if metadata_ok else "failed",
+                    "error": fetch.get("error", "") if isinstance(fetch, dict) else "fetch_failed",
+                })
+            parts_ok = bool(part_checks) and all(bool(p.get("ok")) for p in part_checks)
+            checks[name] = {
+                "name": name,
+                "path": paths.get(name) or _archive_paths_for(wk, td).get(name, ""),
+                "ok": bool(parts_ok and manifest_ok and counts_ok_precheck),
+                "exists": parts_ok,
+                "readable": any(bool(p.get("readable")) for p in part_checks),
+                "split": True,
+                "part_count": len(part_checks),
+                "parts": part_checks,
+                "verification_mode": "split_parts_metadata_plus_manifest_counts" if parts_ok else "failed",
+                "error": "" if parts_ok else "one_or_more_evidence_parts_missing",
+            }
+            continue
         path = paths.get(name) or ""
         if not path:
             checks[name] = {"name": name, "ok": False, "exists": False, "error": "missing_path"}
@@ -4228,7 +4409,7 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
     ok = bool(files_ok and counts_ok)
     result = {
         "ok": ok,
-        "version": "retention_verify_github_v5c_manifest_metadata_safe",
+        "version": "retention_verify_github_v5d_split_manifest_safe",
         "configured": True,
         "week_key": wk,
         "trade_date": td,
@@ -4244,7 +4425,7 @@ def evidence_retention_verify_github(week_key: str | None = None, trade_date: st
         "manifest_counts_at_sync": manifest_counts,
         "count_checks": count_checks,
         "checks": checks,
-        "notes": "Verification only. No Railway deletion is performed here. Uses manifest and metadata for large archive files to avoid huge downloads.",
+        "notes": "Verification only. No Railway deletion is performed here. Supports split evidence archives and uses manifest/metadata to avoid huge downloads.",
     }
     try:
         set_json("evidence_last_retention_verify", result)
