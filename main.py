@@ -210,6 +210,7 @@ from app.final_decision_engine import apply_final_decisions
 from app.telegram_alerts import maybe_send_buy_now_alerts, telegram_alert_status
 from app.system_cost_health import build_system_cost_health
 from app.pre_move_engine import enrich_row_pre_move
+from app.intraday_early_source_radar import get_last_intraday_early_source_radar_status
 
 app = FastAPI()
 
@@ -2536,6 +2537,17 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
             }
     return out
+
+
+@app.get("/diagnostics/intraday-early-source-radar")
+def diagnostics_intraday_early_source_radar():
+    status = get_last_intraday_early_source_radar_status()
+    return {
+        "ok": True,
+        "status_available": bool(status),
+        "status": status if isinstance(status, dict) else {},
+        "notes_ar": "رادار مصدر مبكر فقط. يضيف مرشحين للمنبع ولا يغير قرار الدخول النهائي ولا يرسل Telegram.",
+    }
 
 
 @app.get("/diagnostics/source-promotion-v2a")
