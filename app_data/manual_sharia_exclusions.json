@@ -743,6 +743,14 @@
     "symbol": "FNKO",
     "updated_at": "2026-05-29 12:45:48"
   },
+  "FOFO": {
+    "excluded_at": "2026-06-03 10:44:50",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "FOFO",
+    "updated_at": "2026-06-03 10:44:50"
+  },
   "FPS": {
     "excluded_at": "2026-06-02 10:50:11",
     "note": "استبعاد يدوي شرعي",
@@ -1183,6 +1191,14 @@
     "symbol": "MUSA",
     "updated_at": "2026-04-22 14:19:35"
   },
+  "MVLL": {
+    "excluded_at": "2026-06-03 10:43:19",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "MVLL",
+    "updated_at": "2026-06-03 10:43:19"
+  },
   "MX": {
     "excluded_at": "2026-04-23 17:00:31",
     "note": "",
@@ -1534,6 +1550,14 @@
     "source": "manual",
     "symbol": "TE",
     "updated_at": "2026-05-18 10:23:39"
+  },
+  "TERG": {
+    "excluded_at": "2026-06-03 10:43:46",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "TERG",
+    "updated_at": "2026-06-03 10:43:46"
   },
   "UIS": {
     "excluded_at": "2026-05-12 15:00:57",
