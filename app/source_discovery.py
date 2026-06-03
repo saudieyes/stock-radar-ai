@@ -20,6 +20,11 @@ from app.settings import FMP_API_KEY, HTTP_SESSION, POLYGON_API_KEY
 from app.utils import safe_round, to_float
 from app.live_ignition_engine import classify_live_ignition, live_ignition_enabled
 from app.pre_move_engine import analyze_pre_move, pre_move_engine_enabled
+from app.intraday_early_source_radar import (
+    get_last_intraday_early_source_radar_status,
+    intraday_early_source_radar_enabled,
+    scan_intraday_early_source_radar,
+)
 try:
     from app.detection_journal import record_detection
 except Exception:  # keep source layer resilient if SQLite is unavailable during import
@@ -331,6 +336,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     ) or []
     market_date, grouped_map, source_mode = _scanner._select_grouped_market_map()
     market_activity_mode, suggested_target, activity_stats = _scanner._classify_source_market_activity(grouped_map or {})
+    intraday_early_radar_status = {}
+    intraday_early_radar_count = 0
+    intraday_early_radar_high_risk_count = 0
 
     # Source / Promotion V2a: explicitly inject the curated Early Movement
     # watchlist into the dynamic discovery source.  Previously it usually arrived
@@ -437,6 +445,97 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                     _add_candidate(candidates, ticker, 20 + float(pre_meta.get("pre_move_score", 0) or 0) * 0.15, "pre_move_engine_v2", "Pre-Move Engine V2: " + "، ".join((pre_meta.get("pre_move_reasons") or [])[:2]), {**m, "pre_move_score": pre_meta.get("pre_move_score")})
             except Exception:
                 pass
+
+
+    # Intraday Early Source Radar V1: a clean, separate source-layer radar for
+    # calm intraday ramps and dip-then-reclaim moves.  It does not create BUY
+    # decisions.  It only adds early candidates to the universe so the existing
+    # deep analysis and final decision engine can evaluate them before they
+    # become late/no-chase.
+    try:
+        if intraday_early_source_radar_enabled() and grouped_map:
+            intraday_early_radar_status = scan_intraday_early_source_radar(
+                grouped_map,
+                reference_tickers,
+                source_mode=source_mode,
+            ) or {}
+            for item in intraday_early_radar_status.get("candidates", []) or []:
+                sym = _clean_symbol((item or {}).get("symbol"))
+                if not sym:
+                    continue
+                lane = str((item or {}).get("lane") or "intraday_early_ramp")
+                score = float((item or {}).get("score", 0) or 0)
+                reasons = list((item or {}).get("reasons") or [])
+                blockers = list((item or {}).get("blockers") or [])
+                metrics = dict((item or {}).get("metrics") or {})
+                is_high_risk = bool((item or {}).get("high_risk", False))
+                if lane in {"high_risk_live_mover", "high_risk_late_mover_review"} or is_high_risk:
+                    intraday_early_radar_high_risk_count += 1
+                    _add_candidate(
+                        candidates,
+                        sym,
+                        max(8.0, score),
+                        "high_risk_live_mover",
+                        "مراقبة حركة مبكرة عالية المخاطر: " + "، ".join(reasons[:2]),
+                        {**metrics, "intraday_early_source_lane": lane, "intraday_early_source_score": score},
+                    )
+                elif lane == "dip_reclaim_radar":
+                    intraday_early_radar_count += 1
+                    _add_candidate(
+                        candidates,
+                        sym,
+                        max(18.0, score),
+                        "dip_reclaim_radar",
+                        "استعادة بعد نزول داخل اليوم: " + "، ".join(reasons[:2]),
+                        {**metrics, "intraday_early_source_lane": lane, "intraday_early_source_score": score},
+                    )
+                elif lane == "quiet_accumulation_radar":
+                    intraday_early_radar_count += 1
+                    _add_candidate(
+                        candidates,
+                        sym,
+                        max(14.0, score),
+                        "quiet_accumulation_radar",
+                        "تجميع هادئ داخل اليوم: " + "، ".join(reasons[:2]),
+                        {**metrics, "intraday_early_source_lane": lane, "intraday_early_source_score": score},
+                    )
+                elif lane == "late_intraday_mover_review":
+                    _add_candidate(
+                        candidates,
+                        sym,
+                        max(5.0, score),
+                        "late_mover_review",
+                        "مراجعة متحرك متأخر من رادار الحركة المبكرة",
+                        {**metrics, "intraday_early_source_lane": lane, "intraday_early_source_score": score},
+                    )
+                else:
+                    intraday_early_radar_count += 1
+                    _add_candidate(
+                        candidates,
+                        sym,
+                        max(18.0, score),
+                        "intraday_early_ramp",
+                        "رادار صعود مبكر داخل اليوم: " + "، ".join(reasons[:2]),
+                        {**metrics, "intraday_early_source_lane": lane, "intraday_early_source_score": score},
+                    )
+                if record_detection is not None and lane not in {"late_intraday_mover_review", "high_risk_late_mover_review"}:
+                    try:
+                        move_stage = "High-Risk Watch" if is_high_risk else "Early Confirmation"
+                        early_late = "high_risk" if is_high_risk else "early"
+                        record_detection(
+                            sym,
+                            price=float(metrics.get("price", 0) or 0),
+                            change_pct=float(metrics.get("change_pct", 0) or 0),
+                            source_reason="Intraday Early Source Radar V1: " + "، ".join(reasons[:3]),
+                            source_layer=lane,
+                            source_tags=["intraday_early_source_radar", lane],
+                            move_stage=move_stage,
+                            early_or_late_detection=early_late,
+                        )
+                    except Exception:
+                        pass
+    except Exception as exc:
+        intraday_early_radar_status = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:140]}"}
 
     # FMP movers are source candidates only; they still pass Sharia and deep analysis later.
     fmp_movers, fmp_movers_source = _fetch_fmp_movers()
@@ -553,6 +652,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # then constructive liquidity.  Late movers stay visible for review, but they
     # must never crowd out early builders or weekly-priority names.
     selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
+    selected_order += from_source("intraday_early_ramp", min(140, max_symbols))
+    selected_order += from_source("dip_reclaim_radar", min(120, max_symbols))
+    selected_order += from_source("quiet_accumulation_radar", min(90, max_symbols))
     selected_order += from_source("pre_move_engine_v2", min(120, max_symbols))
     selected_order += from_source("pre_move_watch", min(70, max_symbols))
     selected_order += from_source("live_ignition_hot_lane", min(120, max_symbols))
@@ -564,6 +666,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     selected_order += from_source("fmp_movers", min(80, max_symbols))
     selected_order += from_source("continuation_watch", min(35, max_symbols))
     selected_order += from_source("weekly_high_risk_manual", min(15, max_symbols))
+    selected_order += from_source("high_risk_live_mover", min(20, max_symbols))
     selected_order += from_source("late_mover_review", min(25, max_symbols))
     selected_order += from_source("top_mover", min(60, max_symbols))
     selected_order += from_source("baseline", min(220, max_symbols))
@@ -607,8 +710,17 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "fmp_confirmed": live_confirmed,
         "fmp_extended_confirmed": extended_confirmed,
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
+        "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
+        "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,
+        "quiet_accumulation_radar_count": int(source_bucket_counts.get("quiet_accumulation_radar", 0)) if 'source_bucket_counts' in locals() else 0,
+        "high_risk_live_mover_count": int(source_bucket_counts.get("high_risk_live_mover", 0)) if 'source_bucket_counts' in locals() else 0,
         "pre_move_engine_v2_count": int(source_bucket_counts.get("pre_move_engine_v2", 0)) if 'source_bucket_counts' in locals() else 0,
         "late_mover_review_count": int(source_bucket_counts.get("late_mover_review", 0)) if 'source_bucket_counts' in locals() else 0,
+        "intraday_early_source_radar": {
+            k: v for k, v in (intraday_early_radar_status or {}).items()
+            if k not in {"candidates"}
+        },
+        "intraday_early_source_radar_sample": (intraday_early_radar_status or {}).get("candidates", [])[:20],
         "fmp_quote_diagnostics": fmp_diag,
         "source_bucket_counts": source_bucket_counts,
         "price_under_2_deprioritized": price_flags.get("under_2_deprioritized", 0),
@@ -640,7 +752,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 "reasons": list(r.get("reasons") or [])[:8],
                 "metrics": {
                     k: v for k, v in (r.get("metrics") or {}).items()
-                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct"}
+                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct"}
                 },
             }
             for r in ranked[:max_symbols]
