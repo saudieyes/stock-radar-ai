@@ -1,29 +1,40 @@
-# Stock Radar AI — Clean Decision Core V1
+# Clean Decision Core V1a — Full Integration
 
-## الملفات المعدلة
-- main.py
-- app/decision_contract.py
-- app/final_decision_engine.py
-- app/opportunity_intelligence.py
-- app/pattern_action_engine.py
-- app/single_stock_engine.py
-- app/telegram_alerts.py
+## الهدف
+ربط عقد القرار النظيف بنتائج القوائم الرئيسية، وليس فقط روابط التشخيص الفردية.
 
-## ما تم تنفيذه
-1. توحيد عقد السعر والخطة قبل القرار النهائي.
-2. منع عرض خطة مكسورة كدخول بحذر أو تأكيد مبكر.
-3. حصر لا تطارد في حالة امتداد صعودي فقط، وليس عند الهبوط أو كسر الدعم.
-4. منع أرقام 0 أو بيانات ناقصة من الظهور كخطة قابلة للتنفيذ.
-5. تحويل أنماط الرابحين والخاسرين إلى حقول عملية داخل البطاقة.
-6. جعل Telegram لا يرسل إلا إذا BUY_NOW قابل للتنفيذ الآن.
-7. إضافة رابط تشخيص قرار رمز واحد: /diagnostics/decision-contract/symbol?symbol=ALM
+## ما تغيّر
+- تحديث `decision_contract.py` إلى `decision_contract_v1a_2026_06_05_full_integration`.
+- تحديث `final_decision_engine.py` إلى `official_final_decision_engine_v2a_2026_06_05_full_contract_integration`.
+- تعديل `main.py` حتى لا تفرض طبقات Early/Source القديمة No-Chase إذا لم يكن السهم ممتدًا صعودًا الآن.
 
-## اختبارات قبول محلية
-- ALM: أصبحت الخطة مكسورة PLAN_BROKEN وليست دخول بحذر.
-- RKLB: أصبحت بيانات غير مكتملة DATA_INCOMPLETE عند نقص التغير/الخطة.
-- JOBY: أصبحت انتظار ارتداد WAIT_REBOUND وليست لا تطارد.
-- FSTR: أصبحت انتظار استعادة RECLAIM_REQUIRED بسبب دعم مكسور وليست لا تطارد.
-- STRL: لا يبقى BUY_NOW إلا إذا السعر داخل منطقة التنفيذ والسيولة والسعر موثوقة.
+## الإصلاحات العملية
+- No-Chase لا يظهر بناءً على قمة تاريخية قديمة فقط؛ يجب أن يكون السعر ممتدًا صعودًا حاليًا.
+- إذا السهم أصبح هابطًا/مكسورًا/تحت الوقف، تظهر حالة الخطة الحالية مثل `PLAN_BROKEN` أو `WAIT_REBOUND` أو `RECLAIM_REQUIRED` بدل No-Chase.
+- إذا مصدر السعر مجهول أو نسبة التغير غير مؤكدة، يعتبر السعر غير مكتمل حتى لو ظهر رقم سعر.
+- إذا الخطة غير مكتملة، يتم إخفاء أرقام الدخول/الهدف/الوقف بدل عرض 0.
+- روابط التشخيص تعرض `hide_plan_numbers=true` عند عدم اكتمال الخطة.
 
-## ملاحظات
-هذا التحديث لا يلمس SQLite أو Sharia أو الأرشفة أو ملفات Polygon. هو تحديث نواة القرار والتنبيه فقط.
+## ما لم يتغير
+- لا تعديل على SQLite.
+- لا تعديل على Sharia.
+- لا تعديل على Polygon Weekly Builder.
+- لا تعديل على الواجهة.
+- لا تعديل على الصيانة/الأرشفة.
+
+## روابط الاختبار بعد الرفع
+- `/health`
+- `/diagnostics/decision-contract/symbol?symbol=ALM`
+- `/diagnostics/decision-contract/symbol?symbol=RKLB`
+- `/diagnostics/decision-contract/symbol?symbol=JOBY`
+- `/diagnostics/decision-contract/symbol?symbol=FSTR`
+- `/diagnostics/decision-contract/symbol?symbol=STRL`
+- `/trade-scan`
+- `/radar-live-refresh`
+- `/telegram-alerts/status`
+
+## قبول المرحلة
+- ALM/JOBY: يجب أن يكونا `PLAN_BROKEN` إذا السعر تحت الوقف.
+- RKLB: يجب أن يكون `DATA_INCOMPLETE`، وأرقام الخطة يجب ألا تظهر كـ 0.
+- STRL: إذا صار هابطًا يجب أن يكون `WAIT_REBOUND` أو حالة خطة مناسبة وليس Buy/No-Chase.
+- القوائم الرئيسية يجب أن تقل فيها حالات No-Chase السالبة أو المكسورة.

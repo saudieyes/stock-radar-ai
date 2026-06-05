@@ -2216,6 +2216,37 @@ def _early_movement_fast_lane_reasons(stock: dict, current_decision: str, no_cha
     except Exception:
         return []
 
+
+def _true_upward_chase_context(stock: dict) -> bool:
+    """Return True only when current price is actually extended upward now.
+
+    Historical peak or old move-stage alone is not enough.  This prevents stale
+    No-Chase labels on symbols that are now red, broken, or waiting for reclaim.
+    """
+    try:
+        current_gain = float(
+            stock.get("current_gain", stock.get("display_change_pct", stock.get("live_change_pct", stock.get("change_pct", 0)))) or 0
+        )
+    except Exception:
+        current_gain = 0.0
+    try:
+        price = float(stock.get("current_price_live", stock.get("display_price", stock.get("price", 0))) or 0)
+    except Exception:
+        price = 0.0
+    try:
+        entry = float(stock.get("display_entry_price", stock.get("entry_price", stock.get("entry", 0))) or 0)
+    except Exception:
+        entry = 0.0
+    try:
+        entry_dist = ((price - entry) / entry * 100.0) if price > 0 and entry > 0 else 999.0
+    except Exception:
+        entry_dist = 999.0
+    return bool(
+        current_gain >= 7.0
+        or (current_gain >= 3.0 and entry_dist >= 2.5)
+        or (price > 0 and entry > 0 and price >= entry * 1.035 and current_gain >= 2.0)
+    )
+
 def _post_early_movement_decision_safety(results):
     """Apply final decision caps after Early Movement classification.
 
@@ -2242,13 +2273,21 @@ def _post_early_movement_decision_safety(results):
         em = stock.get("early_movement") or {}
         move_stage_v2_name = str((stock.get("move_stage_v2") or {}).get("move_stage") or stock.get("move_stage") or "")
         v2_no_chase_stage = move_stage_v2_name in {"No-Chase", "Extended", "Catalyst Spike Review"}
-        no_chase = (
+        raw_no_chase = (
             str(em.get("status", "") or "") == "no_chase"
             or str(stock.get("no_chase_guard_status", "") or "") == "no_chase"
             or "لا تطارد" in str(stock.get("no_chase_guard_label", "") or "")
             or v2_no_chase_stage
             or str(stock.get("source_promotion_v2_status", "") or "") == "hard_no_chase_cap"
         )
+        true_chase_context = _true_upward_chase_context(stock)
+        no_chase = bool(raw_no_chase and true_chase_context)
+        if raw_no_chase and not no_chase:
+            stock["stale_no_chase_suppressed_by_contract_v1a"] = True
+            stock["stale_no_chase_original_stage"] = move_stage_v2_name
+            if str(stock.get("no_chase_guard_status", "") or "") == "no_chase":
+                stock["no_chase_guard_status"] = "not_no_chase"
+                stock["no_chase_guard_label"] = "بانتظار تقييم الخطة الحالية"
         em_reasons = [str(x) for x in (em.get("no_chase_reasons") or stock.get("no_chase_guard_reasons") or []) if str(x).strip()]
         if no_chase:
             if original_decision == "دخول قوي":
@@ -2699,9 +2738,10 @@ def diagnostics_decision_contract_symbol(symbol: str):
             "final_decision_label": (plan or {}).get("final_decision_label") if isinstance(plan, dict) else None,
             "display_price": (plan or {}).get("display_price") if isinstance(plan, dict) else None,
             "display_change_pct": (plan or {}).get("display_change_pct") if isinstance(plan, dict) else None,
-            "display_entry_price": (plan or {}).get("display_entry_price") if isinstance(plan, dict) else None,
-            "display_target_price": (plan or {}).get("display_target_price") if isinstance(plan, dict) else None,
-            "display_stop_price": (plan or {}).get("display_stop_price") if isinstance(plan, dict) else None,
+            "hide_plan_numbers": bool((plan or {}).get("hide_plan_numbers")) if isinstance(plan, dict) else False,
+            "display_entry_price": None if isinstance(plan, dict) and plan.get("hide_plan_numbers") else ((plan or {}).get("display_entry_price") if isinstance(plan, dict) else None),
+            "display_target_price": None if isinstance(plan, dict) and plan.get("hide_plan_numbers") else ((plan or {}).get("display_target_price") if isinstance(plan, dict) else None),
+            "display_stop_price": None if isinstance(plan, dict) and plan.get("hide_plan_numbers") else ((plan or {}).get("display_stop_price") if isinstance(plan, dict) else None),
             "owner_action": (plan or {}).get("owner_action") if isinstance(plan, dict) else None,
         },
     }
