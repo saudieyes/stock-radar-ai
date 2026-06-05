@@ -211,6 +211,7 @@ from app.telegram_alerts import maybe_send_buy_now_alerts, telegram_alert_status
 from app.system_cost_health import build_system_cost_health
 from app.pre_move_engine import enrich_row_pre_move
 from app.intraday_early_source_radar import get_last_intraday_early_source_radar_status
+from app.decision_contract import compact_decision_diagnostics
 
 app = FastAPI()
 
@@ -2678,6 +2679,32 @@ def single_stock(symbol: str):
     # and add /scan as a backwards-compatible alias because some links/buttons
     # and earlier handoff notes used /scan?symbol=NVDA.
     return build_single_stock_response(symbol)
+
+
+@app.get("/diagnostics/decision-contract/symbol")
+def diagnostics_decision_contract_symbol(symbol: str):
+    """Explain one symbol through the unified price/plan/final decision contract."""
+    payload = build_single_stock_response(symbol)
+    plan = payload.get("trade_plan") if isinstance(payload, dict) else {}
+    diag = compact_decision_diagnostics(plan or {"symbol": symbol})
+    return {
+        "ok": True,
+        "symbol": str(symbol or "").upper().strip(),
+        "overview_error": (payload or {}).get("overview_error") if isinstance(payload, dict) else None,
+        "trade_error": (payload or {}).get("trade_error") if isinstance(payload, dict) else None,
+        "diagnostics": diag,
+        "trade_plan_compact": {
+            "decision": (plan or {}).get("decision") if isinstance(plan, dict) else None,
+            "final_decision_code": (plan or {}).get("final_decision_code") if isinstance(plan, dict) else None,
+            "final_decision_label": (plan or {}).get("final_decision_label") if isinstance(plan, dict) else None,
+            "display_price": (plan or {}).get("display_price") if isinstance(plan, dict) else None,
+            "display_change_pct": (plan or {}).get("display_change_pct") if isinstance(plan, dict) else None,
+            "display_entry_price": (plan or {}).get("display_entry_price") if isinstance(plan, dict) else None,
+            "display_target_price": (plan or {}).get("display_target_price") if isinstance(plan, dict) else None,
+            "display_stop_price": (plan or {}).get("display_stop_price") if isinstance(plan, dict) else None,
+            "owner_action": (plan or {}).get("owner_action") if isinstance(plan, dict) else None,
+        },
+    }
 
 
 @app.get("/debug-scan")
