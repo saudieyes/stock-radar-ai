@@ -759,6 +759,14 @@
     "symbol": "FOFO",
     "updated_at": "2026-06-03 10:44:50"
   },
+  "FOX": {
+    "excluded_at": "2026-06-05 14:30:09",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "FOX",
+    "updated_at": "2026-06-05 14:30:09"
+  },
   "FPS": {
     "excluded_at": "2026-06-02 10:50:11",
     "note": "استبعاد يدوي شرعي",
@@ -1014,6 +1022,14 @@
     "source": "manual",
     "symbol": "IRDM",
     "updated_at": "2026-04-24 19:55:22"
+  },
+  "KBH": {
+    "excluded_at": "2026-06-05 14:29:07",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "KBH",
+    "updated_at": "2026-06-05 14:29:07"
   },
   "KLXE": {
     "excluded_at": "2026-04-24 11:40:13",
@@ -1374,6 +1390,14 @@
     "source": "manual",
     "symbol": "POET",
     "updated_at": "2026-04-27 05:46:13"
+  },
+  "PPC": {
+    "excluded_at": "2026-06-05 11:22:39",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "PPC",
+    "updated_at": "2026-06-05 11:22:39"
   },
   "PTEN": {
     "excluded_at": "2026-05-04 14:49:53",
