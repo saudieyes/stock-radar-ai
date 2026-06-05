@@ -12,7 +12,7 @@ from typing import Any
 
 from app.decision_contract import apply_decision_contract
 
-FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v2a_2026_06_05_full_contract_integration"
+FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v2_clean_visible_decision_2026_06_05"
 
 BUY_NOW = "BUY_NOW"
 WAIT_TRIGGER = "WAIT_TRIGGER"
@@ -169,6 +169,163 @@ def _previous_move_flags(row: dict) -> tuple[bool, list[str]]:
     return bool(reasons), reasons
 
 
+
+def _visible_stage_for_code(code: str) -> tuple[str, str, str, str]:
+    """Return canonical user-facing stage/list/status for the final decision.
+
+    Legacy discovery layers can still remember a historical peak as No-Chase.
+    The UI, summaries, and Telegram must follow the current final decision only.
+    """
+    mapping = {
+        BUY_NOW: ("Actionable Now", "🟢 دخول قوي مؤكد", "buy_now", "actionable_now"),
+        WAIT_TRIGGER: ("Wait Trigger", "⏳ انتظار تفعيل", "watch", "waiting_trigger"),
+        WAIT_LIQUIDITY: ("Wait Liquidity", "⏳ انتظار السيولة", "watch", "wait_liquidity"),
+        WAIT_RESISTANCE: ("Wait Resistance", "🟠 انتظار اختراق مقاومة", "watch", "wait_resistance"),
+        WAIT_REBOUND: ("Wait Rebound", "⏳ انتظار ارتداد", "watch", "wait_rebound"),
+        RECLAIM_REQUIRED: ("Reclaim Required", "🔴 انتظار استعادة", "watch", "reclaim_required"),
+        PLAN_BROKEN: ("Plan Broken", "🔴 الخطة مكسورة", "watch", "plan_broken"),
+        DATA_INCOMPLETE: ("Data Incomplete", "⚪ بيانات غير مكتملة", "watch", "data_incomplete"),
+        EARLY_WATCH: ("Early Watch", "🔵 مراقبة مبكرة", "pre_move_watch", "early_watch"),
+        CONTINUATION: ("Continuation Watch", "🔵 استمرار مشروط", "continuation", "continuation_only"),
+        PULLBACK_REQUIRED: ("Requires Pullback", "⏳ يحتاج Pullback", "continuation", "pullback_required"),
+        NO_CHASE: ("No-Chase", "⛔ لا تطارد", "no_chase", "hard_no_chase_cap"),
+        WATCH: ("Watch", "👀 مراقبة", "watch", "watch"),
+    }
+    return mapping.get(code, mapping[WATCH])
+
+
+def _contains_no_chase_text(value: Any) -> bool:
+    text = _txt(value)
+    return bool("No-Chase" in text or "لا تطارد" in text or "الحركة متأخرة" in text)
+
+
+def _scrub_no_chase_text_list(items: Any) -> list[str]:
+    """Remove legacy No-Chase wording unless the final decision is NO_CHASE."""
+    cleaned: list[str] = []
+    for item in items or []:
+        text = _txt(item)
+        if not text:
+            continue
+        if _contains_no_chase_text(text):
+            continue
+        cleaned.append(text)
+    return _dedupe(cleaned, 10)
+
+
+def _scrub_no_chase_mapping(mapping: dict, replacement: str) -> dict:
+    out = dict(mapping or {})
+    for key, value in list(out.items()):
+        if isinstance(value, str) and _contains_no_chase_text(value):
+            out[key] = "" if key in {"excluded_reason", "no_chase_reason"} else replacement
+        elif isinstance(value, list):
+            out[key] = [x for x in value if not _contains_no_chase_text(x)]
+        elif isinstance(value, dict):
+            out[key] = _scrub_no_chase_mapping(value, replacement)
+    return out
+
+
+def _sync_visible_legacy_fields(out: dict, code: str, final_label: str) -> dict:
+    """Make legacy presentation fields obey the final decision contract.
+
+    This function is deliberately called at the very end of final_decision_engine.
+    It does not change raw evidence, but it prevents old layers from showing a
+    stale No-Chase/late/cautious label after the current contract says broken,
+    reclaim, rebound, pullback, data-incomplete, or watch.
+    """
+    visible_stage, visible_stage_label, visible_list, visible_status = _visible_stage_for_code(code)
+    old_stage = _txt(out.get("move_stage"))
+    old_stage_label = _txt(out.get("move_stage_label"))
+    old_status = _txt(out.get("source_promotion_v2_status"))
+    old_list = _txt(out.get("source_promotion_v2_list"))
+
+    out["visible_decision_code"] = code
+    out["visible_decision_label"] = final_label
+    out["visible_move_stage"] = visible_stage
+    out["visible_move_stage_label"] = visible_stage_label
+    out["visible_source_promotion_list"] = visible_list
+    out["visible_source_promotion_status"] = visible_status
+    out["user_facing_decision_status"] = visible_status
+    out["user_facing_decision_label"] = final_label
+
+    legacy_no_chase_stage = old_stage in {"No-Chase", "Extended", "Catalyst Spike Review"}
+    if code != NO_CHASE and legacy_no_chase_stage:
+        out["legacy_move_stage_suppressed_by_decision_contract"] = True
+        if old_stage_label:
+            out["legacy_move_stage_label_suppressed_by_decision_contract"] = True
+        out["move_stage"] = visible_stage
+        out["move_stage_label"] = visible_stage_label
+        mv2 = out.get("move_stage_v2") if isinstance(out.get("move_stage_v2"), dict) else None
+        if mv2:
+            mv2 = dict(mv2)
+            mv2["legacy_move_stage_suppressed_by_decision_contract"] = True
+            mv2["legacy_move_stage_label_suppressed_by_decision_contract"] = True
+            mv2["move_stage"] = visible_stage
+            mv2["move_stage_label"] = visible_stage_label
+            mv2["move_stage_action"] = out.get("owner_action") or final_label
+            out["move_stage_v2"] = mv2
+    elif code == NO_CHASE:
+        out["move_stage"] = "No-Chase"
+        out["move_stage_label"] = "⛔ لا تطارد"
+
+    # If V2 source/promotion already marked hard_no_chase historically, align it
+    # with the current final decision before summaries/UI read it.
+    if code != NO_CHASE and old_status == "hard_no_chase_cap":
+        out["legacy_source_promotion_v2_status_suppressed_by_decision_contract"] = True
+        out["source_promotion_v2_status"] = visible_status
+        out["source_promotion_v2_list"] = visible_list
+        out["source_promotion_v2_capped"] = False
+        out["source_promotion_v2_cap_reason"] = final_label
+    elif code == NO_CHASE:
+        out["source_promotion_v2_status"] = "hard_no_chase_cap"
+        out["source_promotion_v2_list"] = "no_chase"
+
+    # Promotion V2a blockers are used in diagnostics and sometimes UI.  Remove
+    # stale no-chase wording unless it is the final decision.
+    if code != NO_CHASE:
+        for key in ("promotion_block_reasons", "live_overlay_block_reasons", "source_promotion_v2_reasons", "tier_cap_reasons"):
+            val = out.get(key)
+            if isinstance(val, list):
+                cleaned = _scrub_no_chase_text_list(val)
+                if cleaned != val:
+                    out[f"legacy_{key}_suppressed_by_decision_contract"] = True
+                    out[key] = cleaned
+        if _txt(out.get("promotion_summary")) and any(x in _txt(out.get("promotion_summary")) for x in ["No-Chase", "لا تطارد", "الحركة متأخرة"]):
+            out["legacy_promotion_summary_suppressed_by_decision_contract"] = True
+            out["promotion_summary"] = f"{out.get('source_priority_lane_label') or 'مصدر'} — القرار النهائي الحالي: {final_label}."
+        if _txt(out.get("source_promotion_v2_summary")) and any(x in _txt(out.get("source_promotion_v2_summary")) for x in ["No-Chase", "لا تطارد", "الحركة متأخرة"]):
+            out["legacy_source_promotion_v2_summary_suppressed_by_decision_contract"] = True
+            out["source_promotion_v2_summary"] = f"{visible_stage_label} — {out.get('owner_action') or final_label}"
+        if _txt(out.get("execution_gate_status")) == "no_chase":
+            out["legacy_execution_gate_status_suppressed_by_decision_contract"] = True
+            out["legacy_execution_gate_label_suppressed_by_decision_contract"] = True
+            out["execution_gate_status"] = visible_status
+            out["execution_gate_label"] = final_label
+        em = out.get("early_movement") if isinstance(out.get("early_movement"), dict) else None
+        if em:
+            raw_em_json = ""
+            try:
+                raw_em_json = str(em)
+            except Exception:
+                raw_em_json = ""
+            em = _scrub_no_chase_mapping(dict(em), visible_stage_label)
+            em_text = " ".join(_txt(em.get(k)) for k in ["status", "status_label", "move_stage", "excluded_reason", "summary", "recommended_action"])
+            if _txt(em.get("status")) == "no_chase" or _contains_no_chase_text(raw_em_json) or _contains_no_chase_text(em_text):
+                em["legacy_status_suppressed_by_decision_contract"] = True
+                em["legacy_status_label_suppressed_by_decision_contract"] = True
+                em["legacy_move_stage_suppressed_by_decision_contract"] = True
+                em["legacy_excluded_reason_suppressed_by_decision_contract"] = True
+                em["status"] = visible_status if visible_status not in {"buy_now"} else "priority_watch"
+                em["status_label"] = visible_stage_label
+                em["move_stage"] = visible_stage
+                em["excluded_reason"] = ""
+                em["no_chase_reasons"] = []
+                em["recommended_action"] = out.get("owner_action") or final_label
+                em["summary"] = f"{visible_stage_label} — {out.get('owner_action') or final_label}"
+            out["early_movement"] = em
+            out["early_movement_status"] = em.get("status", out.get("early_movement_status"))
+            out["early_movement_status_label"] = em.get("status_label", out.get("early_movement_status_label"))
+    return out
+
 def _set_common(out: dict, code: str, final_decision: str, blockers: list[str], action: str, *, liquidity_ok: bool, liquidity_reasons: list[str], entry_dist: float, stage: str, stage_label: str) -> dict:
     labels = {
         BUY_NOW: "دخول قوي مؤكد",
@@ -244,7 +401,7 @@ def _set_common(out: dict, code: str, final_decision: str, blockers: list[str], 
         out["execution_readiness_label"] = "انتظار تأكيد"
         out["execution_readiness_icon"] = "🟠"
         out["execution_status_ar"] = "انتظار تأكيد 🟠"
-    return out
+    return _sync_visible_legacy_fields(out, code, labels.get(code, "مراقبة"))
 
 
 def apply_final_decision(row: dict) -> dict:

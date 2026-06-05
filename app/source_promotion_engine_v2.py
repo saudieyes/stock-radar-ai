@@ -296,22 +296,22 @@ def summarize_source_promotion_v2(rows: list[dict]) -> dict[str, Any]:
     for row in rows or []:
         if not isinstance(row, dict):
             continue
-        stage_counts[str(row.get("move_stage") or "unknown")] += 1
-        status_counts[str(row.get("source_promotion_v2_status") or "unknown")] += 1
-        list_counts[str(row.get("source_promotion_v2_list") or "unknown")] += 1
+        stage_counts[str(row.get("visible_move_stage") or row.get("move_stage") or "unknown")] += 1
+        status_counts[str(row.get("visible_source_promotion_status") or row.get("source_promotion_v2_status") or "unknown")] += 1
+        list_counts[str(row.get("visible_source_promotion_list") or row.get("source_promotion_v2_list") or "unknown")] += 1
         compact = {
             "symbol": row.get("symbol"),
             "decision": row.get("decision"),
-            "move_stage": row.get("move_stage"),
+            "move_stage": row.get("visible_move_stage") or row.get("move_stage"),
             "gain_at_detection": row.get("gain_at_detection"),
             "current_gain": row.get("current_gain"),
             "peak_gain_seen": row.get("peak_gain_seen") or row.get("intraday_peak_gain") or row.get("source_promotion_v2_peak_gain_seen"),
-            "status": row.get("source_promotion_v2_status"),
+            "status": row.get("visible_source_promotion_status") or row.get("source_promotion_v2_status"),
             "final_decision_code": row.get("final_decision_code"),
             "final_decision_label": row.get("final_decision_label"),
             "final_decision_blockers": row.get("final_decision_blockers"),
         }
-        if row.get("source_promotion_v2_capped"):
+        if row.get("source_promotion_v2_capped") and str(row.get("final_decision_code") or "") == "NO_CHASE":
             capped.append(compact)
         if (
             row.get("source_promotion_v2_promoted")

@@ -290,22 +290,35 @@ def summarize_source_promotion_v2a(rows: list[dict]) -> dict[str, Any]:
         lane_counts[lane] += 1
         if status:
             status_counts[status] += 1
-        for r in row.get("promotion_block_reasons") or []:
-            blocked_counts[str(r)] += 1
+        final_code = str(row.get("final_decision_code") or "")
+        raw_blockers = list(row.get("promotion_block_reasons") or [])
+        blockers = []
+        for r in raw_blockers:
+            text = str(r or "")
+            if final_code != "NO_CHASE" and ("No-Chase" in text or "لا تطارد" in text or "الحركة متأخرة" in text):
+                continue
+            blockers.append(text)
+            blocked_counts[text] += 1
+        summary_text = str(row.get("promotion_summary", "") or "")
+        if final_code != "NO_CHASE" and ("No-Chase" in summary_text or "الحركة متأخرة" in summary_text or "لا تطارد" in summary_text):
+            summary_text = f"{_lane_label(lane)} — القرار النهائي الحالي: {row.get('final_decision_label') or row.get('decision') or 'مراقبة'}."
         compact = {
             "symbol": row.get("symbol"),
             "decision": row.get("decision"),
+            "final_decision_code": row.get("final_decision_code"),
+            "final_decision_label": row.get("final_decision_label"),
             "lane": lane,
             "status": status,
             "pressure": row.get("promotion_pressure_score"),
-            "summary": row.get("promotion_summary", ""),
+            "summary": summary_text,
         }
-        if row.get("source_promotion_v2a_promoted") and status == "promoted_to_cautious_live" and not row.get("promotion_block_reasons"):
+        if row.get("source_promotion_v2a_promoted") and status == "promoted_to_cautious_live" and not blockers:
             promoted.append(compact)
         elif status == "close_watch":
             close_watch.append(compact)
         elif status == "promotion_blocked":
-            blocked.append(compact)
+            if blockers or str(row.get("final_decision_code") or "") not in {"WATCH", "WAIT_TRIGGER", "WAIT_REBOUND"}:
+                blocked.append(compact)
     return {
         "version": SOURCE_PROMOTION_V2A_VERSION,
         "lane_counts": dict(lane_counts),
