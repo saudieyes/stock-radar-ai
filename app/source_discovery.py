@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import scanner as _scanner
 from app.live_quotes import get_live_quotes
 from app.early_movement import get_weekly_priority_items
+from app.polygon_weekly_builder import load_weekly_watchlist
 from app.settings import FMP_API_KEY, HTTP_SESSION, POLYGON_API_KEY
 from app.utils import safe_round, to_float
 from app.live_ignition_engine import classify_live_ignition, live_ignition_enabled
@@ -75,19 +76,19 @@ def _phase_detail(now: datetime | None = None) -> dict:
     t = now.time()
     mins = now.hour * 60 + now.minute
     if dt_time(4, 0) <= t < dt_time(7, 0):
-        return {"phase": "pre_market", "detail": "pre_market_early", "interval_sec": 1800, "target": 150, "label": "قبل الافتتاح المبكر"}
+        return {"phase": "pre_market", "detail": "pre_market_early", "interval_sec": 1200, "target": 150, "label": "قبل الافتتاح المبكر"}
     if dt_time(7, 0) <= t < dt_time(9, 30):
-        return {"phase": "pre_market", "detail": "pre_market_active", "interval_sec": 900, "target": 220, "label": "قبل الافتتاح النشط"}
+        return {"phase": "pre_market", "detail": "pre_market_active", "interval_sec": 600, "target": 220, "label": "قبل الافتتاح النشط"}
     if dt_time(9, 30) <= t < dt_time(10, 30):
-        return {"phase": "open", "detail": "open_first_hour", "interval_sec": 600, "target": 240, "label": "أول ساعة تداول"}
+        return {"phase": "open", "detail": "open_first_hour", "interval_sec": 420, "target": 240, "label": "أول ساعة تداول"}
     if dt_time(10, 30) <= t < dt_time(15, 0):
-        return {"phase": "open", "detail": "open_mid_session", "interval_sec": 1500, "target": 210, "label": "وسط الجلسة"}
+        return {"phase": "open", "detail": "open_mid_session", "interval_sec": 720, "target": 210, "label": "وسط الجلسة"}
     if dt_time(15, 0) <= t <= dt_time(16, 0):
-        return {"phase": "open", "detail": "open_last_hour", "interval_sec": 900, "target": 230, "label": "آخر ساعة تداول"}
+        return {"phase": "open", "detail": "open_last_hour", "interval_sec": 480, "target": 230, "label": "آخر ساعة تداول"}
     if dt_time(16, 0) < t <= dt_time(18, 0):
-        return {"phase": "after_hours", "detail": "after_hours_early", "interval_sec": 900, "target": 220, "label": "بعد الإغلاق النشط"}
+        return {"phase": "after_hours", "detail": "after_hours_early", "interval_sec": 600, "target": 220, "label": "بعد الإغلاق النشط"}
     if dt_time(18, 0) < t <= dt_time(20, 0):
-        return {"phase": "after_hours", "detail": "after_hours_late", "interval_sec": 1800, "target": 180, "label": "بعد الإغلاق المتأخر"}
+        return {"phase": "after_hours", "detail": "after_hours_late", "interval_sec": 1200, "target": 180, "label": "بعد الإغلاق المتأخر"}
     return {"phase": "closed", "detail": "overnight_closed", "interval_sec": 3600, "target": 150, "label": "السوق مغلق"}
 
 
@@ -376,6 +377,34 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         weekly_priority_count = 0
         weekly_high_risk_count = 0
 
+    # Polygon Weekly Candidate Builder V1 compact output: auto-built weekly candidates
+    # are injected as their own source bucket, separate from manual Early Movement.
+    polygon_weekly_builder_count = 0
+    try:
+        weekly_payload = load_weekly_watchlist() or {}
+        for item in (weekly_payload.get("candidates") or []):
+            sym = str((item or {}).get("symbol") or "").upper().strip()
+            if not sym:
+                continue
+            stage = str((item or {}).get("stage") or "Weekly Priority")
+            score = to_float((item or {}).get("score"))
+            reason = "Polygon Weekly Builder: " + "، ".join(list((item or {}).get("reasons") or [])[:3])
+            base_score = 48 + min(score, 35) * 0.45
+            if "Quiet" in stage or "Early" in stage:
+                base_score += 10
+            if "Continuation" in stage or "Pullback" in stage:
+                base_score -= 4
+            _add_candidate(candidates, sym, base_score, "polygon_weekly_builder", reason, {
+                "polygon_weekly_builder_score": score,
+                "polygon_weekly_stage": stage,
+                "polygon_weekly_last_close": (item or {}).get("last_close"),
+                "polygon_weekly_watch_zone_low": (item or {}).get("suggested_watch_zone_low"),
+                "polygon_weekly_watch_zone_high": (item or {}).get("suggested_watch_zone_high"),
+            })
+            polygon_weekly_builder_count += 1
+    except Exception:
+        polygon_weekly_builder_count = 0
+
     # Keep the old engine as one bucket only. It no longer owns the entire source list.
     old_baseline_limit = min(260, max(120, int(max_symbols * 0.38)))
     old_baseline = []
@@ -652,6 +681,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # then constructive liquidity.  Late movers stay visible for review, but they
     # must never crowd out early builders or weekly-priority names.
     selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
+    selected_order += from_source("polygon_weekly_builder", min(90, max_symbols))
     selected_order += from_source("intraday_early_ramp", min(140, max_symbols))
     selected_order += from_source("dip_reclaim_radar", min(120, max_symbols))
     selected_order += from_source("quiet_accumulation_radar", min(90, max_symbols))
@@ -728,6 +758,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "price_over_300_deprioritized": price_flags.get("over_300_deprioritized", 0),
         "weekly_priority_injected_count": int(weekly_priority_count),
         "weekly_high_risk_injected_count": int(weekly_high_risk_count),
+        "polygon_weekly_builder_injected_count": int(polygon_weekly_builder_count),
         "baseline_old_engine_count": len(old_baseline),
         "baseline_error": baseline_error,
         "elapsed_sec": elapsed,

@@ -441,6 +441,20 @@ def apply_final_decision(row: dict) -> dict:
     if plan_status == "target_reached":
         return _set_common(out, CONTINUATION, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
 
+    # If the best available quote is delayed/monitoring-only (Polygon fallback),
+    # do not allow any actionable Cautious/Strong label. It may remain watch,
+    # reclaim, resistance, or pullback depending on the plan, but never executable.
+    if not price_reliable and (bool(out.get("price_source_delayed")) or bool(out.get("price_monitoring_only"))):
+        delayed_reason = "السعر من Polygon/مصدر احتياطي متأخر تقريبًا 15 دقيقة — مراقبة فقط وليس تنفيذًا مباشرًا"
+        if plan_status == "blocked_by_resistance":
+            return _set_common(out, WAIT_RESISTANCE, "مراقبة", _dedupe(plan_blockers + [delayed_reason], 10), plan_action or "🟠 انتظر اختراق/ثبات بسعر مباشر موثوق.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        if plan_status == "waiting_trigger":
+            return _set_common(out, WAIT_TRIGGER, "مراقبة", _dedupe(plan_blockers + [delayed_reason], 10), "👀 مراقبة فقط — تحتاج سعر FMP مباشر قبل أي تنفيذ.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        if plan_status == "pullback_required":
+            return _set_common(out, PULLBACK_REQUIRED, "مراقبة", _dedupe(plan_blockers + [delayed_reason], 10), plan_action or "⏳ يحتاج Pullback وسعر مباشر موثوق قبل التنفيذ.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        # For any other valid-watch state, keep it non-actionable.
+        out["price_delayed_execution_blocked"] = True
+
     # No-Chase must only mean upward extension.  Never use it for red/down, broken,
     # flat, or below-entry states.
     # True No-Chase requires current upward extension, not only a historical peak.

@@ -15,6 +15,8 @@ from app.detection_journal import enrich_stock_with_detection_journal
 from app.source_promotion_engine_v2 import enrich_row_source_promotion_v2
 from app.pre_move_engine import enrich_row_pre_move
 from app.final_decision_engine import apply_final_decision
+from app.quote_resolver import resolve_symbol_quote, overlay_quote_contract
+from app.early_watch_lifecycle import enrich_early_watch_lifecycle
 from scanner import apply_late_move_filter, assign_execution_mode, normalize_execution_labels, enrich_signal_stage, finalize_display_contract
 from scanner import get_scan_universe as _unused_get_scan_universe
 from scanner import get_last_source_diagnostics
@@ -187,6 +189,10 @@ def scan_all(debug: bool = False):
                 p = apply_final_decision(p)
             except Exception:
                 pass
+            try:
+                p = enrich_early_watch_lifecycle(p)
+            except Exception:
+                pass
             return {"kind": "row", "symbol": s, "row": p}
         except Exception as e:
             return {"kind": "error", "symbol": s, "error": f"{type(e).__name__}: {str(e)[:260]}"}
@@ -334,6 +340,14 @@ def build_single_stock_response(symbol: str):
     try:
         trade_plan = trade_plan_pro(symbol, get_manual_sharia_exclusions_map(), get_manual_sharia_approvals_map())
         if trade_plan:
+            # Big Clean Rebuild: enforce FMP -> Polygon fallback before any display/decision layer.
+            # If FMP is incomplete and Polygon is used, it is labeled delayed/monitoring-only.
+            try:
+                phase_for_quote = str(trade_plan.get("market_phase", "") or "")
+                quote_contract = resolve_symbol_quote(symbol, phase=phase_for_quote, prefer_cache=False, allow_fallback=True)
+                trade_plan = overlay_quote_contract(trade_plan, quote_contract)
+            except Exception:
+                pass
             trade_plan = apply_late_move_filter(trade_plan)
             trade_plan = assign_execution_mode(trade_plan)
             trade_plan = normalize_execution_labels(trade_plan)
@@ -364,7 +378,17 @@ def build_single_stock_response(symbol: str):
             except Exception:
                 pass
             try:
+                # Re-apply quote contract after legacy display/enrichment layers,
+                # so no later layer silently restores old previous-close/unknown fields.
+                trade_plan = overlay_quote_contract(trade_plan, quote_contract)
+            except Exception:
+                pass
+            try:
                 trade_plan = apply_final_decision(trade_plan)
+            except Exception:
+                pass
+            try:
+                trade_plan = enrich_early_watch_lifecycle(trade_plan)
             except Exception:
                 pass
     except Exception as e:
