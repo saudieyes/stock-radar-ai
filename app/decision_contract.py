@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-DECISION_CONTRACT_VERSION = "decision_contract_v1_2026_06_05_clean_core"
+DECISION_CONTRACT_VERSION = "decision_contract_v1a_2026_06_05_full_integration"
 
 
 def _s(value: Any) -> str:
@@ -68,6 +68,7 @@ def resolve_quote_contract(row: dict) -> dict:
     phase = _s(row.get("market_phase")) or _s(row.get("phase"))
     source = _s(row.get("price_source")) or _s(row.get("quote_source"))
     source_label = _s(row.get("price_source_label")) or source
+    source_present = bool(source)
     price = _first_number(row, [
         "current_price_live", "live_price", "display_price", "price", "current_price", "last_price", "fmp_price"
     ], 0.0)
@@ -85,10 +86,18 @@ def resolve_quote_contract(row: dict) -> dict:
     if change == 999999.0 and open_price > 0 and price > 0:
         change = _pct(price, open_price)
     change_available = change != 999999.0
+
+    # Do not trust an apparently-zero change if the quote source and all
+    # reference fields are missing.  This is the RKLB-style mixed-layer bug:
+    # price exists but change/source/plan are not actually valid.
+    if not source_present and previous_close <= 0 and open_price <= 0:
+        change_available = False
     if not change_available:
         change = 0.0
 
     reliable = bool(row.get("price_reliable_for_execution", False))
+    if not source_present:
+        reliable = False
     delayed = False
     lower_source = source.lower()
     # Polygon/snapshot/minute are useful but should not be silently treated as
@@ -131,7 +140,7 @@ def resolve_quote_contract(row: dict) -> dict:
         "last_update_ms": int(_f(row.get("last_price_update_ms"), 0.0)),
         "last_update_label": _s(row.get("last_price_update_label")),
         "missing": _dedupe(missing, 8),
-        "complete": bool(price > 0 and change_available),
+        "complete": bool(price > 0 and change_available and source_present),
     }
 
 
@@ -285,6 +294,21 @@ def apply_decision_contract(row: dict) -> dict:
     out["display_change_pct"] = quote.get("change_pct")
     out["display_change_available"] = bool(quote.get("change_available"))
     out["price_reliable_for_execution"] = bool(quote.get("reliable_for_execution"))
+
+    # If the contract says the data/plan is not executable, do not let UI cards
+    # display misleading zeros for entry/target/stop.  JSON null is safer than 0.
+    if plan.get("status") in {"data_incomplete", "no_valid_plan"}:
+        for key in [
+            "display_entry_price", "display_target_price", "display_stop_price",
+            "entry_price", "target_price", "target_1", "target1", "stop_loss",
+            "smart_entry_price", "smart_target_1", "smart_stop_price",
+        ]:
+            if _f(out.get(key), 0.0) <= 0:
+                out[key] = None
+        out["hide_plan_numbers"] = True
+        out["invalid_plan_number_reason"] = plan.get("label")
+    else:
+        out["hide_plan_numbers"] = False
 
     # Remove stale no-chase wording when current movement is down/flat or plan is broken.
     change = _f(quote.get("change_pct"), 0.0)

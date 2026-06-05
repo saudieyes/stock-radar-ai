@@ -12,7 +12,7 @@ from typing import Any
 
 from app.decision_contract import apply_decision_contract
 
-FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v2_2026_06_05_clean_contract"
+FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v2a_2026_06_05_full_contract_integration"
 
 BUY_NOW = "BUY_NOW"
 WAIT_TRIGGER = "WAIT_TRIGGER"
@@ -197,6 +197,20 @@ def _set_common(out: dict, code: str, final_decision: str, blockers: list[str], 
     out["final_decision_stage"] = stage
     out["final_decision_stage_label"] = stage_label
     out["owner_action"] = action
+
+    # Clear stale no-chase fields unless the final decision is truly NO_CHASE.
+    # Older discovery layers may mark a stock as no-chase because it once peaked,
+    # but the current actionable state can be broken/reclaim/wait-rebound.
+    if code != NO_CHASE:
+        stale_status = _txt(out.get("no_chase_guard_status")).lower()
+        stale_label = _txt(out.get("no_chase_guard_label"))
+        if stale_status == "no_chase" or "لا تطارد" in stale_label or "مطاردة" in stale_label:
+            out["stale_no_chase_guard_status"] = out.get("no_chase_guard_status")
+            out["stale_no_chase_guard_label"] = out.get("no_chase_guard_label")
+            out["no_chase_guard_status"] = "not_no_chase"
+            out["no_chase_guard_label"] = labels.get(code, "مراقبة")
+            out["no_chase_guard_reasons"] = out.get("final_decision_blockers", [])
+        out["no_chase_hard_cap"] = False
     # Keep old UI fields synchronized with the final contract.
     if code == BUY_NOW:
         out["execution_readiness_label"] = "جاهز للتنفيذ الآن"
@@ -272,10 +286,24 @@ def apply_final_decision(row: dict) -> dict:
 
     # No-Chase must only mean upward extension.  Never use it for red/down, broken,
     # flat, or below-entry states.
-    upward_extended = bool(current_gain >= 8.0 or peak_gain >= 12.0 or gain_at_detection >= 10.0 or (entry_dist != 999.0 and entry_dist >= 4.0 and current_gain >= 3.0))
-    objective_extended = stage in {"Extended", "No-Chase", "Catalyst Spike Review"} or gain_at_detection >= 20 or current_gain >= 25 or peak_gain >= 25
-    explicit_no_chase = (_txt(out.get("no_chase_guard_status")).lower() == "no_chase" or _has_text(out, ["no_chase_guard_label"], "لا تطارد", "مطاردة")) and upward_extended
-    hard_no_chase = objective_extended or explicit_no_chase or (plan_status == "pullback_required" and bool(plan.get("no_chase")))
+    # True No-Chase requires current upward extension, not only a historical peak.
+    # If the stock is now red/down, under the plan, under support, or inside a
+    # broken/reclaim state, the correct label is wait/reclaim/broken, not no-chase.
+    price = _price(out)
+    entry = _entry(out)
+    currently_above_entry = bool(price > 0 and entry > 0 and price >= entry * 1.025)
+    current_upward_extension = bool(
+        current_gain >= 7.0
+        or (current_gain >= 3.0 and currently_above_entry)
+        or (entry_dist != 999.0 and entry_dist >= 3.5 and current_gain >= 3.0)
+    )
+    historical_peak_only = bool(peak_gain >= 12.0 or gain_at_detection >= 10.0 or stage in {"Extended", "No-Chase", "Catalyst Spike Review"})
+    explicit_no_chase = (_txt(out.get("no_chase_guard_status")).lower() == "no_chase" or _has_text(out, ["no_chase_guard_label"], "لا تطارد", "مطاردة")) and current_upward_extension
+    hard_no_chase = bool((historical_peak_only and current_upward_extension) or explicit_no_chase or (plan_status == "pullback_required" and bool(plan.get("no_chase")) and current_upward_extension))
+
+    if historical_peak_only and not current_upward_extension:
+        out["stale_historical_no_chase_suppressed"] = True
+        out["stale_historical_no_chase_reason"] = "No-Chase history suppressed because current price is not upward-extended."
 
     if hard_no_chase:
         return _set_common(out, NO_CHASE, "مراقبة", ["السعر ارتفع وابتعد عن منطقة الدخول — لا تطارد"], "⛔ لا تطارد الآن — انتظر Pullback/Reclaim بمنطقة واضحة وسيولة مستمرة.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
