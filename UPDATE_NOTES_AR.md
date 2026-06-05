@@ -1,40 +1,59 @@
-# Clean Decision Core V2 — Unified Visible Decision & Legacy Label Cleanup
+# Stock Radar AI — Big Clean Source & Monitoring Update V1
 
-## الهدف
-هذا التحديث يكمل V1/V1a ويجعل القرار النهائي الحالي هو الحكم الظاهر في القوائم والتشخيصات، بدل أن تبقى تسميات legacy مثل No-Chase/الحركة متأخرة ظاهرة عندما يكون القرار الحقيقي هو انتظار ارتداد، استعادة، Pullback، خطة مكسورة، أو بيانات غير مكتملة.
-
-## الملفات المعدلة
-- app/final_decision_engine.py
-- app/source_promotion_engine_v2.py
-- app/source_promotion_v2a.py
+هذا التحديث يبدأ المرحلة الأكبر بعد تثبيت Clean Decision Core V2.
 
 ## ما تم
-1. إضافة مزامنة نهائية للحقول القديمة بعد final_decision_code.
-2. إخفاء/تنظيف No-Chase من الحقول الظاهرة إذا final_decision_code ليس NO_CHASE.
-3. حفظ حالة العرض الجديدة في:
-   - visible_decision_code
-   - visible_decision_label
-   - visible_move_stage
-   - visible_move_stage_label
-   - visible_source_promotion_status
-   - visible_source_promotion_list
-4. تعديل ملخص Source Promotion V2 ليحسب stage/status/list من الحقول المرئية النهائية، لا من move_stage القديم.
-5. تعديل ملخص Source Promotion V2a حتى لا يعرض No-Chase كسبب إذا القرار النهائي الحالي ليس NO_CHASE.
-6. تنظيف early_movement من No-Chase القديم إذا القرار النهائي الحالي ليس NO_CHASE، مع إبقاء القرار النهائي واضحًا.
+
+1. **Quote Resolver V1**
+   - قاعدة واحدة للسعر: FMP أولًا، ثم Polygon fallback عند فشل/نقص FMP.
+   - إذا استخدم Polygon، يظهر أنه متأخر تقريبًا 15 دقيقة ومراقبة فقط، وليس تنفيذًا مباشرًا.
+   - لا يسمح السعر المتأخر بترقية BUY_NOW أو دخول قوي.
+
+2. **ربط فحص السهم الواحد بالسعر الموحد**
+   - `/single-stock` و`/diagnostics/decision-contract/symbol` يحاولان الآن FMP ثم Polygon قبل إعلان نقص البيانات.
+   - يمنع بقاء RKLB مثلًا على مصدر unknown إذا Polygon أعطى بيانات صالحة.
+
+3. **Early Watch Lifecycle V1**
+   - المراقبة المبكرة أصبحت لها حالة متابعة واضحة:
+     - مراقبة لصيقة
+     - قريب من التفعيل
+     - يحتاج Pullback
+     - يحتاج Reclaim
+     - الخطة مكسورة
+     - بيانات ناقصة
+     - لا تطارد
+   - الأداة تتابع السهم؛ المراقبة ليست أمر شراء للمستخدم.
+
+4. **مسح أسرع لكن آمن**
+   - تم تقليل فواصل المسح العميق بشكل محسوب:
+     - أول ساعة: 7 دقائق تقريبًا بدل 10
+     - وسط الجلسة: 12 دقيقة بدل 25
+     - آخر ساعة: 8 دقائق تقريبًا
+     - قبل/بعد السوق: أسرع لكن بدون مسح كل دقيقة
+   - السعر الحي لا يزال يحدث أسرع من المسح العميق.
+
+5. **Polygon Weekly Builder V1**
+   - أضيفت بنية تحليل ملفات Polygon اليومية/الدقيقة من مسار محلي مؤقت.
+   - تحفظ فقط الناتج المختصر، لا ملفات الدقيقة الخام.
+   - تدخل نتائجها لاحقًا إلى المنبع كـ `polygon_weekly_builder` مستقل عن Auto-Detected Early Movement.
+
+6. **روابط تشخيص جديدة**
+   - `/diagnostics/quote-resolver/symbol?symbol=RKLB`
+   - `/diagnostics/scan-cadence`
+   - `/polygon-weekly/status`
+   - `/polygon-weekly/build-from-local?path=app_data/polygon_weekly_input.zip&top_n=15&execute=false`
+
+## ما لم يتم اعتباره شراء مباشر
+
+- Polygon fallback = مراقبة فقط.
+- Early Watch = الأداة تتابع، وليس المستخدم يشتري.
+- Polygon Weekly list = قائمة أولوية للأسبوع، وليست BUY_NOW.
+- Telegram لا يزال BUY_NOW فقط.
 
 ## اختبارات محلية
-- python -m compileall على المشروع كاملًا.
-- import main نجح.
-- اختبار على trade-scan الأخير:
-  - لا توجد No-Chase ظاهرة في الحقول المستخدمية لأي سهم final_decision_code لديه ليس NO_CHASE.
-  - بقي No-Chase واحد فقط عندما كان final_decision_code = NO_CHASE.
-- RKLB يبقى DATA_INCOMPLETE مع hide_plan_numbers.
-- ALM/JOBY يبقيان PLAN_BROKEN.
-- STRL يبقى WAIT_REBOUND عند الهبوط.
-- FSTR يبقى WAIT_RESISTANCE عند مقاومة قريبة.
 
-## ما لم يتم تغييره
-- لا تغيير على SQLite.
-- لا تغيير على Sharia.
-- لا تغيير على Telegram logic نفسه بعد V1a، لكن Telegram يستفيد من final_decision_code النظيف.
-- لا تغيير على Polygon Weekly Builder أو منطق المسح؛ هذه تأتي بعد تنظيف نواة القرار والعرض.
+- compileall نجح.
+- import main نجح.
+- اختبار Polygon delayed يمنع BUY_NOW.
+- اختبار Early Watch Lifecycle يعمل.
+- اختبار Polygon Weekly Builder على CSV تجريبي نجح.

@@ -212,6 +212,9 @@ from app.system_cost_health import build_system_cost_health
 from app.pre_move_engine import enrich_row_pre_move
 from app.intraday_early_source_radar import get_last_intraday_early_source_radar_status
 from app.decision_contract import compact_decision_diagnostics
+from app.quote_resolver import resolve_symbol_quote
+from app.early_watch_lifecycle import enrich_rows_early_watch_lifecycle, summarize_early_watch_lifecycle
+from app.polygon_weekly_builder import build_weekly_candidates_from_path, load_weekly_watchlist, POLYGON_WEEKLY_BUILDER_VERSION
 
 app = FastAPI()
 
@@ -780,6 +783,9 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
     volume = safe_round(quote.get("volume", 0))
     source_label = str(quote.get("source_label", "") or quote.get("source", "FMP/Live"))
     updated_label = str(quote.get("updated_label", "") or "")
+    quote_source = str(quote.get("source", "live_overlay") or "live_overlay")
+    quote_delayed = bool(quote.get("delayed")) or any(x in quote_source.lower() for x in ["polygon", "snapshot"])
+    quote_reliable_for_execution = bool(quote.get("reliable_for_execution", True)) and not quote_delayed
 
     entry = _first_positive_number(out, [
         "display_entry_price", "smart_entry_price", "entry_price_real", "entry", "breakout_price", "confirmation_price"
@@ -853,8 +859,11 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
         "live_change_pct_reliable": bool(quote_change_reliable),
         "previous_close_live": prev_close,
         "volume_live": volume,
-        "price_source": str(quote.get("source", "live_overlay") or "live_overlay"),
+        "price_source": quote_source,
         "price_source_label": source_label,
+        "price_source_delayed": bool(quote_delayed),
+        "price_reliable_for_execution": bool(quote_reliable_for_execution),
+        "price_monitoring_only": bool(quote_delayed or not quote_reliable_for_execution),
         "last_price_update_label": updated_label,
         "live_overlay_label": live_label,
         "live_rank_score": safe_round(live_rank, 2),
@@ -1083,6 +1092,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = enrich_rows_early_watch_lifecycle(overlaid)
+    except Exception:
+        pass
+    try:
         early_movement_payload = build_early_movement_sections(overlaid)
     except Exception:
         early_movement_payload = {"count": 0, "early_movement_watchlist": [], "weekly_priority_count": 0, "auto_detected_count": 0, "priority_watch_count": 0}
@@ -1148,6 +1161,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "source_promotion_v2a": summarize_source_promotion_v2a(overlaid),
         "source_promotion_v2a_promoted_count": len([x for x in overlaid if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
         "source_early_discovery_v2": summarize_source_promotion_v2(overlaid),
+        "early_watch_lifecycle": summarize_early_watch_lifecycle(overlaid),
         "groups": {
             "strong_entries": _live_bucket_payload(strong, limit),
             "cautious_entries": _live_bucket_payload(cautious, limit),
@@ -2437,6 +2451,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         results = apply_final_decisions(results)
     except Exception:
         pass
+    try:
+        results = enrich_rows_early_watch_lifecycle(results)
+    except Exception:
+        pass
     early_movement_payload = build_early_movement_sections(results)
     scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
@@ -2494,6 +2512,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "source_promotion_v2a": summarize_source_promotion_v2a(results),
         "source_promotion_v2a_promoted_count": len([x for x in results if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
         "source_early_discovery_v2": summarize_source_promotion_v2(results),
+        "early_watch_lifecycle": summarize_early_watch_lifecycle(results),
         "detection_journal": detection_journal_status(limit=12),
         "manual_sharia_exclusions_count": len(load_manual_sharia_exclusions()),
         "manual_sharia_approvals_count": len(load_manual_sharia_approvals()),
@@ -2746,6 +2765,73 @@ def diagnostics_decision_contract_symbol(symbol: str):
         },
     }
 
+
+@app.get("/diagnostics/quote-resolver/symbol")
+def diagnostics_quote_resolver_symbol(symbol: str, prefer_cache: bool = False, allow_fallback: bool = True):
+    """Show the single-source quote contract: FMP first, Polygon delayed fallback second."""
+    sym = normalize_symbol_text(symbol)
+    phase = get_market_phase()
+    if not sym:
+        return {"ok": False, "error": "missing_symbol"}
+    quote = resolve_symbol_quote(sym, phase=phase, prefer_cache=bool(prefer_cache), allow_fallback=bool(allow_fallback))
+    return {
+        "ok": True,
+        "symbol": sym,
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "quote": quote,
+        "rule_ar": "FMP أولًا. إذا لم يكتمل السعر من FMP، تُستخدم Polygon كاحتياط متأخر حوالي 15 دقيقة ومراقبة فقط لا تنفيذ مباشر.",
+    }
+
+
+@app.get("/diagnostics/scan-cadence")
+def diagnostics_scan_cadence():
+    """Explain the new safe scan cadence plan."""
+    phase = get_market_phase()
+    status = get_json("live_radar_worker_status", {}) or {}
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    age_sec = _parse_scan_snapshot_age_sec(snapshot) if isinstance(snapshot, dict) else None
+    interval = _server_full_market_scan_interval_sec(phase)
+    return {
+        "ok": True,
+        "version": "scan_cadence_v1_fast_light_plus_deep_safe_2026_06_05",
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "full_scan_interval_sec": int(interval),
+        "live_price_refresh_sec": int(LIVE_RADAR_PRICE_REFRESH_SEC),
+        "snapshot_age_sec": age_sec,
+        "worker": status if isinstance(status, dict) else {},
+        "design_ar": [
+            "تحديث السعر سريع للأسهم الموجودة بدون كاش أثناء السوق النشط.",
+            "المسح العميق لا يعمل كل دقيقة حتى لا يضغط FMP/Railway؛ يعمل حسب المرحلة.",
+            "المرشحات المبكرة وWeekly Priority تحصل على متابعة لصيقة عبر Early Watch Lifecycle.",
+            "أي ترقية إلى دخول بحذر/قوي تمر عبر Decision Contract وFinal Decision فقط.",
+        ],
+    }
+
+
+@app.get("/polygon-weekly/status")
+def polygon_weekly_status():
+    data = load_weekly_watchlist()
+    return {
+        "ok": True,
+        "version": POLYGON_WEEKLY_BUILDER_VERSION,
+        "watchlist": data,
+        "rule_ar": "ملفات Polygon الدقيقة/اليومية تستخدم مؤقتًا للتحليل فقط. الناتج المختصر هو الذي يُحفظ، لا الملفات الخام.",
+    }
+
+
+@app.get("/polygon-weekly/build-from-local")
+def polygon_weekly_build_from_local(path: str = "app_data/polygon_weekly_input.zip", top_n: int = 15, execute: bool = False):
+    """Build a compact weekly list from a local temporary CSV/ZIP path.
+
+    Put the Polygon flat files under the given local path first.  This endpoint
+    never stores raw minute files; execute=true stores only the compact JSON.
+    """
+    try:
+        return build_weekly_candidates_from_path(path=path, top_n=int(top_n or 15), execute=bool(execute))
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "path": path}
 
 @app.get("/debug-scan")
 def debug_scan():
