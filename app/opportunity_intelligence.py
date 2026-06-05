@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.pattern_action_engine import evaluate_pattern_action
+
 
 def _f(value: Any, default: float = 0.0) -> float:
     try:
@@ -170,6 +172,7 @@ def compute_no_chase_guard(stock: dict) -> dict:
     price = _f(stock.get("current_price_live", stock.get("display_price", 0)))
     entry = _f(stock.get("display_entry_price", stock.get("entry_price_real", stock.get("entry", 0))))
     change_open = _f(stock.get("change_from_open_pct", stock.get("display_change_pct", stock.get("change_pct", 0))))
+    display_change = _f(stock.get("display_change_pct", stock.get("change_pct", change_open)))
     live_dist = _f(stock.get("live_distance_to_entry_pct"), 0.0)
     if price > 0 and entry > 0:
         dist_to_entry = ((price - entry) / entry) * 100.0
@@ -180,6 +183,15 @@ def compute_no_chase_guard(stock: dict) -> dict:
     execution_label = _s(stock.get("execution_readiness_label"))
     reasons: list[str] = []
     severity = 0
+
+    # No-Chase must mean chasing an upward extension.  A red/down stock, a broken
+    # support, or a below-entry setup is NOT no-chase; it is wait-rebound/reclaim.
+    upward_context = (change_open >= 3.0 or display_change >= 5.0 or dist_to_entry >= 2.5)
+    if not upward_context:
+        if display_change < -2.0 or change_open < -2.0:
+            return {"status": "wait_rebound", "label": "⏳ انتظار ارتداد", "score_penalty": 8, "reasons": ["السهم ليس ممتدًا صعودًا؛ يحتاج ارتداد/استعادة لا عبارة لا تطارد"]}
+        return {"status": "ok", "label": "✅ ليس مطاردة", "score_penalty": 0, "reasons": []}
+
     if late_flag in {"CONFIRMED_LATE", "FAST_AFTER_CONFIRMATION"}:
         severity = max(severity, 3)
         reasons.append("السعر تجاوز منطقة الدخول المناسبة حسب late_move_flag")
@@ -189,13 +201,13 @@ def compute_no_chase_guard(stock: dict) -> dict:
     elif dist_to_entry >= 3.0:
         severity = max(severity, 2)
         reasons.append(f"السعر ابتعد عن الدخول بنحو {dist_to_entry:.1f}%")
-    if change_open >= 12:
+    if change_open >= 12 or display_change >= 15:
         severity = max(severity, 3)
-        reasons.append(f"السهم صاعد بقوة منذ الافتتاح ({change_open:.1f}%)")
-    elif change_open >= 8:
+        reasons.append(f"السهم صاعد بقوة ({max(change_open, display_change):.1f}%)")
+    elif change_open >= 8 or display_change >= 10:
         severity = max(severity, 2)
-        reasons.append(f"السهم صاعد كثيرًا منذ الافتتاح ({change_open:.1f}%)")
-    if "مطاردة" in execution_label:
+        reasons.append(f"السهم صاعد كثيرًا ({max(change_open, display_change):.1f}%)")
+    if "مطاردة" in execution_label and upward_context:
         severity = max(severity, 3)
         reasons.append("جاهزية التنفيذ تشير إلى مطاردة سعرية")
 
@@ -203,7 +215,7 @@ def compute_no_chase_guard(stock: dict) -> dict:
         return {"status": "no_chase", "label": "🔴 متأخر / لا تطارد", "score_penalty": 26, "reasons": reasons[:5]}
     if severity == 2:
         return {"status": "late_watch", "label": "⚠️ قريب من المطاردة", "score_penalty": 12, "reasons": reasons[:5]}
-    return {"status": "ok", "label": "✅ ليس متأخرًا", "score_penalty": 0, "reasons": reasons[:5]}
+    return {"status": "ok", "label": "✅ ليس مطاردة", "score_penalty": 0, "reasons": reasons[:5]}
 
 
 def compute_structure_guards(stock: dict) -> dict:
@@ -483,10 +495,17 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
     structure = compute_structure_guards(out)
     pattern = compute_pattern_risk(out, liquidity, no_chase, structure)
     post_activation = compute_post_activation_guard(out, liquidity, pattern)
+    pattern_action = evaluate_pattern_action({**out,
+        "liquidity_persistence_score": liquidity.get("score"),
+        "liquidity_persistence_status": liquidity.get("status"),
+        "support_broken_flag": structure.get("support_broken_flag"),
+        "close_resistance_guard_flag": structure.get("close_resistance_flag"),
+        "post_activation_guard_status": post_activation.get("status"),
+    })
     tier = compute_strong_entry_tier(out, pattern, liquidity, no_chase, post_activation, structure)
 
     out.update({
-        "intelligence_layer_version": "pattern_learning_v1_guard_only",
+        "intelligence_layer_version": "pattern_learning_v2_pattern_to_action",
         "liquidity_persistence_score": liquidity["score"],
         "liquidity_persistence_label": liquidity["label"],
         "liquidity_persistence_status": liquidity["status"],
@@ -516,6 +535,13 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
         "strong_entry_tier": tier["tier"],
         "strong_entry_tier_label": tier["label"],
         "strong_entry_tier_reasons": tier.get("reasons", []),
+        "winning_pattern_score": pattern_action.get("winning_pattern_score", 0),
+        "winning_pattern_reasons": pattern_action.get("winning_pattern_reasons", []),
+        "losing_pattern_score": pattern_action.get("losing_pattern_score", 0),
+        "losing_pattern_reasons": pattern_action.get("losing_pattern_reasons", []),
+        "pattern_action": pattern_action.get("pattern_action", "neutral"),
+        "pattern_action_label": pattern_action.get("pattern_action_label", ""),
+        "pattern_action_priority": pattern_action.get("pattern_action_priority", "neutral"),
     })
 
     # Conservative display re-ranking only. No core score/classification rewrite.
@@ -537,6 +563,10 @@ def enrich_opportunity_intelligence(stock: dict | None) -> dict:
         out["live_rank_score"] = round(max(0.0, live_base + (adjusted - base_rank)), 2)
 
     # Owner-facing flags. Keep them compact because the UI already has many details.
+    if str(out.get("pattern_action")) == "monitor_closely":
+        _add_flag(out, "يشبه نمط رابح سابق: مراقبة لصيقة لا شراء مباشر")
+    if str(out.get("pattern_action")) == "demote_or_block":
+        _add_flag(out, "يشبه نمط فشل سابق: لا ترقية دون تأكيد قوي")
     if str(pattern.get("status")) == "high":
         _add_flag(out, "نمط مخاطرة متكرر: يحتاج تأكيد أقوى قبل الدخول")
     if str(no_chase.get("status")) == "no_chase":

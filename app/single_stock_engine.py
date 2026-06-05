@@ -180,11 +180,11 @@ def scan_all(debug: bool = False):
             except Exception:
                 pass
             try:
-                p = apply_final_decision(p)
+                p = enrich_opportunity_intelligence(p)
             except Exception:
                 pass
             try:
-                p = enrich_opportunity_intelligence(p)
+                p = apply_final_decision(p)
             except Exception:
                 pass
             return {"kind": "row", "symbol": s, "row": p}
@@ -360,11 +360,11 @@ def build_single_stock_response(symbol: str):
             except Exception:
                 pass
             try:
-                trade_plan = apply_final_decision(trade_plan)
+                trade_plan = enrich_opportunity_intelligence(trade_plan)
             except Exception:
                 pass
             try:
-                trade_plan = enrich_opportunity_intelligence(trade_plan)
+                trade_plan = apply_final_decision(trade_plan)
             except Exception:
                 pass
     except Exception as e:

@@ -1,19 +1,27 @@
-"""Final decision engine for Stock Radar AI official launch.
+"""Final decision engine for Stock Radar AI.
 
-This layer is intentionally the last visible decision gate.  Upstream modules may
-score, stage, promote, or warn, but the UI and alerts should trust only the
-fields produced here.
+V2 cleans the visible decision path after months of layered patches:
+- every row is first normalized through decision_contract;
+- broken/stale plans cannot remain Cautious/Strong;
+- No-Chase is reserved for true upward extension only;
+- Telegram can trust BUY_NOW as an executable-now state.
 """
 from __future__ import annotations
 
 from typing import Any
 
-FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v1_2026_05_30b"
+from app.decision_contract import apply_decision_contract
+
+FINAL_DECISION_ENGINE_VERSION = "official_final_decision_engine_v2_2026_06_05_clean_contract"
 
 BUY_NOW = "BUY_NOW"
 WAIT_TRIGGER = "WAIT_TRIGGER"
 WAIT_LIQUIDITY = "WAIT_LIQUIDITY"
 WAIT_RESISTANCE = "WAIT_RESISTANCE"
+WAIT_REBOUND = "WAIT_REBOUND"
+RECLAIM_REQUIRED = "RECLAIM_REQUIRED"
+PLAN_BROKEN = "PLAN_BROKEN"
+DATA_INCOMPLETE = "DATA_INCOMPLETE"
 EARLY_WATCH = "EARLY_WATCH"
 CONTINUATION = "CONTINUATION"
 PULLBACK_REQUIRED = "PULLBACK_REQUIRED"
@@ -32,18 +40,11 @@ def _f(row: dict, keys: list[str], default: float = 0.0) -> float:
             if value is None or value == "":
                 continue
             if isinstance(value, str):
-                value = value.replace("%", "").replace(",", "").strip()
+                value = value.replace("$", "").replace("%", "").replace(",", "").strip()
             return float(value)
         except Exception:
             continue
     return float(default)
-
-
-def _first_existing(row: dict, keys: list[str], default: Any = None) -> Any:
-    for key in keys:
-        if key in row and row.get(key) not in (None, ""):
-            return row.get(key)
-    return default
 
 
 def _dedupe(items: list[Any], limit: int = 10) -> list[str]:
@@ -76,22 +77,25 @@ def _has_text(row: dict, keys: list[str], *phrases: str) -> bool:
 
 
 def _price(row: dict) -> float:
-    return _f(row, [
-        "current_price_live", "display_price", "price", "current_price", "fmp_price", "live_price", "last_price"
-    ], 0.0)
+    return _f(row, ["current_price_live", "display_price", "price", "current_price", "fmp_price", "live_price", "last_price"], 0.0)
 
 
 def _entry(row: dict) -> float:
-    return _f(row, ["display_entry_price", "entry_price", "entry", "buy_above"], 0.0)
+    return _f(row, ["display_entry_price", "entry_price", "entry", "buy_above", "breakout_price", "confirmation_price"], 0.0)
 
 
 def _entry_distance_pct(row: dict) -> float:
+    contract = row.get("plan_lifecycle") if isinstance(row.get("plan_lifecycle"), dict) else {}
+    if contract and contract.get("entry_distance_pct", 999.0) != 999.0:
+        try:
+            return float(contract.get("entry_distance_pct"))
+        except Exception:
+            pass
     price = _price(row)
     entry = _entry(row)
     if price > 0 and entry > 0:
         return ((price - entry) / entry) * 100.0
-    # Some rows do not have an explicit entry; do not fail them only for missing data.
-    return 0.0
+    return 999.0
 
 
 def _liquidity_confirmed(row: dict) -> tuple[bool, list[str]]:
@@ -100,15 +104,18 @@ def _liquidity_confirmed(row: dict) -> tuple[bool, list[str]]:
     liq_score = _f(row, ["liquidity_persistence_score", "liquidity_score"], 0.0)
     dollar_volume = _f(row, ["dollar_volume", "live_dollar_volume", "fmp_dollar_volume"], 0.0)
     success_tags = " ".join(str(x) for x in (row.get("success_tags") or []))
-    risk_tags = " ".join(str(x) for x in (row.get("risk_tags") or []))
+    risk_tags = " ".join(str(x) for x in (row.get("risk_tags") or []) + (row.get("risk_flags") or []))
     action_text = " ".join([
         _txt(row.get("owner_action")),
         _txt(row.get("execution_readiness_label")),
         _txt(row.get("execution_gate_label")),
         _txt(row.get("live_plan_action")),
+        _txt(row.get("liquidity_persistence_label")),
     ])
 
-    if "السيولة لم تستمر" in risk_tags or "السيولة ضعيفة" in action_text or "ضعيفة" in action_text and "السيولة" in action_text:
+    weak = False
+    if "السيولة لم تستمر" in risk_tags or "سيولة مؤقتة" in action_text or ("ضعيفة" in action_text and "السيولة" in action_text):
+        weak = True
         reasons.append("السيولة الحالية غير مؤكدة أو ضعفت")
     if volume >= 1.05:
         reasons.append(f"RVOL/volume={round(volume, 2)}")
@@ -119,21 +126,19 @@ def _liquidity_confirmed(row: dict) -> tuple[bool, list[str]]:
     if "السيولة استمرت" in success_tags:
         reasons.append("السيولة استمرت")
 
-    confirmed = (
-        (volume >= 1.05 or liq_score >= 55 or dollar_volume >= 20_000_000 or "السيولة استمرت" in success_tags)
-        and not ("السيولة الحالية غير مؤكدة أو ضعفت" in reasons)
-    )
+    confirmed = (volume >= 1.05 or liq_score >= 55 or dollar_volume >= 20_000_000 or "السيولة استمرت" in success_tags) and not weak
     return confirmed, _dedupe(reasons, 6)
 
 
 def _resistance_blocked(row: dict) -> tuple[bool, str]:
-    res_dist = _f(row, ["nearest_resistance_distance_pct", "resistance_distance_pct", "distance_to_resistance_pct"], 999.0)
-    risk_tags = " ".join(str(x) for x in (row.get("risk_tags") or []))
-    labels = " ".join([
-        _txt(row.get("resistance_guard_label")),
-        _txt(row.get("support_guard_label")),
-        _txt(row.get("execution_gate_label")),
-    ])
+    contract = row.get("plan_lifecycle") if isinstance(row.get("plan_lifecycle"), dict) else {}
+    status = _txt(contract.get("status"))
+    if status == "blocked_by_resistance":
+        blockers = contract.get("blockers") if isinstance(contract.get("blockers"), list) else []
+        return True, blockers[0] if blockers else "مقاومة قريبة تمنع الدخول الآن"
+    res_dist = _f(row, ["nearest_resistance_distance_pct", "resistance_distance_pct", "distance_to_resistance_pct", "structure_resistance_distance_pct"], 999.0)
+    risk_tags = " ".join(str(x) for x in (row.get("risk_tags") or []) + (row.get("risk_flags") or []))
+    labels = " ".join([_txt(row.get("resistance_guard_label")), _txt(row.get("support_guard_label")), _txt(row.get("execution_gate_label"))])
     if "قريب من مقاومة قوية" in risk_tags:
         return True, "قريب من مقاومة قوية"
     if _txt(row.get("close_resistance_guard_flag")).lower() in {"1", "true", "yes"}:
@@ -164,93 +169,136 @@ def _previous_move_flags(row: dict) -> tuple[bool, list[str]]:
     return bool(reasons), reasons
 
 
+def _set_common(out: dict, code: str, final_decision: str, blockers: list[str], action: str, *, liquidity_ok: bool, liquidity_reasons: list[str], entry_dist: float, stage: str, stage_label: str) -> dict:
+    labels = {
+        BUY_NOW: "دخول قوي مؤكد",
+        WAIT_TRIGGER: "انتظار تفعيل",
+        WAIT_LIQUIDITY: "انتظار السيولة",
+        WAIT_RESISTANCE: "انتظار اختراق مقاومة",
+        WAIT_REBOUND: "انتظار ارتداد",
+        RECLAIM_REQUIRED: "انتظار استعادة",
+        PLAN_BROKEN: "الخطة مكسورة",
+        DATA_INCOMPLETE: "بيانات غير مكتملة",
+        EARLY_WATCH: "مراقبة مبكرة",
+        CONTINUATION: "استمرار مشروط",
+        PULLBACK_REQUIRED: "يحتاج Pullback",
+        NO_CHASE: "لا تطارد",
+        WATCH: "مراقبة",
+    }
+    out["decision"] = final_decision
+    out["effective_decision"] = final_decision
+    out["final_decision_engine_version"] = FINAL_DECISION_ENGINE_VERSION
+    out["final_decision_code"] = code
+    out["final_decision_label"] = labels.get(code, "مراقبة")
+    out["final_decision_blockers"] = _dedupe(blockers, 10)
+    out["final_decision_liquidity_ok"] = bool(liquidity_ok)
+    out["final_decision_liquidity_reasons"] = liquidity_reasons
+    out["final_decision_entry_distance_pct"] = round(entry_dist, 3) if entry_dist != 999.0 else 999.0
+    out["final_decision_stage"] = stage
+    out["final_decision_stage_label"] = stage_label
+    out["owner_action"] = action
+    # Keep old UI fields synchronized with the final contract.
+    if code == BUY_NOW:
+        out["execution_readiness_label"] = "جاهز للتنفيذ الآن"
+        out["execution_readiness_icon"] = "🟢"
+        out["execution_status_ar"] = "دخول قوي مؤكد 🟢"
+    elif code == NO_CHASE:
+        out["execution_readiness_label"] = "لا تطارد"
+        out["execution_readiness_icon"] = "⛔"
+        out["execution_status_ar"] = "لا تطارد ⛔"
+    elif code == PLAN_BROKEN:
+        out["execution_readiness_label"] = "الخطة مكسورة"
+        out["execution_readiness_icon"] = "🔴"
+        out["execution_status_ar"] = "الخطة مكسورة 🔴"
+    elif code == RECLAIM_REQUIRED:
+        out["execution_readiness_label"] = "انتظار استعادة"
+        out["execution_readiness_icon"] = "🔴"
+        out["execution_status_ar"] = "انتظار استعادة 🔴"
+    elif code == WAIT_REBOUND:
+        out["execution_readiness_label"] = "انتظار ارتداد"
+        out["execution_readiness_icon"] = "⏳"
+        out["execution_status_ar"] = "انتظار ارتداد ⏳"
+    elif code == PULLBACK_REQUIRED:
+        out["execution_readiness_label"] = "يحتاج Pullback"
+        out["execution_readiness_icon"] = "⏳"
+        out["execution_status_ar"] = "يحتاج Pullback ⏳"
+    elif code == DATA_INCOMPLETE:
+        out["execution_readiness_label"] = "بيانات غير مكتملة"
+        out["execution_readiness_icon"] = "⚪"
+        out["execution_status_ar"] = "بيانات غير مكتملة ⚪"
+    elif code in {WAIT_LIQUIDITY, WAIT_RESISTANCE, WAIT_TRIGGER}:
+        out["execution_readiness_label"] = "انتظار تأكيد"
+        out["execution_readiness_icon"] = "🟠"
+        out["execution_status_ar"] = "انتظار تأكيد 🟠"
+    return out
+
+
 def apply_final_decision(row: dict) -> dict:
-    """Apply one final, non-contradictory decision to a stock row."""
     if not isinstance(row, dict):
         return row
 
-    out = dict(row)
+    out = apply_decision_contract(dict(row))
     original_decision = _txt(out.get("decision")) or "مراقبة"
+    out["decision_before_final_engine"] = original_decision
     stage = _stage(out)
     stage_label = _stage_label(out)
-    gain_at_detection = _f(out, ["gain_at_detection"], 0.0)
-    current_gain = _f(out, ["current_gain", "display_change_pct", "live_change_pct", "change_pct"], 0.0)
-    peak_gain = max(
-        _f(out, ["peak_gain_seen"], 0.0),
-        _f(out, ["intraday_peak_gain"], 0.0),
-        _f(out, ["max_gain_basis"], 0.0),
-        current_gain,
-        gain_at_detection,
-    )
-    readiness = _f(out, ["execution_readiness_score", "readiness_score"], 0.0)
-    rr = _f(out, ["rr_1", "risk_reward", "reward_risk"], 0.0)
-    price_reliable = bool(out.get("price_reliable_for_execution", True))
+    plan = out.get("plan_lifecycle") if isinstance(out.get("plan_lifecycle"), dict) else {}
+    plan_status = _txt(plan.get("status"))
+    plan_label = _txt(plan.get("label"))
+    plan_action = _txt(plan.get("action"))
+    plan_blockers = plan.get("blockers") if isinstance(plan.get("blockers"), list) else []
     entry_dist = _entry_distance_pct(out)
     liquidity_ok, liquidity_reasons = _liquidity_confirmed(out)
     resistance_blocked, resistance_reason = _resistance_blocked(out)
     prior_move_risk, prior_move_reasons = _previous_move_flags(out)
+    price_reliable = bool(out.get("price_reliable_for_execution", False))
+    gain_at_detection = _f(out, ["gain_at_detection"], 0.0)
+    current_gain = _f(out, ["current_gain", "display_change_pct", "live_change_pct", "change_pct"], 0.0)
+    peak_gain = max(_f(out, ["peak_gain_seen"], 0.0), _f(out, ["intraday_peak_gain"], 0.0), _f(out, ["max_gain_basis"], 0.0), current_gain, gain_at_detection)
+    readiness = _f(out, ["execution_readiness_score", "readiness_score"], 0.0)
+    rr = _f(out, ["rr_1", "risk_reward", "reward_risk"], 0.0)
 
-    non_actionable_stages = {
-        "Pre-Move", "Continuation Watch", "Requires Pullback", "Already Moved", "Extended", "No-Chase", "Catalyst Spike Review"
-    }
-    # IMPORTANT: do not infer NO_CHASE from owner_action/execution labels.
-    # Those labels may already be stale from an upstream/previous decision pass and
-    # caused clean Pre-Move rows to become "لا تطارد" even when current/peak gain
-    # was tiny.  Only explicit no-chase guards, hard late stages, or objectively
-    # extended movement are allowed to cap the final decision.
-    explicit_no_chase_status = _txt(out.get("no_chase_guard_status")).lower() == "no_chase"
-    explicit_no_chase_label = _has_text(out, ["no_chase_guard_label"], "لا تطارد", "مطاردة")
-    # Pre-Move is a preparation/watch state.  It must never inherit stale
-    # upstream "لا تطارد" wording unless the objective movement itself is
-    # already extended.  This is the core protection against the old layered
-    # behavior: clean Pre-Move rows such as GHM/CIEN/NUE were being capped as
-    # NO_CHASE because an older label/action still contained "لا تطارد".
-    clean_pre_move = (
-        stage == "Pre-Move"
-        and gain_at_detection < 5.0
-        and current_gain < 8.0
-        and peak_gain < 10.0
-        and not bool(out.get("late_seen_flag"))
-    )
+    # Contract hard stops come first: no old badge may override these.
+    if plan_status == "data_incomplete":
+        return _set_common(out, DATA_INCOMPLETE, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status in {"no_valid_plan"}:
+        return _set_common(out, DATA_INCOMPLETE, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status == "broken_stop":
+        return _set_common(out, PLAN_BROKEN, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status == "broken_support":
+        return _set_common(out, RECLAIM_REQUIRED, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status == "target_reached":
+        return _set_common(out, CONTINUATION, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
 
-    objective_extended = (
-        stage in {"Extended", "No-Chase", "Catalyst Spike Review"}
-        or gain_at_detection >= 20
-        or current_gain >= 25
-        or peak_gain >= 25
-    )
-    explicit_no_chase = (explicit_no_chase_status or explicit_no_chase_label) and not clean_pre_move
-    hard_no_chase = objective_extended or explicit_no_chase
-
-    code = WATCH
-    final_decision = original_decision
-    blockers: list[str] = []
-    action = ""
+    # No-Chase must only mean upward extension.  Never use it for red/down, broken,
+    # flat, or below-entry states.
+    upward_extended = bool(current_gain >= 8.0 or peak_gain >= 12.0 or gain_at_detection >= 10.0 or (entry_dist != 999.0 and entry_dist >= 4.0 and current_gain >= 3.0))
+    objective_extended = stage in {"Extended", "No-Chase", "Catalyst Spike Review"} or gain_at_detection >= 20 or current_gain >= 25 or peak_gain >= 25
+    explicit_no_chase = (_txt(out.get("no_chase_guard_status")).lower() == "no_chase" or _has_text(out, ["no_chase_guard_label"], "لا تطارد", "مطاردة")) and upward_extended
+    hard_no_chase = objective_extended or explicit_no_chase or (plan_status == "pullback_required" and bool(plan.get("no_chase")))
 
     if hard_no_chase:
-        code = NO_CHASE
-        final_decision = "مراقبة"
-        blockers = ["الحركة متأخرة أو ممتدة — لا تطارد"]
-        action = "⛔ لا تطارد الآن — انتظر pullback صحي أو إعادة تمركز قبل أي دخول."
-    elif stage == "Requires Pullback" or (peak_gain >= 10 and stage not in {"Active Breakout", "Early Confirmation"}):
-        code = PULLBACK_REQUIRED
-        final_decision = "مراقبة"
-        blockers = ["يحتاج Pullback أو إعادة تمركز قبل الدخول"]
-        action = "⏳ يحتاج Pullback — لا تدخل حتى يعود قرب دعم/entry أو يحدث reclaim بسيولة."
-    elif stage == "Continuation Watch" or (gain_at_detection >= 10 and not bool(out.get("stage_allows_strong"))):
-        code = CONTINUATION
-        final_decision = "مراقبة"
-        blockers = ["استمرار مشروط وليس دخولًا مباشرًا"]
-        action = "🔵 استمرار مشروط — انتظر ثبات/ pullback / reclaim بسيولة."
-    elif stage == "Pre-Move":
-        code = EARLY_WATCH
-        final_decision = "مراقبة"
-        blockers = ["مراقبة مبكرة قبل الحركة وليست دخولًا الآن"]
-        action = "🟣 مراقبة مبكرة — تابع فقط حتى يظهر تأكيد حي."
-    elif original_decision == "دخول قوي":
-        blockers = []
+        return _set_common(out, NO_CHASE, "مراقبة", ["السعر ارتفع وابتعد عن منطقة الدخول — لا تطارد"], "⛔ لا تطارد الآن — انتظر Pullback/Reclaim بمنطقة واضحة وسيولة مستمرة.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status == "pullback_required" or (peak_gain >= 10 and stage not in {"Active Breakout", "Early Confirmation"}):
+        return _set_common(out, PULLBACK_REQUIRED, "مراقبة", plan_blockers or ["يحتاج Pullback أو إعادة تمركز قبل الدخول"], plan_action or "⏳ يحتاج Pullback — لا تدخل حتى يعود قرب دعم/entry أو يحدث reclaim بسيولة.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status == "waiting_trigger" and current_gain < -3.0:
+        return _set_common(out, WAIT_REBOUND, "مراقبة", plan_blockers or ["السهم هابط حاليًا ويحتاج ارتداد"], plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if plan_status == "blocked_by_resistance":
+        return _set_common(out, WAIT_RESISTANCE, "مراقبة", plan_blockers or [resistance_reason], plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if stage == "Continuation Watch" or (gain_at_detection >= 10 and not bool(out.get("stage_allows_strong"))):
+        return _set_common(out, CONTINUATION, "مراقبة", ["استمرار مشروط وليس دخولًا مباشرًا"], "🔵 استمرار مشروط — انتظر ثبات/ Pullback / Reclaim بسيولة.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+    if stage == "Pre-Move":
+        if current_gain < -3.0:
+            return _set_common(out, WAIT_REBOUND, "مراقبة", ["مراقبة مبكرة لكن الحركة الحالية هابطة؛ تحتاج ارتداد"], "⏳ مراقبة مبكرة هابطة — الأداة تنتظر ارتدادًا/استعادة قبل أي ترقية.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        return _set_common(out, EARLY_WATCH, "مراقبة", ["مراقبة مبكرة قبل الحركة وليست دخولًا الآن"], "🟣 مراقبة مبكرة — الأداة تتابعها حتى يظهر تأكيد حي.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+
+    # Strong means executable now, not merely a good idea around an entry.
+    if original_decision == "دخول قوي":
+        blockers: list[str] = []
         if not price_reliable:
-            blockers.append("السعر غير موثوق للتنفيذ")
+            blockers.append("السعر غير مباشر/غير موثوق للتنفيذ")
+        if plan_status != "execution_zone":
+            blockers.append(plan_label or "السعر ليس داخل منطقة تنفيذ واضحة")
         if not liquidity_ok:
             blockers.append("السيولة غير مؤكدة لدخول قوي")
         if resistance_blocked:
@@ -259,92 +307,52 @@ def apply_final_decision(row: dict) -> dict:
             blockers.append("جاهزية التنفيذ أقل من مستوى دخول قوي")
         if rr and rr < 0.65:
             blockers.append("العائد/المخاطرة غير كافٍ لدخول قوي")
-        if entry_dist < -0.75:
+        if entry_dist != 999.0 and entry_dist < -0.75:
             blockers.append("السعر لم يتفعل بعد فوق منطقة الدخول")
-        if entry_dist > 2.0:
+        if entry_dist != 999.0 and entry_dist > 1.35:
             blockers.append("السعر ابتعد عن منطقة الدخول")
         if prior_move_risk and not bool(out.get("clean_continuation_confirmed")):
             blockers += prior_move_reasons[:2]
-        if stage in non_actionable_stages and not bool(out.get("stage_allows_strong")):
-            blockers.append("مرحلة الحركة الحالية لا تسمح بشراء الآن")
-
+        if _f(out, ["losing_pattern_score"], 0.0) >= 60 and _txt(out.get("pattern_action")) == "demote_or_block":
+            blockers.append("يشبه نمط فشل سابق — يحتاج تأكيد أقوى")
         blockers = _dedupe(blockers, 10)
-        if blockers:
-            if any("السيولة" in b for b in blockers):
-                code = WAIT_LIQUIDITY
-                action = "🟠 انتظر تأكيد السيولة — لا تدخل حتى تثبت السيولة الحية ويظل السعر قريبًا من الدخول."
-            elif any("مقاومة" in b for b in blockers):
-                code = WAIT_RESISTANCE
-                action = "🟠 انتظر اختراق/ثبات فوق المقاومة قبل أي دخول."
-            else:
-                code = WAIT_TRIGGER
-                action = "🟠 انتظر اكتمال شرط التنفيذ قبل الدخول."
-            final_decision = "دخول بحذر" if stage in {"Active Breakout", "Early Confirmation"} or original_decision == "دخول قوي" else "مراقبة"
-        else:
-            code = BUY_NOW
-            final_decision = "دخول قوي"
-            action = "🟢 دخول قوي مؤكد — قابل للشراء الآن إذا بقي السعر داخل منطقة الدخول ولم يتجاوز عدم المطاردة."
-    elif original_decision == "دخول بحذر":
-        code = WAIT_TRIGGER
-        final_decision = "دخول بحذر"
-        blockers = []
+        if not blockers:
+            out["final_decision_executable_now"] = True
+            return _set_common(out, BUY_NOW, "دخول قوي", [], "🟢 دخول قوي مؤكد — السعر داخل منطقة التنفيذ الآن، بشرط بقاء السيولة وعدم كسر مستوى الإلغاء.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        if any("السيولة" in b for b in blockers):
+            return _set_common(out, WAIT_LIQUIDITY, "مراقبة", blockers, "🟠 انتظر تأكيد السيولة — لا تدخل حتى تثبت السيولة الحية ويبقى السعر قرب الدخول.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        if any("مقاومة" in b for b in blockers):
+            return _set_common(out, WAIT_RESISTANCE, "مراقبة", blockers, "🟠 انتظر اختراق/ثبات فوق المقاومة قبل أي دخول.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        return _set_common(out, WAIT_TRIGGER, "مراقبة", blockers, "🟠 كانت مرشحة قوية لكن ليست شراء الآن — انتظر اكتمال شرط التنفيذ.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+
+    # Cautious is actionable only when conditional and near execution; never a late/no-plan label.
+    if original_decision == "دخول بحذر":
+        blockers: list[str] = []
+        if plan_status not in {"execution_zone", "waiting_trigger", "valid_watch"}:
+            blockers.append(plan_label or "ليست خطة حذرة قابلة للتنفيذ")
         if resistance_blocked:
             blockers.append(resistance_reason)
         if not liquidity_ok:
             blockers.append("يحتاج استمرار السيولة قبل الدخول")
-        if entry_dist < -1.0:
+        if entry_dist != 999.0 and entry_dist < -1.0:
             blockers.append("لم يتفعل السعر بعد")
-        if entry_dist > 2.5:
+        if entry_dist != 999.0 and entry_dist > 1.75:
             blockers.append("ابتعد عن منطقة الدخول")
-        action = "🟠 دخول بحذر = انتظر التفعيل. لا تدخل إلا إذا استمرت السيولة وبقي السعر قرب entry."
-    else:
-        if stage == "Early Confirmation":
-            code = WAIT_TRIGGER
-            final_decision = "دخول بحذر" if bool(out.get("stage_allows_cautious")) and liquidity_ok and not resistance_blocked else "مراقبة"
-            action = "🟠 تأكيد مبكر — انتظر اكتمال شرط الدخول والسيولة."
-        else:
-            code = WATCH
-            final_decision = "مراقبة"
-            action = out.get("owner_action") or "👀 مراقبة — ليست دخولًا الآن."
+        if _f(out, ["losing_pattern_score"], 0.0) >= 65 and _txt(out.get("pattern_action")) == "demote_or_block":
+            blockers.append("يشبه نمط فشل سابق — لا يظهر كدخول بحذر")
+        if blockers and plan_status not in {"execution_zone", "waiting_trigger"}:
+            return _set_common(out, WATCH, "مراقبة", blockers, plan_action or "👀 مراقبة — ليست دخولًا حذرًا صالحًا الآن.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        if any("نمط فشل" in b for b in blockers):
+            return _set_common(out, WATCH, "مراقبة", blockers, "👀 مراقبة فقط — النمط الحالي لا يسمح بدخول بحذر قبل تأكيد أقوى.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        return _set_common(out, WAIT_TRIGGER, "دخول بحذر", _dedupe(blockers, 10), "🟠 دخول بحذر = شرط قريب وليس مطاردة. لا تدخل إلا إذا استمرت السيولة وبقي السعر قرب منطقة الدخول.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
 
-    out["decision_before_final_engine"] = original_decision
-    out["decision"] = final_decision
-    out["effective_decision"] = final_decision
-    out["final_decision_engine_version"] = FINAL_DECISION_ENGINE_VERSION
-    out["final_decision_code"] = code
-    out["final_decision_label"] = {
-        BUY_NOW: "دخول قوي مؤكد",
-        WAIT_TRIGGER: "انتظار تفعيل",
-        WAIT_LIQUIDITY: "انتظار السيولة",
-        WAIT_RESISTANCE: "انتظار اختراق مقاومة",
-        EARLY_WATCH: "مراقبة مبكرة",
-        CONTINUATION: "استمرار مشروط",
-        PULLBACK_REQUIRED: "يحتاج Pullback",
-        NO_CHASE: "لا تطارد",
-        WATCH: "مراقبة",
-    }.get(code, "مراقبة")
-    out["final_decision_blockers"] = _dedupe(blockers, 10)
-    out["final_decision_liquidity_ok"] = bool(liquidity_ok)
-    out["final_decision_liquidity_reasons"] = liquidity_reasons
-    out["final_decision_entry_distance_pct"] = round(entry_dist, 3)
-    out["final_decision_stage"] = stage
-    out["final_decision_stage_label"] = stage_label
-    out["owner_action"] = action
-    if code == BUY_NOW:
-        out["execution_readiness_label"] = "جاهز للتنفيذ"
-        out["execution_readiness_icon"] = "🟢"
-        out["execution_status_ar"] = "دخول قوي مؤكد 🟢"
-    elif code == NO_CHASE:
-        out["execution_readiness_label"] = "لا تطارد"
-        out["execution_readiness_icon"] = "⛔"
-        out["execution_status_ar"] = "لا تطارد ⛔"
-    elif code in {WAIT_LIQUIDITY, WAIT_RESISTANCE, WAIT_TRIGGER}:
-        out["execution_readiness_label"] = "انتظار تأكيد"
-        out["execution_readiness_icon"] = "🟠"
-        out["execution_status_ar"] = "انتظار تأكيد 🟠"
-    return out
+    if stage == "Early Confirmation":
+        if bool(out.get("stage_allows_cautious")) and liquidity_ok and not resistance_blocked and plan_status in {"execution_zone", "waiting_trigger"}:
+            return _set_common(out, WAIT_TRIGGER, "دخول بحذر", [], "🟠 تأكيد مبكر — انتظر اكتمال شرط الدخول والسيولة.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        return _set_common(out, EARLY_WATCH, "مراقبة", ["تأكيد مبكر يحتاج متابعة لصيقة قبل الترقية"], "🟣 تأكيد مبكر تحت المراقبة — ليست دخولًا الآن.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+
+    return _set_common(out, WATCH, "مراقبة", [], plan_action or out.get("owner_action") or "👀 مراقبة — ليست دخولًا الآن.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
 
 
 def apply_final_decisions(rows: list[dict]) -> list[dict]:
     return [apply_final_decision(x) if isinstance(x, dict) else x for x in (rows or [])]
-
