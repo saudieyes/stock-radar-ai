@@ -29,7 +29,7 @@ from .polygon_flatfile_fetcher import (
     mark_flatfile_processed,
 )
 
-POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2a_direct_pull_state_fix_2026_06_06"
+POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2b_selection_quality_fix_2026_06_06"
 DEFAULT_OUTPUT_PATH = Path(DATA_DIR) / "polygon_weekly_priority_watchlist.json"
 _DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 
@@ -190,6 +190,159 @@ def _is_common_stock_symbol(sym: str, company_symbols: set[str]) -> bool:
     if not company_symbols and s.isalpha() and 1 <= len(s) <= 5:
         return True
     return False
+
+
+_COMPANY_PROFILE_CACHE: dict[str, dict[str, str]] | None = None
+
+
+def _company_profile_map() -> dict[str, dict[str, str]]:
+    """Map symbols to sector/industry using bundled SimFin-style files when present.
+
+    This is used only as a quality/review layer for the weekly Polygon list.
+    It does not replace the user's manual Sharia approvals/exclusions.
+    """
+    global _COMPANY_PROFILE_CACHE
+    if _COMPANY_PROFILE_CACHE is not None:
+        return _COMPANY_PROFILE_CACHE
+
+    industry_map: dict[str, dict[str, str]] = {}
+    for path in [Path(__file__).resolve().parent.parent / "data" / "sector_industry.csv", Path.cwd() / "data" / "sector_industry.csv"]:
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8", errors="ignore", newline="") as f:
+                    for row in csv.DictReader(f, delimiter=";"):
+                        iid = str(row.get("IndustryId") or "").strip()
+                        if iid:
+                            industry_map[iid] = {
+                                "industry": str(row.get("Industry") or "").strip(),
+                                "sector": str(row.get("Sector") or "").strip(),
+                            }
+                break
+        except Exception:
+            continue
+
+    profiles: dict[str, dict[str, str]] = {}
+    for path in [Path(__file__).resolve().parent.parent / "data" / "companies.csv", Path.cwd() / "data" / "companies.csv"]:
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8", errors="ignore", newline="") as f:
+                    for row in csv.DictReader(f, delimiter=";"):
+                        sym = _clean_symbol(row.get("Ticker"))
+                        if not sym:
+                            continue
+                        iid = str(row.get("IndustryId") or "").strip()
+                        meta = industry_map.get(iid, {})
+                        profiles[sym] = {
+                            "company_name": str(row.get("Company Name") or "").strip(),
+                            "industry_id": iid,
+                            "industry": str(meta.get("industry") or "").strip(),
+                            "sector": str(meta.get("sector") or "").strip(),
+                        }
+                break
+        except Exception:
+            continue
+    _COMPANY_PROFILE_CACHE = profiles
+    return profiles
+
+
+def _is_financial_review_profile(profile: dict[str, str] | None) -> bool:
+    p = profile or {}
+    sector = str(p.get("sector") or "").lower()
+    industry = str(p.get("industry") or "").lower()
+    joined = f"{sector} {industry}"
+    if "financial services" in joined:
+        return True
+    keywords = ["bank", "insurance", "asset management", "credit services", "brokers", "exchange"]
+    return any(k in joined for k in keywords)
+
+
+def _liquidity_tier(m: dict[str, Any]) -> str:
+    dollar_vol = float(m.get("avg_dollar_volume_20d", 0) or 0)
+    avg_vol = float(m.get("avg_volume_20d", 0) or 0)
+    last_close = float(m.get("last_close", 0) or 0)
+    # Prefer dollar volume for high-priced names, but protect against thin penny/low-volume names.
+    if dollar_vol >= 25_000_000 and avg_vol >= 150_000:
+        return "institutional"
+    if dollar_vol >= 10_000_000 and avg_vol >= 120_000:
+        return "tradeable"
+    if dollar_vol >= 5_000_000 and avg_vol >= 100_000:
+        return "watch"
+    if dollar_vol >= 2_000_000 and avg_vol >= 75_000 and last_close >= 2.0:
+        return "speculative"
+    return "low_liquidity"
+
+
+def _quality_bucket(
+    sym: str,
+    m: dict[str, Any],
+    *,
+    approved: bool,
+    no_chase: bool,
+    profile: dict[str, str] | None,
+) -> tuple[str, list[str], float, bool]:
+    """Return candidate bucket, flags, rank adjustment, and whether it is reject-level.
+
+    Buckets keep the weekly list honest: a technically strong but unresolved or
+    financial/low-liquidity name should not look like a clean Sharia-ready entry.
+    """
+    flags: list[str] = []
+    adj = 0.0
+    reject = False
+    tier = _liquidity_tier(m)
+    financial_review = _is_financial_review_profile(profile)
+
+    if tier == "low_liquidity":
+        flags.append("سيولة ضعيفة جدًا — لا يدخل القائمة النظيفة")
+        reject = True
+        adj -= 80
+        bucket = "Rejected - Low Liquidity"
+    elif tier == "speculative":
+        flags.append("سيولة محدودة — مضاربي/عالي المخاطر")
+        adj -= 30
+        bucket = "Speculative Liquidity Review"
+    elif tier == "watch":
+        flags.append("سيولة متوسطة — يحتاج تأكيد حي")
+        adj -= 8
+        bucket = "Watch Liquidity Review"
+    else:
+        bucket = "Clean Weekly Priority"
+
+    if no_chase:
+        flags.append("امتداد/مطاردة — يحتاج تراجع أو إعادة تمركز")
+        adj -= 35
+        bucket = "Continuation / No-Chase Review"
+
+    if financial_review and not approved:
+        flags.append("قطاع مالي/تأمين — يحتاج مراجعة شرعية قبل الإدراج النظيف")
+        adj -= 45
+        if not reject:
+            bucket = "Financial / Sharia Review"
+
+    if approved:
+        flags.append("معتمد يدويًا شرعيًا")
+        adj += 18
+        if bucket in {"Financial / Sharia Review", "Needs Sharia Review"}:
+            bucket = "Clean Weekly Priority"
+    else:
+        flags.append("غير محسوم شرعيًا — ليس ضمن القائمة النظيفة")
+        adj -= 12
+        if bucket == "Clean Weekly Priority":
+            bucket = "Needs Sharia Review"
+
+    return bucket, flags[:6], adj, reject
+
+
+def _bucket_rank(bucket: str) -> int:
+    order = {
+        "Clean Weekly Priority": 60,
+        "Needs Sharia Review": 45,
+        "Watch Liquidity Review": 35,
+        "Financial / Sharia Review": 25,
+        "Speculative Liquidity Review": 20,
+        "Continuation / No-Chase Review": 10,
+        "Rejected - Low Liquidity": 0,
+    }
+    return order.get(str(bucket or ""), 5)
 
 
 
@@ -598,6 +751,10 @@ def _score_metrics(m: dict[str, Any]) -> tuple[float, list[str], str, bool]:
         score += 8; reasons.append("قوة يومية واضحة في آخر جلسة")
     if last_ret >= 5.0:
         score += 5; reasons.append("اندفاع آخر جلسة قوي — يحتاج تأكيد لا مطاردة")
+    if last_ret <= -2.0:
+        score -= 10; reasons.append("ضعف واضح في آخر جلسة — يحتاج reclaim")
+    if last_ret <= -4.0:
+        score -= 12; reasons.append("ضغط قوي في آخر جلسة — مراقبة تراجع/استعادة فقط")
     if close_loc >= 0.78:
         score += 10; reasons.append("إغلاق قريب من قمة اليوم")
     elif close_loc <= 0.35:
@@ -632,6 +789,8 @@ def _score_metrics(m: dict[str, Any]) -> tuple[float, list[str], str, bool]:
     no_chase = bool(last_ret > 10 or ret5 > 22 or max_rise > 30)
     if no_chase:
         stage = "Pullback Required / No-Chase Review"
+    elif last_ret <= -4.0 or close_loc <= 0.30:
+        stage = "Pullback/Reclaim Watch"
     elif ret5 > 12 or max_rise > 18:
         stage = "Continuation Watch"
     elif reclaim or red_green or stress or close_power >= 2:
@@ -685,9 +844,13 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         if exclusions.get(sym) and not approvals.get(sym):
             continue
         m0 = _compact_metrics(s, market_last)
-        sc0, _, _, _ = _score_metrics(m0)
-        if sc0 >= 25:
-            prelim.append((float(sc0), sym))
+        sc0, _, stage0, no_chase0 = _score_metrics(m0)
+        profile0 = _company_profile_map().get(sym, {})
+        approved0 = bool(approvals.get(sym))
+        bucket0, _, adj0, reject0 = _quality_bucket(sym, m0, approved=approved0, no_chase=no_chase0, profile=profile0)
+        # Keep a wide enough pool for minute confirmation, but avoid wasting work on clearly thin names.
+        if not reject0 and sc0 + adj0 >= 18:
+            prelim.append((float(sc0 + adj0 + _bucket_rank(bucket0)), sym))
     prelim.sort(reverse=True)
     allowed_minute_symbols = {sym for _, sym in prelim[:2500]}
 
@@ -702,6 +865,7 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
 
     _sort_records(stats)
     market_last = _market_last_day_returns(stats)
+    profiles = _company_profile_map()
     candidates = []
     rejected_count = 0
     excluded = 0
@@ -719,7 +883,18 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             rejected_count += 1
             continue
         score, reasons, stage, no_chase = _score_metrics(metrics)
-        if score < 38:
+        approved = bool(approvals.get(sym))
+        profile = profiles.get(sym, {})
+        bucket, review_flags, rank_adjustment, reject_quality = _quality_bucket(
+            sym, metrics, approved=approved, no_chase=no_chase, profile=profile
+        )
+        adjusted_rank_score = float(score) + float(rank_adjustment) + float(_bucket_rank(bucket))
+        if stage not in {"Weekly Priority", "Early/Quiet Accumulation Watch"}:
+            adjusted_rank_score -= 22
+            if bucket == "Clean Weekly Priority":
+                bucket = "Continuation / No-Chase Review"
+        # Reject only truly low-quality liquidity.  Unresolved Sharia names are kept, but separated.
+        if reject_quality or adjusted_rank_score < 45:
             rejected_count += 1
             continue
         last = float(metrics.get("last_close", 0) or 0)
@@ -731,14 +906,22 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         item = {
             "symbol": sym,
             "score": max(0.0, min(100.0, safe_round(score, 2))),
-            "rank_score": safe_round(score, 2),
+            "rank_score": safe_round(adjusted_rank_score, 2),
+            "raw_score": safe_round(score, 2),
+            "rank_adjustment": safe_round(rank_adjustment, 2),
             "stage": stage,
             "pattern": stage,
-            "weekly_priority": stage in {"Weekly Priority", "Early/Quiet Accumulation Watch"},
+            "quality_bucket": bucket,
+            "clean_weekly_priority": bucket == "Clean Weekly Priority" and stage in {"Weekly Priority", "Early/Quiet Accumulation Watch"},
+            "weekly_priority": bucket in {"Clean Weekly Priority", "Needs Sharia Review", "Watch Liquidity Review"} and stage in {"Weekly Priority", "Early/Quiet Accumulation Watch"},
             "is_buy_signal": False,
             "requires_live_confirmation": True,
             "no_chase": no_chase,
-            "reasons": reasons,
+            "reasons": (review_flags + reasons)[:12],
+            "review_flags": review_flags,
+            "liquidity_tier": _liquidity_tier(metrics),
+            "sector": str((profile or {}).get("sector") or ""),
+            "industry": str((profile or {}).get("industry") or ""),
             "last_close": safe_round(last, 4),
             "last_date": metrics.get("last_date"),
             "return_5d_pct": safe_round(metrics.get("return_5d_pct"), 2),
@@ -751,12 +934,28 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             "suggested_watch_zone_high": safe_round(support_high, 4),
             "invalidation": safe_round(max(0.01, support_low * 0.985), 4) if support_low > 0 else 0,
             "first_target": safe_round(target, 4),
-            "sharia_manual_status": "approved" if approvals.get(sym) else "unresolved",
+            "sharia_manual_status": "approved" if approved else "unresolved",
             "compact_metrics": {k: v for k, v in metrics.items() if k not in {"minute_last"}},
             "minute_last": metrics.get("minute_last"),
         }
         candidates.append(item)
-    candidates.sort(key=lambda x: (0 if x.get("no_chase") else 1, float(x.get("rank_score", x.get("score", 0))), float(x.get("last_day_return_pct", 0) or 0)), reverse=True)
+    candidates.sort(
+        key=lambda x: (
+            _bucket_rank(str(x.get("quality_bucket") or "")),
+            0 if x.get("no_chase") else 1,
+            float(x.get("rank_score", x.get("score", 0)) or 0),
+            float(x.get("avg_dollar_volume_20d", 0) or 0),
+        ),
+        reverse=True,
+    )
+    sections = {
+        "clean_weekly_priority": [c for c in candidates if c.get("quality_bucket") == "Clean Weekly Priority"],
+        "needs_sharia_review": [c for c in candidates if c.get("quality_bucket") == "Needs Sharia Review"],
+        "financial_sharia_review": [c for c in candidates if c.get("quality_bucket") == "Financial / Sharia Review"],
+        "liquidity_review": [c for c in candidates if c.get("quality_bucket") in {"Watch Liquidity Review", "Speculative Liquidity Review"}],
+        "continuation_no_chase_review": [c for c in candidates if c.get("quality_bucket") == "Continuation / No-Chase Review"],
+    }
+    top_limit = max(1, min(50, int(top_n or 15)))
     result = {
         "ok": True,
         "version": POLYGON_WEEKLY_BUILDER_VERSION,
@@ -769,7 +968,9 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         "rejected_count": rejected_count,
         "market_last_day_returns": {k: safe_round(v, 2) for k, v in market_last.items()},
         "top_n": int(top_n),
-        "candidates": candidates[:max(1, min(50, int(top_n or 15)))],
+        "candidates": candidates[:top_limit],
+        "sections": {k: v[:top_limit] for k, v in sections.items()},
+        "selection_quality_rule_ar": "V2b يفصل القائمة النظيفة عن غير المحسوم شرعيًا والقطاع المالي والسيولة الضعيفة. غير المحسوم قد يظهر للمراجعة فقط وليس كقائمة نظيفة.",
         "source_errors": source_errors[:20],
         "rule_ar": "هذه قائمة Polygon Weekly Priority مستقلة وليست إشارة شراء. لا تتحول إلى Cautious/Strong إلا بعد السعر الحي والسيولة والدعم/المقاومة وFinal Decision.",
         "storage_rule_ar": "تم تحليل ملفات Polygon كمدخل مؤقت فقط. الناتج المختصر فقط هو الذي يُحفظ؛ لا حفظ للملفات الخام في Railway/GitHub/SQLite.",
