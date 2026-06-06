@@ -29,7 +29,7 @@ from .polygon_flatfile_fetcher import (
     mark_flatfile_processed,
 )
 
-POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2c_weekly_freeze_reclaim_quality_2026_06_06"
+POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2d_manual_sharia_live_filter_2026_06_06"
 DEFAULT_OUTPUT_PATH = Path(DATA_DIR) / "polygon_weekly_priority_watchlist.json"
 _DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 
@@ -910,7 +910,7 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             continue
         if not _is_common_stock_symbol(sym, company_symbols):
             continue
-        if exclusions.get(sym) and not approvals.get(sym):
+        if exclusions.get(sym):
             continue
         m0 = _compact_metrics(s, market_last)
         sc0, _, stage0, no_chase0 = _score_metrics(m0)
@@ -944,7 +944,9 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         if not _is_common_stock_symbol(sym, company_symbols):
             rejected_count += 1
             continue
-        if exclusions.get(sym) and not approvals.get(sym):
+        if exclusions.get(sym):
+            # Manual exclusion is the final user decision for weekly candidates.
+            # It must hide the symbol even if an older manual approval exists.
             excluded += 1
             continue
         metrics = _compact_metrics(s, market_last)
@@ -1176,11 +1178,76 @@ def polygon_flatfile_status() -> dict:
     }
 
 
+def _filter_items_against_current_manual_exclusions(items: list[dict], exclusions: dict) -> tuple[list[dict], int]:
+    """Hide symbols that the user excluded after the weekly list was frozen.
+
+    The weekly list is intentionally frozen for performance comparison, but Sharia
+    decisions are live user controls.  If the user manually excludes a symbol, it
+    must disappear from Polygon Weekly immediately on the next status/read, even
+    if the saved JSON snapshot still contains the old candidate or an old manual
+    approval entry exists.
+    """
+    if not isinstance(items, list):
+        return [], 0
+    excluded_symbols = {str(k or "").upper().strip() for k, v in (exclusions or {}).items() if str(k or "").strip()}
+    if not excluded_symbols:
+        return list(items), 0
+    kept = []
+    removed = 0
+    for item in items:
+        sym = str((item or {}).get("symbol") or "").upper().strip()
+        if sym and sym in excluded_symbols:
+            removed += 1
+            continue
+        kept.append(item)
+    return kept, removed
+
+
+def _apply_live_manual_sharia_filter_to_watchlist(data: dict) -> dict:
+    """Return a display-safe copy of a frozen weekly watchlist.
+
+    This does not rebuild Polygon and does not mutate raw files.  It only filters
+    the saved compact JSON using the *current* manual Sharia exclusions so excluded
+    symbols do not reappear when the UI reloads.
+    """
+    if not isinstance(data, dict) or not data.get("ok", True):
+        return data
+    try:
+        exclusions = get_manual_sharia_exclusions_map() or {}
+    except Exception:
+        exclusions = {}
+    if not exclusions:
+        data["manual_sharia_live_filter_active"] = False
+        data["manual_sharia_live_filtered_count"] = 0
+        return data
+
+    filtered = json.loads(json.dumps(data, ensure_ascii=False))
+    total_removed = 0
+
+    candidates, removed = _filter_items_against_current_manual_exclusions(filtered.get("candidates") or [], exclusions)
+    filtered["candidates"] = candidates
+    total_removed += removed
+
+    sections = filtered.get("sections") or {}
+    if isinstance(sections, dict):
+        new_sections = {}
+        for key, value in sections.items():
+            section_items, section_removed = _filter_items_against_current_manual_exclusions(value or [], exclusions)
+            new_sections[key] = section_items
+            total_removed += section_removed
+        filtered["sections"] = new_sections
+
+    filtered["manual_sharia_live_filter_active"] = True
+    filtered["manual_sharia_live_filtered_count"] = total_removed
+    filtered["manual_sharia_live_filter_rule_ar"] = "تم إخفاء أي سهم مستبعد يدويًا من القائمة الأسبوعية المجمدة عند العرض، بدون إعادة بناء Polygon."
+    return filtered
+
+
 def load_weekly_watchlist() -> dict:
     if DEFAULT_OUTPUT_PATH.exists():
         try:
-            return json.loads(DEFAULT_OUTPUT_PATH.read_text(encoding="utf-8"))
+            data = json.loads(DEFAULT_OUTPUT_PATH.read_text(encoding="utf-8"))
+            return _apply_live_manual_sharia_filter_to_watchlist(data)
         except Exception as exc:
             return {"ok": False, "error": f"read_error: {type(exc).__name__}: {str(exc)[:120]}"}
     return {"ok": True, "version": POLYGON_WEEKLY_BUILDER_VERSION, "available": False, "candidates": []}
-
