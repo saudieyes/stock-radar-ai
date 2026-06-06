@@ -26,9 +26,10 @@ from .polygon_flatfile_fetcher import (
     cleanup_tmp_path,
     flatfiles_config_status,
     pull_flatfiles_for_window,
+    mark_flatfile_processed,
 )
 
-POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2_csv_gz_direct_pull_safe_2026_06_06"
+POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2a_direct_pull_state_fix_2026_06_06"
 DEFAULT_OUTPUT_PATH = Path(DATA_DIR) / "polygon_weekly_priority_watchlist.json"
 _DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 
@@ -830,7 +831,26 @@ def build_weekly_candidates_from_polygon(
     """Pull Massive/Polygon flat files into /tmp, build candidates, delete raw files."""
     pull = pull_flatfiles_for_window(end_date=trade_date, minute_days=minute_days, daily_days=daily_days, force=force)
     tmp_dir = pull.get("tmp_dir")
+    recovered_from_stale_processed_state = False
     try:
+        if not pull.get("ok"):
+            results0 = list(pull.get("results") or [])
+            all_processed = bool(results0) and all(str((r or {}).get("status") or "") == "already_processed" for r in results0)
+            # If a previous dry-run/download marked dates as processed but no compact watchlist exists,
+            # there are no raw files to reuse. Recover once by forcing a fresh /tmp pull.
+            if all_processed and not DEFAULT_OUTPUT_PATH.exists() and not force:
+                cleanup_tmp_path(tmp_dir)
+                recovered_from_stale_processed_state = True
+                pull = pull_flatfiles_for_window(end_date=trade_date, minute_days=minute_days, daily_days=daily_days, force=True)
+                tmp_dir = pull.get("tmp_dir")
+            elif all_processed and DEFAULT_OUTPUT_PATH.exists():
+                saved = load_weekly_watchlist()
+                saved["ok"] = bool(saved.get("ok", True))
+                saved["from_existing_watchlist"] = True
+                saved["note_ar"] = "كل التواريخ معالجة سابقًا، لذلك تم إرجاع قائمة Weekly Priority المحفوظة بدل إعادة تحميل الملفات الخام."
+                saved["fetcher_version"] = POLYGON_FLATFILE_FETCHER_VERSION
+                saved["polygon_pull"] = {"download_results": [{k: v for k, v in (r or {}).items() if k != "path"} for r in results0], "raw_files_downloaded": False}
+                return saved
         if not pull.get("ok"):
             return {
                 "ok": False,
@@ -839,6 +859,7 @@ def build_weekly_candidates_from_polygon(
                 "error": pull.get("error") or "no_flatfiles_downloaded",
                 "pull": {k: v for k, v in pull.items() if k != "tmp_dir"},
                 "config": flatfiles_config_status(),
+                "recovered_from_stale_processed_state": recovered_from_stale_processed_state,
             }
         result = _build_from_paths_internal(
             minute_paths=list(pull.get("minute_paths") or []),
@@ -847,7 +868,12 @@ def build_weekly_candidates_from_polygon(
             execute=execute,
             input_label="polygon_flatfiles_direct_pull_tmp_only",
         )
+        if execute and result.get("ok"):
+            for r in list(pull.get("results") or []):
+                if (r or {}).get("ok") and (r or {}).get("s3_key") and (r or {}).get("trade_date") and (r or {}).get("dataset"):
+                    mark_flatfile_processed(str(r.get("dataset")), str(r.get("trade_date")), str(r.get("s3_key")))
         result["fetcher_version"] = POLYGON_FLATFILE_FETCHER_VERSION
+        result["recovered_from_stale_processed_state"] = recovered_from_stale_processed_state
         result["polygon_pull"] = {
             "minute_dates": pull.get("minute_dates"),
             "daily_dates": pull.get("daily_dates"),

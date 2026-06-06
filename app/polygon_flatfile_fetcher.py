@@ -23,7 +23,7 @@ from typing import Any
 
 from .settings import DATA_DIR
 
-POLYGON_FLATFILE_FETCHER_VERSION = "polygon_flatfile_fetcher_v1_safe_retry_cap_2026_06_06"
+POLYGON_FLATFILE_FETCHER_VERSION = "polygon_flatfile_fetcher_v1a_stale_processed_recovery_2026_06_06"
 STATE_PATH = Path(DATA_DIR) / "polygon_flatfile_pull_state.json"
 
 DATASET_MINUTE = "minute"
@@ -281,16 +281,37 @@ def _record_attempt(dataset: str, trade_date: date, status: str, error: str = ""
     return rec
 
 
-def _record_processed(dataset: str, trade_date: date, key_path: str) -> dict[str, Any]:
+def mark_flatfile_processed(dataset: str, trade_date: str | date | datetime, key_path: str = "") -> dict[str, Any]:
+    d = _parse_date(trade_date)
+    if not d:
+        return {}
+    kind = str(dataset or "").strip().lower()
+    state = _load_state()
+    key = _state_key(kind, d)
+    rec = dict(state.get(key) or {})
+    rec.update({
+        "trade_date": d.isoformat(),
+        "dataset": kind,
+        "status": "processed",
+        "processed_at": datetime.utcnow().isoformat() + "Z",
+        "s3_key": key_path or rec.get("s3_key", ""),
+    })
+    state[key] = rec
+    _save_state(state)
+    return rec
+
+
+def _record_downloaded_tmp(dataset: str, trade_date: date, key_path: str, file_size: int = 0) -> dict[str, Any]:
     state = _load_state()
     key = _state_key(dataset, trade_date)
     rec = dict(state.get(key) or {})
     rec.update({
         "trade_date": trade_date.isoformat(),
         "dataset": dataset,
-        "status": "processed",
-        "processed_at": datetime.utcnow().isoformat() + "Z",
+        "status": "downloaded_to_tmp",
+        "downloaded_at": datetime.utcnow().isoformat() + "Z",
         "s3_key": key_path,
+        "last_file_size_bytes": int(file_size or 0),
     })
     state[key] = rec
     _save_state(state)
@@ -403,7 +424,8 @@ def fetch_flatfile_to_tmp(
     attempts = int(prev.get("attempt_count", 0) or 0)
     if not force and str(prev.get("status") or "") == "processed":
         return FetchResult(True, "already_processed", kind, d.isoformat(), skipped=True, attempts=attempts).to_dict()
-    if not force and attempts >= max_attempts() and str(prev.get("status") or "") != "processed":
+    cap_statuses = {"checking", "not_available_yet", "unavailable_after_retries", "download_failed", "download_failed_after_retries"}
+    if not force and attempts >= max_attempts() and str(prev.get("status") or "") in cap_statuses:
         return FetchResult(False, "attempt_cap_reached", kind, d.isoformat(), skipped=True, attempts=attempts, error="max attempts reached; will wait for next scheduled day").to_dict()
 
     client, client_error = _client()
@@ -432,7 +454,7 @@ def fetch_flatfile_to_tmp(
     try:
         with out_path.open("wb") as f:
             client.download_fileobj(bucket, key, f)
-        _record_processed(kind, d, key)
+        _record_downloaded_tmp(kind, d, key, size)
         return FetchResult(True, "downloaded_to_tmp", kind, d.isoformat(), path=str(out_path), s3_key=key, attempts=attempts, file_size_bytes=size).to_dict()
     except Exception as exc:
         err = f"download_failed: {type(exc).__name__}: {str(exc)[:180]}"
