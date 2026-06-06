@@ -29,7 +29,7 @@ from .polygon_flatfile_fetcher import (
     mark_flatfile_processed,
 )
 
-POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2b_selection_quality_fix_2026_06_06"
+POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2c_weekly_freeze_reclaim_quality_2026_06_06"
 DEFAULT_OUTPUT_PATH = Path(DATA_DIR) / "polygon_weekly_priority_watchlist.json"
 _DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 
@@ -282,8 +282,10 @@ def _quality_bucket(
 ) -> tuple[str, list[str], float, bool]:
     """Return candidate bucket, flags, rank adjustment, and whether it is reject-level.
 
-    Buckets keep the weekly list honest: a technically strong but unresolved or
-    financial/low-liquidity name should not look like a clean Sharia-ready entry.
+    Important: ``approved`` means the symbol exists in the user's previously/manual
+    reviewed approval list.  It is not a fresh full financial Sharia audit of all
+    12k+ symbols during this Polygon pass.  Therefore it helps ranking, but it
+    must never override weak technical behavior, extension, or no-chase risk.
     """
     flags: list[str] = []
     adj = 0.0
@@ -294,23 +296,23 @@ def _quality_bucket(
     if tier == "low_liquidity":
         flags.append("سيولة ضعيفة جدًا — لا يدخل القائمة النظيفة")
         reject = True
-        adj -= 80
+        adj -= 90
         bucket = "Rejected - Low Liquidity"
     elif tier == "speculative":
         flags.append("سيولة محدودة — مضاربي/عالي المخاطر")
-        adj -= 30
+        adj -= 35
         bucket = "Speculative Liquidity Review"
     elif tier == "watch":
         flags.append("سيولة متوسطة — يحتاج تأكيد حي")
-        adj -= 8
+        adj -= 10
         bucket = "Watch Liquidity Review"
     else:
         bucket = "Clean Weekly Priority"
 
     if no_chase:
         flags.append("امتداد/مطاردة — يحتاج تراجع أو إعادة تمركز")
-        adj -= 35
-        bucket = "Continuation / No-Chase Review"
+        adj -= 45
+        bucket = "Continuation / Pullback Required"
 
     if financial_review and not approved:
         flags.append("قطاع مالي/تأمين — يحتاج مراجعة شرعية قبل الإدراج النظيف")
@@ -319,12 +321,14 @@ def _quality_bucket(
             bucket = "Financial / Sharia Review"
 
     if approved:
-        flags.append("معتمد يدويًا شرعيًا")
-        adj += 18
+        flags.append("مراجع يدويًا سابقًا — ليس فحصًا ماليًا جديدًا")
+        # A modest bonus only.  Manual review should help clean names surface,
+        # but should not push weak-close or extended names into the clean top list.
+        adj += 8
         if bucket in {"Financial / Sharia Review", "Needs Sharia Review"}:
             bucket = "Clean Weekly Priority"
     else:
-        flags.append("غير محسوم شرعيًا — ليس ضمن القائمة النظيفة")
+        flags.append("غير محسوم شرعيًا — يظهر للمراجعة لا للقائمة النظيفة")
         adj -= 12
         if bucket == "Clean Weekly Priority":
             bucket = "Needs Sharia Review"
@@ -332,13 +336,76 @@ def _quality_bucket(
     return bucket, flags[:6], adj, reject
 
 
+def _technical_quality_overlay(m: dict[str, Any]) -> tuple[list[str], float, str]:
+    """Downgrade technically weak or extended names after base scoring.
+
+    This overlay is deliberately applied after manual Sharia status so a prior
+    manual approval cannot hide a broken/weak weekly setup.
+    """
+    flags: list[str] = []
+    penalty = 0.0
+    override_bucket = ""
+
+    ret5 = float(m.get("return_5d_pct", 0) or 0)
+    ret20 = float(m.get("return_20d_pct", 0) or 0)
+    last_ret = float(m.get("last_day_return_pct", 0) or 0)
+    close_loc = float(m.get("last_day_close_location", 0) or 0)
+    vol_ratio = float(m.get("volume_ratio_last_vs_prev20", 0) or 0)
+    max_rise = float(m.get("max_intraday_rise_pct", 0) or 0)
+    dist_high = float(m.get("distance_from_20d_high_pct", 0) or 0)
+
+    weak_close = (last_ret <= -1.25 and close_loc <= 0.55) or close_loc <= 0.32
+    severe_weak_close = last_ret <= -3.0 or close_loc <= 0.22
+    extended_20d = ret20 >= 35.0 or (ret20 >= 25.0 and dist_high > -8.0)
+    extended_5d = ret5 >= 12.0
+    intraday_fade = max_rise >= 7.0 and close_loc <= 0.45
+
+    if severe_weak_close:
+        flags.append("إغلاق ضعيف/ضغط واضح — Reclaim مطلوب قبل الأولوية")
+        penalty -= 36
+        override_bucket = "Reclaim Required"
+    elif weak_close:
+        flags.append("إغلاق غير مقنع — يخفض إلى Reclaim Watch")
+        penalty -= 24
+        override_bucket = "Reclaim Required"
+
+    if extended_20d:
+        flags.append("امتداد 20 يوم مرتفع — استمرار/تراجع لا أولوية نظيفة")
+        penalty -= 34
+        override_bucket = "Continuation / Pullback Required"
+    elif ret20 >= 20.0 and weak_close:
+        flags.append("صعود سابق مع إغلاق ضعيف — يحتاج إعادة تمركز")
+        penalty -= 18
+        override_bucket = "Continuation / Pullback Required"
+
+    if extended_5d:
+        flags.append("صعود 5 أيام مرتفع — يحتاج منع مطاردة")
+        penalty -= 18
+        if not override_bucket:
+            override_bucket = "Continuation / Pullback Required"
+
+    if intraday_fade:
+        flags.append("اندفاع داخلي ثم تراجع — تأكيد حي مطلوب")
+        penalty -= 14
+        if not override_bucket:
+            override_bucket = "Reclaim Required"
+
+    if vol_ratio < 0.55 and last_ret <= 0:
+        flags.append("السيولة الأخيرة أضعف من المتوسط")
+        penalty -= 10
+
+    return flags[:5], penalty, override_bucket
+
+
 def _bucket_rank(bucket: str) -> int:
     order = {
-        "Clean Weekly Priority": 60,
-        "Needs Sharia Review": 45,
-        "Watch Liquidity Review": 35,
-        "Financial / Sharia Review": 25,
-        "Speculative Liquidity Review": 20,
+        "Clean Weekly Priority": 70,
+        "Needs Sharia Review": 48,
+        "Watch Liquidity Review": 38,
+        "Reclaim Required": 28,
+        "Financial / Sharia Review": 24,
+        "Speculative Liquidity Review": 18,
+        "Continuation / Pullback Required": 12,
         "Continuation / No-Chase Review": 10,
         "Rejected - Low Liquidity": 0,
     }
@@ -746,19 +813,21 @@ def _score_metrics(m: dict[str, Any]) -> tuple[float, list[str], str, bool]:
     if -8 <= ret20 <= 18:
         score += 8; reasons.append("اتجاه 20 يوم قابل للمتابعة بدون انفجار مفرط")
     elif ret20 > 35:
-        score -= 12; reasons.append("امتداد 20 يوم مرتفع")
+        score -= 22; reasons.append("امتداد 20 يوم مرتفع — لا يدخل كأولوية نظيفة")
+    elif ret20 > 25:
+        score -= 8; reasons.append("صعود 20 يوم ملحوظ — يحتاج تراجع/تأكيد")
     if last_ret >= 2.0:
         score += 8; reasons.append("قوة يومية واضحة في آخر جلسة")
     if last_ret >= 5.0:
         score += 5; reasons.append("اندفاع آخر جلسة قوي — يحتاج تأكيد لا مطاردة")
     if last_ret <= -2.0:
-        score -= 10; reasons.append("ضعف واضح في آخر جلسة — يحتاج reclaim")
+        score -= 16; reasons.append("ضعف واضح في آخر جلسة — يحتاج reclaim")
     if last_ret <= -4.0:
-        score -= 12; reasons.append("ضغط قوي في آخر جلسة — مراقبة تراجع/استعادة فقط")
+        score -= 18; reasons.append("ضغط قوي في آخر جلسة — مراقبة تراجع/استعادة فقط")
     if close_loc >= 0.78:
         score += 10; reasons.append("إغلاق قريب من قمة اليوم")
     elif close_loc <= 0.35:
-        score -= 9; reasons.append("الإغلاق داخل اليوم ضعيف")
+        score -= 16; reasons.append("الإغلاق داخل اليوم ضعيف")
     if 1.15 <= vol_ratio <= 3.5:
         score += 8; reasons.append("السيولة تحسنت بدون جنون")
     elif 0.85 <= vol_ratio < 1.15:
@@ -786,12 +855,12 @@ def _score_metrics(m: dict[str, Any]) -> tuple[float, list[str], str, bool]:
     if max_rise > 24:
         score -= 12; reasons.append("اندفاع داخلي مفرط — يحتاج تراجع/إعادة تمركز")
 
-    no_chase = bool(last_ret > 10 or ret5 > 22 or max_rise > 30)
+    no_chase = bool(last_ret > 10 or ret5 > 22 or ret20 > 45 or max_rise > 30)
     if no_chase:
         stage = "Pullback Required / No-Chase Review"
-    elif last_ret <= -4.0 or close_loc <= 0.30:
+    elif last_ret <= -3.0 or close_loc <= 0.32:
         stage = "Pullback/Reclaim Watch"
-    elif ret5 > 12 or max_rise > 18:
+    elif ret20 > 35 or ret5 > 12 or max_rise > 18:
         stage = "Continuation Watch"
     elif reclaim or red_green or stress or close_power >= 2:
         stage = "Weekly Priority"
@@ -888,11 +957,17 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         bucket, review_flags, rank_adjustment, reject_quality = _quality_bucket(
             sym, metrics, approved=approved, no_chase=no_chase, profile=profile
         )
+        technical_flags, technical_penalty, technical_bucket = _technical_quality_overlay(metrics)
+        if technical_flags:
+            review_flags = (review_flags + technical_flags)[:8]
+            rank_adjustment += technical_penalty
+        if technical_bucket:
+            bucket = technical_bucket
         adjusted_rank_score = float(score) + float(rank_adjustment) + float(_bucket_rank(bucket))
         if stage not in {"Weekly Priority", "Early/Quiet Accumulation Watch"}:
-            adjusted_rank_score -= 22
+            adjusted_rank_score -= 26
             if bucket == "Clean Weekly Priority":
-                bucket = "Continuation / No-Chase Review"
+                bucket = "Continuation / Pullback Required"
         # Reject only truly low-quality liquidity.  Unresolved Sharia names are kept, but separated.
         if reject_quality or adjusted_rank_score < 45:
             rejected_count += 1
@@ -914,6 +989,7 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             "quality_bucket": bucket,
             "clean_weekly_priority": bucket == "Clean Weekly Priority" and stage in {"Weekly Priority", "Early/Quiet Accumulation Watch"},
             "weekly_priority": bucket in {"Clean Weekly Priority", "Needs Sharia Review", "Watch Liquidity Review"} and stage in {"Weekly Priority", "Early/Quiet Accumulation Watch"},
+            "weekly_update_policy": "frozen_weekly_candidate_status_updates_only",
             "is_buy_signal": False,
             "requires_live_confirmation": True,
             "no_chase": no_chase,
@@ -935,6 +1011,7 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             "invalidation": safe_round(max(0.01, support_low * 0.985), 4) if support_low > 0 else 0,
             "first_target": safe_round(target, 4),
             "sharia_manual_status": "approved" if approved else "unresolved",
+            "sharia_status_label_ar": "مراجع يدويًا سابقًا — ليس فحصًا ماليًا جديدًا" if approved else "غير محسوم شرعيًا — يحتاج مراجعة قبل الإدراج النظيف",
             "compact_metrics": {k: v for k, v in metrics.items() if k not in {"minute_last"}},
             "minute_last": metrics.get("minute_last"),
         }
@@ -953,7 +1030,8 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         "needs_sharia_review": [c for c in candidates if c.get("quality_bucket") == "Needs Sharia Review"],
         "financial_sharia_review": [c for c in candidates if c.get("quality_bucket") == "Financial / Sharia Review"],
         "liquidity_review": [c for c in candidates if c.get("quality_bucket") in {"Watch Liquidity Review", "Speculative Liquidity Review"}],
-        "continuation_no_chase_review": [c for c in candidates if c.get("quality_bucket") == "Continuation / No-Chase Review"],
+        "reclaim_required": [c for c in candidates if c.get("quality_bucket") == "Reclaim Required"],
+        "continuation_pullback_review": [c for c in candidates if c.get("quality_bucket") in {"Continuation / Pullback Required", "Continuation / No-Chase Review"}],
     }
     top_limit = max(1, min(50, int(top_n or 15)))
     result = {
@@ -970,7 +1048,8 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         "top_n": int(top_n),
         "candidates": candidates[:top_limit],
         "sections": {k: v[:top_limit] for k, v in sections.items()},
-        "selection_quality_rule_ar": "V2b يفصل القائمة النظيفة عن غير المحسوم شرعيًا والقطاع المالي والسيولة الضعيفة. غير المحسوم قد يظهر للمراجعة فقط وليس كقائمة نظيفة.",
+        "selection_quality_rule_ar": "V2c: الاعتماد اليدوي السابق يساعد الترتيب لكنه لا يغطي ضعف الإغلاق أو الامتداد. القائمة النظيفة تفصل عن Needs Sharia Review وReclaim Required وContinuation/Pullback.",
+        "weekly_update_policy_ar": "قائمة Polygon Weekly Priority تُبنى وتُجمّد أسبوعيًا بعد بيانات الجمعة. خلال الأسبوع تُحدّث حالة السهم فقط: active / reclaim required / failed / no-chase / promoted، ولا تُستبدل القائمة اليومية إلا في قسم منفصل للفرص الجديدة.",
         "source_errors": source_errors[:20],
         "rule_ar": "هذه قائمة Polygon Weekly Priority مستقلة وليست إشارة شراء. لا تتحول إلى Cautious/Strong إلا بعد السعر الحي والسيولة والدعم/المقاومة وFinal Decision.",
         "storage_rule_ar": "تم تحليل ملفات Polygon كمدخل مؤقت فقط. الناتج المختصر فقط هو الذي يُحفظ؛ لا حفظ للملفات الخام في Railway/GitHub/SQLite.",
