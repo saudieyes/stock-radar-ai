@@ -214,7 +214,14 @@ from app.intraday_early_source_radar import get_last_intraday_early_source_radar
 from app.decision_contract import compact_decision_diagnostics
 from app.quote_resolver import resolve_symbol_quote
 from app.early_watch_lifecycle import enrich_rows_early_watch_lifecycle, summarize_early_watch_lifecycle
-from app.polygon_weekly_builder import build_weekly_candidates_from_path, load_weekly_watchlist, POLYGON_WEEKLY_BUILDER_VERSION
+from app.polygon_weekly_builder import (
+    build_weekly_candidates_from_path,
+    build_weekly_candidates_from_paths,
+    build_weekly_candidates_from_polygon,
+    load_weekly_watchlist,
+    polygon_flatfile_status,
+    POLYGON_WEEKLY_BUILDER_VERSION,
+)
 
 app = FastAPI()
 
@@ -2821,17 +2828,63 @@ def polygon_weekly_status():
     }
 
 
-@app.get("/polygon-weekly/build-from-local")
-def polygon_weekly_build_from_local(path: str = "app_data/polygon_weekly_input.zip", top_n: int = 15, execute: bool = False):
-    """Build a compact weekly list from a local temporary CSV/ZIP path.
+@app.get("/polygon-weekly/flatfiles-status")
+def polygon_weekly_flatfiles_status():
+    """Show whether direct Massive/Polygon Flat Files pull is safely configured."""
+    return polygon_flatfile_status()
 
-    Put the Polygon flat files under the given local path first.  This endpoint
-    never stores raw minute files; execute=true stores only the compact JSON.
+
+@app.get("/polygon-weekly/build-from-local")
+def polygon_weekly_build_from_local(
+    path: str = "",
+    minute_path: str = "",
+    daily_path: str = "",
+    top_n: int = 15,
+    execute: bool = False,
+):
+    """Build a compact weekly list from temporary local CSV/CSV.GZ/ZIP paths.
+
+    Prefer minute_path + daily_path so the builder does not guess from file names.
+    This endpoint never stores raw minute files; execute=true stores only compact JSON.
     """
     try:
-        return build_weekly_candidates_from_path(path=path, top_n=int(top_n or 15), execute=bool(execute))
+        if minute_path or daily_path:
+            return build_weekly_candidates_from_paths(
+                minute_path=minute_path or None,
+                daily_path=daily_path or None,
+                top_n=int(top_n or 15),
+                execute=bool(execute),
+            )
+        return build_weekly_candidates_from_path(path=path or "app_data/polygon_weekly_input.zip", top_n=int(top_n or 15), execute=bool(execute))
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "path": path}
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "path": path, "minute_path": minute_path, "daily_path": daily_path}
+
+
+@app.get("/polygon-weekly/build-from-polygon")
+def polygon_weekly_build_from_polygon(
+    trade_date: str = "",
+    minute_days: int = 3,
+    daily_days: int = 25,
+    top_n: int = 15,
+    execute: bool = False,
+    force: bool = False,
+):
+    """Pull Massive/Polygon Flat Files into /tmp, build the list, then delete raw files.
+
+    Safety gates are inside the fetcher: no weekend/holiday pulls, capped attempts per
+    trade_date/dataset, and no raw-file persistence in Railway/GitHub/SQLite.
+    """
+    try:
+        return build_weekly_candidates_from_polygon(
+            trade_date=trade_date or None,
+            minute_days=int(minute_days or 3),
+            daily_days=int(daily_days or 25),
+            top_n=int(top_n or 15),
+            execute=bool(execute),
+            force=bool(force),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "trade_date": trade_date}
 
 @app.get("/debug-scan")
 def debug_scan():
