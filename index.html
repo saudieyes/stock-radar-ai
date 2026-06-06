@@ -2287,6 +2287,21 @@
       <div id="openingContent" class="opening-box hidden-section">جاري تحميل وضع الافتتاح...</div>
     </div>
 
+
+    <div class="section scroll-anchor" id="polygonWeeklySection">
+      <div class="section-header">
+        <div class="section-heading">
+          <div class="section-title">🧊 Polygon Weekly Priority</div>
+          <div class="section-count" id="polygonWeeklyCount">القائمة الأسبوعية المجمدة — ليست شراء مباشر</div>
+        </div>
+        <div class="section-tools">
+          <button class="ghost" onclick="loadWeeklyPriority(true)">تحديث العرض</button>
+          <button class="ghost" data-section-toggle="polygonWeeklyContent" onclick="toggleSection('polygonWeeklyContent', this, 'إظهار', 'إخفاء'); loadWeeklyPriority(true);">إظهار</button>
+        </div>
+      </div>
+      <div id="polygonWeeklyContent" class="panel hidden-section">اضغط إظهار لتحميل قائمة Polygon Weekly Priority...</div>
+    </div>
+
     <div id="content"><div class="loading">جاري تحميل الفرص...</div></div>
 
     <div class="section scroll-anchor" id="watchlistSection">
@@ -5546,8 +5561,118 @@
       }
     }
 
+
+    function weeklyPriorityCard(item, bucketLabel) {
+      const sym = safeText(String(item?.symbol || '').toUpperCase());
+      const stage = safeText(item?.stage || item?.pattern || 'Weekly Priority');
+      const score = Number(item?.score || item?.rank_score || 0);
+      const price = Number(item?.last_close || item?.current_price_live || item?.display_price || 0);
+      const r5 = Number(item?.return_5d_pct || 0);
+      const r20 = Number(item?.return_20d_pct || 0);
+      const day = Number(item?.last_day_return_pct || 0);
+      const zoneLow = Number(item?.suggested_watch_zone_low || 0);
+      const zoneHigh = Number(item?.suggested_watch_zone_high || 0);
+      const invalidation = Number(item?.invalidation || 0);
+      const target = Number(item?.first_target || 0);
+      const liqTier = safeText(item?.liquidity_tier || '—');
+      const sharia = safeText(item?.sharia_status_label_ar || item?.sharia_manual_status || '—');
+      const reasons = (item?.reasons || []).slice(0, 5).map(r => `<li>${safeText(r)}</li>`).join('');
+      const flags = (item?.review_flags || []).slice(0, 3).map(r => `<span class="badge warn">${safeText(r)}</span>`).join(' ');
+      return `
+        <div class="card" data-symbol="${sym}" data-section-key="polygon-weekly">
+          <div class="card-head">
+            <div>
+              <div class="symbol">${sym}</div>
+              <div class="company">${safeText(bucketLabel)} • ${stage}</div>
+            </div>
+            <div class="decision-badge wait">مراقبة أسبوعية</div>
+          </div>
+          <div class="compact-grid">
+            <div class="compact-item"><div class="compact-label">آخر سعر</div><div class="compact-value">${price ? formatNumber(price) : '—'}</div></div>
+            <div class="compact-item"><div class="compact-label">Score</div><div class="compact-value">${formatNumber(score)}</div></div>
+            <div class="compact-item"><div class="compact-label">5 أيام</div><div class="compact-value">${formatNumber(r5)}%</div></div>
+            <div class="compact-item"><div class="compact-label">20 يوم</div><div class="compact-value">${formatNumber(r20)}%</div></div>
+            <div class="compact-item"><div class="compact-label">آخر جلسة</div><div class="compact-value">${formatNumber(day)}%</div></div>
+            <div class="compact-item"><div class="compact-label">السيولة</div><div class="compact-value">${liqTier}</div></div>
+          </div>
+          <div class="badges-row">${flags || `<span class="badge gray">${sharia}</span>`}</div>
+          <div class="small-note" style="margin-top:8px;line-height:1.8;">
+            منطقة مراقبة: ${zoneLow && zoneHigh ? `${formatNumber(zoneLow)} - ${formatNumber(zoneHigh)}` : '—'} •
+            إبطال: ${invalidation ? formatNumber(invalidation) : '—'} •
+            هدف أول: ${target ? formatNumber(target) : '—'}
+          </div>
+          <details class="detail-panel" style="margin-top:10px;">
+            <summary>أسباب الاختيار</summary>
+            <ul class="reasons-list">${reasons || '<li>لا توجد أسباب مختصرة.</li>'}</ul>
+          </details>
+        </div>`;
+    }
+
+    function renderWeeklyPrioritySectionItems(title, items, bucketLabel) {
+      const list = Array.isArray(items) ? items : [];
+      const body = list.length
+        ? `<div class="cards">${list.map(item => weeklyPriorityCard(item, bucketLabel)).join('')}</div>`
+        : '<div class="empty">لا توجد عناصر في هذا القسم.</div>';
+      return `
+        <div class="section-box" style="margin-bottom:12px;">
+          <div class="section-title-row" style="margin-bottom:8px;">
+            <div class="section-title">${safeText(title)}</div>
+            <span class="section-count-pill">${formatNumber(list.length)}</span>
+          </div>
+          ${body}
+        </div>`;
+    }
+
+    function renderWeeklyPriorityPayload(payload) {
+      const wrap = document.getElementById('polygonWeeklyContent');
+      const countEl = document.getElementById('polygonWeeklyCount');
+      if (!wrap) return;
+      const watchlist = payload?.watchlist || payload || {};
+      if (!payload?.ok || !watchlist || watchlist.ok === false || !watchlist.sections) {
+        if (countEl) countEl.textContent = 'لا توجد قائمة محفوظة بعد';
+        wrap.innerHTML = '<div class="empty">لا توجد قائمة Weekly Priority محفوظة. شغّل build مع execute=true مرة واحدة فقط.</div>';
+        return;
+      }
+      const sections = watchlist.sections || {};
+      const clean = sections.clean_weekly_priority || [];
+      const needs = sections.needs_sharia_review || [];
+      const reclaim = sections.reclaim_required || [];
+      const financial = sections.financial_sharia_review || [];
+      const liquidity = sections.liquidity_review || [];
+      const pullback = sections.continuation_pullback_review || [];
+      if (countEl) countEl.textContent = `نظيفة ${formatNumber(clean.length)} • مراجعة شرعية ${formatNumber(needs.length)} • Reclaim ${formatNumber(reclaim.length)}`;
+      wrap.innerHTML = `
+        <div class="summary-box" style="margin-bottom:12px;">
+          <div class="summary-title">قائمة Polygon الأسبوعية المجمدة</div>
+          <div class="summary-text">هذه ليست إشارة شراء. القائمة تُبنى أسبوعيًا من Polygon، وخلال الأسبوع تتغير حالة السهم فقط بعد السعر الحي والسيولة وFinal Decision.</div>
+          <div class="small-note">الإصدار: ${safeText(watchlist.version || payload.version || '—')} • آخر توليد: ${safeText(watchlist.generated_at || '—')}</div>
+        </div>
+        ${renderWeeklyPrioritySectionItems('✅ Clean Weekly Priority', clean, 'Clean Weekly Priority')}
+        ${renderWeeklyPrioritySectionItems('⚖️ Needs Sharia Review', needs, 'Needs Sharia Review')}
+        ${renderWeeklyPrioritySectionItems('🔁 Reclaim Required', reclaim, 'Reclaim Required')}
+        ${renderWeeklyPrioritySectionItems('🏦 Financial / Sharia Review', financial, 'Financial / Sharia Review')}
+        ${renderWeeklyPrioritySectionItems('💧 Liquidity Review', liquidity, 'Liquidity Review')}
+        ${renderWeeklyPrioritySectionItems('↩️ Continuation / Pullback Review', pullback, 'Continuation / Pullback Review')}
+      `;
+    }
+
+    async function loadWeeklyPriority(force=false) {
+      const wrap = document.getElementById('polygonWeeklyContent');
+      if (!wrap) return;
+      if (wrap.dataset.loaded === '1' && !force) return;
+      wrap.innerHTML = '<div class="loading">جاري تحميل Polygon Weekly Priority...</div>';
+      try {
+        const res = await apiFetch(`/polygon-weekly/status?_=${Date.now()}`);
+        const payload = await res.json();
+        renderWeeklyPriorityPayload(payload);
+        wrap.dataset.loaded = '1';
+      } catch (e) {
+        wrap.innerHTML = '<div class="error">تعذر تحميل قائمة Polygon Weekly Priority</div>';
+      }
+    }
+
     async function loadAll(manual=false) {
-      await Promise.allSettled([loadMarketMood(true), loadScan(!!manual)]);
+      await Promise.allSettled([loadMarketMood(true), loadWeeklyPriority(false), loadScan(!!manual)]);
       restoreInitialDecisionView();
     }
 
