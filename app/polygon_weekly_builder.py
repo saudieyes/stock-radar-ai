@@ -1104,3 +1104,4 @@ def load_weekly_watchlist() -> dict:
         except Exception as exc:
             return {"ok": False, "error": f"read_error: {type(exc).__name__}: {str(exc)[:120]}"}
     return {"ok": True, "version": POLYGON_WEEKLY_BUILDER_VERSION, "available": False, "candidates": []}
+
