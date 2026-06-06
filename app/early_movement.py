@@ -431,6 +431,50 @@ def load_early_movement_store() -> dict[str, Any]:
         return out
 
 
+
+
+def _parse_week_end_date(item: dict[str, Any]) -> datetime | None:
+    key = str((item or {}).get("week_key") or "").strip()
+    # Examples: 2026-05-25_2026-05-29 or a single YYYY-MM-DD.
+    parts = key.replace("/", "_").split("_")
+    for part in reversed(parts):
+        try:
+            return datetime.strptime(part[:10], "%Y-%m-%d").replace(tzinfo=NY_TZ)
+        except Exception:
+            continue
+    return None
+
+
+def _sanitize_time_sensitive_weekly_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Expire old Friday-close wording after the next trading day.
+
+    The weekly list can remain useful as a monitoring lane, but reasons such as
+    "إغلاق الجمعة قوي" must not stay visible after Monday unless reconfirmed by
+    a fresh weekly-builder output.
+    """
+    out = dict(item or {})
+    end_dt = _parse_week_end_date(out)
+    if not end_dt:
+        return out
+    now = datetime.now(NY_TZ)
+    expires_after = end_dt + timedelta(days=3)  # Friday -> Monday close/context expiry.
+    if now.date() <= expires_after.date():
+        return out
+    reasons = list(out.get("reasons") or [])
+    cleaned = []
+    removed = []
+    for r in reasons:
+        text = str(r or "")
+        if "إغلاق الجمعة" in text or "يوم الجمعة" in text or "Friday" in text:
+            removed.append(text)
+            continue
+        cleaned.append(r)
+    if removed:
+        out["reasons"] = cleaned + ["تم حذف سبب إغلاق الجمعة لأنه قديم ولم يُعاد تأكيده ببيانات اليوم التالي"]
+        out["time_sensitive_context_expired"] = True
+        out["expired_context_removed"] = removed[:5]
+    return out
+
 def get_weekly_priority_items(include_high_risk: bool = False) -> list[dict[str, Any]]:
     store = load_early_movement_store()
     rows = list(store.get("weekly_priority") or [])
@@ -452,6 +496,7 @@ def get_weekly_priority_items(include_high_risk: bool = False) -> list[dict[str,
         item.setdefault("validity_days", 5)
         item.setdefault("confidence", 60)
         item.setdefault("reasons", [])
+        item = _sanitize_time_sensitive_weekly_item(item)
         out.append(item)
     return out
 

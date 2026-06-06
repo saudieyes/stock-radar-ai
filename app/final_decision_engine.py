@@ -22,6 +22,7 @@ WAIT_REBOUND = "WAIT_REBOUND"
 RECLAIM_REQUIRED = "RECLAIM_REQUIRED"
 PLAN_BROKEN = "PLAN_BROKEN"
 DATA_INCOMPLETE = "DATA_INCOMPLETE"
+NO_VALID_PLAN = "NO_VALID_PLAN"
 EARLY_WATCH = "EARLY_WATCH"
 CONTINUATION = "CONTINUATION"
 PULLBACK_REQUIRED = "PULLBACK_REQUIRED"
@@ -336,6 +337,7 @@ def _set_common(out: dict, code: str, final_decision: str, blockers: list[str], 
         RECLAIM_REQUIRED: "انتظار استعادة",
         PLAN_BROKEN: "الخطة مكسورة",
         DATA_INCOMPLETE: "بيانات غير مكتملة",
+        NO_VALID_PLAN: "لا توجد خطة قابلة للتنفيذ",
         EARLY_WATCH: "مراقبة مبكرة",
         CONTINUATION: "استمرار مشروط",
         PULLBACK_REQUIRED: "يحتاج Pullback",
@@ -397,6 +399,10 @@ def _set_common(out: dict, code: str, final_decision: str, blockers: list[str], 
         out["execution_readiness_label"] = "بيانات غير مكتملة"
         out["execution_readiness_icon"] = "⚪"
         out["execution_status_ar"] = "بيانات غير مكتملة ⚪"
+    elif code == NO_VALID_PLAN:
+        out["execution_readiness_label"] = "لا توجد خطة قابلة للتنفيذ"
+        out["execution_readiness_icon"] = "⚪"
+        out["execution_status_ar"] = "لا توجد خطة قابلة للتنفيذ ⚪"
     elif code in {WAIT_LIQUIDITY, WAIT_RESISTANCE, WAIT_TRIGGER}:
         out["execution_readiness_label"] = "انتظار تأكيد"
         out["execution_readiness_icon"] = "🟠"
@@ -433,7 +439,8 @@ def apply_final_decision(row: dict) -> dict:
     if plan_status == "data_incomplete":
         return _set_common(out, DATA_INCOMPLETE, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
     if plan_status in {"no_valid_plan"}:
-        return _set_common(out, DATA_INCOMPLETE, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
+        out["price_available_but_plan_missing"] = bool(_price(out) > 0)
+        return _set_common(out, NO_VALID_PLAN, "مراقبة", plan_blockers, plan_action or "⚪ لا توجد خطة قابلة للتنفيذ حاليًا — السعر موجود لكن الدخول/الهدف/الوقف غير مكتمل.", liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
     if plan_status == "broken_stop":
         return _set_common(out, PLAN_BROKEN, "مراقبة", plan_blockers, plan_action, liquidity_ok=liquidity_ok, liquidity_reasons=liquidity_reasons, entry_dist=entry_dist, stage=stage, stage_label=stage_label)
     if plan_status == "broken_support":

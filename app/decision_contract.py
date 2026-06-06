@@ -118,7 +118,7 @@ def resolve_quote_contract(row: dict) -> dict:
         missing.append("مصدر السعر غير محدد")
 
     label = source_label or "غير محدد"
-    if delayed:
+    if delayed and "متأخر تقريبًا 15 دقيقة" not in label:
         label = f"{label} — متأخر تقريبًا 15 دقيقة"
     if price <= 0:
         label = "بيانات سعر غير مكتملة"

@@ -58,7 +58,7 @@ def normalize_quote(symbol: str, quote: dict | None, phase: str = "") -> dict:
     reliable = bool(source and price > 0 and change_reliable and not polygon_delayed and not _is_polygon_source(source, source_label))
     if str(source).startswith("fmp"):
         reliable = bool(price > 0 and change_reliable)
-    if polygon_delayed:
+    if polygon_delayed and "متأخر تقريبًا 15 دقيقة" not in source_label:
         source_label = f"{source_label} — متأخر تقريبًا 15 دقيقة"
     missing: list[str] = []
     if price <= 0:
