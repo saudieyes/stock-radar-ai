@@ -29,7 +29,7 @@ from .polygon_flatfile_fetcher import (
     mark_flatfile_processed,
 )
 
-POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2b_selection_quality_fix_2026_06_06"
+POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2e_manual_sharia_authoritative_2026_06_08"
 DEFAULT_OUTPUT_PATH = Path(DATA_DIR) / "polygon_weekly_priority_watchlist.json"
 _DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 
@@ -841,12 +841,12 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             continue
         if not _is_common_stock_symbol(sym, company_symbols):
             continue
-        if exclusions.get(sym) and not approvals.get(sym):
+        if exclusions.get(sym):
             continue
         m0 = _compact_metrics(s, market_last)
         sc0, _, stage0, no_chase0 = _score_metrics(m0)
         profile0 = _company_profile_map().get(sym, {})
-        approved0 = bool(approvals.get(sym))
+        approved0 = bool(approvals.get(sym)) and not bool(exclusions.get(sym))
         bucket0, _, adj0, reject0 = _quality_bucket(sym, m0, approved=approved0, no_chase=no_chase0, profile=profile0)
         # Keep a wide enough pool for minute confirmation, but avoid wasting work on clearly thin names.
         if not reject0 and sc0 + adj0 >= 18:
@@ -875,7 +875,7 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
         if not _is_common_stock_symbol(sym, company_symbols):
             rejected_count += 1
             continue
-        if exclusions.get(sym) and not approvals.get(sym):
+        if exclusions.get(sym):
             excluded += 1
             continue
         metrics = _compact_metrics(s, market_last)
@@ -883,7 +883,7 @@ def _build_from_paths_internal(minute_paths: list[str], daily_paths: list[str], 
             rejected_count += 1
             continue
         score, reasons, stage, no_chase = _score_metrics(metrics)
-        approved = bool(approvals.get(sym))
+        approved = bool(approvals.get(sym)) and not bool(exclusions.get(sym))
         profile = profiles.get(sym, {})
         bucket, review_flags, rank_adjustment, reject_quality = _quality_bucket(
             sym, metrics, approved=approved, no_chase=no_chase, profile=profile
@@ -1094,13 +1094,67 @@ def polygon_flatfile_status() -> dict:
         "fetcher": flatfiles_config_status(),
         "watchlist_available": DEFAULT_OUTPUT_PATH.exists(),
         "storage_rule_ar": "السحب المباشر يستخدم /tmp فقط، ثم يحذف الخام ويحفظ ملخص Weekly Priority فقط عند execute=true.",
+        "manual_sharia_rule_ar": "الاستبعاد اليدوي الشرعي هو القرار الأقوى ويغلب أي اعتماد سابق عند العرض.",
     }
+
+
+def _apply_current_manual_sharia_exclusions_to_watchlist(data: dict) -> dict:
+    """Hide currently excluded symbols from a frozen Polygon Weekly snapshot.
+
+    The weekly list is intentionally frozen for fair performance comparison, but
+    manual Sharia decisions must remain live.  If the user excludes a symbol
+    after the weekly snapshot was built, it must disappear from candidates and
+    sections without rebuilding Polygon data.
+    """
+    if not isinstance(data, dict):
+        return data
+    try:
+        exclusions = get_manual_sharia_exclusions_map() or {}
+    except Exception:
+        exclusions = {}
+    excluded_symbols = {str(k or "").upper() for k in exclusions.keys() if str(k or "").strip()}
+    if not excluded_symbols:
+        out = dict(data)
+        out["manual_sharia_live_filter_version"] = POLYGON_WEEKLY_BUILDER_VERSION
+        out["manual_sharia_exclusion_wins"] = True
+        return out
+
+    def keep(item: dict) -> bool:
+        sym = str((item or {}).get("symbol") or "").strip().upper()
+        return bool(sym) and sym not in excluded_symbols
+
+    out = dict(data)
+    removed = 0
+    if isinstance(out.get("candidates"), list):
+        before = len(out.get("candidates") or [])
+        out["candidates"] = [c for c in (out.get("candidates") or []) if keep(c)]
+        removed += before - len(out["candidates"])
+
+    sections = out.get("sections")
+    if isinstance(sections, dict):
+        new_sections = {}
+        for key, value in sections.items():
+            if isinstance(value, list):
+                before = len(value)
+                filtered = [c for c in value if keep(c)]
+                removed += before - len(filtered)
+                new_sections[key] = filtered
+            else:
+                new_sections[key] = value
+        out["sections"] = new_sections
+
+    out["manual_sharia_live_filter_version"] = POLYGON_WEEKLY_BUILDER_VERSION
+    out["manual_sharia_live_filtered_removed_count"] = int(removed)
+    out["manual_sharia_exclusion_wins"] = True
+    out["manual_sharia_rule_ar"] = "تم إخفاء أي سهم مستبعد يدويًا من قائمة Polygon المجمدة دون إعادة بناء القائمة."
+    return out
 
 
 def load_weekly_watchlist() -> dict:
     if DEFAULT_OUTPUT_PATH.exists():
         try:
-            return json.loads(DEFAULT_OUTPUT_PATH.read_text(encoding="utf-8"))
+            data = json.loads(DEFAULT_OUTPUT_PATH.read_text(encoding="utf-8"))
+            return _apply_current_manual_sharia_exclusions_to_watchlist(data)
         except Exception as exc:
             return {"ok": False, "error": f"read_error: {type(exc).__name__}: {str(exc)[:120]}"}
     return {"ok": True, "version": POLYGON_WEEKLY_BUILDER_VERSION, "available": False, "candidates": []}
