@@ -3269,7 +3269,28 @@ def sharia_exclusions_add(payload: dict = Body(...)):
     if not found:
         items.insert(0, {"symbol": symbol, "note": note, "reason": note, "excluded_at": now_str, "updated_at": now_str, "source": "manual"})
     save_manual_sharia_exclusions(items)
-    return {"ok": True, "count": len(items), "symbol": symbol, "saved": True}
+
+    # Sharia safety rule: a manual exclusion must be authoritative.
+    # If the same symbol was previously manually approved, remove that old
+    # approval immediately so the stock cannot reappear in cached/frozen lists
+    # as approved after the user excludes it.
+    approvals_before = load_manual_sharia_approvals()
+    approvals_after = [
+        item for item in approvals_before
+        if normalize_symbol_text(item.get("symbol", "")) != symbol
+    ]
+    approval_removed = len(approvals_after) != len(approvals_before)
+    if approval_removed:
+        save_manual_sharia_approvals(approvals_after)
+
+    return {
+        "ok": True,
+        "count": len(items),
+        "symbol": symbol,
+        "saved": True,
+        "approval_removed": approval_removed,
+        "rule": "manual_exclusion_overrides_manual_approval",
+    }
 
 
 @app.post("/sharia-exclusions/remove")
