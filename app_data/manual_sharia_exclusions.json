@@ -151,6 +151,14 @@
     "symbol": "ALTO",
     "updated_at": "2026-04-24 12:30:15"
   },
+  "AMPG": {
+    "excluded_at": "2026-06-11 10:01:04",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "AMPG",
+    "updated_at": "2026-06-11 10:01:04"
+  },
   "AMT": {
     "excluded_at": "2026-06-03 10:40:35",
     "note": "استبعاد يدوي شرعي",
@@ -198,6 +206,14 @@
     "source": "manual",
     "symbol": "ARRY",
     "updated_at": "2026-06-03 10:34:58"
+  },
+  "ASTI": {
+    "excluded_at": "2026-06-11 10:00:29",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ASTI",
+    "updated_at": "2026-06-11 10:00:29"
   },
   "ASX": {
     "excluded_at": "2026-04-27 05:58:01",
@@ -887,6 +903,14 @@
     "symbol": "FPS",
     "updated_at": "2026-06-02 10:50:11"
   },
+  "FRO": {
+    "excluded_at": "2026-06-11 10:00:13",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "FRO",
+    "updated_at": "2026-06-11 10:00:13"
+  },
   "FUBO": {
     "excluded_at": "2026-05-01 14:37:10",
     "note": "استبعاد يدوي شرعي",
@@ -1198,6 +1222,14 @@
     "source": "manual",
     "symbol": "LCUT",
     "updated_at": "2026-05-07 09:51:56"
+  },
+  "LE": {
+    "excluded_at": "2026-06-11 06:09:13",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LE",
+    "updated_at": "2026-06-11 06:09:13"
   },
   "LEA": {
     "excluded_at": "2026-05-01 17:02:13",
@@ -1622,6 +1654,14 @@
     "source": "manual",
     "symbol": "QCML",
     "updated_at": "2026-05-26 07:42:18"
+  },
+  "QH": {
+    "excluded_at": "2026-06-11 10:01:31",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "QH",
+    "updated_at": "2026-06-11 10:01:31"
   },
   "RCAT": {
     "excluded_at": "2026-06-02 10:50:27",
