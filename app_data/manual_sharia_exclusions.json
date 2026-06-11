@@ -135,6 +135,14 @@
     "symbol": "ALL",
     "updated_at": "2026-06-06 17:42:30"
   },
+  "ALOY": {
+    "excluded_at": "2026-06-11 06:07:33",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ALOY",
+    "updated_at": "2026-06-11 06:07:33"
+  },
   "ALTO": {
     "excluded_at": "2026-04-24 12:30:15",
     "note": "",
@@ -1046,6 +1054,14 @@
     "source": "manual",
     "symbol": "HPQ",
     "updated_at": "2026-04-29 14:40:17"
+  },
+  "HQY": {
+    "excluded_at": "2026-06-08 15:38:04",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "HQY",
+    "updated_at": "2026-06-08 15:38:04"
   },
   "HRL": {
     "excluded_at": "2026-05-21 11:42:09",
