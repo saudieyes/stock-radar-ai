@@ -216,6 +216,9 @@ from app.trade_plan_ledger import (
     record_active_strong_plans,
 )
 from app.paper_trading_engine import PAPER_TRADING_VERSION, paper_trading_status, process_paper_trading_scan
+from app.breakout_quality_engine import BREAKOUT_QUALITY_VERSION, enrich_breakout_quality_rows, breakout_quality_status
+from app.weekly_plan_lifecycle import WEEKLY_PLAN_LIFECYCLE_VERSION, evaluate_weekly_rows, weekly_plan_lifecycle_status
+from app.paper_learning_report import PAPER_LEARNING_REPORT_VERSION, build_paper_learning_report
 from app.system_cost_health import build_system_cost_health
 from app.pre_move_engine import enrich_row_pre_move
 from app.intraday_early_source_radar import get_last_intraday_early_source_radar_status
@@ -569,6 +572,21 @@ def paper_trading_status_endpoint():
 @app.get("/paper-trading/report")
 def paper_trading_report_endpoint():
     return paper_trading_status()
+
+
+@app.get("/paper-trading/learning-report")
+def paper_trading_learning_report_endpoint():
+    return build_paper_learning_report()
+
+
+@app.get("/breakout-quality/status")
+def breakout_quality_status_endpoint():
+    return breakout_quality_status()
+
+
+@app.get("/weekly-plan-lifecycle/status")
+def weekly_plan_lifecycle_status_endpoint(limit: int = 100):
+    return weekly_plan_lifecycle_status(limit=limit)
 
 
 @app.get("/system-cost-health")
@@ -1126,6 +1144,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = enrich_breakout_quality_rows(overlaid)
+    except Exception:
+        pass
+    try:
         overlaid = apply_breakout_guard_to_rows(overlaid)
     except Exception:
         pass
@@ -1157,7 +1179,14 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         plan_ledger_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
-        paper_trading_live_stats = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, watch_rows=watch, weekly_rows=((load_weekly_watchlist() or {}).get("candidates") or []), source="radar_live_refresh")
+        weekly_rows_for_lifecycle = ((load_weekly_watchlist() or {}).get("candidates") or [])
+        weekly_lifecycle_live_stats = evaluate_weekly_rows(weekly_rows_for_lifecycle, source="radar_live_refresh")
+    except Exception as exc:
+        weekly_rows_for_lifecycle = []
+        weekly_lifecycle_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+    try:
+        paper_trading_live_stats = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, watch_rows=watch, weekly_rows=weekly_rows_for_lifecycle, source="radar_live_refresh")
     except Exception as exc:
         paper_trading_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
@@ -1201,6 +1230,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "telegram_alerts": telegram_live_stats,
         "plan_ledger": plan_ledger_live_stats,
         "paper_trading": paper_trading_live_stats,
+        "weekly_plan_lifecycle": weekly_lifecycle_live_stats,
         "live_overlay_gate_version": "source_promotion_v2a2_live_overlay_gate",
         "live_overlay_blocked_count": len([x for x in overlaid if isinstance(x, dict) and x.get("live_overlay_gate_status") == "blocked"]),
         "early_movement_count": int(early_movement_payload.get("count", 0) or 0),
@@ -2506,6 +2536,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     except Exception:
         pass
     try:
+        results = enrich_breakout_quality_rows(results)
+    except Exception:
+        pass
+    try:
         results = apply_breakout_guard_to_rows(results)
     except Exception:
         pass
@@ -2627,7 +2661,14 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         out["plan_ledger"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
-        out["paper_trading"] = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, watch_rows=watch, weekly_rows=((load_weekly_watchlist() or {}).get("candidates") or []), source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+        weekly_rows_for_lifecycle = ((load_weekly_watchlist() or {}).get("candidates") or [])
+        out["weekly_plan_lifecycle"] = evaluate_weekly_rows(weekly_rows_for_lifecycle, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+    except Exception as exc:
+        weekly_rows_for_lifecycle = []
+        out["weekly_plan_lifecycle"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+    try:
+        out["paper_trading"] = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, watch_rows=watch, weekly_rows=weekly_rows_for_lifecycle, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
     except Exception as exc:
         out["paper_trading"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
