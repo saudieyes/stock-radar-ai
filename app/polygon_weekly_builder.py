@@ -29,7 +29,7 @@ from .polygon_flatfile_fetcher import (
     mark_flatfile_processed,
 )
 
-POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2e_manual_sharia_authoritative_2026_06_08"
+POLYGON_WEEKLY_BUILDER_VERSION = "polygon_weekly_builder_v2f_daily_window_guard_2026_06_13"
 DEFAULT_OUTPUT_PATH = Path(DATA_DIR) / "polygon_weekly_priority_watchlist.json"
 _DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 
@@ -1062,6 +1062,53 @@ def build_weekly_candidates_from_polygon(
                 "config": flatfiles_config_status(),
                 "recovered_from_stale_processed_state": recovered_from_stale_processed_state,
             }
+
+        # V2f guard: a weekly list should not be built from a partial daily
+        # window just because older dates were marked already_processed by a
+        # previous dry run.  When the caller asks for a real weekly window
+        # (usually 20-25 daily files) but only a few daily files are present in
+        # /tmp, force one safe rebuild so the raw files are downloaded only for
+        # this analysis and still deleted in finally.  This prevents freezing a
+        # misleading "5-day only" list.
+        requested_daily_days = max(1, min(35, int(daily_days or 25)))
+        expected_daily_floor = requested_daily_days if requested_daily_days <= 10 else min(15, requested_daily_days)
+        daily_path_count = len(list(pull.get("daily_paths") or []))
+        forced_for_partial_daily_window = False
+        if daily_path_count < expected_daily_floor and requested_daily_days >= 15 and not force:
+            cleanup_tmp_path(tmp_dir)
+            forced_for_partial_daily_window = True
+            pull = pull_flatfiles_for_window(end_date=trade_date, minute_days=minute_days, daily_days=daily_days, force=True)
+            tmp_dir = pull.get("tmp_dir")
+            daily_path_count = len(list(pull.get("daily_paths") or []))
+
+        if not pull.get("ok"):
+            return {
+                "ok": False,
+                "version": POLYGON_WEEKLY_BUILDER_VERSION,
+                "fetcher_version": POLYGON_FLATFILE_FETCHER_VERSION,
+                "error": pull.get("error") or "no_flatfiles_downloaded_after_partial_window_recovery",
+                "pull": {k: v for k, v in pull.items() if k != "tmp_dir"},
+                "config": flatfiles_config_status(),
+                "recovered_from_stale_processed_state": recovered_from_stale_processed_state,
+                "forced_for_partial_daily_window": forced_for_partial_daily_window,
+            }
+
+        if daily_path_count < expected_daily_floor and requested_daily_days >= 15:
+            return {
+                "ok": False,
+                "version": POLYGON_WEEKLY_BUILDER_VERSION,
+                "fetcher_version": POLYGON_FLATFILE_FETCHER_VERSION,
+                "error": "insufficient_daily_history_for_weekly_build",
+                "note_ar": "لم يتم حفظ القائمة لأن ملفات اليومي المتاحة أقل من الحد الأدنى المطلوب لبناء Weekly Priority موثوقة.",
+                "requested_daily_days": requested_daily_days,
+                "expected_daily_floor": expected_daily_floor,
+                "daily_files_downloaded": daily_path_count,
+                "minute_files_downloaded": len(list(pull.get("minute_paths") or [])),
+                "force_attempted": bool(force or forced_for_partial_daily_window),
+                "pull": {k: v for k, v in pull.items() if k != "tmp_dir"},
+                "config": flatfiles_config_status(),
+            }
+
         result = _build_from_paths_internal(
             minute_paths=list(pull.get("minute_paths") or []),
             daily_paths=list(pull.get("daily_paths") or []),
@@ -1069,6 +1116,12 @@ def build_weekly_candidates_from_polygon(
             execute=execute,
             input_label="polygon_flatfiles_direct_pull_tmp_only",
         )
+        result["daily_window_guard"] = {
+            "requested_daily_days": requested_daily_days,
+            "expected_daily_floor": expected_daily_floor,
+            "daily_files_downloaded": daily_path_count,
+            "forced_for_partial_daily_window": forced_for_partial_daily_window,
+        }
         if execute and result.get("ok"):
             for r in list(pull.get("results") or []):
                 if (r or {}).get("ok") and (r or {}).get("s3_key") and (r or {}).get("trade_date") and (r or {}).get("dataset"):
