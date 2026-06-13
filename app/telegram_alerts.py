@@ -14,6 +14,7 @@ from typing import Any
 import requests
 
 from app.sqlite_store import get_json, set_json
+from app.trade_plan_ledger import breakout_alert_blockers
 
 TELEGRAM_ALERTS_VERSION = "telegram_buy_now_alerts_v2_buy_now_executable_2026_06_05"
 NY_TZ = ZoneInfo("America/New_York")
@@ -97,6 +98,7 @@ def _is_executable_buy_now(stock: dict) -> tuple[bool, list[str]]:
         blockers.append("final_decision_has_blockers")
     if str(stock.get("final_decision_label") or "") not in {"دخول قوي مؤكد", ""}:
         blockers.append("label_not_confirmed_buy_now")
+    blockers.extend(breakout_alert_blockers(stock))
     text = " ".join(str(stock.get(k, "") or "") for k in ["owner_action", "execution_readiness_label", "plan_lifecycle_label"])
     if any(w in text for w in ["انتظر", "لا تطارد", "Pullback", "استعادة", "مكسورة", "غير مكتملة"]):
         blockers.append("action_text_is_wait_not_buy_now")
