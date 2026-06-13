@@ -1,0 +1,45 @@
+{
+  "daily_big_movers": {
+    "c": 3326
+  },
+  "intraday_bars": {
+    "c": 56982,
+    "symbols": 504
+  },
+  "notes": "الغرض معرفة هل لدينا عينة كافية قبل إدخال الأنماط في الترتيب أو التنبيهات.",
+  "ok": true,
+  "readiness_label": "جاهز لتحليل أولي",
+  "readiness_score": 100,
+  "snapshots": {
+    "c": 78324,
+    "symbols": 1140
+  },
+  "top_winner_patterns": [
+    {
+      "cases": 132,
+      "likely_pattern": "steady_liquidity_followthrough"
+    },
+    {
+      "cases": 117,
+      "likely_pattern": "pre_market_gap_then_followthrough"
+    },
+    {
+      "cases": 66,
+      "likely_pattern": "first_hour_liquidity_acceleration"
+    },
+    {
+      "cases": 53,
+      "likely_pattern": "open_gap_big_mover"
+    },
+    {
+      "cases": 32,
+      "likely_pattern": "unclassified_winner"
+    }
+  ],
+  "version": "pattern_readiness_v2",
+  "week_key": "2026-06-08_2026-06-12",
+  "winner_profiles": {
+    "c": 400,
+    "symbols": 348
+  }
+}
