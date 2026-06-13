@@ -1157,7 +1157,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         plan_ledger_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
-        paper_trading_live_stats = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, source="radar_live_refresh")
+        paper_trading_live_stats = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, watch_rows=watch, weekly_rows=((load_weekly_watchlist() or {}).get("candidates") or []), source="radar_live_refresh")
     except Exception as exc:
         paper_trading_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
@@ -2627,7 +2627,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         out["plan_ledger"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
-        out["paper_trading"] = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+        out["paper_trading"] = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, watch_rows=watch, weekly_rows=((load_weekly_watchlist() or {}).get("candidates") or []), source="trade_scan_full" if not cache_hit else "trade_scan_cache")
     except Exception as exc:
         out["paper_trading"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
