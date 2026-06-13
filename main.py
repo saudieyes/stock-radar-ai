@@ -208,6 +208,14 @@ from app.source_promotion_engine_v2 import (
 )
 from app.final_decision_engine import apply_final_decisions
 from app.telegram_alerts import maybe_send_buy_now_alerts, telegram_alert_status
+from app.trade_plan_ledger import (
+    TRADE_PLAN_LEDGER_VERSION,
+    active_plan_status,
+    apply_breakout_guard_to_rows,
+    enrich_rows_with_active_plan_status,
+    record_active_strong_plans,
+)
+from app.paper_trading_engine import PAPER_TRADING_VERSION, paper_trading_status, process_paper_trading_scan
 from app.system_cost_health import build_system_cost_health
 from app.pre_move_engine import enrich_row_pre_move
 from app.intraday_early_source_radar import get_last_intraday_early_source_radar_status
@@ -546,6 +554,21 @@ def health():
 @app.get("/telegram-alerts/status")
 def telegram_alerts_status_endpoint():
     return telegram_alert_status()
+
+
+@app.get("/active-plans/status")
+def active_plans_status_endpoint(limit: int = 100):
+    return active_plan_status(limit=limit)
+
+
+@app.get("/paper-trading/status")
+def paper_trading_status_endpoint():
+    return paper_trading_status()
+
+
+@app.get("/paper-trading/report")
+def paper_trading_report_endpoint():
+    return paper_trading_status()
 
 
 @app.get("/system-cost-health")
@@ -1103,6 +1126,14 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = apply_breakout_guard_to_rows(overlaid)
+    except Exception:
+        pass
+    try:
+        overlaid = enrich_rows_with_active_plan_status(overlaid)
+    except Exception:
+        pass
+    try:
         early_movement_payload = build_early_movement_sections(overlaid)
     except Exception:
         early_movement_payload = {"count": 0, "early_movement_watchlist": [], "weekly_priority_count": 0, "auto_detected_count": 0, "priority_watch_count": 0}
@@ -1119,6 +1150,16 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     ]
     if not include_watch:
         watch = []
+
+    try:
+        plan_ledger_live_stats = record_active_strong_plans(strong, source="radar_live_refresh")
+    except Exception as exc:
+        plan_ledger_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+    try:
+        paper_trading_live_stats = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, source="radar_live_refresh")
+    except Exception as exc:
+        paper_trading_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     tracking_live_stats = {}
     try:
@@ -1158,6 +1199,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         "tracking_intelligence": tracking_live_stats,
         "telegram_alerts": telegram_live_stats,
+        "plan_ledger": plan_ledger_live_stats,
+        "paper_trading": paper_trading_live_stats,
         "live_overlay_gate_version": "source_promotion_v2a2_live_overlay_gate",
         "live_overlay_blocked_count": len([x for x in overlaid if isinstance(x, dict) and x.get("live_overlay_gate_status") == "blocked"]),
         "early_movement_count": int(early_movement_payload.get("count", 0) or 0),
@@ -2462,6 +2505,14 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         results = enrich_rows_early_watch_lifecycle(results)
     except Exception:
         pass
+    try:
+        results = apply_breakout_guard_to_rows(results)
+    except Exception:
+        pass
+    try:
+        results = enrich_rows_with_active_plan_status(results)
+    except Exception:
+        pass
     early_movement_payload = build_early_movement_sections(results)
     scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
@@ -2569,6 +2620,16 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "source": "server_background_worker_and_snapshot",
         },
     }
+
+    try:
+        out["plan_ledger"] = record_active_strong_plans(strong, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+    except Exception as exc:
+        out["plan_ledger"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+    try:
+        out["paper_trading"] = process_paper_trading_scan(strong_rows=strong, cautious_rows=cautious, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+    except Exception as exc:
+        out["paper_trading"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
         out["telegram_alerts"] = maybe_send_buy_now_alerts(strong, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
