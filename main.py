@@ -1318,6 +1318,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     low_float_premarket_radar = opportunity_radar_payload.get("low_float_premarket_radar", []) if isinstance(opportunity_radar_payload, dict) else []
     gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
+    learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
 
     try:
         plan_ledger_live_stats = record_active_strong_plans(strong, source="radar_live_refresh")
@@ -1401,6 +1402,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "next_week_analysis": opportunity_radar_payload.get("next_week_analysis", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "next_week_watchlist": opportunity_radar_payload.get("next_week_watchlist", []) if isinstance(opportunity_radar_payload, dict) else [],
         "next_week_analysis_count": int(opportunity_radar_payload.get("next_week_analysis_count", 0) or 0) if isinstance(opportunity_radar_payload, dict) else 0,
+        "learning_bridge_debug": opportunity_radar_payload.get("learning_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "learning_bridge_rule_ar": opportunity_radar_payload.get("learning_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
+        "learning_opportunity_candidates": learning_opportunity_candidates[:limit],
         "support_bounce_candidates_count": len(support_bounce_candidates),
         "reclaim_candidates_count": len(reclaim_candidates),
         "pre_trigger_candidates_count": len(pre_trigger_candidates),
@@ -2768,6 +2773,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     low_float_premarket_radar = opportunity_radar_payload.get("low_float_premarket_radar", []) if isinstance(opportunity_radar_payload, dict) else []
     gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
+    learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
 
     out = {
         "market_phase": phase,
@@ -2816,6 +2822,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "next_week_analysis": opportunity_radar_payload.get("next_week_analysis", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "next_week_watchlist": opportunity_radar_payload.get("next_week_watchlist", []) if isinstance(opportunity_radar_payload, dict) else [],
         "next_week_analysis_count": int(opportunity_radar_payload.get("next_week_analysis_count", 0) or 0) if isinstance(opportunity_radar_payload, dict) else 0,
+        "learning_bridge_debug": opportunity_radar_payload.get("learning_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "learning_bridge_rule_ar": opportunity_radar_payload.get("learning_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
+        "learning_opportunity_candidates": learning_opportunity_candidates[:limit],
         "support_bounce_candidates_count": len(support_bounce_candidates),
         "reclaim_candidates_count": len(reclaim_candidates),
         "pre_trigger_candidates_count": len(pre_trigger_candidates),

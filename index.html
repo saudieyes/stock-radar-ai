@@ -3766,6 +3766,7 @@
 
     const SECTION_DEFAULT_LIMIT = 5;
     const OPPORTUNITY_RADAR_GROUP_KEYS = [
+      'learning_opportunity_candidates',
       'small_stock_classic_radar',
       'pre_trigger_candidates',
       'support_bounce_candidates',
@@ -3779,6 +3780,7 @@
     const RADAR_SECTION_CONTENT_IDS = [
       'strong-section-content',
       'cautious-section-content',
+      'learning-opportunity-section-content',
       'pre-trigger-section-content',
       'support-bounce-section-content',
       'reclaim-section-content',
@@ -4647,6 +4649,7 @@
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
       const oppRowsRaw = [
+        ...(data.learning_opportunity_candidates || []),
         ...(data.small_stock_classic_radar || []),
         ...(data.pre_trigger_candidates || []),
         ...(data.support_bounce_candidates || []),
@@ -4665,6 +4668,7 @@
         oppSeen.add(key);
         return true;
       });
+      const learningOpportunity = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'learning_opportunity'));
       const preTrigger = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'pre_trigger'));
       const supportBounce = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'support_bounce'));
       const reclaim = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'reclaim'));
@@ -4682,6 +4686,7 @@
       window.__sectionItems = {
         'strong-section-content': strong,
         'cautious-section-content': cautious,
+        'learning-opportunity-section-content': learningOpportunity,
         'pre-trigger-section-content': preTrigger,
         'support-bounce-section-content': supportBounce,
         'reclaim-section-content': reclaim,
@@ -4700,6 +4705,7 @@
         ${renderLearningOverlayPanel(data)}
         ${renderNextWeekAnalysisPanel(data)}
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
+        ${renderSection('🧠 مرشحو طبقة التعلم / تحضير مبكر', learningOpportunity.length, 'learning-opportunity-section-content', 'learning-opportunity-section', learningOpportunity, { tone: 'open', defaultOpen: learningOpportunity.length > 0, orderedText: 'هذا القسم يجسر البيانات الموجودة في المراقبة/الحركة المبكرة إلى طبقة تعلم مرئية. ليس Strong ولا Cautious، لكنه يمنع اختفاء الفرص التحضيرية عندما لا تكتمل شروط الأقسام المتخصصة.' })}
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
         ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0 })}
         ${renderSection('⏳ قريب من التفعيل / Pre-Trigger', preTrigger.length, 'pre-trigger-section-content', 'pre-trigger-section', preTrigger, { tone: 'open', orderedText: 'أسهم قريبة من التفعيل قبل أن تفوت الحركة؛ ليست BUY_NOW حتى تظهر شروط التنفيذ.' })}
