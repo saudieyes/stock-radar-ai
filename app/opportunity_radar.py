@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1b_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1c_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -159,16 +159,19 @@ def _abs_pct_distance(a: float, b: float) -> float:
 def _change_pct(row: dict) -> float:
     """Read displayed/live percent change using all known source field names.
 
-    Some rows carry the visible +% under UI/source-specific keys, so relying on
-    display_change_pct only can make a stock that is already +8% look flat and
-    slip into Support Bounce.
+    Critical rule: a stock already up strongly today must never be classified as
+    Support Bounce just because one source omitted display_change_pct.  We read
+    all known UI/live/cache fields, normalize scanner decimal ratios when the key
+    implies percent, and finally calculate from previous close/open if possible.
     """
     keys = [
-        "display_change_pct", "change_pct", "percent_change", "change_percent",
+        "display_change_pct", "change_vs_prev_close_pct", "live_change_pct",
+        "change_pct", "percent_change", "change_percent", "changePercentage",
         "changesPercentage", "changes_percentage", "changePercent",
-        "regularMarketChangePercent", "fmp_change_pct", "live_change_pct",
-        "today_change_pct", "day_change_pct", "session_change_pct",
+        "regularMarketChangePercent", "fmp_change_pct", "today_change_pct",
+        "day_change_pct", "session_change_pct", "current_gain",
         "change_from_open_pct", "pm_change_pct", "pre_market_change_pct",
+        "premarket_change_pct", "after_hours_change_pct", "gap_from_prev_close_pct",
     ]
     for key in keys:
         if key not in row:
@@ -177,8 +180,20 @@ def _change_pct(row: dict) -> float:
         if val is None or val == "":
             continue
         n = _num(val, 999999.0)
-        if n != 999999.0:
-            return n
+        if n == 999999.0:
+            continue
+        # scanner.py stores some *_pct fields as decimal ratios (0.08 = 8%).
+        if key in {"day_change_pct", "session_change_pct", "change_from_open_pct", "gap_from_prev_close_pct"} and -1.0 <= n <= 1.0 and abs(n) >= 0.015:
+            n *= 100.0
+        return n
+
+    price = _price(row)
+    prev = _first(row, ["previous_close", "prev_close", "prior_close", "regularMarketPreviousClose", "close_previous", "last_close"], 0.0)
+    if price > 0 and prev > 0:
+        return ((price - prev) / prev) * 100.0
+    open_px = _first(row, ["open_price", "day_open", "open", "regularMarketOpen"], 0.0)
+    if price > 0 and open_px > 0:
+        return ((price - open_px) / open_px) * 100.0
     return 0.0
 
 
@@ -343,12 +358,16 @@ def build_support_resistance_zones(row: dict) -> dict:
         if price > 0 and z["low"] <= price <= z["high"] and z["kind"] in {"support", "resistance", "congestion", "reclaim", "broken_support"}:
             price_zone = z
             break
-    supports = [z for z in zones if z["kind"] in {"support", "reclaim", "broken_support", "congestion"} and price > 0 and z["center"] <= price * 1.015]
-    resistances = [z for z in zones if z["kind"] in {"resistance", "major_resistance", "target", "congestion"} and price > 0 and z["center"] >= price * 0.985]
-    if supports:
-        nearest_support = sorted(supports, key=lambda z: abs(price - z["center"]))[0]
-    if resistances:
-        nearest_resistance = sorted(resistances, key=lambda z: abs(price - z["center"]))[0]
+    # Do not treat a congestion/decision zone as both a tradable support and
+    # resistance.  Inside congestion, the lower boundary is the failure side and
+    # the upper boundary is the activation side; the card should not show
+    # cent-level support/resistance as separate decisions.
+    structural_supports = [z for z in zones if z["kind"] in {"support", "reclaim", "broken_support"} and price > 0 and z["center"] <= price * 1.015]
+    structural_resistances = [z for z in zones if z["kind"] in {"resistance", "major_resistance", "target"} and price > 0 and z["center"] >= price * 0.985]
+    if structural_supports:
+        nearest_support = sorted(structural_supports, key=lambda z: abs(price - z["center"]))[0]
+    if structural_resistances:
+        nearest_resistance = sorted(structural_resistances, key=lambda z: abs(price - z["center"]))[0]
 
     if price_zone and price_zone.get("kind") == "congestion":
         notes.append("السعر داخل منطقة ضيقة؛ لا يُبنى قرار مستقل من فروقات سنتات داخلها.")
@@ -583,11 +602,19 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     pz_low = _num(pz.get("low"), 0.0)
     pz_high = _num(pz.get("high"), 0.0)
     pz_mid = (pz_low + pz_high) / 2.0 if pz_low > 0 and pz_high > 0 else 0.0
-    in_upper_congestion = bool(_s(pz.get("kind")) == "congestion" and pz_mid > 0 and price >= pz_mid)
-    near_resistance_now = bool(nr and -0.25 <= resistance_dist <= max(1.2, atr_pct * 0.55))
-    extended_after_move = bool((change >= 5.0 or from_open >= 4.0) and (near_resistance_now or in_upper_congestion or close_pos >= 70))
-    near_support_raw = bool(price > 0 and ns and (ns.get("low", 0) <= price <= ns.get("high", 0) * 1.012 or 0 <= support_dist <= max(2.2, atr_pct * 0.75)))
-    near_support = bool(near_support_raw and not extended_after_move)
+    pz_pos = ((price - pz_low) / (pz_high - pz_low)) if price > 0 and pz_high > pz_low and pz_low <= price <= pz_high else 0.0
+    in_upper_congestion = bool(_s(pz.get("kind")) == "congestion" and pz_mid > 0 and (price >= pz_mid or pz_pos >= 0.45))
+    # If no structural resistance exists, the upper boundary of the decision zone
+    # is the real activation wall, not a separate cents-level resistance.
+    if resistance_center <= 0 and _s(pz.get("kind")) == "congestion" and pz_high > price:
+        resistance_center = pz_high
+        resistance_dist = ((resistance_center - price) / price * 100.0) if price > 0 else 999.0
+    near_resistance_now = bool((nr or (_s(pz.get("kind")) == "congestion" and pz_high > 0)) and -0.25 <= resistance_dist <= max(1.2, atr_pct * 0.55))
+    extended_after_move = bool((change >= 4.5 or from_open >= 4.0) and (near_resistance_now or in_upper_congestion or close_pos >= 70))
+    structural_support_near = bool(price > 0 and ns and (ns.get("low", 0) <= price <= ns.get("high", 0) * 1.012 or 0 <= support_dist <= max(2.2, atr_pct * 0.75)))
+    lower_decision_zone_bounce = bool(_s(pz.get("kind")) == "congestion" and pz_low > 0 and pz_pos <= 0.35 and change <= 2.0)
+    near_support_raw = bool(structural_support_near or lower_decision_zone_bounce)
+    near_support = bool(near_support_raw and not extended_after_move and change < 4.5)
     reclaim = bool(row.get("support_reclaimed_flag") or row.get("reclaimed_support_level") or final_code == "RECLAIM_REQUIRED" or _s(pz.get("kind")) == "reclaim")
     broken_needs_reclaim = bool(row.get("support_broken_flag") or row.get("broken_support_level") or final_code == "RECLAIM_REQUIRED")
 
@@ -620,8 +647,11 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         support_score += 35; support_reasons.append("قريب من منطقة دعم ذات معنى")
     elif near_support_raw and extended_after_move:
         support_reasons.append("كان قريبًا من منطقة قرار/دعم، لكنه تحرك وأصبح قريبًا من مقاومة؛ لا يصنف كارتداد دعم مبكر.")
-    if support_dist != 999.0:
+    if support_dist != 999.0 and support_center > 0:
         support_reasons.append(f"المسافة عن الدعم {round(support_dist, 2)}%")
+    elif _s(pz.get("kind")) == "congestion" and pz_low > 0:
+        boundary_dist = ((price - pz_low) / price * 100.0) if price > 0 else 999.0
+        support_reasons.append(f"المسافة عن حد الفشل في منطقة القرار {round(boundary_dist, 2)}%")
     if change <= 2.0 and not extended_after_move:
         support_score += 8; support_reasons.append("لم يتحرك بعيدًا بعد")
     elif change >= 5.0:
@@ -695,7 +725,9 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
         if flags.get("reclaim"):
             return "cautious_reclaim", "🟠 دخول بحذر — Reclaim", "cautious_entries", flags.get("reclaim_reasons", [])
         return "cautious", "🟠 دخول بحذر", "cautious_entries", ["خطة جيدة لكنها تحتاج انضباطًا وحجمًا أصغر من Strong."]
-    if flags.get("pre_trigger"):
+    if flags.get("extended_after_move") and flags.get("high_risk_day"):
+        return "high_risk_day_trade", "⚡ مضاربة عالية المخاطرة", "high_risk_day_trade", ["تحرك قوي وقريب من مقاومة/منطقة قرار؛ لا يصنف Support Bounce ولا يُطارد."]
+    if flags.get("pre_trigger") and not flags.get("extended_after_move"):
         return "pre_trigger", "⏳ قريب من التفعيل", "pre_trigger", flags.get("pre_trigger_reasons", [])
     if flags.get("reclaim"):
         label = "🟢 Reclaim مؤكد" if flags.get("reclaim_confirmed") else "🔁 Reclaim يحتاج ثبات"
