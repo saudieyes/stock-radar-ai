@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2g_exit_decision_overlay_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2h_next_week_catalyst_details_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -239,6 +239,193 @@ def _small_stock_micro_zone_ok(price: float, atr_pct: float, low: float, high: f
     width_pct = _micro_zone_width_pct(price, low, high)
     allowed = max(0.85, min(4.0, max(atr_pct, 1.0) * 0.55))
     return bool(width_pct <= allowed)
+
+
+def _catalyst_type_from_row(row: dict) -> tuple[str, str]:
+    """Return compact catalyst/news type codes for display only.
+
+    This does not add buy points by itself; it only prevents Catalyst / News Watch
+    from showing an unnamed/undated generic catalyst.
+    """
+    scope = _s(row.get("news_scope")).lower()
+    category = _s(row.get("news_category") or row.get("news_sentiment")).lower()
+    title = " ".join([
+        _s(row.get("news_title")), _s(row.get("news_public_summary")),
+        _s(row.get("news_context_note")), _s(row.get("news_badge")),
+    ]).lower()
+    if scope == "sector":
+        return "sector_context", "سياق قطاعي"
+    if scope == "market":
+        return "market_context", "سياق سوق عام"
+    if scope == "opinion":
+        return "opinion", "مقال رأي / قائمة ترشيحات"
+    if scope == "unrelated":
+        return "unrelated", "غير مرتبط مباشرة"
+    if category == "legal" or any(k in title for k in ["lawsuit", "sec", "investigation", "legal", "class action", "قضية", "تحقيق"]):
+        return "legal_risk", "خبر قانوني / مخاطر"
+    if any(k in title for k in ["fda", "clinical", "trial", "phase", "approval", "clearance", "pdufa", "biotech", "دواء", "سريري", "موافقة"]):
+        return "biotech_regulatory", "محفز دوائي / تنظيمي"
+    if any(k in title for k in ["earnings", "revenue", "eps", "guidance", "results", "quarter", "أرباح", "إيرادات", "توجيهات", "نتائج"]):
+        return "earnings", "أرباح / نتائج"
+    if any(k in title for k in ["contract", "order", "award", "agreement", "partnership", "deal", "عقد", "طلب", "اتفاق", "شراكة"]):
+        return "contract_partnership", "عقد / شراكة"
+    if any(k in title for k in ["merger", "acquisition", "buyout", "takeover", "اندماج", "استحواذ"]):
+        return "ma", "اندماج / استحواذ"
+    if any(k in title for k in ["upgrade", "downgrade", "price target", "initiates", "analyst", "ترقية", "تخفيض", "سعر مستهدف", "محلل"]):
+        return "analyst_action", "تغيير محللين / سعر مستهدف"
+    if any(k in title for k in ["offering", "registered direct", "atm", "warrant", "financing", "طرح", "تمويل"]):
+        return "financing", "تمويل / طرح"
+    if category == "positive":
+        return "company_positive", "خبر شركة إيجابي"
+    if category == "negative":
+        return "company_negative", "خبر شركة سلبي"
+    if category == "mixed":
+        return "company_mixed", "خبر شركة مختلط"
+    if scope == "company":
+        return "company_news", "خبر شركة مباشر"
+    return "no_clear_catalyst", "لا يوجد محفز واضح"
+
+
+def _build_catalyst_details(row: dict) -> dict[str, Any]:
+    code, label = _catalyst_type_from_row(row or {})
+    published_ksa = _s(row.get("news_published_ksa"))
+    published_utc = _s(row.get("news_published_utc"))
+    age = _s(row.get("news_age_label")) or _s(row.get("news_freshness_label"))
+    source = _s(row.get("news_source_name"))
+    title = _s(row.get("news_title")) or _s(row.get("news_public_summary")) or _s(row.get("news_note"))
+    scope = _s(row.get("news_scope")) or "neutral"
+    category = _s(row.get("news_category")) or _s(row.get("news_sentiment")) or "neutral"
+    is_catalyst = bool(row.get("news_is_catalyst"))
+    date_text = published_ksa or published_utc or age or "تاريخ الخبر غير متوفر"
+    time_parts = []
+    if age:
+        time_parts.append(age)
+    if published_ksa:
+        time_parts.append(published_ksa)
+    elif published_utc:
+        time_parts.append(published_utc)
+    if source:
+        time_parts.append("المصدر: " + source)
+    time_line = " | ".join(time_parts) if time_parts else "تاريخ الخبر غير متوفر"
+    context_only = bool(row.get("news_context_only") or scope in {"sector", "market", "opinion", "unrelated", "neutral"})
+    actionability = "محفز مباشر" if is_catalyst else ("سياق فقط" if context_only else "خبر للمتابعة")
+    return {
+        "type_code": code,
+        "type_ar": label,
+        "date_ar": date_text,
+        "time_line_ar": time_line,
+        "title": title,
+        "source": source,
+        "age_label": age,
+        "published_ksa": published_ksa,
+        "published_utc": published_utc,
+        "scope": scope,
+        "category": category,
+        "is_catalyst": is_catalyst,
+        "context_only": context_only,
+        "actionability_ar": actionability,
+        "summary_ar": f"{label} — {date_text}" + (f" — {title[:140]}" if title else ""),
+        "rule_ar": "الأخبار في هذا القسم سياق مساعد وليست شراء مباشر؛ نعرض نوع المحفز وتاريخه حتى لا تظهر بطاقة Catalyst مبهمة.",
+        "has_news": bool(title or _s(row.get("news_badge")) or published_ksa or published_utc),
+    }
+
+
+def _catalyst_reasons(details: dict) -> list[str]:
+    if not isinstance(details, dict) or not details.get("has_news"):
+        return []
+    out = [f"نوع المحفز/الخبر: {details.get('type_ar')}"]
+    out.append(f"تاريخ/حداثة الخبر: {details.get('date_ar')}")
+    if details.get("actionability_ar"):
+        out.append(f"قابلية الاعتماد: {details.get('actionability_ar')}")
+    return _dedupe(out, 4)
+
+
+def _next_week_action_for_row(row: dict) -> str:
+    bucket = _s(row.get("opportunity_bucket"))
+    flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
+    trigger = _num(flags.get("trigger_price") if isinstance(flags, dict) else 0.0, 0.0)
+    cdet = row.get("catalyst_details") if isinstance(row.get("catalyst_details"), dict) else {}
+    if bucket == "small_stock_classic":
+        return "راقبه للأسبوع القادم كمرشح أسهم صغيرة: انتظار إغلاق 5د/15د فوق Fib/VWAP/قمة أمس، وليس شراء مباشر من القائمة."
+    if bucket == "pre_trigger":
+        return f"قريب من التفعيل؛ راقب إغلاقًا فوق {round(trigger, 2) if trigger else 'حد التفعيل'} مع حجم واضح."
+    if bucket == "support_bounce":
+        return "مرشح ارتداد: صالح للمراقبة قرب الدعم فقط؛ إذا ابتعد سريعًا يتحول إلى مضاربة/استمرار ولا يُطارد."
+    if bucket == "reclaim":
+        return "مرشح Reclaim: راقب ثبات السعر فوق المستوى المستعاد مع عدم كسر الدعم مرة أخرى."
+    if bucket == "continuation_pullback":
+        return "استمرار مشروط: الأفضل انتظار Pullback صحي أو إعادة اختبار VWAP/دعم قبل الدخول."
+    if bucket == "low_float_premarket":
+        return "مرشح Low-Float/Pre-Market: يظهر مبكرًا للأسبوع القادم لكن حجم الصفقة يجب أن يكون صغيرًا جدًا."
+    if bucket == "high_risk_day_trade":
+        return "مضاربة عالية المخاطرة: إن ظهرت فرصة فهي سريعة؛ جني ربح سريع ولا تعاملها كـ Runner إلا بعد ثبات واضح."
+    if bucket == "gap_fill_watch":
+        return "Gap Watch: راقب دخول السعر داخل الفجوة أو احترام حدها؛ لا تفترض أن كل فجوة ستغلق."
+    if bucket == "catalyst_watch":
+        extra = f" ({cdet.get('type_ar')} — {cdet.get('date_ar')})" if cdet else ""
+        return "Catalyst Watch" + extra + ": الخبر سياق مساعد فقط؛ القرار من السعر والسيولة بعد الخبر."
+    return "مراقبة فقط حتى تظهر مرحلة أوضح."
+
+
+def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | None = None) -> dict[str, Any]:
+    labels = {
+        "small_stock_classic_radar": "أسهم صغيرة كلاسيكية",
+        "pre_trigger_candidates": "قريبة من التفعيل",
+        "support_bounce_candidates": "ارتداد من دعم",
+        "reclaim_candidates": "Reclaim / استعادة مستوى",
+        "continuation_pullback_candidates": "Continuation Pullback",
+        "low_float_premarket_radar": "Low-Float / بري ماركت",
+        "high_risk_day_trades": "مضاربة عالية المخاطرة",
+        "gap_fill_watch": "Gap Fill Watch",
+        "catalyst_watch": "Catalyst / News Watch",
+    }
+    priority = [
+        "small_stock_classic_radar", "pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates",
+        "continuation_pullback_candidates", "low_float_premarket_radar", "catalyst_watch",
+        "gap_fill_watch", "high_risk_day_trades",
+    ]
+    groups = []
+    top = []
+    for key in priority:
+        rows = final_map.get(key, []) or []
+        if rows:
+            groups.append({"key": key, "label_ar": labels.get(key, key), "count": len(rows), "symbols_sample": [_u(r.get("symbol")) for r in rows[:6] if _u(r.get("symbol"))]})
+        for r in rows[:4]:
+            sym = _u(r.get("symbol"))
+            if not sym:
+                continue
+            item = {
+                "symbol": sym,
+                "group_key": key,
+                "group_ar": labels.get(key, key),
+                "price": _round(_price(r), 4),
+                "stage_label": _s(r.get("opportunity_stage_label")),
+                "why_ar": _s(r.get("why_appeared_ar") or r.get("special_bucket_reason")),
+                "next_week_action_ar": _next_week_action_for_row(r),
+                "opportunity_rank_score": _round(r.get("opportunity_rank_score"), 2),
+            }
+            cdet = r.get("catalyst_details") if isinstance(r.get("catalyst_details"), dict) else {}
+            if key == "catalyst_watch" and cdet:
+                item["catalyst_type_ar"] = cdet.get("type_ar")
+                item["catalyst_date_ar"] = cdet.get("date_ar")
+                item["catalyst_summary_ar"] = cdet.get("summary_ar")
+            top.append(item)
+    return {
+        "ok": True,
+        "version": OPPORTUNITY_RADAR_VERSION,
+        "label_ar": "تحليل الأسبوع القادم",
+        "generated_at": _now_text(),
+        "mode_ar": "تحضير ومراقبة فقط — ليس شراء مباشر",
+        "summary_ar": "هذه اللوحة تجمع المرشحين الذين يستحقون المتابعة للأسبوع القادم حسب مراحل Opportunity Radar، مع بقاء Strong/Cautious منفصلين كقرارات تنفيذ.",
+        "groups": groups,
+        "top_candidates": top[:24],
+        "rules_ar": [
+            "لا تدخل من Watch وحده؛ انتظر تحول السهم إلى Cautious/Strong أو إغلاق تأكيد واضح.",
+            "مرشحو الأسهم الصغيرة وLow-Float يظهرون مبكرًا، لكن حجم الصفقة صغير والخروج أسرع.",
+            "Catalyst/News Watch يعرض نوع وتاريخ المحفز، لكن الخبر وحده لا يضيف قرار شراء مباشر.",
+        ],
+        "learning_archive_v1_note_ar": "جاهز لاحقًا لتغذية Learning Archive بملفات compact فقط: 10 أيام متابعة + 5 أيام نتائج، بدون raw على Railway.",
+    }
 
 def _level_merge_threshold(price: float, atr: float) -> float:
     if price <= 0:
@@ -988,7 +1175,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
 
     news_context = " ".join([_s(row.get("news_badge")), _s(row.get("news_title")), _s(row.get("news_category")), _s(row.get("news_scope")), _s(row.get("news_context_note"))]).lower()
     catalyst_keywords = ["fda", "clinical", "trial", "earnings", "merger", "acquisition", "upgrade", "downgrade", "price target", "contract", "approval", "biotech", "عقد", "ترقية", "أرباح", "اندماج", "استحواذ"]
-    catalyst = bool(_s(row.get("news_badge")) and any(k in news_context for k in catalyst_keywords + ["positive", "negative", "legal"]))
+    catalyst_details = _build_catalyst_details(row)
+    catalyst = bool(catalyst_details.get("has_news") and (catalyst_details.get("is_catalyst") or any(k in news_context for k in catalyst_keywords + ["positive", "negative", "legal"])))
 
     classic_small = _classic_small_stock_setup(row, zones, {})
     classic_candidate = bool(classic_small.get("eligible") or classic_small.get("candidate"))
@@ -1063,6 +1251,7 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "resistance_closer_than_support": resistance_closer_than_support,
         "gap_watch": gap_watch,
         "catalyst": catalyst,
+        "catalyst_details": catalyst_details,
         "continuation_pullback": continuation_pullback,
         "liquidity_score": round(liquidity_points, 2),
         "liquidity_reasons": _dedupe(liquidity_reasons, 6),
@@ -1111,7 +1300,9 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
     if flags.get("gap_watch"):
         return "gap_fill_watch", "🕳️ Gap Fill Watch", "gap_fill_watch", ["توجد فجوة أو إعادة اختبار فجوة؛ ليست كل فجوة يجب أن تغلق."]
     if flags.get("catalyst"):
-        return "catalyst_watch", "📰 Catalyst / News Watch", "catalyst_watch", ["يوجد سياق خبر/محفز؛ القرار ليس شراء مباشر من الخبر وحده."]
+        details = flags.get("catalyst_details") if isinstance(flags.get("catalyst_details"), dict) else {}
+        reasons = _catalyst_reasons(details) or ["يوجد سياق خبر/محفز؛ القرار ليس شراء مباشر من الخبر وحده."]
+        return "catalyst_watch", "📰 Catalyst / News Watch", "catalyst_watch", reasons
     if flags.get("no_chase"):
         return "no_chase", "⛔ تحرك وفات / لا تطارد", "no_chase", ["الفرصة أصبحت متأخرة؛ انتظر Pullback أو Reclaim جديد."]
     return "watch", "👀 مراقبة", "watchlist", ["تحت المراقبة حتى تظهر مرحلة أوضح."]
@@ -1133,7 +1324,9 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     elif _s(price_filter.get("bucket")) == "high_price_exception":
         high_price_note.append(_s(price_filter.get("label")))
         high_price_note.extend(price_filter.get("exception_reasons") or [])
-    merged_reasons = _dedupe(stage_reasons + technical_reasons + high_price_note, 12)
+    catalyst_details = flags.get("catalyst_details") if isinstance(flags.get("catalyst_details"), dict) else _build_catalyst_details(out)
+    catalyst_note = _catalyst_reasons(catalyst_details)
+    merged_reasons = _dedupe(stage_reasons + catalyst_note + technical_reasons + high_price_note, 12)
     base_extra = 0.0
     if bucket == "support_bounce":
         base_extra = flags.get("support_score", 0.0)
@@ -1169,6 +1362,12 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     out["opportunity_bucket"] = bucket
     out["opportunity_reasons"] = merged_reasons
     out["technical_explainer_reasons"] = merged_reasons
+    out["catalyst_details"] = catalyst_details
+    out["catalyst_type_ar"] = catalyst_details.get("type_ar")
+    out["catalyst_date_ar"] = catalyst_details.get("date_ar")
+    out["catalyst_time_line_ar"] = catalyst_details.get("time_line_ar")
+    out["catalyst_actionability_ar"] = catalyst_details.get("actionability_ar")
+    out["catalyst_summary_ar"] = catalyst_details.get("summary_ar")
     out["opportunity_rank_score"] = _bucket_rank(out, base=base_extra)
     out["opportunity_flow_flags"] = flags
     out["small_stock_classic_setup"] = flags.get("classic_small_stock") or {}
@@ -1315,6 +1514,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         final_map[key] = items
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
+    next_week_analysis = _build_next_week_analysis(final_map, counts)
     return {
         "ok": True,
         "version": OPPORTUNITY_RADAR_VERSION,
@@ -1325,6 +1525,9 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "suppressed_high_price_count": len(set(suppressed_high_price)),
         "suppressed_high_price_symbols_sample": _dedupe(suppressed_high_price, 20),
         "high_price_rule_ar": "الأسهم فوق 150$ تُخفى من الأقسام العملية إلا إذا كانت فرصة استثنائية من حيث الجودة والجاهزية والسيولة.",
+        "next_week_analysis": next_week_analysis,
+        "next_week_watchlist": next_week_analysis.get("top_candidates", []),
+        "next_week_analysis_count": len(next_week_analysis.get("top_candidates", [])),
         **counts,
         **final_map,
     }

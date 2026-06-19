@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from app.opportunity_radar import OPPORTUNITY_RADAR_VERSION, enrich_row_opportunity_radar
 
-MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1e_exit_decision_overlay_2026_06_19"
+MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1f_next_week_learning_overlay_2026_06_19"
 
 
 def _s(v: Any) -> str:
@@ -345,9 +345,12 @@ def _build_performance_summary(candidates: list[dict]) -> dict[str, Any]:
     return {
         "note_ar": "هذه الإحصاءات من المرشحين الـ replay فقط، وليست قياسًا لكل السوق. قياس الأسهم الرابحة التي لم تلتقطها الأداة يحتاج مسح missed-opportunities على كل الرموز.",
         "candidate_count": len(candidates),
+        "clean_entry_winners_count": len(clean),
+        "clean_entry_winners_pct": round(len(clean) / total * 100.0, 1),
+        "clean_entry_winners_meaning_ar": "فائز من ناحية الالتقاط المبكر وعدم هبوطه بقوة قبل الصعود؛ قد يتلاشى بعد القمة لذلك لا يعني Hold.",
         "clean_winners_count": len(clean),
         "clean_winners_pct": round(len(clean) / total * 100.0, 1),
-        "clean_winners_meaning_ar": "فائز من ناحية الالتقاط المبكر وعدم هبوطه بقوة قبل الصعود؛ قد يتلاشى بعد القمة لذلك لا يعني Hold.",
+        "clean_winners_meaning_ar": "اسم قديم محفوظ للتوافق؛ المعنى الصحيح هو Clean Entry Winner وليس Runner.",
         "clean_runner_winners_count": len(clean_runner),
         "clean_runner_winners_pct": round(len(clean_runner) / total * 100.0, 1),
         "clean_runner_meaning_ar": "فائز حافظ على جزء كبير من الصعود بعد القمة؛ هذا أقرب لسهم يمكن التدرج في بيعه بدل الخروج السريع.",
@@ -856,6 +859,36 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         else:
             timing_counts["early_or_acceptable"] += 1
 
+    def _build_next_week_replay_playbook(cands: list[dict]) -> dict[str, Any]:
+        clean_entry = [c for c in cands if _candidate_is_clean_entry_winner(c)]
+        clean_runner = [c for c in cands if _candidate_is_clean_runner_winner(c)]
+        quick_take = [c for c in cands if c.get("quick_take_profit_candidate")]
+        danger = [c for c in cands if _candidate_is_danger_winner(c)]
+        def _mini(c: dict) -> dict[str, Any]:
+            return {
+                "symbol": c.get("symbol"), "date": c.get("date"), "first_seen_time_utc": c.get("first_seen_time_utc"),
+                "phase_at_detection_ar": c.get("phase_at_detection_ar"), "peak_gain_after_detection_pct": c.get("max_after_pct"),
+                "minutes_to_peak": c.get("minutes_to_peak"), "post_peak_drawdown_pct": c.get("post_peak_drawdown_pct"),
+                "gain_retention_pct": c.get("gain_retention_pct"), "sell_plan_ar": c.get("suggested_sell_plan_ar"),
+            }
+        return {
+            "label_ar": "خلاصة أسبوع قادم من Replay",
+            "mode_ar": "تحضير وتعلم فقط — لا يغير ظهور الفرص الحية",
+            "summary_ar": "نستخدم هذه الخلاصة لبناء قواعد خروج ومتابعة للأسبوع القادم: نفرق بين التقاط ممتاز يحتاج بيع سريع، وبين Runner يصلح للاحتفاظ الجزئي.",
+            "clean_entry_count": len(clean_entry),
+            "clean_runner_count": len(clean_runner),
+            "quick_take_profit_count": len(quick_take),
+            "danger_winner_count": len(danger),
+            "top_clean_entry_examples": [_mini(c) for c in clean_entry[:10]],
+            "top_clean_runner_examples": [_mini(c) for c in clean_runner[:10]],
+            "top_quick_take_examples": [_mini(c) for c in quick_take[:10]],
+            "learning_archive_v1_plan": {
+                "window_ar": "10 أيام متابعة + 5 أيام نتائج بنظام rolling",
+                "storage_rule_ar": "نحفظ ملفات compact features/outcomes فقط، بدون raw minute على Railway أو GitHub العادي.",
+                "fields_ar": ["symbol", "date", "setup_type", "phase", "price_at_detection", "rvol", "vwap_state", "fib_state", "previous_session_detected", "max_gain_after_detection", "minutes_to_peak", "post_peak_drawdown", "runner_or_fade"],
+            },
+        }
+
     def _summary_item(c: dict) -> dict:
         return {
             "symbol": c.get("symbol"),
@@ -893,7 +926,8 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
     top_peak_movers = [_summary_item(c) for c in candidates[:20]]
     top_previous_session_peak_movers = [_summary_item(c) for c in candidates if c.get("detected_previous_session")][:20]
     late_or_chase_peak_movers = [_summary_item(c) for c in candidates if str(c.get("chase_risk_at_detection")) in {"late", "very_late"}][:20]
-    clean_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_clean_winner(c)][:20]
+    clean_entry_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_clean_entry_winner(c)][:20]
+    clean_winner_peak_movers = clean_entry_winner_peak_movers  # backward-compatible alias
     clean_runner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_clean_runner_winner(c)][:20]
     quick_take_profit_movers = [_summary_item(c) for c in candidates if c.get("quick_take_profit_candidate")][:20]
     danger_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_danger_winner(c)][:20]
@@ -902,6 +936,7 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "top_peak_movers": top_peak_movers,
         "top_previous_session_peak_movers": top_previous_session_peak_movers,
         "late_or_chase_peak_movers": late_or_chase_peak_movers,
+        "clean_entry_winner_peak_movers": clean_entry_winner_peak_movers,
         "clean_winner_peak_movers": clean_winner_peak_movers,
         "clean_runner_peak_movers": clean_runner_peak_movers,
         "quick_take_profit_movers": quick_take_profit_movers,
@@ -909,6 +944,7 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
     }
     performance_summary = _build_performance_summary(candidates)
     exit_behavior_summary = _build_exit_behavior_summary(candidates)
+    next_week_replay_playbook = _build_next_week_replay_playbook(candidates)
     railway_usage_guard = {
         "raw_storage": "temporary_tmp_only_deleted_after_pull_run",
         "row_cap_mode": "per_file_day",
@@ -935,6 +971,7 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "peak_summary": peak_summary,
         "performance_summary": performance_summary,
         "exit_behavior_summary": exit_behavior_summary,
+        "next_week_replay_playbook": next_week_replay_playbook,
         "railway_usage_guard": railway_usage_guard,
         "phase_counts": [{"phase": k, "label_ar": _phase_label_ar(k), "count": v} for k, v in sorted(phase_counts.items())],
         "behavior_groups": sorted([{"tag": k, "count": v} for k, v in grouped.items()], key=lambda x: x["count"], reverse=True)[:20],
