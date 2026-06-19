@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2l2_trade_scan_limit_fix_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2m_low_float_capture_audit_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2089,6 +2089,147 @@ def _prep_row_base_score(row: dict) -> float:
     return quality * 0.28 + readiness * 0.18 + rank * 0.16 + learning_boost + price_bonus
 
 
+def _first_positive_number(row: dict, keys: list[str]) -> float:
+    for key in keys:
+        val = _num(row.get(key), 0.0)
+        if val > 0:
+            return val
+    return 0.0
+
+
+def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
+    """Return a transparent low-float / small-stock proxy used only for prep visibility.
+
+    Live feeds often do not provide a trusted current public float for every
+    micro-cap name.  This helper therefore separates confirmed float from proxy
+    candidates so the UI can show them without pretending the float is verified.
+    """
+    price = _price(row)
+    change = _change_pct(row)
+    move_risk = _move_risk_pct(row)
+    vol_ratio = _num(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", row.get("relative_volume", 0)))), 0.0)
+    dollar_vol = _num(row.get("dollar_volume", row.get("current_dollar_volume", row.get("live_dollar_volume", row.get("premarket_dollar_volume", 0)))), 0.0)
+    pm_vol = _num(row.get("pre_market_volume", row.get("premarket_volume", row.get("pm_volume", 0))), 0.0)
+    pm_change = _num(row.get("pre_market_change_pct", row.get("premarket_change_pct", row.get("pm_change_pct", 0))), 0.0)
+    float_shares = _first_positive_number(row, [
+        "float_shares", "shares_float", "public_float", "free_float",
+        "float", "freeFloat", "share_float", "sharesFloat",
+    ])
+    market_cap = _first_positive_number(row, ["market_cap", "marketCap", "mkt_cap", "company_market_cap"])
+    prior_count = _num(row.get("prior_candidate_count"), 0.0)
+    prev_dates = row.get("previous_candidate_dates")
+    has_prev = _bool(row.get("candidate_from_previous_trading_session")) or _bool(row.get("detected_previous_session")) or prior_count > 0 or (isinstance(prev_dates, list) and len(prev_dates) > 0)
+    watch_context = _row_is_early_or_watch_context(row)
+    learning = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+    learning_positive = _s(learning.get("entry_bias")) in {"positive_watch", "watch_needs_volume", "speculative_watch"}
+    confirmed_float = bool(float_shares > 0 and float_shares <= 25_000_000)
+    small_cap_proxy = bool(market_cap > 0 and market_cap <= 350_000_000)
+    low_price_core = bool(0.35 <= price <= 20.0)
+    micro_price_core = bool(0.35 <= price <= 12.0)
+    activity = bool(
+        vol_ratio >= 1.05 or dollar_vol >= 75_000 or pm_vol >= 30_000 or abs(pm_change) >= 1.0
+        or abs(change) >= 1.0 or move_risk >= 3.0 or has_prev or watch_context or learning_positive
+    )
+    proxy_candidate = bool(low_price_core and activity)
+    strong_proxy = bool(micro_price_core and (activity or has_prev or watch_context))
+    label = "confirmed_float" if confirmed_float else ("small_cap_proxy" if small_cap_proxy else ("proxy_low_price_activity" if proxy_candidate else "not_low_float_candidate"))
+    reasons = []
+    if confirmed_float:
+        reasons.append(f"Float معروف تقريبًا {round(float_shares/1_000_000, 2)}M")
+    elif small_cap_proxy:
+        reasons.append(f"قيمة سوقية صغيرة تقريبًا {round(market_cap/1_000_000, 1)}M — بديل عند غياب float")
+    elif proxy_candidate:
+        reasons.append("Float غير مؤكد؛ مرشح Proxy بسبب السعر المنخفض/النشاط/الذاكرة")
+    if price > 0:
+        reasons.append(f"السعر {round(price, 3)}$ ضمن نطاق الأسهم الصغيرة")
+    if has_prev:
+        reasons.append("كان موجودًا في جلسة سابقة/ذاكرة مراقبة")
+    if watch_context:
+        reasons.append("ظاهر في Watch/Early Movement")
+    if vol_ratio > 0:
+        reasons.append(f"حجم نسبي {round(vol_ratio, 2)}x")
+    if pm_vol > 0:
+        reasons.append(f"حجم بري ماركت {int(pm_vol):,}")
+    if dollar_vol > 0:
+        reasons.append(f"دولار فوليوم {round(dollar_vol/1000, 1)}K")
+    if abs(change) >= 1.0:
+        reasons.append(f"حركة/تغير {round(change, 2)}%")
+    return {
+        "price": price,
+        "float_shares": float_shares,
+        "market_cap": market_cap,
+        "confirmed_float": confirmed_float,
+        "small_cap_proxy": small_cap_proxy,
+        "proxy_candidate": proxy_candidate,
+        "strong_proxy": strong_proxy,
+        "label": label,
+        "label_ar": {
+            "confirmed_float": "Low-Float مؤكد من بيانات float",
+            "small_cap_proxy": "سهم صغير/قيمة سوقية صغيرة — بديل عند غياب float",
+            "proxy_low_price_activity": "مرشح Low-Float بالوكالة — السعر/النشاط/الذاكرة",
+            "not_low_float_candidate": "ليس مرشح Low-Float حاليًا",
+        }.get(label, label),
+        "activity": activity,
+        "has_previous_session_memory": has_prev,
+        "watch_context": watch_context,
+        "learning_positive": learning_positive,
+        "volume_ratio": vol_ratio,
+        "dollar_volume": dollar_vol,
+        "premarket_volume": pm_vol,
+        "premarket_change_pct": pm_change,
+        "move_risk_pct": move_risk,
+        "reasons": _dedupe(reasons, 8),
+    }
+
+
+def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = None) -> dict[str, Any]:
+    rows = [r for r in (rows or []) if isinstance(r, dict) and not _is_blocked(r)]
+    existing = existing if isinstance(existing, list) else []
+    debug = {
+        "version": "low_float_capture_audit_v1_2026_06_19",
+        "rows_seen": len(rows),
+        "price_0_35_to_20_count": 0,
+        "price_0_35_to_12_count": 0,
+        "confirmed_float_count": 0,
+        "small_cap_proxy_count": 0,
+        "proxy_candidate_count": 0,
+        "watch_or_early_context_count": 0,
+        "previous_session_memory_count": 0,
+        "existing_low_float_section_count": len(existing),
+        "sample_candidates": [],
+        "rule_ar": "هذا التشخيص يثبت هل الأداة تلتقط أسهم Low-Float/Small Proxy قبل الافتتاح حتى لو لم تتحول إلى Strong/Cautious. لا يعتمد على شراء مباشر.",
+    }
+    samples = []
+    for row in rows:
+        m = _low_float_proxy_metrics(row)
+        price = m.get("price", 0.0) or 0.0
+        if 0.35 <= price <= 20.0:
+            debug["price_0_35_to_20_count"] += 1
+        if 0.35 <= price <= 12.0:
+            debug["price_0_35_to_12_count"] += 1
+        if m.get("confirmed_float"):
+            debug["confirmed_float_count"] += 1
+        if m.get("small_cap_proxy"):
+            debug["small_cap_proxy_count"] += 1
+        if m.get("proxy_candidate"):
+            debug["proxy_candidate_count"] += 1
+        if m.get("watch_context"):
+            debug["watch_or_early_context_count"] += 1
+        if m.get("has_previous_session_memory"):
+            debug["previous_session_memory_count"] += 1
+        if m.get("proxy_candidate") or m.get("confirmed_float") or m.get("small_cap_proxy"):
+            samples.append({
+                "symbol": _u(row.get("symbol")),
+                "price": _round(price, 3),
+                "label_ar": m.get("label_ar"),
+                "reasons": m.get("reasons", [])[:4],
+                "bucket": _s(row.get("opportunity_bucket")),
+                "decision": _s(row.get("decision")),
+            })
+    debug["sample_candidates"] = samples[:15]
+    return debug
+
+
 def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     if not isinstance(row, dict):
         return []
@@ -2171,15 +2312,14 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
             reasons.append(f"منطقة دعم/عودة محتملة تبعد {round(levels['support_dist'], 2)}%")
         add("continuation_pullback_candidates", 21.0, reasons)
 
-    # Low-float/small-stock pre-open prep.  Float may be unavailable, so we use
-    # low price + activity/learning/watch context as a safe proxy and label it.
-    if very_low and (volume_ratio >= 1.1 or dollar_vol >= 150_000 or was_watch_or_early or learning_positive or abs(change) >= 1.5):
-        reasons = ["سهم صغير منخفض السعر تحت مراقبة قبل الافتتاح؛ الحجم صغير والمخاطرة عالية."]
-        if volume_ratio > 0:
-            reasons.append(f"حجم نسبي {round(volume_ratio, 2)}x")
-        if dollar_vol > 0:
-            reasons.append(f"دولار فوليوم تقريبي {round(dollar_vol/1000, 1)}K")
-        add("low_float_premarket_radar", 20.0, reasons)
+    # Low-float/small-stock pre-open prep.  V2M separates confirmed float from
+    # proxy low-float candidates so the user can audit candidates before open.
+    lf = _low_float_proxy_metrics(row)
+    if lf.get("confirmed_float") or lf.get("small_cap_proxy") or lf.get("proxy_candidate") or (very_low and (was_watch_or_early or learning_positive)):
+        reasons = ["Low-Float / سهم صغير للتحضير قبل الافتتاح — ليس شراء مباشر."]
+        reasons.append(_s(lf.get("label_ar")))
+        reasons.extend(lf.get("reasons", [])[:6])
+        add("low_float_premarket_radar", 27.0 if lf.get("confirmed_float") else 22.0, reasons)
 
     # Gap/Catalyst are context sections, not entry calls.
     gap = _num(row.get("open_gap_pct", row.get("gap_from_prev_close_pct", 0)), 0.0)
@@ -2222,6 +2362,9 @@ def _make_closed_market_prep_row(row: dict, section: str, score: float, reasons:
     out["why_appeared_ar"] = "، ".join(merged[:4])
     out["special_bucket_reason"] = out["why_appeared_ar"]
     out["opportunity_rank_score"] = round(max(score, _num(out.get("opportunity_rank_score"), 0.0)), 2)
+    if section == "low_float_premarket_radar":
+        out["low_float_capture_v2m"] = _low_float_proxy_metrics(out)
+        out["low_float_label_ar"] = (out.get("low_float_capture_v2m") or {}).get("label_ar")
     out["non_actionable_prep"] = True
     return out
 
@@ -2266,10 +2409,14 @@ def _fill_closed_market_prep_sections(final_map: dict[str, list[dict]], rows: li
             # spread it everywhere; keep one or two clear places max.
             current_section_items = section_candidates.get(section, [])
             already_prepped_elsewhere = any(_u(x.get("symbol")) == sym for k, vals in section_candidates.items() if k != section for x in vals)
-            if sym in global_specific_seen and section not in {"catalyst_watch", "gap_fill_watch"}:
+            # V2M: allow Small Classic and Low-Float to be visible even when the
+            # same symbol is also in Learning/Pre-trigger. The user must be able
+            # to audit small-stock and low-float candidates before the open.
+            duplicate_allowed_sections = {"catalyst_watch", "gap_fill_watch", "small_stock_classic_radar", "low_float_premarket_radar"}
+            if sym in global_specific_seen and section not in duplicate_allowed_sections:
                 debug["skipped_duplicate_symbols"] += 1
                 continue
-            if already_prepped_elsewhere and section not in {"catalyst_watch", "gap_fill_watch"}:
+            if already_prepped_elsewhere and section not in duplicate_allowed_sections:
                 continue
             current_section_items.append(_make_closed_market_prep_row(row, section, score, reasons, market_phase))
 
@@ -2370,6 +2517,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     final_map["learning_opportunity_candidates"] = learning_bridge_rows
 
     closed_market_planning_debug = _fill_closed_market_prep_sections(final_map, rows or [], market_phase=market_phase, limit=limit)
+    low_float_capture = _low_float_capture_debug(rows or [], final_map.get("low_float_premarket_radar", []))
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
@@ -2393,6 +2541,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "closed_market_prep_enabled": bool(closed_market_planning_debug.get("enabled")),
         "closed_market_prep_added_count": int(closed_market_planning_debug.get("total_added", 0) or 0),
         "closed_market_prep_rule_ar": closed_market_planning_debug.get("rule_ar"),
+        "low_float_capture_debug": low_float_capture,
+        "low_float_capture_rule_ar": low_float_capture.get("rule_ar"),
         "next_week_analysis": next_week_analysis,
         "next_week_watchlist": next_week_analysis.get("top_candidates", []),
         "next_week_analysis_count": len(next_week_analysis.get("top_candidates", [])),
@@ -2706,5 +2856,6 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
         },
         "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
         "small_stock_classic_rule_ar": "للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ لا نعامل فروقات السنت كقرار منفصل. نعتمد Fib 61.8/78.6، VWAP بإغلاق شمعة 5د/15د، قمة أمس، أو اختراق واضح لمنطقة صغيرة، ولا نطارد الشمعة الخضراء.",
+        "low_float_capture_rule_ar": "V2M يضيف تشخيص low_float_capture_debug حتى نعرف هل المشكلة عدم وجود مرشحين أم سقوطهم في التوجيه/العرض. إذا غاب float الحقيقي تظهر Proxy واضحة لا تُعامل كتأكيد float.",
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }
