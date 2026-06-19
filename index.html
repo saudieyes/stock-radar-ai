@@ -3130,6 +3130,46 @@
       return parts.join('');
     }
 
+
+    function catalystDetailsObj(stock) {
+      const d = stock?.catalyst_details || {};
+      return {
+        type: String(d.type_ar || stock?.catalyst_type_ar || '').trim(),
+        date: String(d.date_ar || stock?.catalyst_date_ar || stock?.news_published_ksa || stock?.news_published_utc || stock?.news_age_label || '').trim(),
+        timeLine: String(d.time_line_ar || stock?.catalyst_time_line_ar || '').trim(),
+        actionability: String(d.actionability_ar || stock?.catalyst_actionability_ar || '').trim(),
+        summary: String(d.summary_ar || stock?.catalyst_summary_ar || '').trim(),
+        title: String(d.title || stock?.news_title || '').trim(),
+        source: String(d.source || stock?.news_source_name || '').trim(),
+        rule: String(d.rule_ar || '').trim(),
+        hasNews: Boolean(d.has_news || stock?.news_title || stock?.news_badge || stock?.news_published_ksa || stock?.news_published_utc)
+      };
+    }
+
+    function catalystQuickLine(stock) {
+      const c = catalystDetailsObj(stock);
+      if (!c.hasNews) return '';
+      const bits = [];
+      if (c.type) bits.push(c.type);
+      if (c.date) bits.push(c.date);
+      if (c.actionability) bits.push(c.actionability);
+      return bits.join(' • ');
+    }
+
+    function renderCatalystDetails(stock) {
+      const c = catalystDetailsObj(stock);
+      if (!c.hasNews) return 'لا يوجد محفز/خبر واضح لهذا السهم الآن.';
+      const rows = [];
+      if (c.type) rows.push(`<div><b>نوع المحفز:</b> ${safeText(c.type)}</div>`);
+      if (c.date || c.timeLine) rows.push(`<div><b>تاريخ/حداثة الخبر:</b> ${safeText(c.timeLine || c.date)}</div>`);
+      if (c.actionability) rows.push(`<div><b>قابلية الاعتماد:</b> ${safeText(c.actionability)}</div>`);
+      if (c.title) rows.push(`<div><b>العنوان:</b> ${safeText(c.title)}</div>`);
+      if (c.source) rows.push(`<div><b>المصدر:</b> ${safeText(c.source)}</div>`);
+      if (c.summary && c.summary !== c.title) rows.push(`<div style="margin-top:6px;">${safeText(c.summary)}</div>`);
+      rows.push(`<div style="margin-top:8px;font-weight:900;">الخبر لا يعني شراء مباشر؛ نحتاج سعر/حجم/تأكيد بعد الخبر.</div>`);
+      return rows.join('');
+    }
+
     function analystDomId(symbol) {
       return `analystSnapshot_${String(symbol || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
     }
@@ -4127,6 +4167,7 @@
       details.push(detailBox('صلاحية الخطة بالسعر الحي', `${safeText(stock.live_plan_action || '—')}<br>${safeText(stock.live_plan_reason || '')}`, true));
       details.push(detailBox('آراء المحللين', renderAnalystPlaceholder(stock.symbol), true, 'آراء المحللين'));
       details.push(detailBox('AI / الخبر ومزاج السوق', renderAiContextPlaceholder(stock.symbol), true, 'AI / الخبر ومزاج السوق'));
+      details.push(detailBox('المحفز/الخبر — النوع والتاريخ', renderCatalystDetails(stock), true));
       details.push(detailBox('الأخبار', renderNewsDetails(stock), true));
       details.push(detailBox('الحالة الشرعية', safeText(stock.sharia_label || 'غير متوفر')));
       if (grayLabel) details.push(detailBox('التصنيف الفني قبل الشرعية', safeText(grayLabel), false));
@@ -4207,7 +4248,7 @@
 
           ${hasPrimaryNews(stock) ? `<div class="news-line">
             ${newsBadge(stock)}
-            <span>الأخبار معلومة فقط: ${safeText(shortText(newsHeadlineText(stock), 110))}</span>
+            <span>الأخبار معلومة فقط: ${safeText(shortText(newsHeadlineText(stock), 95))}${catalystQuickLine(stock) ? ' — ' + safeText(shortText(catalystQuickLine(stock), 95)) : ''}</span>
           </div>` : ''}
 
           <div class="card-why-line"><b>لماذا ظهر؟</b> ${safeText(shortText(stock.why_appeared_ar || stock.special_bucket_reason || stock.early_movement_summary || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'تجتمع عدة مؤشرات فنية وسعرية داعمة، وافتح تحليل شامل للتفاصيل.', 190))}</div>
@@ -4504,6 +4545,41 @@
       if (window.__sourceDiscoveryStatus) renderSourceDiscoveryPanel({ sourceStatus: window.__sourceDiscoveryStatus });
     }
 
+
+    function renderNextWeekAnalysisPanel(data={}) {
+      const ana = data?.next_week_analysis || {};
+      const groups = Array.isArray(ana.groups) ? ana.groups : [];
+      const top = Array.isArray(ana.top_candidates) ? ana.top_candidates : [];
+      if (!groups.length && !top.length) return '';
+      const groupHtml = groups.slice(0, 9).map(g => `<div class="stat"><div class="stat-label">${safeText(g.label_ar || g.key)}</div><div class="stat-value">${formatNumber(g.count || 0)}</div></div>`).join('');
+      const rowsHtml = top.slice(0, 12).map((x, idx) => `
+        <div class="mini-row" style="padding:9px 0;border-top:1px solid var(--border-soft);">
+          <b>#${idx + 1} ${safeText(x.symbol)}</b>
+          <span style="font-size:12px;color:var(--text-muted);"> — ${safeText(x.group_ar || '')}</span>
+          <div style="font-size:12px;line-height:1.7;color:var(--text-main);">${safeText(x.next_week_action_ar || x.why_ar || '')}</div>
+          ${x.catalyst_type_ar || x.catalyst_date_ar ? `<div style="font-size:12px;color:var(--text-muted);">📰 ${safeText(x.catalyst_type_ar || '')} ${x.catalyst_date_ar ? '• ' + safeText(x.catalyst_date_ar) : ''}</div>` : ''}
+        </div>`).join('');
+      const rules = Array.isArray(ana.rules_ar) ? ana.rules_ar : [];
+      return `
+        <div class="section scroll-anchor" id="next-week-analysis-section">
+          <div class="section-header section-tone-open">
+            <div class="section-heading">
+              <div class="section-title-row"><div class="section-title">🗓️ تحليل الأسبوع القادم</div><span class="section-count-pill">${formatNumber(top.length)}</span></div>
+              <div class="section-rank-note">${safeText(ana.mode_ar || 'تحضير ومراقبة فقط — ليس شراء مباشر')}</div>
+              <div class="section-preview">${safeText(ana.summary_ar || '')}</div>
+            </div>
+          </div>
+          <div style="padding:12px;">
+            <div class="stats-grid">${groupHtml}</div>
+            ${rules.length ? `<ul class="flags" style="margin-top:10px;">${rules.map(r => `<li>${safeText(r)}</li>`).join('')}</ul>` : ''}
+            <details style="margin-top:10px;" open>
+              <summary style="cursor:pointer;font-weight:900;">أعلى مرشحي المتابعة للأسبوع القادم</summary>
+              <div>${rowsHtml || '<div class="empty">لا توجد مرشحات بعد</div>'}</div>
+            </details>
+          </div>
+        </div>`;
+    }
+
     function renderSections(data) {
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
@@ -4558,6 +4634,7 @@
         'watch-section-content': watch,
       };
       document.getElementById('content').innerHTML = `
+        ${renderNextWeekAnalysisPanel(data)}
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
         ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0 })}
