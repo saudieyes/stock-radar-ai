@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from app.opportunity_radar import OPPORTUNITY_RADAR_VERSION, enrich_row_opportunity_radar
 
-MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1b_multiday_previous_session_2026_06_19"
+MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1c_peak_summary_daily_lookback_2026_06_19"
 
 
 def _s(v: Any) -> str:
@@ -222,9 +222,9 @@ def market_replay_lab_status() -> dict:
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
         "available_runs": [
             "/replay-lab/small-stock-classic/run?path=/tmp/your_polygon_minutes.zip",
-            "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5&max_rows=250000",
+            "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5&daily_lookback_days=14&max_rows=250000",
         ],
-        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2d يقرأ عدة أيام فعليًا ويستخدم daily context لقمة/إغلاق الجلسة السابقة مع تخطي الويكند/الإجازات.",
+        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2e يقرأ عدة أيام فعليًا، يستخدم daily lookback أوسع لقمة/إغلاق آخر جلسة تداول، ويضيف ملخص أعلى قمة بعد الالتقاط من شموع الدقيقة لا من الإغلاق فقط.",
         "small_stock_rules_ar": [
             "فريم 5د/15د عند المضاربة اللحظية.",
             "مستويات Fib 38.2/50/61.8/78.6 من آخر قاع إلى آخر قمة، مع تركيز على 61.8/78.6.",
@@ -426,18 +426,33 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
                     "fib_levels": classic.get("fib_levels"),
                     "behavior_tags": (classic.get("behavior_group") or {}).get("tags", []),
                     "reasons": classic.get("reasons", [])[:8],
-                    "max_after_price": _round(c, 4),
-                    "min_after_price": _round(c, 4),
-                    "max_after_pct": 0.0,
-                    "min_after_pct": 0.0,
+                    "max_after_price": _round(h, 4),
+                    "max_after_time_utc": hhmm,
+                    "min_after_price": _round(l, 4),
+                    "min_after_time_utc": hhmm,
+                    "max_after_pct": _round(((h - c) / c * 100.0) if c > 0 else 0.0, 2),
+                    "min_after_pct": _round(((l - c) / c * 100.0) if c > 0 else 0.0, 2),
+                    "peak_gain_after_detection_pct": _round(((h - c) / c * 100.0) if c > 0 else 0.0, 2),
+                    "peak_price_note_ar": "أعلى سعر بعد الالتقاط محسوب من High لشموع الدقيقة، وليس شرطًا أنه إغلاق.",
                 }
                 prior_candidate_dates_by_symbol[sym].add(date)
             if event_key in events:
                 ev = events[event_key]
-                ev["max_after_price"] = max(_num(ev.get("max_after_price"), c), c)
-                ev["min_after_price"] = min(_num(ev.get("min_after_price"), c), c)
+                old_max = _num(ev.get("max_after_price"), c)
+                old_min = _num(ev.get("min_after_price"), c)
+                if h > old_max:
+                    ev["max_after_price"] = _round(h, 4)
+                    ev["max_after_time_utc"] = hhmm
+                else:
+                    ev["max_after_price"] = _round(old_max, 4)
+                if l < old_min:
+                    ev["min_after_price"] = _round(l, 4)
+                    ev["min_after_time_utc"] = hhmm
+                else:
+                    ev["min_after_price"] = _round(old_min, 4)
                 base = _num(ev.get("first_seen_price"), c)
                 ev["max_after_pct"] = _round(((ev["max_after_price"] - base) / base * 100.0) if base > 0 else 0.0, 2)
+                ev["peak_gain_after_detection_pct"] = ev["max_after_pct"]
                 ev["min_after_pct"] = _round(((ev["min_after_price"] - base) / base * 100.0) if base > 0 else 0.0, 2)
         rows_by_file[source_name] = file_rows
         # Finalize this file's daily high/low/close so the next downloaded minute
@@ -467,6 +482,46 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
             timing_counts["late_or_chase"] += 1
         else:
             timing_counts["early_or_acceptable"] += 1
+
+    def _summary_item(c: dict) -> dict:
+        return {
+            "symbol": c.get("symbol"),
+            "date": c.get("date"),
+            "phase_at_detection": c.get("phase_at_detection"),
+            "phase_at_detection_ar": c.get("phase_at_detection_ar"),
+            "first_seen_time_utc": c.get("first_seen_time_utc"),
+            "first_seen_price": c.get("first_seen_price"),
+            "first_seen_change_pct": c.get("first_seen_change_pct"),
+            "max_gain_before_detection_pct": c.get("max_gain_before_detection_pct"),
+            "peak_price": c.get("max_after_price"),
+            "peak_time_utc": c.get("max_after_time_utc"),
+            "peak_gain_after_detection_pct": c.get("max_after_pct"),
+            "worst_pullback_after_detection_pct": c.get("min_after_pct"),
+            "detected_previous_session": c.get("detected_previous_session"),
+            "previous_candidate_dates": c.get("previous_candidate_dates"),
+            "chase_risk_at_detection": c.get("chase_risk_at_detection"),
+            "chase_risk_label_ar": c.get("chase_risk_label_ar"),
+            "classic_state": c.get("classic_state"),
+            "stage": c.get("stage"),
+        }
+
+    top_peak_movers = [_summary_item(c) for c in candidates[:20]]
+    top_previous_session_peak_movers = [_summary_item(c) for c in candidates if c.get("detected_previous_session")][:20]
+    late_or_chase_peak_movers = [_summary_item(c) for c in candidates if str(c.get("chase_risk_at_detection")) in {"late", "very_late"}][:20]
+    peak_summary = {
+        "note_ar": "أعلى ارتفاع هنا هو أعلى High ظهر في شموع الدقيقة بعد الالتقاط، حتى لو لم يغلق السهم عليه. استخدمه لقياس الإمكانات، وليس كربح مضمون.",
+        "top_peak_movers": top_peak_movers,
+        "top_previous_session_peak_movers": top_previous_session_peak_movers,
+        "late_or_chase_peak_movers": late_or_chase_peak_movers,
+    }
+    railway_usage_guard = {
+        "raw_storage": "temporary_tmp_only_deleted_after_pull_run",
+        "row_cap_mode": "per_file_day",
+        "max_rows_per_file": max_rows_per_file,
+        "minute_files_seen": len(files_seen),
+        "daily_files_seen": len(daily_files_seen),
+        "note_ar": "للحفاظ على Railway: لا يتم حفظ raw، القراءة محدودة لكل يوم، والملخص فقط هو الذي يرجع في JSON. زد max_rows أو minute_days تدريجيًا فقط عند الحاجة.",
+    }
     return {
         "ok": True,
         "version": MARKET_REPLAY_LAB_VERSION,
@@ -481,6 +536,8 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "max_rows_per_file": max_rows_per_file,
         "candidate_count": len(candidates),
         "timing_summary": dict(timing_counts),
+        "peak_summary": peak_summary,
+        "railway_usage_guard": railway_usage_guard,
         "phase_counts": [{"phase": k, "label_ar": _phase_label_ar(k), "count": v} for k, v in sorted(phase_counts.items())],
         "behavior_groups": sorted([{"tag": k, "count": v} for k, v in grouped.items()], key=lambda x: x["count"], reverse=True)[:20],
         "candidates": candidates,
@@ -495,6 +552,7 @@ def run_small_stock_classic_replay_from_polygon(
     minute_days: int = 5,
     max_rows: int = 250_000,
     max_candidates: int = 120,
+    daily_lookback_days: int = 14,
     force: bool = False,
 ) -> dict[str, Any]:
     """Pull Polygon minute flat files to /tmp, replay them, then delete raw files.
@@ -516,8 +574,10 @@ def run_small_stock_classic_replay_from_polygon(
 
     days = max(1, min(10, int(minute_days or 5)))
     # Pull enough daily context to cover the previous trading session even when
-    # the immediately prior calendar day is a weekend/holiday.
-    daily_days = max(days + 8, 10)
+    # the immediately prior calendar day is a weekend/holiday.  Clamp to the
+    # fetcher's safe limit so this stays Railway-friendly.
+    daily_days = max(days + 8, int(daily_lookback_days or 14), 10)
+    daily_days = max(1, min(35, daily_days))
     pull = pull_flatfiles_for_window(end_date=end_date or None, minute_days=days, daily_days=daily_days, force=bool(force))
     tmp_dir = str(pull.get("tmp_dir") or "")
     try:
@@ -552,6 +612,7 @@ def run_small_stock_classic_replay_from_polygon(
             "minute_files_downloaded": len(minute_paths),
             "daily_files_downloaded": len([str(x) for x in (pull.get("daily_paths") or []) if str(x)]),
             "daily_days_requested_for_previous_session_context": daily_days,
+            "daily_lookback_days_param": daily_lookback_days,
             "results_summary": [
                 {
                     "dataset": r.get("dataset"),
