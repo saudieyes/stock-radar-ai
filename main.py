@@ -215,6 +215,16 @@ from app.trade_plan_ledger import (
     enrich_rows_with_active_plan_status,
     record_active_strong_plans,
 )
+from app.opportunity_radar import (
+    OPPORTUNITY_RADAR_VERSION,
+    build_opportunity_radar_sections,
+    build_position_aware_snapshot,
+    enrich_rows_opportunity_radar,
+    enrich_rows_with_opportunity_plan_memory,
+    opportunity_plan_memory_status,
+    opportunity_radar_status_payload,
+    record_opportunity_plans,
+)
 from app.paper_trading_engine import PAPER_TRADING_VERSION, paper_trading_status, process_paper_trading_scan
 from app.breakout_quality_engine import BREAKOUT_QUALITY_VERSION, enrich_breakout_quality_rows, breakout_quality_status
 from app.weekly_plan_lifecycle import WEEKLY_PLAN_LIFECYCLE_VERSION, evaluate_weekly_rows, weekly_plan_lifecycle_status
@@ -562,6 +572,18 @@ def telegram_alerts_status_endpoint():
 @app.get("/active-plans/status")
 def active_plans_status_endpoint(limit: int = 100):
     return active_plan_status(limit=limit)
+
+
+@app.get("/opportunity-radar/status")
+def opportunity_radar_status_endpoint():
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    return opportunity_radar_status_payload(rows if isinstance(rows, list) else [])
+
+
+@app.get("/opportunity-radar/plan-memory/status")
+def opportunity_plan_memory_status_endpoint(limit: int = 100):
+    return opportunity_plan_memory_status(limit=limit)
 
 
 @app.get("/paper-trading/status")
@@ -1156,9 +1178,21 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = enrich_rows_with_opportunity_plan_memory(overlaid)
+    except Exception:
+        pass
+    try:
+        overlaid = enrich_rows_opportunity_radar(overlaid, market_phase=phase)
+    except Exception:
+        pass
+    try:
         early_movement_payload = build_early_movement_sections(overlaid)
     except Exception:
         early_movement_payload = {"count": 0, "early_movement_watchlist": [], "weekly_priority_count": 0, "auto_detected_count": 0, "priority_watch_count": 0}
+    try:
+        opportunity_radar_payload = build_opportunity_radar_sections(overlaid, market_phase=phase)
+    except Exception as exc:
+        opportunity_radar_payload = {"ok": False, "version": OPPORTUNITY_RADAR_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
     gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
@@ -1173,10 +1207,27 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     if not include_watch:
         watch = []
 
+    support_bounce_candidates = opportunity_radar_payload.get("support_bounce_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    reclaim_candidates = opportunity_radar_payload.get("reclaim_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    pre_trigger_candidates = opportunity_radar_payload.get("pre_trigger_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    continuation_pullback_candidates = opportunity_radar_payload.get("continuation_pullback_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    high_risk_day_trades = opportunity_radar_payload.get("high_risk_day_trades", []) if isinstance(opportunity_radar_payload, dict) else []
+    low_float_premarket_radar = opportunity_radar_payload.get("low_float_premarket_radar", []) if isinstance(opportunity_radar_payload, dict) else []
+    gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
+    catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
+
     try:
         plan_ledger_live_stats = record_active_strong_plans(strong, source="radar_live_refresh")
     except Exception as exc:
         plan_ledger_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+    try:
+        memory_rows = []
+        for bucket_rows in [strong, cautious, pre_trigger_candidates, support_bounce_candidates, reclaim_candidates, continuation_pullback_candidates, low_float_premarket_radar, high_risk_day_trades]:
+            memory_rows.extend(bucket_rows or [])
+        opportunity_plan_memory_live_stats = record_opportunity_plans(memory_rows, source="radar_live_refresh")
+    except Exception as exc:
+        opportunity_plan_memory_live_stats = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
         weekly_rows_for_lifecycle = ((load_weekly_watchlist() or {}).get("candidates") or [])
@@ -1229,6 +1280,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "tracking_intelligence": tracking_live_stats,
         "telegram_alerts": telegram_live_stats,
         "plan_ledger": plan_ledger_live_stats,
+        "opportunity_plan_memory": opportunity_plan_memory_live_stats,
         "paper_trading": paper_trading_live_stats,
         "weekly_plan_lifecycle": weekly_lifecycle_live_stats,
         "live_overlay_gate_version": "source_promotion_v2a2_live_overlay_gate",
@@ -1238,6 +1290,24 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
         "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
         "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
+        "opportunity_radar": opportunity_radar_payload,
+        "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "support_bounce_candidates_count": len(support_bounce_candidates),
+        "reclaim_candidates_count": len(reclaim_candidates),
+        "pre_trigger_candidates_count": len(pre_trigger_candidates),
+        "continuation_pullback_candidates_count": len(continuation_pullback_candidates),
+        "high_risk_day_trades_count": len(high_risk_day_trades),
+        "low_float_premarket_radar_count": len(low_float_premarket_radar),
+        "gap_fill_watch_count": len(gap_fill_watch),
+        "catalyst_watch_count": len(catalyst_watch),
+        "support_bounce_candidates": support_bounce_candidates[:limit],
+        "reclaim_candidates": reclaim_candidates[:limit],
+        "pre_trigger_candidates": pre_trigger_candidates[:limit],
+        "continuation_pullback_candidates": continuation_pullback_candidates[:limit],
+        "high_risk_day_trades": high_risk_day_trades[:limit],
+        "low_float_premarket_radar": low_float_premarket_radar[:limit],
+        "gap_fill_watch": gap_fill_watch[:limit],
+        "catalyst_watch": catalyst_watch[:limit],
         "source_promotion_v2a": summarize_source_promotion_v2a(overlaid),
         "source_promotion_v2a_promoted_count": len([x for x in overlaid if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
         "source_early_discovery_v2": summarize_source_promotion_v2(overlaid),
@@ -1248,6 +1318,14 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
             "gray_strong": _live_bucket_payload(gray_strong, limit),
             "premarket_setups": _live_bucket_payload(premarket_setups, limit),
             "early_movement_watchlist": _live_bucket_payload(early_movement_payload.get("early_movement_watchlist", []), limit),
+            "support_bounce_candidates": _live_bucket_payload(support_bounce_candidates, limit),
+            "reclaim_candidates": _live_bucket_payload(reclaim_candidates, limit),
+            "pre_trigger_candidates": _live_bucket_payload(pre_trigger_candidates, limit),
+            "continuation_pullback_candidates": _live_bucket_payload(continuation_pullback_candidates, limit),
+            "high_risk_day_trades": _live_bucket_payload(high_risk_day_trades, limit),
+            "low_float_premarket_radar": _live_bucket_payload(low_float_premarket_radar, limit),
+            "gap_fill_watch": _live_bucket_payload(gap_fill_watch, limit),
+            "catalyst_watch": _live_bucket_payload(catalyst_watch, limit),
             "watchlist": _live_bucket_payload(watch, limit if include_watch else 1),
         },
     }
@@ -2547,9 +2625,21 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         results = enrich_rows_with_active_plan_status(results)
     except Exception:
         pass
-    early_movement_payload = build_early_movement_sections(results)
-    scan_debug = dict(scan_debug or {})
     phase = get_market_phase()
+    try:
+        results = enrich_rows_with_opportunity_plan_memory(results)
+    except Exception:
+        pass
+    try:
+        results = enrich_rows_opportunity_radar(results, market_phase=phase)
+    except Exception:
+        pass
+    early_movement_payload = build_early_movement_sections(results)
+    try:
+        opportunity_radar_payload = build_opportunity_radar_sections(results, market_phase=phase)
+    except Exception as exc:
+        opportunity_radar_payload = {"ok": False, "version": OPPORTUNITY_RADAR_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+    scan_debug = dict(scan_debug or {})
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
     gray_strong, premarket_setups, watch = _build_special_buckets(results, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
@@ -2561,6 +2651,14 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         and not _is_gray_sharia(x)
     ])
     early_movement_watchlist = early_movement_payload.get("early_movement_watchlist", [])
+    support_bounce_candidates = opportunity_radar_payload.get("support_bounce_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    reclaim_candidates = opportunity_radar_payload.get("reclaim_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    pre_trigger_candidates = opportunity_radar_payload.get("pre_trigger_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    continuation_pullback_candidates = opportunity_radar_payload.get("continuation_pullback_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    high_risk_day_trades = opportunity_radar_payload.get("high_risk_day_trades", []) if isinstance(opportunity_radar_payload, dict) else []
+    low_float_premarket_radar = opportunity_radar_payload.get("low_float_premarket_radar", []) if isinstance(opportunity_radar_payload, dict) else []
+    gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
+    catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
 
     out = {
         "market_phase": phase,
@@ -2601,6 +2699,16 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_auto_detected_count": int(early_movement_payload.get("auto_detected_count", 0) or 0),
         "early_movement_priority_watch_count": int(early_movement_payload.get("priority_watch_count", 0) or 0),
         "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
+        "opportunity_radar": opportunity_radar_payload,
+        "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "support_bounce_candidates_count": len(support_bounce_candidates),
+        "reclaim_candidates_count": len(reclaim_candidates),
+        "pre_trigger_candidates_count": len(pre_trigger_candidates),
+        "continuation_pullback_candidates_count": len(continuation_pullback_candidates),
+        "high_risk_day_trades_count": len(high_risk_day_trades),
+        "low_float_premarket_radar_count": len(low_float_premarket_radar),
+        "gap_fill_watch_count": len(gap_fill_watch),
+        "catalyst_watch_count": len(catalyst_watch),
         "source_promotion_v2a": summarize_source_promotion_v2a(results),
         "source_promotion_v2a_promoted_count": len([x for x in results if isinstance(x, dict) and x.get("source_promotion_v2a_promoted")]),
         "source_early_discovery_v2": summarize_source_promotion_v2(results),
@@ -2615,6 +2723,14 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "premarket_setups": premarket_setups[:25],
         "watchlist": watch[:50],
         "early_movement_watchlist": early_movement_watchlist[:30],
+        "support_bounce_candidates": support_bounce_candidates[:25],
+        "reclaim_candidates": reclaim_candidates[:25],
+        "pre_trigger_candidates": pre_trigger_candidates[:25],
+        "continuation_pullback_candidates": continuation_pullback_candidates[:25],
+        "high_risk_day_trades": high_risk_day_trades[:25],
+        "low_float_premarket_radar": low_float_premarket_radar[:25],
+        "gap_fill_watch": gap_fill_watch[:25],
+        "catalyst_watch": catalyst_watch[:25],
         "early_movement": early_movement_payload,
         "opening_mode_active": is_opening_window(),
         "opening_focus": build_opening_focus(results),
@@ -2659,6 +2775,14 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         out["plan_ledger"] = record_active_strong_plans(strong, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
     except Exception as exc:
         out["plan_ledger"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+    try:
+        memory_rows = []
+        for bucket_rows in [strong, cautious, pre_trigger_candidates, support_bounce_candidates, reclaim_candidates, continuation_pullback_candidates, low_float_premarket_radar, high_risk_day_trades]:
+            memory_rows.extend(bucket_rows or [])
+        out["opportunity_plan_memory"] = record_opportunity_plans(memory_rows, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
+    except Exception as exc:
+        out["opportunity_plan_memory"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     try:
         weekly_rows_for_lifecycle = ((load_weekly_watchlist() or {}).get("candidates") or [])
@@ -3262,6 +3386,10 @@ def portfolio_get():
 
         plan = enrich_display_meta(plan)
         recommendation = evaluate_portfolio_action(item, plan)
+        try:
+            position_aware = build_position_aware_snapshot(item, plan)
+        except Exception as exc:
+            position_aware = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
         current_price = float(plan.get("display_price", plan.get("current_price_live", 0)) or 0)
         buy_price = float(item.get("buy_price", 0) or 0)
         quantity = float(item.get("quantity", 0) or 0)
@@ -3278,6 +3406,10 @@ def portfolio_get():
             "type_label": str(plan.get("trade_type_label_ar", plan.get("display_plan_family_label", plan.get("strategy_label", ""))) or ""),
             "recommendation": recommendation["recommendation"],
             "recommendation_note": recommendation["recommendation_note"],
+            "position_aware": position_aware,
+            "position_aware_action": position_aware.get("action_ar", "") if isinstance(position_aware, dict) else "",
+            "position_aware_status": position_aware.get("status", "") if isinstance(position_aware, dict) else "",
+            "position_levels_summary": position_aware.get("levels_summary", "") if isinstance(position_aware, dict) else "",
             "target_price": recommendation["target_price"],
             "stop_loss": recommendation["stop_loss"],
             "saved_target_price": safe_round(item.get("target_price", 0)),
@@ -3290,7 +3422,22 @@ def portfolio_get():
             "updated_at": str(item.get("updated_at", "") or ""),
         })
 
-    return {"items": out}
+    try:
+        total_market_value = sum(float(x.get("market_value", 0) or 0) for x in out)
+        total_cost_value = sum(float(x.get("cost_value", 0) or 0) for x in out)
+        total_pl = total_market_value - total_cost_value
+        total_pl_pct = (total_pl / total_cost_value * 100.0) if total_cost_value > 0 else 0.0
+        summary = {
+            "positions": len(out),
+            "market_value": safe_round(total_market_value),
+            "cost_value": safe_round(total_cost_value),
+            "unrealized_pl": safe_round(total_pl),
+            "unrealized_pl_pct": safe_round(total_pl_pct),
+            "rule_ar": "المحفظة Position-Aware: التحليل يبدأ من سعر شراء المستخدم لا من خطة جديدة.",
+        }
+    except Exception:
+        summary = {"positions": len(out)}
+    return {"items": out, "summary": summary}
 
 
 @app.post("/watchlist/add")

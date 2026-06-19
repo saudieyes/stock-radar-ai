@@ -2956,6 +2956,55 @@
       return `<span class="badge ${cls}">${safeText(label)}</span>`;
     }
 
+    function opportunityBadge(stock) {
+      const label = String(stock?.opportunity_stage_label || '').trim();
+      if (!label) return '';
+      const bucket = String(stock?.opportunity_bucket || '').trim();
+      let cls = 'badge-stage';
+      if (bucket === 'high_risk_day_trade' || bucket === 'low_float_premarket') cls = 'badge-cautious';
+      if (bucket === 'no_chase') cls = 'badge-news-neg';
+      if (bucket === 'pre_trigger' || bucket === 'support_bounce' || bucket === 'reclaim') cls = 'badge-plan';
+      return `<span class="badge ${cls}">${safeText(label)}</span>`;
+    }
+
+    function renderOriginalPlanBlock(stock) {
+      const p = stock?.original_plan || null;
+      const st = stock?.current_plan_state || null;
+      if (!p && !st) return '';
+      const parts = [];
+      if (p) {
+        parts.push(`<b>الخطة الأصلية</b>`);
+        if (p.created_at) parts.push(`وقت الظهور: ${safeText(p.created_at)}`);
+        if (p.original_stage_label) parts.push(`المرحلة: ${safeText(p.original_stage_label)}`);
+        if (p.alert_price) parts.push(`سعر الظهور: ${formatNumber(p.alert_price)}`);
+        if (p.entry || p.trigger) parts.push(`دخول/تفعيل: ${formatNumber(p.entry || p.trigger)}`);
+        if (p.stop) parts.push(`وقف: ${formatNumber(p.stop)}`);
+        if (p.target_1) parts.push(`هدف1: ${formatNumber(p.target_1)}`);
+        if (p.support_resistance_summary) parts.push(`المناطق: ${safeText(p.support_resistance_summary)}`);
+      }
+      if (st) {
+        parts.push(`<b>حالة الخطة الآن</b>`);
+        if (st.status) parts.push(`الحالة: ${safeText(st.status)}`);
+        if (st.action) parts.push(`${safeText(st.action)}`);
+        if (st.max_price_seen) parts.push(`أعلى سعر منذ الخطة: ${formatNumber(st.max_price_seen)}`);
+        if (st.min_price_seen) parts.push(`أدنى سعر منذ الخطة: ${formatNumber(st.min_price_seen)}`);
+      }
+      return parts.join('<br>');
+    }
+
+    function renderOpportunityZonesBlock(stock) {
+      const z = stock?.support_resistance_zones_v2 || null;
+      if (!z) return '';
+      const rows = [];
+      if (z.summary_ar) rows.push(`<b>${safeText(z.summary_ar)}</b>`);
+      const zones = Array.isArray(z.zones) ? z.zones.slice(0, 6) : [];
+      zones.forEach(zone => {
+        rows.push(`${safeText(zone.label || zone.kind)}: ${formatNumber(zone.low)} - ${formatNumber(zone.high)} (${safeText(zone.strength || 'متوسطة')})`);
+      });
+      if (Array.isArray(z.notes) && z.notes.length) rows.push(renderReasonsList(z.notes));
+      return rows.join('<br>');
+    }
+
     function moveStageBadge(stock) {
       if (!stock) return '';
       const label = String(stock.move_stage_label || stock.move_stage || '').trim();
@@ -3560,10 +3609,28 @@
     }
 
     const SECTION_DEFAULT_LIMIT = 5;
+    const OPPORTUNITY_RADAR_GROUP_KEYS = [
+      'pre_trigger_candidates',
+      'support_bounce_candidates',
+      'reclaim_candidates',
+      'continuation_pullback_candidates',
+      'low_float_premarket_radar',
+      'high_risk_day_trades',
+      'gap_fill_watch',
+      'catalyst_watch'
+    ];
     const RADAR_SECTION_CONTENT_IDS = [
       'strong-section-content',
       'cautious-section-content',
+      'pre-trigger-section-content',
+      'support-bounce-section-content',
+      'reclaim-section-content',
+      'continuation-pullback-section-content',
       'early-movement-section-content',
+      'low-float-premarket-section-content',
+      'high-risk-day-trades-section-content',
+      'gap-fill-section-content',
+      'catalyst-watch-section-content',
       'premarket-section-content',
       'gray-strong-section-content',
       'watch-section-content'
@@ -3571,11 +3638,46 @@
     const RADAR_SCAN_GROUP_KEYS = [
       'strong_entries',
       'cautious_entries',
+      ...OPPORTUNITY_RADAR_GROUP_KEYS,
       'early_movement_watchlist',
       'premarket_setups',
       'gray_strong',
       'watchlist'
     ];
+
+    const ALL_SCAN_GROUP_KEYS = [
+      'strong_entries',
+      'cautious_entries',
+      ...OPPORTUNITY_RADAR_GROUP_KEYS,
+      'premarket_setups',
+      'gray_strong',
+      'early_movement_watchlist',
+      'watchlist',
+      'top_ranked',
+      'opening_focus',
+      'all_results'
+    ];
+
+    function opportunityRadarVisibleCount(data) {
+      if (!data) return 0;
+      return OPPORTUNITY_RADAR_GROUP_KEYS.reduce((total, key) => total + (Array.isArray(data[key]) ? data[key].length : Number(data[`${key}_count`] || 0) || 0), 0);
+    }
+
+    function refreshScanCountsFromGroups(data) {
+      if (!data) return data;
+      data.strong_entries_count = Array.isArray(data.strong_entries) ? data.strong_entries.length : Number(data.strong_entries_count || 0);
+      data.cautious_entries_count = Array.isArray(data.cautious_entries) ? data.cautious_entries.length : Number(data.cautious_entries_count || 0);
+      data.premarket_setups_count = Array.isArray(data.premarket_setups) ? data.premarket_setups.length : Number(data.premarket_setups_count || 0);
+      data.gray_strong_count = Array.isArray(data.gray_strong) ? data.gray_strong.length : Number(data.gray_strong_count || 0);
+      data.early_movement_count = Array.isArray(data.early_movement_watchlist) ? data.early_movement_watchlist.length : Number(data.early_movement_count || 0);
+      data.watchlist_count = Array.isArray(data.watchlist) ? data.watchlist.length : Number(data.watchlist_count || 0);
+      OPPORTUNITY_RADAR_GROUP_KEYS.forEach(key => {
+        data[`${key}_count`] = Array.isArray(data[key]) ? data[key].length : Number(data[`${key}_count`] || 0);
+      });
+      data.opportunity_radar_visible_count = opportunityRadarVisibleCount(data);
+      data.count = data.strong_entries_count + data.cautious_entries_count + data.premarket_setups_count + data.gray_strong_count + data.early_movement_count + data.watchlist_count + data.opportunity_radar_visible_count;
+      return data;
+    }
 
     function renderSectionItems(contentId, showAll=false) {
       const el = document.getElementById(contentId);
@@ -3829,6 +3931,10 @@
       const detailKey = `${safeText(sectionKey || 'section')}:${safeText(stock.symbol || '')}`;
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
+      details.push(detailBox('مرحلة Opportunity Radar', `${safeText(stock.opportunity_stage_label || '')}<br>${renderReasonsList(stock.opportunity_reasons || stock.technical_explainer_reasons)}`, true));
+      details.push(detailBox('مناطق الدعم/المقاومة V2', renderOpportunityZonesBlock(stock), true));
+      details.push(detailBox('الخطة الأصلية وحالتها الآن', renderOriginalPlanBlock(stock), true));
+      details.push(detailBox('فلتر السعر الشخصي', safeText(stock.personal_price_label || ''), false));
       details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
       details.push(detailBox(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price)));
       details.push(detailBox(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price)));
@@ -3960,6 +4066,7 @@
               ${badgeDecision(stock.decision)}
               ${phaseBadge(stock.market_phase_label)}
               ${strengthBadge(stock)}
+              ${opportunityBadge(stock)}
               ${intelligenceBadge(stock)}
               ${moveStageBadge(stock)}
               ${earlyMovementBadge(stock)}
@@ -3984,7 +4091,7 @@
             <span>الأخبار معلومة فقط: ${safeText(shortText(newsHeadlineText(stock), 110))}</span>
           </div>` : ''}
 
-          <div class="card-why-line"><b>لماذا ظهر؟</b> ${safeText(shortText(stock.special_bucket_reason || stock.early_movement_summary || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'تجتمع عدة مؤشرات فنية وسعرية داعمة، وافتح تحليل شامل للتفاصيل.', 190))}</div>
+          <div class="card-why-line"><b>لماذا ظهر؟</b> ${safeText(shortText(stock.why_appeared_ar || stock.special_bucket_reason || stock.early_movement_summary || stock.live_rank_reason || stock.source_reason || stock.quick_explainer || stock.ai_summary || 'تجتمع عدة مؤشرات فنية وسعرية داعمة، وافتح تحليل شامل للتفاصيل.', 190))}</div>
           ${stock.live_plan_action ? `<div class="live-plan-warning">صلاحية الخطة: ${safeText(stock.live_plan_action)}${stock.live_plan_reason ? ' • ' + safeText(shortText(stock.live_plan_reason, 130)) : ''}</div>` : ''}
 
           <div class="card-actions">
@@ -4120,6 +4227,9 @@
         <div class="stat"><div class="stat-label">إجمالي الفرص</div><div class="stat-value">${formatNumber(data.count)}</div></div>
         <div class="stat"><div class="stat-label">دخول قوي</div><div class="stat-value">${formatNumber(data.strong_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
+        <div class="stat"><div class="stat-label">قريب من التفعيل</div><div class="stat-value">${formatNumber(data.pre_trigger_candidates_count || (data.pre_trigger_candidates || []).length || 0)}</div></div>
+        <div class="stat"><div class="stat-label">ارتداد/Reclaim</div><div class="stat-value">${formatNumber((data.support_bounce_candidates_count || (data.support_bounce_candidates || []).length || 0) + (data.reclaim_candidates_count || (data.reclaim_candidates || []).length || 0))}</div></div>
+        <div class="stat"><div class="stat-label">Low-Float</div><div class="stat-value">${formatNumber(data.low_float_premarket_radar_count || (data.low_float_premarket_radar || []).length || 0)}</div></div>
         <div class="stat"><div class="stat-label">تهيئة قوية</div><div class="stat-value">${formatNumber(data.premarket_setups_count || 0)}</div></div>
         <div class="stat"><div class="stat-label">حركة مبكرة</div><div class="stat-value">${formatNumber(data.early_movement_count || 0)}</div></div>
         <div class="stat"><div class="stat-label">قوي رمادي</div><div class="stat-value">${formatNumber(data.gray_strong_count || 0)}</div></div>
@@ -4130,6 +4240,7 @@
         <div class="stat"><div class="stat-label">حالة السوق</div><div class="stat-value">${safeText(phaseLabel)}</div></div>
         <div class="stat"><div class="stat-label">المراقبة</div><div class="stat-value">${formatNumber(data.watchlist_count)}</div></div>
         <div class="stat"><div class="stat-label">الحركة المبكرة</div><div class="stat-value">${formatNumber(data.early_movement_count || 0)}</div></div>
+        <div class="stat"><div class="stat-label">Opportunity Radar</div><div class="stat-value">${formatNumber(data.opportunity_radar_visible_count || opportunityRadarVisibleCount(data))}</div></div>
         <div class="stat"><div class="stat-label">وضع الافتتاح</div><div class="stat-value">${data?.opening_mode_active ? 'نشط' : '—'}</div></div>
         <div class="stat"><div class="stat-label">آخر تحديث</div><div class="stat-value" style="font-size:16px;">${safeText(data.updated_at || '—')}</div></div>
       `;
@@ -4276,6 +4387,14 @@
     function renderSections(data) {
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
+      const preTrigger = sortDisplayItems(data.pre_trigger_candidates || []);
+      const supportBounce = sortDisplayItems(data.support_bounce_candidates || []);
+      const reclaim = sortDisplayItems(data.reclaim_candidates || []);
+      const continuationPullback = sortDisplayItems(data.continuation_pullback_candidates || []);
+      const lowFloatPM = sortDisplayItems(data.low_float_premarket_radar || []);
+      const highRiskDay = sortDisplayItems(data.high_risk_day_trades || []);
+      const gapFill = sortDisplayItems(data.gap_fill_watch || []);
+      const catalystWatch = sortDisplayItems(data.catalyst_watch || []);
       const premarket = sortDisplayItems(data.premarket_setups || []);
       const grayStrong = sortDisplayItems(data.gray_strong || []);
       const earlyMovement = sortDisplayItems(data.early_movement_watchlist || []);
@@ -4284,7 +4403,15 @@
       window.__sectionItems = {
         'strong-section-content': strong,
         'cautious-section-content': cautious,
+        'pre-trigger-section-content': preTrigger,
+        'support-bounce-section-content': supportBounce,
+        'reclaim-section-content': reclaim,
+        'continuation-pullback-section-content': continuationPullback,
         'early-movement-section-content': earlyMovement,
+        'low-float-premarket-section-content': lowFloatPM,
+        'high-risk-day-trades-section-content': highRiskDay,
+        'gap-fill-section-content': gapFill,
+        'catalyst-watch-section-content': catalystWatch,
         'premarket-section-content': premarket,
         'gray-strong-section-content': grayStrong,
         'watch-section-content': watch,
@@ -4292,8 +4419,16 @@
       document.getElementById('content').innerHTML = `
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
-        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious' })}
-        ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط. الأسهم فوق +10% عند الاكتشاف تنتقل إلى استمرار/لا تطارد ولا تظهر هنا.' })}
+        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0 })}
+        ${renderSection('⏳ قريب من التفعيل / Pre-Trigger', preTrigger.length, 'pre-trigger-section-content', 'pre-trigger-section', preTrigger, { tone: 'open', orderedText: 'أسهم قريبة من التفعيل قبل أن تفوت الحركة؛ ليست BUY_NOW حتى تظهر شروط التنفيذ.' })}
+        ${renderSection('↩️ ارتداد من دعم / Support Bounce', supportBounce.length, 'support-bounce-section-content', 'support-bounce-section', supportBounce, { tone: 'open', orderedText: 'فرص مبكرة قرب دعم حقيقي أو منطقة قرار؛ الهدف رؤيتها قبل الاختراق وليس بعده.' })}
+        ${renderSection('🔁 Reclaim / استعادة مستوى', reclaim.length, 'reclaim-section-content', 'reclaim-section', reclaim, { tone: 'open', orderedText: 'أسهم كسرت أو اختبرت مستوى مهمًا ثم بدأت استعادته؛ تحتاج ثبات وحجم.' })}
+        ${renderSection('📈 Continuation Pullback', continuationPullback.length, 'continuation-pullback-section-content', 'continuation-pullback-section', continuationPullback, { tone: 'cautious', orderedText: 'استمرار مشروط: لا نطارد القمة، ننتظر Pullback صحي داخل الحركة.' })}
+        ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط.' })}
+        ${renderSection('🚀 Low-Float / Pre-Market Radar', lowFloatPM.length, 'low-float-premarket-section-content', 'low-float-premarket-section', lowFloatPM, { tone: 'cautious', orderedText: 'أسهم صغيرة أو نشطة مبكرًا؛ تعامل كمضاربة عالية المخاطر وليست Strong عادي.' })}
+        ${renderSection('⚡ مضاربة عالية المخاطرة', highRiskDay.length, 'high-risk-day-trades-section-content', 'high-risk-day-trades-section', highRiskDay, { tone: 'cautious', orderedText: 'فرص سريعة وصغيرة الحجم؛ تظهر منفصلة حتى لا تختلط مع Strong/Cautious العادي.' })}
+        ${renderSection('🕳️ Gap Fill Watch', gapFill.length, 'gap-fill-section-content', 'gap-fill-section', gapFill, { tone: 'watch', orderedText: 'ليست كل فجوة تُغلق؛ هذا القسم يراقب دخول السعر داخل الفجوة أو احترامها.' })}
+        ${renderSection('📰 Catalyst / News Watch', catalystWatch.length, 'catalyst-watch-section-content', 'catalyst-watch-section', catalystWatch, { tone: 'watch', orderedText: 'الأخبار والمحفزات سياق مساعد وليست قرار شراء مباشر.' })}
         ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section', grayStrong, { tone: 'gray', orderedText: 'أسهم قوية فنيًا لكنها تحتاج حسمًا شرعيًا قبل التنفيذ.' })}
         ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section', watch, { tone: 'watch' })}
         ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section', premarket, { tone: 'open', orderedText: 'فرص تهيئة مبكرة تظهر قبل الافتتاح وأول الجلسة.' })}
@@ -4306,6 +4441,9 @@
       window.__scanData = { ...(data || {}) };
       window.__scanData.strong_entries = [...(data?.strong_entries || [])];
       window.__scanData.cautious_entries = [...(data?.cautious_entries || [])];
+      OPPORTUNITY_RADAR_GROUP_KEYS.forEach(key => {
+        window.__scanData[key] = [...(data?.[key] || [])];
+      });
       window.__scanData.premarket_setups = [...(data?.premarket_setups || [])];
       window.__scanData.gray_strong = [...(data?.gray_strong || [])];
       window.__scanData.early_movement_watchlist = [...(data?.early_movement_watchlist || [])];
@@ -4313,6 +4451,7 @@
       window.__scanData.opening_focus = [...(data?.opening_focus || [])];
       window.__scanData.top_ranked = [...(data?.top_ranked || [])];
       window.__scanData.all_results = [...(data?.all_results || [])];
+      refreshScanCountsFromGroups(window.__scanData);
     }
 
     function scanGroupSymbols(data, key) {
@@ -4395,6 +4534,9 @@
       const strong = Number(data?.strong_entries_count ?? (data?.strong_entries || []).length ?? 0);
       const cautious = Number(data?.cautious_entries_count ?? (data?.cautious_entries || []).length ?? 0);
       const early = Number(data?.early_movement_count ?? (data?.early_movement_watchlist || []).length ?? 0);
+      const preTrigger = Number(data?.pre_trigger_candidates_count ?? (data?.pre_trigger_candidates || []).length ?? 0);
+      const bounceReclaim = Number(data?.support_bounce_candidates_count ?? (data?.support_bounce_candidates || []).length ?? 0) + Number(data?.reclaim_candidates_count ?? (data?.reclaim_candidates || []).length ?? 0);
+      const lowFloat = Number(data?.low_float_premarket_radar_count ?? (data?.low_float_premarket_radar || []).length ?? 0);
       el.innerHTML = isError ? `
         <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">⚠️ تعذر تحميل التحديث الجديد</div>
         <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
@@ -4406,7 +4548,7 @@
         <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">✅ اكتمل تحديث جديد بدون تحريك الصفحة</div>
         <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
           وصلت نتائج جديدة، لكن لم أعد رسم القوائم حتى لا يتغير مكانك أثناء القراءة.<br>
-          آخر تحديث: <b>${safeText(updated)}</b> • دخول قوي: ${formatNumber(strong)} • دخول بحذر: ${formatNumber(cautious)} • مراقبة مبكرة: ${formatNumber(early)}
+          آخر تحديث: <b>${safeText(updated)}</b> • دخول قوي: ${formatNumber(strong)} • دخول بحذر: ${formatNumber(cautious)} • Pre-Trigger: ${formatNumber(preTrigger)} • Bounce/Reclaim: ${formatNumber(bounceReclaim)} • Low-Float: ${formatNumber(lowFloat)} • مراقبة مبكرة: ${formatNumber(early)}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
           <button class="primary" type="button" onclick="applyPendingScanData()">عرض النتائج الجديدة</button>
@@ -4447,15 +4589,9 @@
         window.__scanData[key] = (window.__scanData[key] || []).filter(item => String(item?.symbol || '').toUpperCase() !== clean);
         if ((window.__scanData[key] || []).length !== before) changed = true;
       };
-      ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','all_results','opening_focus'].forEach(removeFrom);
+      ALL_SCAN_GROUP_KEYS.forEach(removeFrom);
       if (!changed) return false;
-      window.__scanData.strong_entries_count = (window.__scanData.strong_entries || []).length;
-      window.__scanData.cautious_entries_count = (window.__scanData.cautious_entries || []).length;
-      window.__scanData.premarket_setups_count = (window.__scanData.premarket_setups || []).length;
-      window.__scanData.gray_strong_count = (window.__scanData.gray_strong || []).length;
-      window.__scanData.early_movement_count = (window.__scanData.early_movement_watchlist || []).length;
-      window.__scanData.watchlist_count = (window.__scanData.watchlist || []).length;
-      window.__scanData.count = window.__scanData.strong_entries_count + window.__scanData.cautious_entries_count + window.__scanData.premarket_setups_count + window.__scanData.gray_strong_count + window.__scanData.early_movement_count + window.__scanData.watchlist_count;
+      refreshScanCountsFromGroups(window.__scanData);
       renderScanData();
       return true;
     }
@@ -4572,7 +4708,7 @@
     function mergeRadarLivePricesIntoScanData(payload) {
       if (!payload || payload.ok === false || !payload.groups || !window.__scanData) return false;
       const liveBySymbol = radarLiveItemsBySymbol(payload);
-      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','opening_focus','all_results'];
+      const keys = ALL_SCAN_GROUP_KEYS;
       let changed = false;
       keys.forEach(key => {
         (window.__scanData[key] || []).forEach(item => {
@@ -4611,7 +4747,7 @@
       // Prefer the freshest live item per symbol. In some snapshots the same symbol can appear
       // in more than one bucket, and a later stale all_results copy used to overwrite the live one.
       const out = {};
-      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','opening_focus','all_results'];
+      const keys = ALL_SCAN_GROUP_KEYS;
       const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
       const itemFreshnessScore = (item, keyIndex) => {
         const livePrice = num(item?.current_price_live);
@@ -4787,7 +4923,7 @@
 
     function collectVisibleScanSymbols() {
       if (!window.__scanData) return [];
-      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','opening_focus'];
+      const keys = ALL_SCAN_GROUP_KEYS.filter(key => key !== 'all_results');
       const out = [];
       keys.forEach(key => {
         (window.__scanData[key] || []).forEach(item => {
@@ -4958,7 +5094,7 @@
     function applyLiveQuotesToScan(quotes) {
       if (!window.__scanData || !quotes) return false;
       let changed = false;
-      const keys = ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','opening_focus','all_results'];
+      const keys = ALL_SCAN_GROUP_KEYS;
       keys.forEach(key => {
         (window.__scanData[key] || []).forEach(item => {
           const s = String(item?.symbol || '').toUpperCase().trim();
@@ -5176,7 +5312,7 @@
         }
         return item;
       };
-      ['strong_entries','cautious_entries','premarket_setups','gray_strong','early_movement_watchlist','watchlist','top_ranked','all_results','opening_focus'].forEach(key => {
+      ALL_SCAN_GROUP_KEYS.forEach(key => {
         if (Array.isArray(window.__scanData[key])) window.__scanData[key].forEach(mark);
       });
     }
@@ -5244,12 +5380,7 @@
       // Manual approval removes it from the gray bucket immediately without full rescan.
       ['gray_strong','top_ranked','opening_focus'].forEach(removeFrom);
       if (!changed) return false;
-      window.__scanData.gray_strong_count = (window.__scanData.gray_strong || []).length;
-      window.__scanData.count = (window.__scanData.strong_entries || []).length
-        + (window.__scanData.cautious_entries || []).length
-        + (window.__scanData.premarket_setups || []).length
-        + (window.__scanData.gray_strong || []).length
-        + (window.__scanData.watchlist || []).length;
+      refreshScanCountsFromGroups(window.__scanData);
       showRadarPendingNotice(window.__scanData, 'manual-sharia');
       return true;
     }
@@ -5358,7 +5489,8 @@
             <div class="portfolio-summary-card"><div class="portfolio-summary-label">القيمة الحالية</div><div class="portfolio-summary-value" id="portfolioSummaryMarketValue">$${formatNumber(summary.market_value || 0)}</div></div>
             <div class="portfolio-summary-card"><div class="portfolio-summary-label">التكلفة</div><div class="portfolio-summary-value" id="portfolioSummaryCostValue">$${formatNumber(summary.cost_value || 0)}</div></div>
             <div class="portfolio-summary-card"><div class="portfolio-summary-label">الربح/الخسارة</div><div class="portfolio-summary-value ${portfolioColorClass(summary.unrealized_pl)}" id="portfolioSummaryPL">$${formatNumber(summary.unrealized_pl || 0)} (${formatNumber(summary.unrealized_pl_pct || 0)}%)</div></div>
-          </div>`;
+          </div>
+          ${summary.rule_ar ? `<div class="portfolio-note-line"><b>قاعدة المحفظة:</b> ${safeText(summary.rule_ar)}</div>` : ''}`;
         const cards = items.map(item => {
           const pct = Number(item.holding_change_pct || 0);
           const plClass = portfolioColorClass(pct);
@@ -5387,6 +5519,7 @@
                 <span>وقف <b>${formatNumber(item.stop_loss)}</b></span>
               </div>
               <div class="portfolio-note-line"><b>رأي الأداة:</b> ${safeText(item.recommendation_note || 'راقب السعر مقارنة بالخطة والوقف والهدف.')}</div>
+              <div class="portfolio-note-line"><b>Position-Aware:</b> ${safeText(item.position_aware_action || 'متابعة حسب سعر دخولك')} ${item.position_levels_summary ? '• ' + safeText(item.position_levels_summary) : ''}</div>
               <div class="mini-actions portfolio-row-actions">
                 <button class="ghost" onclick="scanSingleFromCard('${safeText(item.symbol)}')">🔎 فحص</button>
                 <button class="ghost" onclick="addToWatchlist('${safeText(item.symbol)}', ${Number(item.current_price || item.buy_price || 0)})">📌 متابعة</button>
