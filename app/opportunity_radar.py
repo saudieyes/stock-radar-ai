@@ -23,13 +23,15 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1a_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 
 PERSONAL_PRICE_COMFORT = 50.0
 PERSONAL_PRICE_MAX_NORMAL = 150.0
+DEFAULT_SECTION_LIMIT = 12
+ACTIVE_MEMORY_STATUSES = {"active", "unknown_price", "needs_reclaim_or_trigger", "under_original_entry", "extended_from_original_entry"}
 
 
 def _s(value: Any) -> str:
@@ -391,23 +393,89 @@ def _liquidity_score(row: dict) -> tuple[float, list[str]]:
 
 
 def _price_filter(row: dict) -> dict:
+    """Personal price comfort filter.
+
+    High-priced stocks are not treated as bad data. They are simply not
+    practical for the user's main opportunity flow unless the setup is truly
+    exceptional. This keeps MU-like prices valid while preventing expensive
+    names from filling the actionable sections.
+    """
     price = _price(row)
     quality = _num(row.get("quality_score"), 0.0)
     readiness = _num(row.get("execution_readiness_score"), 0.0)
+    decision = _s(row.get("decision"))
+    final_code = _s(row.get("final_decision_code"))
+    change = _num(row.get("display_change_pct", row.get("change_pct", 0)), 0.0)
+    liquidity_points, liquidity_reasons = _liquidity_score(row)
     if price <= 0:
-        return {"bucket": "unknown", "label": "سعر غير متوفر", "rank_adjustment": 0.0, "practical": True}
+        return {
+            "bucket": "unknown",
+            "label": "سعر غير متوفر",
+            "rank_adjustment": 0.0,
+            "practical": True,
+            "section_eligible": True,
+            "memory_eligible": True,
+        }
     if price < PERSONAL_PRICE_COMFORT:
-        return {"bucket": "comfortable", "label": "سعر مريح للمستخدم (<50$)", "rank_adjustment": 5.0, "practical": True}
+        return {
+            "bucket": "comfortable",
+            "label": "سعر مريح للمستخدم (<50$)",
+            "rank_adjustment": 6.0,
+            "practical": True,
+            "section_eligible": True,
+            "memory_eligible": True,
+        }
     if price <= PERSONAL_PRICE_MAX_NORMAL:
-        return {"bucket": "acceptable", "label": "سعر مقبول للمستخدم (50–150$)", "rank_adjustment": 0.0, "practical": True}
-    exceptional = quality >= 88 and readiness >= 72 and _s(row.get("decision")) == "دخول قوي"
+        return {
+            "bucket": "acceptable",
+            "label": "سعر مقبول للمستخدم (50–150$)",
+            "rank_adjustment": 0.0,
+            "practical": True,
+            "section_eligible": True,
+            "memory_eligible": True,
+        }
+
+    strong_exception = bool(
+        decision == "دخول قوي"
+        and final_code == "BUY_NOW"
+        and quality >= 86
+        and readiness >= 68
+        and liquidity_points >= 18
+    )
+    cautious_exception = bool(
+        decision == "دخول بحذر"
+        and quality >= 90
+        and readiness >= 74
+        and liquidity_points >= 24
+        and change < 5.5
+    )
+    pre_stage_exception = bool(
+        final_code in {"WAIT_TRIGGER", "EARLY_WATCH", "WAIT_RESISTANCE"}
+        and quality >= 93
+        and readiness >= 82
+        and liquidity_points >= 32
+        and change < 4.5
+    )
+    exceptional = strong_exception or cautious_exception or pre_stage_exception
+    exception_reasons = []
+    if quality >= 90:
+        exception_reasons.append(f"جودة عالية {round(quality, 1)}/100")
+    if readiness >= 74:
+        exception_reasons.append(f"جاهزية عالية {round(readiness, 1)}/100")
+    if liquidity_points >= 24:
+        exception_reasons.extend(liquidity_reasons[:2])
+
     return {
         "bucket": "high_price_exception" if exceptional else "high_price_deprioritized",
-        "label": "سعر مرتفع — لا يظهر عمليًا إلا إذا الفرصة استثنائية جدًا" if not exceptional else "سعر مرتفع لكن الفرصة استثنائية فنيًا",
-        "rank_adjustment": -22.0 if not exceptional else -8.0,
+        "label": "سعر مرتفع لكن الفرصة استثنائية فنيًا" if exceptional else "سعر مرتفع — مخفي من الفرص العملية إلا إذا أصبح استثنائيًا",
+        "rank_adjustment": -14.0 if exceptional else -55.0,
         "practical": bool(exceptional),
+        "section_eligible": bool(exceptional),
+        "memory_eligible": bool(exceptional),
+        "exceptional": bool(exceptional),
+        "exception_reasons": _dedupe(exception_reasons, 5),
+        "rule_ar": "فوق 150$ لا يدخل الأقسام العملية ولا Plan Memory إلا إذا اجتمعت جودة عالية + جاهزية + سيولة واضحة.",
     }
-
 
 def _technical_reasons(row: dict, zones: dict) -> list[str]:
     reasons: list[str] = []
@@ -609,7 +677,13 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     flags = _flow_flags(out, zones)
     stage_code, stage_label, bucket, stage_reasons = _stage_from_flags(out, flags)
     technical_reasons = _technical_reasons(out, zones)
-    merged_reasons = _dedupe(stage_reasons + technical_reasons, 12)
+    high_price_note = []
+    if _s(price_filter.get("bucket")) == "high_price_deprioritized":
+        high_price_note.append(_s(price_filter.get("label")))
+    elif _s(price_filter.get("bucket")) == "high_price_exception":
+        high_price_note.append(_s(price_filter.get("label")))
+        high_price_note.extend(price_filter.get("exception_reasons") or [])
+    merged_reasons = _dedupe(stage_reasons + technical_reasons + high_price_note, 12)
     base_extra = 0.0
     if bucket == "support_bounce":
         base_extra = flags.get("support_score", 0.0)
@@ -635,6 +709,9 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     out["personal_price_filter"] = price_filter
     out["personal_price_label"] = price_filter.get("label")
     out["personal_price_bucket"] = price_filter.get("bucket")
+    out["personal_price_section_eligible"] = bool(price_filter.get("section_eligible", True))
+    out["personal_price_exceptional"] = bool(price_filter.get("exceptional", False))
+    out["personal_visibility_status"] = "visible_exception" if price_filter.get("exceptional") else ("deprioritized_high_price" if _s(price_filter.get("bucket")) == "high_price_deprioritized" else "visible")
     out["opportunity_stage"] = stage_code
     out["opportunity_stage_label"] = stage_label
     out["opportunity_bucket"] = bucket
@@ -697,17 +774,46 @@ def _is_blocked(row: dict) -> bool:
     return False
 
 
+def _is_personal_section_eligible(row: dict) -> bool:
+    pf = row.get("personal_price_filter")
+    if not isinstance(pf, dict):
+        pf = _price_filter(row)
+    # For expensive names, hide by default from practical sections. The stock
+    # remains valid for study/comparison, but it should not crowd the user's
+    # opportunity radar unless it passes the exception rule.
+    if _s(pf.get("bucket")) == "high_price_deprioritized" and not pf.get("section_eligible"):
+        return False
+    return True
+
+
+def _high_price_suppression_reason(row: dict) -> str:
+    pf = row.get("personal_price_filter")
+    if not isinstance(pf, dict):
+        pf = _price_filter(row)
+    if _s(pf.get("bucket")) == "high_price_deprioritized":
+        return _s(pf.get("label")) or "سعر مرتفع — ليس أولوية شخصية"
+    return ""
+
+
 def _sort_bucket(rows: list[dict]) -> list[dict]:
     return sorted(rows or [], key=lambda r: _num(r.get("opportunity_rank_score", r.get("display_rank_score", 0)), 0.0), reverse=True)
 
 
-def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", limit: int = 25) -> dict:
+def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict:
     bucket_map = {key: [] for key in OPPORTUNITY_BUCKET_KEYS}
     raw_counts: dict[str, int] = {}
+    suppressed_high_price: list[str] = []
     for row in rows or []:
         if not isinstance(row, dict) or _is_blocked(row):
             continue
         bucket = _s(row.get("opportunity_bucket"))
+        if bucket:
+            raw_counts[bucket] = raw_counts.get(bucket, 0) + 1
+        if not _is_personal_section_eligible(row):
+            sym = _u(row.get("symbol"))
+            if sym:
+                suppressed_high_price.append(sym)
+            continue
         if bucket == "support_bounce":
             bucket_map["support_bounce_candidates"].append(row)
         elif bucket == "reclaim":
@@ -724,8 +830,6 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             bucket_map["gap_fill_watch"].append(row)
         elif bucket == "catalyst_watch":
             bucket_map["catalyst_watch"].append(row)
-        if bucket:
-            raw_counts[bucket] = raw_counts.get(bucket, 0) + 1
 
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
@@ -758,8 +862,12 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "ok": True,
         "version": OPPORTUNITY_RADAR_VERSION,
         "market_phase": market_phase,
+        "display_limit_per_section": max(1, int(limit or DEFAULT_SECTION_LIMIT)),
         "rule_ar": "Strong يبقى صارمًا؛ هذه الأقسام تعيد الحياة للمراحل التي تسبق Strong بدون تحويلها إلى BUY_NOW.",
         "counts_by_stage": raw_counts,
+        "suppressed_high_price_count": len(set(suppressed_high_price)),
+        "suppressed_high_price_symbols_sample": _dedupe(suppressed_high_price, 20),
+        "high_price_rule_ar": "الأسهم فوق 150$ تُخفى من الأقسام العملية إلا إذا كانت فرصة استثنائية من حيث الجودة والجاهزية والسيولة.",
         **counts,
         **final_map,
     }
@@ -868,6 +976,11 @@ def _evaluate_memory_plan(plan: dict, row: dict) -> dict:
 def _should_record(row: dict) -> bool:
     if not isinstance(row, dict) or _is_blocked(row):
         return False
+    pf = row.get("personal_price_filter")
+    if not isinstance(pf, dict):
+        pf = _price_filter(row)
+    if _s(pf.get("bucket")) == "high_price_deprioritized" and not pf.get("memory_eligible"):
+        return False
     decision = _s(row.get("decision"))
     bucket = _s(row.get("opportunity_bucket"))
     if decision in {"دخول قوي", "دخول بحذر"}:
@@ -875,18 +988,38 @@ def _should_record(row: dict) -> bool:
     return bucket in {"pre_trigger", "support_bounce", "reclaim", "low_float_premarket", "high_risk_day_trade", "continuation_pullback"}
 
 
+def _deprioritize_existing_high_price_plan(store: dict[str, dict], row: dict) -> bool:
+    sym = _u(row.get("symbol"))
+    if not sym or sym not in store:
+        return False
+    reason = _high_price_suppression_reason(row)
+    if not reason:
+        return False
+    plan = store.get(sym)
+    if not isinstance(plan, dict):
+        return False
+    plan["status"] = "deprioritized_high_price"
+    plan["last_status_reason"] = "personal_price_filter"
+    plan["last_action"] = "🟡 أُخفيت من الفرص العملية لأنها فوق 150$ وليست استثنائية حاليًا حسب الجودة/الجاهزية/السيولة."
+    plan["last_seen_at"] = _now_text()
+    plan["last_seen_ts"] = time.time()
+    store[sym] = plan
+    return True
+
 def record_opportunity_plans(rows: list[dict], source: str = "") -> dict:
     store = _plan_store()
     events: list[dict] = []
     recorded, updated = [], []
     for row in rows or []:
+        sym = _u(row.get("symbol")) if isinstance(row, dict) else ""
         if not _should_record(row):
+            if isinstance(row, dict) and sym and _deprioritize_existing_high_price_plan(store, row):
+                updated.append(sym)
             continue
-        sym = _u(row.get("symbol"))
         if not sym:
             continue
         current = store.get(sym)
-        if isinstance(current, dict) and _s(current.get("status")) in {"active", "unknown_price", "needs_reclaim_or_trigger", "under_original_entry", "target_1_hit", "extended_from_original_entry"}:
+        if isinstance(current, dict) and _s(current.get("status")) in ACTIVE_MEMORY_STATUSES.union({"target_1_hit"}):
             ev = _evaluate_memory_plan(current, row)
             current["status"] = ev["status"]
             current["last_status_reason"] = ev["reason"]
@@ -969,13 +1102,15 @@ def opportunity_plan_memory_status(limit: int = 100) -> dict:
     hist = get_json(PLAN_EVENTS_KEY, []) or []
     if not isinstance(hist, list):
         hist = []
+    active_plans = [p for p in plans if _s(p.get("status")) in ACTIVE_MEMORY_STATUSES]
     return {
         "ok": True,
         "version": OPPORTUNITY_RADAR_VERSION,
-        "active_count": len(plans),
+        "active_count": len(active_plans),
+        "total_saved_count": len(plans),
         "plans": plans[:max(1, int(limit or 100))],
         "recent_events": hist[-50:],
-        "rule_ar": "تُحفظ خطط Strong/Cautious/Pre-Trigger/Support Bounce/Reclaim حتى لا تعيد الأداة اختراع خطة جديدة بعد تغير السعر.",
+        "rule_ar": "تُحفظ خطط Strong/Cautious/Pre-Trigger/Support Bounce/Reclaim حتى لا تعيد الأداة اختراع خطة جديدة بعد تغير السعر، مع إخفاء خطط الأسهم فوق 150$ إذا لم تعد استثنائية.",
     }
 
 
@@ -1034,7 +1169,9 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
         "personal_price_filter": {
             "comfortable_under": PERSONAL_PRICE_COMFORT,
             "acceptable_until": PERSONAL_PRICE_MAX_NORMAL,
-            "above_rule_ar": "فوق 150$ لا يظهر في الفرص الشخصية إلا إذا كان استثنائيًا جدًا.",
+            "above_rule_ar": "فوق 150$ لا يدخل الأقسام العملية ولا Plan Memory إلا إذا كان استثنائيًا جدًا من حيث الجودة والجاهزية والسيولة.",
+            "exception_rule_ar": "الاستثناء يحتاج عادة جودة >= 90 تقريبًا + جاهزية عالية + سيولة واضحة، أو Strong BUY_NOW مكتمل.",
         },
+        "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }
