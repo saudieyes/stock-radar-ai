@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2k1_visible_learning_overlay_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2l_closed_market_prep_sections_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -681,11 +681,193 @@ def _build_visible_learning_overlay_candidates(rows: list[dict], limit: int = 16
         "sample_only_watch": sample,
     }
 
+
+def _row_is_early_or_watch_context(row: dict) -> bool:
+    """Return True for rows that are visible in the current tool as Early Movement / Watch.
+
+    These rows often carry useful prior-session / setup data but do not pass the
+    stricter Opportunity buckets yet. V2k2 exposes them as *prepared learning
+    candidates* so the user can see the data without falsely promoting them.
+    """
+    if not isinstance(row, dict):
+        return False
+    bucket = _s(row.get("opportunity_bucket"))
+    stage = _s(row.get("opportunity_stage")).lower()
+    decision = _s(row.get("decision"))
+    labels = " ".join([
+        _s(row.get("opportunity_stage_label")),
+        _s(row.get("display_plan_family_label")),
+        _s(row.get("signal_bucket")),
+        _s(row.get("source_group")),
+        _s(row.get("plan_family")),
+        _s(row.get("quick_explainer")),
+    ]).lower()
+    if bucket in {"watch", "watchlist"} or stage in {"watch", "early_watch", "pre_move"}:
+        return True
+    if decision in {"مراقبة", "انتظار", "Watch", "WATCH"}:
+        return True
+    return any(token in labels for token in [
+        "early", "pre-move", "pre move", "quiet", "accumulation", "مراقبة", "الحركة المبكرة", "تجميع", "تحضير"
+    ])
+
+
+def _learning_bridge_score(row: dict) -> tuple[float, list[str], str]:
+    """Score watch/early rows for a visible learning-prep section.
+
+    This is not an execution score. It exists to avoid the current confusing UI
+    state where all actionable sections are empty while the data is sitting in
+    Watch / Early Movement.
+    """
+    if not isinstance(row, dict):
+        return 0.0, [], "neutral"
+    reasons: list[str] = []
+    lov = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+    bias = _s(lov.get("entry_bias"))
+    exit_bias = _s(lov.get("exit_bias"))
+    confidence = _s(lov.get("confidence"))
+    matched = bool(lov.get("matched"))
+    score = 0.0
+    mode = "neutral"
+
+    if matched and bias == "positive_watch":
+        score += 55; mode = "positive"; reasons.append("مطابقة نمط تعلم إيجابي مؤكد من نافذتين")
+    elif matched and bias in {"watch_needs_volume", "speculative_watch"}:
+        score += 36; mode = "speculative"; reasons.append("مطابقة نمط تعلم قابل للمتابعة لكن يحتاج تأكيد")
+    elif exit_bias == "quick_take_profit" or bias == "late_guard":
+        score += 24; mode = "quick"; reasons.append("تعلم: إن تحرك فهو أقرب إلى خطفة/بيع سريع")
+    elif confidence in {"mixed_two_windows", "weak_two_windows"}:
+        score += 12; mode = "mixed"; reasons.append("تعلم: نمط متذبذب لا نرفع وزنه")
+
+    # Fallback bridge: surface credible watch/early candidates even when exact
+    # replay pattern fields are missing from live rows.
+    if _row_is_early_or_watch_context(row):
+        score += 18; reasons.append("موجود حاليًا في المراقبة/الحركة المبكرة وليس في قسم فرصة متخصص")
+    change = abs(_change_pct(row))
+    price = _price(row)
+    move_risk = _move_risk_pct(row)
+    prior_count = _num(row.get("prior_candidate_count"), 0.0)
+    prev_dates = row.get("previous_candidate_dates")
+    has_prior = _bool(row.get("candidate_from_previous_trading_session")) or _bool(row.get("detected_previous_session")) or prior_count > 0 or (isinstance(prev_dates, list) and len(prev_dates) > 0)
+    if has_prior:
+        score += 12; reasons.append("له أثر سابق/جلسة سابقة في الذاكرة")
+    if 0 < price <= PERSONAL_PRICE_MAX_NORMAL:
+        score += 6; reasons.append("سعره ضمن النطاق الشخصي المقبول")
+    if change <= 5.0 and move_risk < 8.0:
+        score += 8; reasons.append("لم يتحول إلى مطاردة بعد")
+    elif change <= 8.0 and move_risk < 12.0:
+        score += 4; reasons.append("ما زال قريبًا من نطاق متابعة لا شراء مباشر")
+    else:
+        score -= 8; reasons.append("فيه تمدد/حركة سابقة؛ يحتاج بيع سريع أو Pullback")
+
+    if mode == "neutral" and score >= 30:
+        mode = "prepared"
+    return round(max(0.0, score), 2), _dedupe(reasons, 6), mode
+
+
+def _learning_bridge_label(mode: str) -> tuple[str, str]:
+    if mode == "positive":
+        return "🧠 مرشح تعلم إيجابي", "فرصة متابعة مبكرة من طبقة التعلم؛ ليست Strong ولا Cautious حتى تكتمل شروط التنفيذ."
+    if mode == "speculative":
+        return "🧠 مرشح تعلم يحتاج تأكيد", "راقبه بحجم صغير فقط بعد تأكيد حجم/VWAP/منطقة قرار."
+    if mode == "quick":
+        return "🧠 خطفة محتملة — بيع سريع", "لا تتعامل معه كـ Runner؛ إن تحرك فالخروج الجزئي السريع أهم."
+    if mode == "mixed":
+        return "🧠 نمط متذبذب — لا ترفع الوزن", "يظهر للمتابعة فقط لأن العينة متذبذبة."
+    return "🧠 مرشح تحضير من المراقبة", "البيانات موجودة في Watch/Early Movement، لكنها لم تصل بعد إلى فرصة متخصصة."
+
+
+def _make_learning_bridge_row(row: dict, mode: str, score: float, reasons: list[str]) -> dict:
+    out = dict(row or {})
+    label, action = _learning_bridge_label(mode)
+    lov = out.get("learning_overlay_v1") if isinstance(out.get("learning_overlay_v1"), dict) else {}
+    if not lov:
+        lov = _learning_overlay_for_row(out, out.get("opportunity_flow_flags") if isinstance(out.get("opportunity_flow_flags"), dict) else {}, _s(out.get("market_phase")))
+    out["learning_overlay_v1"] = lov
+    out["learning_bridge_v2k2"] = {
+        "ok": True,
+        "version": OPPORTUNITY_RADAR_VERSION,
+        "mode": mode,
+        "score": score,
+        "reasons_ar": reasons,
+        "label_ar": label,
+        "action_ar": action,
+        "applies_to_execution": False,
+    }
+    out["learning_overlay_label_ar"] = _s(lov.get("label_ar") or label)
+    out["learning_overlay_action_ar"] = _s(lov.get("action_ar") or action)
+    out["opportunity_bucket"] = "learning_opportunity"
+    out["opportunity_stage"] = "learning_opportunity"
+    out["opportunity_stage_label"] = label
+    out["display_plan_family_label"] = label
+    out["opportunity_rank_score"] = round(max(_num(out.get("opportunity_rank_score"), 0.0), score), 2)
+    base_why = _s(out.get("why_appeared_ar") or out.get("quick_explainer") or out.get("special_bucket_reason"))
+    out["why_appeared_ar"] = "، ".join(_dedupe(reasons + ([base_why] if base_why else []), 5))
+    out["special_bucket_reason"] = out["why_appeared_ar"]
+    return out
+
+
+def _build_learning_opportunity_bridge(rows: list[dict], excluded_symbols: set[str] | None = None, limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+    excluded_symbols = excluded_symbols or set()
+    candidates: list[dict] = []
+    debug = {
+        "rows_seen": 0,
+        "watch_or_early_rows_seen": 0,
+        "exact_learning_matches_seen": 0,
+        "candidate_rows_before_limit": 0,
+        "excluded_existing_specific_symbols": len(excluded_symbols),
+        "fallback_used": False,
+        "rule_ar": "V2k2 يعرض مرشحي التعلم من Watch/Early Movement عندما تكون أقسام الفرص المتخصصة فارغة أو قليلة، بدون ترقية تنفيذية.",
+    }
+    seen: set[str] = set()
+    for row in rows or []:
+        if not isinstance(row, dict) or _is_blocked(row) or not _is_personal_section_eligible(row):
+            continue
+        debug["rows_seen"] += 1
+        sym = _u(row.get("symbol"))
+        if not sym or sym in seen or sym in excluded_symbols:
+            continue
+        is_watch = _row_is_early_or_watch_context(row)
+        if is_watch:
+            debug["watch_or_early_rows_seen"] += 1
+        lov = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+        if bool(lov.get("matched")):
+            debug["exact_learning_matches_seen"] += 1
+        score, reasons, mode = _learning_bridge_score(row)
+        # Show exact matches, credible watch/early rows, and a small fallback list
+        # so the section is not blank when the data exists but strict buckets are empty.
+        if score >= 22 or bool(lov.get("matched")):
+            seen.add(sym)
+            candidates.append(_make_learning_bridge_row(row, mode, score, reasons))
+    if not candidates:
+        # Last-resort transparent fallback: top watch/early rows only, marked as neutral.
+        debug["fallback_used"] = True
+        for row in rows or []:
+            if not isinstance(row, dict) or _is_blocked(row) or not _is_personal_section_eligible(row):
+                continue
+            sym = _u(row.get("symbol"))
+            if not sym or sym in seen or sym in excluded_symbols:
+                continue
+            if not _row_is_early_or_watch_context(row):
+                continue
+            score = max(10.0, _num(row.get("display_rank_score"), 0.0) * 0.25)
+            reasons = ["بياناته موجودة في المراقبة/الحركة المبكرة لكن لم يكتمل سبب فرصة متخصص", "يعرض هنا حتى لا تختفي طبقة التعلم عندما تكون أقسام التنفيذ فارغة"]
+            seen.add(sym)
+            candidates.append(_make_learning_bridge_row(row, "neutral", score, reasons))
+            if len(candidates) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                break
+    candidates = _sort_bucket(candidates)[:max(1, int(limit or DEFAULT_SECTION_LIMIT))]
+    debug["candidate_rows_before_limit"] = len(candidates)
+    debug["candidate_symbols"] = [_u(x.get("symbol")) for x in candidates[:12] if _u(x.get("symbol"))]
+    return candidates, debug
+
 def _next_week_action_for_row(row: dict) -> str:
     bucket = _s(row.get("opportunity_bucket"))
     flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
     trigger = _num(flags.get("trigger_price") if isinstance(flags, dict) else 0.0, 0.0)
     cdet = row.get("catalyst_details") if isinstance(row.get("catalyst_details"), dict) else {}
+    if bucket == "learning_opportunity":
+        bridge = row.get("learning_bridge_v2k2") if isinstance(row.get("learning_bridge_v2k2"), dict) else {}
+        return _s(bridge.get("action_ar")) or "مرشح تحضير من طبقة التعلم/المراقبة؛ ليس شراء مباشر حتى تكتمل شروط التنفيذ."
     if bucket == "small_stock_classic":
         return "راقبه للأسبوع القادم كمرشح أسهم صغيرة: انتظار إغلاق 5د/15د فوق Fib/VWAP/قمة أمس، وليس شراء مباشر من القائمة."
     if bucket == "pre_trigger":
@@ -710,6 +892,7 @@ def _next_week_action_for_row(row: dict) -> str:
 
 def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | None = None) -> dict[str, Any]:
     labels = {
+        "learning_opportunity_candidates": "مرشحو طبقة التعلم / تحضير",
         "small_stock_classic_radar": "أسهم صغيرة كلاسيكية",
         "pre_trigger_candidates": "قريبة من التفعيل",
         "support_bounce_candidates": "ارتداد من دعم",
@@ -721,6 +904,7 @@ def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | N
         "catalyst_watch": "Catalyst / News Watch",
     }
     priority = [
+        "learning_opportunity_candidates",
         "small_stock_classic_radar", "pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates",
         "continuation_pullback_candidates", "low_float_premarket_radar", "catalyst_watch",
         "gap_fill_watch", "high_risk_day_trades",
@@ -1769,6 +1953,7 @@ def enrich_rows_opportunity_radar(rows: list[dict], market_phase: str = "") -> l
 
 
 OPPORTUNITY_BUCKET_KEYS = [
+    "learning_opportunity_candidates",
     "small_stock_classic_radar",
     "support_bounce_candidates",
     "reclaim_candidates",
@@ -1815,6 +2000,289 @@ def _sort_bucket(rows: list[dict]) -> list[dict]:
     return sorted(rows or [], key=lambda r: _num(r.get("opportunity_rank_score", r.get("display_rank_score", 0)), 0.0), reverse=True)
 
 
+# V2L: Closed-market / pre-open planning sections
+# -----------------------------------------------
+# Strong/Cautious remain execution sections.  When the market is closed (or not
+# in the regular session), the user still needs to see concrete preparation
+# candidates: small stocks, pre-trigger, continuation/pullback, catalyst, etc.
+# This layer copies credible Watch/Early rows into non-actionable prep sections
+# with explicit labels.  It never promotes to BUY_NOW and never changes the
+# final decision engine.
+CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
+
+PREP_SECTION_TO_BUCKET = {
+    "small_stock_classic_radar": "small_stock_classic",
+    "pre_trigger_candidates": "pre_trigger",
+    "support_bounce_candidates": "support_bounce",
+    "reclaim_candidates": "reclaim",
+    "continuation_pullback_candidates": "continuation_pullback",
+    "low_float_premarket_radar": "low_float_premarket",
+    "gap_fill_watch": "gap_fill_watch",
+    "catalyst_watch": "catalyst_watch",
+}
+
+PREP_SECTION_LABELS_AR = {
+    "small_stock_classic_radar": "🎯 سهم صغير للتحضير — Fib/VWAP/منطقة قرار",
+    "pre_trigger_candidates": "⏳ قريب من التفعيل — تحضير قبل الافتتاح",
+    "support_bounce_candidates": "↩️ قرب دعم — تحقق من المقاومة قبل الافتتاح",
+    "reclaim_candidates": "🔁 Reclaim Watch — يحتاج ثبات",
+    "continuation_pullback_candidates": "📈 Continuation / Pullback — تحضير لا مطاردة",
+    "low_float_premarket_radar": "🚀 Low-Float / سهم صغير تحت المراقبة",
+    "gap_fill_watch": "🕳️ Gap Watch — مراقبة فجوة",
+    "catalyst_watch": "📰 Catalyst / News Context — تحقق يدويًا",
+}
+
+
+def _closed_market_prep_enabled(market_phase: str = "") -> tuple[bool, str]:
+    phase = _s(market_phase or "").lower()
+    # Treat pre-market and after-hours as planning phases too.  The card must be
+    # visible before the open, but it remains non-actionable until live gates pass.
+    if phase in {"open", "regular", "market_open"}:
+        return False, "regular_session"
+    if phase in {"pre_market", "premarket", "after_hours", "afterhours", "closed", "overnight", "weekend", "holiday", ""}:
+        return True, phase or "unknown_closed_like"
+    # Unknown phases should fail open for visibility, but labels keep the warning.
+    return True, f"unknown_phase:{phase}"
+
+
+def _prep_level_distances(row: dict) -> dict[str, float]:
+    price = _price(row)
+    zones = row.get("support_resistance_zones_v2") if isinstance(row.get("support_resistance_zones_v2"), dict) else {}
+    ns = zones.get("nearest_support_zone") if isinstance(zones.get("nearest_support_zone"), dict) else {}
+    nr = zones.get("nearest_resistance_zone") if isinstance(zones.get("nearest_resistance_zone"), dict) else {}
+    support = _num(ns.get("center"), _first(row, ["nearest_support", "support_price", "display_support_price", "support"], 0.0))
+    resistance = _num(nr.get("center"), _first(row, ["nearest_resistance", "resistance_price", "display_resistance_price", "resistance"], 0.0))
+    entry = _entry(row)
+    trigger = resistance if resistance > 0 else entry
+    support_dist = _pct_distance(price, support) if price > 0 and support > 0 else 999.0
+    resistance_dist = ((resistance - price) / price * 100.0) if price > 0 and resistance > 0 else 999.0
+    trigger_dist = ((trigger - price) / price * 100.0) if price > 0 and trigger > 0 else 999.0
+    return {
+        "support": support,
+        "resistance": resistance,
+        "trigger": trigger,
+        "support_dist": support_dist,
+        "resistance_dist": resistance_dist,
+        "trigger_dist": trigger_dist,
+    }
+
+
+def _prep_row_base_score(row: dict) -> float:
+    quality = _num(row.get("quality_score"), 0.0)
+    readiness = _num(row.get("execution_readiness_score"), 0.0)
+    rank = _num(row.get("display_rank_score", row.get("live_rank_score", row.get("opportunity_rank_score", 0))), 0.0)
+    learning = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+    learning_boost = _num(learning.get("priority_boost"), 0.0) if learning.get("matched") else 0.0
+    price = _price(row)
+    price_bonus = 8.0 if 1.0 <= price <= 20.0 else 0.0
+    return quality * 0.28 + readiness * 0.18 + rank * 0.16 + learning_boost + price_bonus
+
+
+def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
+    if not isinstance(row, dict):
+        return []
+    price = _price(row)
+    if price <= 0:
+        return []
+    flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
+    classic = flags.get("classic_small_stock") if isinstance(flags.get("classic_small_stock"), dict) else (row.get("small_stock_classic_setup") if isinstance(row.get("small_stock_classic_setup"), dict) else {})
+    learning = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+    levels = _prep_level_distances(row)
+    change = _change_pct(row)
+    move_risk = _move_risk_pct(row)
+    quality = _num(row.get("quality_score"), 0.0)
+    readiness = _num(row.get("execution_readiness_score"), 0.0)
+    volume_ratio = _num(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", 0))), 0.0)
+    dollar_vol = _num(row.get("dollar_volume", row.get("current_dollar_volume", row.get("live_dollar_volume", 0))), 0.0)
+    base = _prep_row_base_score(row)
+    out: list[tuple[str, float, list[str]]] = []
+
+    def add(section: str, bonus: float, reasons: list[str]):
+        clean_reasons = _dedupe([r for r in reasons if _s(r)], 8)
+        if clean_reasons:
+            out.append((section, round(base + bonus, 2), clean_reasons))
+
+    learning_matched = bool(learning.get("matched"))
+    learning_positive = _s(learning.get("entry_bias")) in {"positive_watch", "watch_needs_volume", "speculative_watch"}
+    was_watch_or_early = _row_is_early_or_watch_context(row)
+    low_price = 1.0 <= price <= 20.0
+    very_low = 1.0 <= price <= 8.0
+
+    # Small-stock classic prep: show low-price candidates before the open even
+    # when live liquidity/readiness is not enough to classify them as execution.
+    if low_price and (classic.get("candidate") or classic.get("eligible") or learning_positive or was_watch_or_early or quality >= 48):
+        reasons = ["تحضير سهم صغير أثناء الإغلاق/قبل الافتتاح — ليس شراء مباشر."]
+        setup = _s(classic.get("setup_state") or row.get("classic_state") or row.get("plan_family"))
+        if setup:
+            reasons.append(f"النمط/التمركز: {setup}")
+        if learning_matched:
+            reasons.append(_s(learning.get("label_ar")))
+        if levels["resistance_dist"] != 999.0:
+            reasons.append(f"راقب التفعيل/المقاومة: تبعد {round(levels['resistance_dist'], 2)}%")
+        if levels["support_dist"] != 999.0:
+            reasons.append(f"الدعم المرجعي يبعد {round(levels['support_dist'], 2)}%")
+        add("small_stock_classic_radar", 34.0, reasons)
+
+    # Pre-trigger prep: near a trigger/resistance/entry zone.  Looser than live
+    # Pre-Trigger because it is explicitly non-actionable preparation.
+    if levels["trigger_dist"] != 999.0 and -0.35 <= levels["trigger_dist"] <= 5.0 and not flags.get("no_chase"):
+        reasons = ["قريب من منطقة تفعيل/مقاومة؛ راقبه قبل الافتتاح ولا تدخل حتى يؤكد."]
+        reasons.append(f"المسافة إلى التفعيل تقريبًا {round(levels['trigger_dist'], 2)}%")
+        if quality >= 55:
+            reasons.append(f"الجودة الفنية {round(quality, 1)}/100")
+        if volume_ratio > 0:
+            reasons.append(f"حجم نسبي {round(volume_ratio, 2)}x")
+        add("pre_trigger_candidates", 28.0, reasons)
+
+    # Support bounce prep: near lower side/support, but not if already extended.
+    if levels["support_dist"] != 999.0 and -0.45 <= levels["support_dist"] <= 4.0 and change <= 4.5:
+        reasons = ["قرب دعم/منطقة فشل — صالح للمراجعة قبل الافتتاح."]
+        reasons.append(f"المسافة عن الدعم {round(levels['support_dist'], 2)}%")
+        if levels["resistance_dist"] != 999.0:
+            reasons.append(f"تأكد من المقاومة فوق السعر: {round(levels['resistance_dist'], 2)}%")
+        add("support_bounce_candidates", 24.0, reasons)
+
+    # Reclaim prep: show broken/reclaim setups even if no live confirmation.
+    if flags.get("reclaim") or row.get("support_reclaimed_flag") or row.get("reclaimed_support_level") or row.get("support_broken_flag") or _s(row.get("final_decision_code")) == "RECLAIM_REQUIRED":
+        reasons = ["Reclaim Watch: يحتاج ثبات فوق المستوى مع حجم عند الافتتاح."]
+        if row.get("reclaimed_support_level"):
+            reasons.append(f"مستوى مستعاد: {row.get('reclaimed_support_level')}")
+        if row.get("broken_support_level"):
+            reasons.append(f"مستوى مكسور يحتاج استعادة: {row.get('broken_support_level')}")
+        add("reclaim_candidates", 24.0, reasons)
+
+    # Continuation/Pullback prep: moved before, but should not be chased.
+    if (change >= 2.0 or move_risk >= 8.0 or "continuation" in _s(row.get("move_stage")).lower() or "pullback" in _s(row.get("move_stage")).lower()):
+        reasons = ["استمرار مشروط بعد حركة سابقة — لا تطارد؛ انتظر Pullback/Reclaim."]
+        if move_risk > 0:
+            reasons.append(f"أعلى حركة/مخاطرة مطاردة مرصودة {round(move_risk, 2)}%")
+        if levels["support_dist"] != 999.0:
+            reasons.append(f"منطقة دعم/عودة محتملة تبعد {round(levels['support_dist'], 2)}%")
+        add("continuation_pullback_candidates", 21.0, reasons)
+
+    # Low-float/small-stock pre-open prep.  Float may be unavailable, so we use
+    # low price + activity/learning/watch context as a safe proxy and label it.
+    if very_low and (volume_ratio >= 1.1 or dollar_vol >= 150_000 or was_watch_or_early or learning_positive or abs(change) >= 1.5):
+        reasons = ["سهم صغير منخفض السعر تحت مراقبة قبل الافتتاح؛ الحجم صغير والمخاطرة عالية."]
+        if volume_ratio > 0:
+            reasons.append(f"حجم نسبي {round(volume_ratio, 2)}x")
+        if dollar_vol > 0:
+            reasons.append(f"دولار فوليوم تقريبي {round(dollar_vol/1000, 1)}K")
+        add("low_float_premarket_radar", 20.0, reasons)
+
+    # Gap/Catalyst are context sections, not entry calls.
+    gap = _num(row.get("open_gap_pct", row.get("gap_from_prev_close_pct", 0)), 0.0)
+    if abs(gap) >= 2.0 or row.get("gap_fill_candidate") or row.get("gap_retest_success") or row.get("gap_fade_flag"):
+        reasons = ["Gap Watch للتحضير: راقب هل يحترم الفجوة أو يدخل داخلها."]
+        if gap:
+            reasons.append(f"الفجوة/التغير عن الإغلاق السابق تقريبًا {round(gap, 2)}%")
+        add("gap_fill_watch", 12.0, reasons)
+
+    details = row.get("catalyst_details") if isinstance(row.get("catalyst_details"), dict) else _build_catalyst_details(row)
+    if details.get("has_news"):
+        reasons = _catalyst_reasons(details) or ["يوجد خبر/سياق؛ تحقق من قوة المحفز وتاريخه قبل اعتباره سببًا للتداول."]
+        add("catalyst_watch", 10.0, reasons)
+
+    return out
+
+
+def _make_closed_market_prep_row(row: dict, section: str, score: float, reasons: list[str], market_phase: str = "") -> dict:
+    out = dict(row or {})
+    bucket = PREP_SECTION_TO_BUCKET.get(section, "watchlist")
+    label = PREP_SECTION_LABELS_AR.get(section, "تحضير قبل الافتتاح")
+    original_bucket = _s(out.get("opportunity_bucket"))
+    out["original_opportunity_bucket"] = original_bucket
+    out["opportunity_bucket"] = bucket
+    out["opportunity_stage"] = f"closed_market_prep_{bucket}"
+    out["opportunity_stage_label"] = label
+    out["display_plan_family_label"] = label
+    out["decision"] = "تحضير قبل الافتتاح — ليس شراء مباشر"
+    out["closed_market_prep_v2l"] = {
+        "version": CLOSED_MARKET_PREP_VERSION,
+        "section": section,
+        "source_bucket": original_bucket or "watch_or_early",
+        "market_phase": _s(market_phase),
+        "rule_ar": "يظهر أثناء الإغلاق/قبل الافتتاح لمراجعة الفرصة والمقاومة والدعم، ولا يتحول إلى دخول إلا بعد تحقق البوابة الحية.",
+    }
+    prefix = "تحضير أثناء الإغلاق/قبل الافتتاح — راجع المقاومة والدعم ولا تعتبرها شراء مباشر."
+    merged = _dedupe([prefix] + (reasons or []) + (out.get("opportunity_reasons") if isinstance(out.get("opportunity_reasons"), list) else []), 10)
+    out["opportunity_reasons"] = merged
+    out["technical_explainer_reasons"] = merged
+    out["why_appeared_ar"] = "، ".join(merged[:4])
+    out["special_bucket_reason"] = out["why_appeared_ar"]
+    out["opportunity_rank_score"] = round(max(score, _num(out.get("opportunity_rank_score"), 0.0)), 2)
+    out["non_actionable_prep"] = True
+    return out
+
+
+def _fill_closed_market_prep_sections(final_map: dict[str, list[dict]], rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
+    enabled, reason = _closed_market_prep_enabled(market_phase)
+    debug = {
+        "version": CLOSED_MARKET_PREP_VERSION,
+        "enabled": enabled,
+        "reason": reason,
+        "rows_seen": len(rows or []),
+        "added_by_section": {},
+        "candidate_hits_by_section": {},
+        "skipped_duplicate_symbols": 0,
+        "rule_ar": "في الإغلاق/قبل الافتتاح نملأ أقسام التحضير من Watch/Early إذا كانت شروط التنفيذ الحية غير مكتملة. لا يغير Strong/Cautious.",
+    }
+    if not enabled:
+        return debug
+    section_candidates: dict[str, list[dict]] = {k: [] for k in PREP_SECTION_TO_BUCKET}
+    existing_symbols_by_section: dict[str, set[str]] = {}
+    global_specific_seen: set[str] = set()
+    for key, vals in (final_map or {}).items():
+        syms = {_u(v.get("symbol")) for v in (vals or []) if isinstance(v, dict) and _u(v.get("symbol"))}
+        existing_symbols_by_section[key] = syms
+        if key != "learning_opportunity_candidates":
+            global_specific_seen.update(syms)
+
+    for row in rows or []:
+        if not isinstance(row, dict) or _is_blocked(row) or not _is_personal_section_eligible(row):
+            continue
+        sym = _u(row.get("symbol"))
+        if not sym:
+            continue
+        for section, score, reasons in _prep_candidate_sections(row):
+            debug["candidate_hits_by_section"][section] = debug["candidate_hits_by_section"].get(section, 0) + 1
+            # Avoid exact duplicates in the same section; allow a symbol in one
+            # existing specialized section to remain there rather than being copied.
+            if sym in existing_symbols_by_section.get(section, set()):
+                debug["skipped_duplicate_symbols"] += 1
+                continue
+            # If a symbol is already in a stronger specific prep section, do not
+            # spread it everywhere; keep one or two clear places max.
+            current_section_items = section_candidates.get(section, [])
+            already_prepped_elsewhere = any(_u(x.get("symbol")) == sym for k, vals in section_candidates.items() if k != section for x in vals)
+            if sym in global_specific_seen and section not in {"catalyst_watch", "gap_fill_watch"}:
+                debug["skipped_duplicate_symbols"] += 1
+                continue
+            if already_prepped_elsewhere and section not in {"catalyst_watch", "gap_fill_watch"}:
+                continue
+            current_section_items.append(_make_closed_market_prep_row(row, section, score, reasons, market_phase))
+
+    for section, candidates in section_candidates.items():
+        if not candidates:
+            debug["added_by_section"][section] = 0
+            continue
+        existing = final_map.get(section, []) or []
+        seen = {_u(x.get("symbol")) for x in existing if isinstance(x, dict)}
+        to_add = []
+        for item in _sort_bucket(candidates):
+            sym = _u(item.get("symbol"))
+            if not sym or sym in seen:
+                continue
+            seen.add(sym)
+            to_add.append(item)
+            if len(existing) + len(to_add) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                break
+        final_map[section] = _sort_bucket(existing + to_add)[:max(1, int(limit or DEFAULT_SECTION_LIMIT))]
+        debug["added_by_section"][section] = len(to_add)
+    debug["total_added"] = sum(debug["added_by_section"].values())
+    return debug
+
+
 def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict:
     bucket_map = {key: [] for key in OPPORTUNITY_BUCKET_KEYS}
     raw_counts: dict[str, int] = {}
@@ -1852,6 +2320,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
     ordered_keys = [
+        "learning_opportunity_candidates",
         "small_stock_classic_radar",
         "pre_trigger_candidates",
         "support_bounce_candidates",
@@ -1876,6 +2345,21 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
                 break
         final_map[key] = items
 
+    # V2k2 bridge: when the live tool only shows Watch/Early Movement, expose
+    # non-execution learning/prep candidates in their own visible section.
+    specific_seen = set()
+    for k, vals in final_map.items():
+        if k == "learning_opportunity_candidates":
+            continue
+        for r in vals or []:
+            sym = _u(r.get("symbol")) if isinstance(r, dict) else ""
+            if sym:
+                specific_seen.add(sym)
+    learning_bridge_rows, learning_bridge_debug = _build_learning_opportunity_bridge(rows or [], specific_seen, limit=limit)
+    final_map["learning_opportunity_candidates"] = learning_bridge_rows
+
+    closed_market_planning_debug = _fill_closed_market_prep_sections(final_map, rows or [], market_phase=market_phase, limit=limit)
+
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
     learning_overlay_candidates = _build_visible_learning_overlay_candidates(rows or [], limit=16)
@@ -1884,7 +2368,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "version": OPPORTUNITY_RADAR_VERSION,
         "market_phase": market_phase,
         "display_limit_per_section": max(1, int(limit or DEFAULT_SECTION_LIMIT)),
-        "rule_ar": "Strong يبقى صارمًا؛ هذه الأقسام تعيد الحياة للمراحل التي تسبق Strong بدون تحويلها إلى BUY_NOW.",
+        "rule_ar": "Strong يبقى صارمًا؛ أثناء الإغلاق/قبل الافتتاح تظهر أقسام تحضيرية لمراجعة الفرص والمقاومة والدعم بدون تحويلها إلى BUY_NOW.",
         "counts_by_stage": raw_counts,
         "suppressed_high_price_count": len(set(suppressed_high_price)),
         "suppressed_high_price_symbols_sample": _dedupe(suppressed_high_price, 20),
@@ -1892,6 +2376,12 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "learning_overlay_summary": _learning_overlay_summary(),
         "learning_overlay_candidates": learning_overlay_candidates,
         "learning_overlay_candidates_count": int((learning_overlay_candidates or {}).get("positive_count", 0) or 0) + int((learning_overlay_candidates or {}).get("quick_take_profit_count", 0) or 0) + int((learning_overlay_candidates or {}).get("weak_or_mixed_count", 0) or 0) + int((learning_overlay_candidates or {}).get("sample_only_count", 0) or 0),
+        "learning_bridge_debug": learning_bridge_debug,
+        "learning_bridge_rule_ar": learning_bridge_debug.get("rule_ar"),
+        "closed_market_opportunity_mode": closed_market_planning_debug,
+        "closed_market_prep_enabled": bool(closed_market_planning_debug.get("enabled")),
+        "closed_market_prep_added_count": int(closed_market_planning_debug.get("total_added", 0) or 0),
+        "closed_market_prep_rule_ar": closed_market_planning_debug.get("rule_ar"),
         "next_week_analysis": next_week_analysis,
         "next_week_watchlist": next_week_analysis.get("top_candidates", []),
         "next_week_analysis_count": len(next_week_analysis.get("top_candidates", [])),
