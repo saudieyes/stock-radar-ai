@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2h_next_week_catalyst_details_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2k_learning_overlay_v1_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -32,6 +32,117 @@ PERSONAL_PRICE_COMFORT = 50.0
 PERSONAL_PRICE_MAX_NORMAL = 150.0
 DEFAULT_SECTION_LIMIT = 12
 ACTIVE_MEMORY_STATUSES = {"active", "unknown_price", "needs_reclaim_or_trigger", "under_original_entry", "extended_from_original_entry"}
+
+
+# Learning Overlay V1
+# -------------------
+# Static, conservative conclusions from two replay learning windows:
+# - learning_2026-06-18_5m_14d
+# - learning_2026-06-12_5m_14d
+# This overlay only explains/labels opportunity candidates. It must not promote a
+# symbol to Strong/Cautious or change execution gates.
+LEARNING_OVERLAY_VERSION = "learning_overlay_v1_two_windows_2026_06_19"
+LEARNING_MIN_SAMPLE_FOR_WEIGHT = 8
+LEARNING_PATTERN_LIBRARY: dict[str, dict[str, Any]] = {
+    "fib_golden_pullback|premarket|prev_session|early": {
+        "label_ar": "نمط تعلّم إيجابي — مبكر من جلسة سابقة",
+        "action_ar": "ارفع أولوية المتابعة فقط: هذا النمط تكرر في نافذتين، لكنه ليس Strong تلقائيًا. الأفضل بيع تدريجي وحماية جزء صغير فقط إذا تحول إلى Runner.",
+        "risk_ar": "يميل إلى إعطاء فرصة مبكرة جيدة، لكن نسبة كبيرة منه تتحول إلى خطفة بعد القمة.",
+        "entry_bias": "positive_watch",
+        "exit_bias": "scale_then_trail",
+        "sample_count": 44,
+        "peak20_pct": 59.1,
+        "runner_pct": 11.4,
+        "quick_take_profit_pct": 36.4,
+        "confidence": "confirmed_two_windows",
+        "rule_ar": "Fib Golden + بري ماركت + كان مرشحًا من جلسة سابقة + غير متأخر = أفضل نمط تعلم حاليًا للمتابعة المبكرة، وليس شراء مباشر.",
+    },
+    "needs_volume|premarket|prev_session|early": {
+        "label_ar": "نمط قابل للمتابعة — يحتاج حجم مؤكد",
+        "action_ar": "راقبه مبكرًا، لكن لا ترفع الحجم إلا بعد ظهور حجم/دولار فوليوم حقيقي وثبات فوق VWAP أو منطقة القرار.",
+        "risk_ar": "العينة متوسطة؛ بعض الحالات رابحة وبعضها خطفة، لذلك لا نرفعه إلى قرار تنفيذ.",
+        "entry_bias": "watch_needs_volume",
+        "exit_bias": "small_size_fast_manage",
+        "sample_count": 8,
+        "peak20_pct": 62.5,
+        "runner_pct": 12.5,
+        "quick_take_profit_pct": 50.0,
+        "confidence": "medium_two_windows",
+        "rule_ar": "نمط يحتاج volume confirmation؛ لا يكفي وحده للدخول.",
+    },
+    "fib_golden_pullback|premarket|new_symbol|early": {
+        "label_ar": "نمط خطفة محتمل — سهم جديد على الرادار",
+        "action_ar": "لا تمنعه؛ اعرضه كفرصة مضاربة بحجم أصغر وخطة بيع سريع، وليس كـ Runner افتراضي.",
+        "risk_ar": "يرتفع بقوة أحيانًا، لكنه لم يكن مرشحًا من جلسة سابقة ويحتاج إدارة خروج أسرع.",
+        "entry_bias": "speculative_watch",
+        "exit_bias": "quick_take_profit",
+        "sample_count": 9,
+        "peak20_pct": 66.7,
+        "runner_pct": 11.1,
+        "quick_take_profit_pct": 44.4,
+        "confidence": "medium_two_windows",
+        "rule_ar": "New symbol + premarket + Fib قد يكون سريعًا؛ لا تخلطه مع فرص الذاكرة السابقة.",
+    },
+    "vwap_pullback|premarket|prev_session|early": {
+        "label_ar": "نمط متذبذب — VWAP Pullback مبكر",
+        "action_ar": "اعرضه للمتابعة فقط ولا ترفع وزنه الآن؛ يحتاج تأكيد إضافي مثل دولار فوليوم قوي أو كسر/استعادة واضحة.",
+        "risk_ar": "تكرر كثيرًا لكنه أقل ثباتًا من Fib Golden؛ نسبة Runner ضعيفة وسلوك الخطفة حاضر.",
+        "entry_bias": "mixed_watch",
+        "exit_bias": "active_management",
+        "sample_count": 33,
+        "peak20_pct": 42.4,
+        "runner_pct": 6.1,
+        "quick_take_profit_pct": 39.4,
+        "confidence": "mixed_two_windows",
+        "rule_ar": "لا نرفع وزن VWAP Pullback وحده؛ يحتاج عامل تأكيد آخر.",
+    },
+    "fib_618_reclaim|premarket|prev_session|early": {
+        "label_ar": "Fib 61.8 Reclaim — قابل للمضاربة لا للثقة العالية",
+        "action_ar": "يمكن عرضه كفرصة متابعة، لكن بخطة بيع سريع حتى يثبت أنه Runner.",
+        "risk_ar": "العينة محدودة وتميل للتلاشي بعد القمة في نافذة من النوافذ.",
+        "entry_bias": "cautious_watch",
+        "exit_bias": "quick_take_profit",
+        "sample_count": 5,
+        "peak20_pct": 60.0,
+        "runner_pct": 0.0,
+        "quick_take_profit_pct": 60.0,
+        "confidence": "medium_sample_but_not_runner",
+        "rule_ar": "Reclaim عند 61.8 جيد للمراقبة، لكن ليس Runner حتى يثبت احتفاظه بالمكسب.",
+    },
+    "vwap_pullback|regular|prev_session|early": {
+        "label_ar": "نمط ضعيف في السوق الرسمي",
+        "action_ar": "لا ترفع وزنه الآن؛ إن ظهر أثناء السوق الرسمي فالأفضل انتظار Pullback/تفعيل أو تحويله لخطة بيع سريع.",
+        "risk_ar": "النافذتان أظهرتا ضعفًا/تذبذبًا واضحًا لهذا الشكل مقارنة بالبري ماركت.",
+        "entry_bias": "weak_watch",
+        "exit_bias": "do_not_upgrade",
+        "sample_count": 4,
+        "peak20_pct": 0.0,
+        "runner_pct": 0.0,
+        "quick_take_profit_pct": 50.0,
+        "confidence": "weak_two_windows",
+        "rule_ar": "VWAP Pullback أثناء السوق الرسمي لا يرفع الأولوية وحده.",
+    },
+    "fib_golden_pullback|regular|prev_session|early": {
+        "label_ar": "Fib أثناء السوق الرسمي — متذبذب",
+        "action_ar": "لا ترفعه كتعلم إيجابي عام؛ يحتاج تأكيد نافذة إضافية لأن النتائج اختلفت بين النافذتين.",
+        "risk_ar": "كان ضعيفًا في نافذة وقويًا في أخرى بعينة صغيرة؛ لا نغير الوزن بناء عليه.",
+        "entry_bias": "mixed_regular",
+        "exit_bias": "active_management",
+        "sample_count": 8,
+        "peak20_pct": 25.0,
+        "runner_pct": 0.0,
+        "quick_take_profit_pct": 25.0,
+        "confidence": "mixed_two_windows",
+        "rule_ar": "القوة الحالية في premarket المبكر، لا في regular وحده.",
+    },
+}
+
+LEARNING_GENERIC_RULES_AR = [
+    "طبقة التعلم لا تغيّر Strong/Cautious؛ هي وسم شرح وترتيب فقط.",
+    "العينة القليلة لا ترفع الوزن مهما كان الأداء عاليًا.",
+    "أفضل نمط مؤكد حاليًا: Fib Golden + بري ماركت + مرشح من جلسة سابقة + غير متأخر.",
+    "الأنماط المتأخرة أو very_late تبقى خطفة/بيع سريع ولا تتحول إلى Runner.",
+]
 
 
 def _s(value: Any) -> str:
@@ -340,6 +451,154 @@ def _catalyst_reasons(details: dict) -> list[str]:
     return _dedupe(out, 4)
 
 
+
+def _learning_phase_for_row(row: dict, market_phase: str = "") -> str:
+    raw = _s(row.get("phase_at_detection") or row.get("session") or row.get("market_phase") or market_phase).lower()
+    raw = raw.replace("-", "_").replace(" ", "_")
+    if raw in {"pre_market", "premarket", "قبل_الافتتاح"}:
+        return "premarket"
+    if raw in {"after_hours", "afterhours", "postmarket", "post_market", "بعد_الإغلاق"}:
+        return "after_hours"
+    if raw in {"open", "opening", "market_open", "لحظة_الافتتاح"}:
+        return "open"
+    if raw in {"overnight", "overnight_watch"}:
+        return "overnight"
+    return "regular" if raw else "regular"
+
+
+def _learning_prior_session_state(row: dict) -> str:
+    prior_count = _num(row.get("prior_candidate_count"), 0.0)
+    prev_dates = row.get("previous_candidate_dates")
+    has_prev_dates = isinstance(prev_dates, list) and len(prev_dates) > 0
+    if _bool(row.get("candidate_from_previous_trading_session")) or _bool(row.get("detected_previous_session")) or prior_count > 0 or has_prev_dates:
+        return "prev_session"
+    return "new_symbol"
+
+
+def _learning_chase_state(row: dict, flags: dict | None = None) -> str:
+    flags = flags if isinstance(flags, dict) else {}
+    raw = _s(row.get("chase_risk_at_detection") or row.get("source_chase_risk") or "").lower()
+    if raw in {"early", "watch_carefully", "late", "very_late"}:
+        return raw
+    change = abs(_change_pct(row))
+    move_risk = _move_risk_pct(row)
+    max_before = _num(row.get("max_gain_before_detection_pct"), 0.0)
+    if flags.get("classic_small_chase_risk") or flags.get("extended_after_move") or max_before >= 15 or move_risk >= 15 or change >= 18:
+        return "very_late" if max(max_before, move_risk, change) >= 20 else "late"
+    if change >= 5.0 or move_risk >= 7.0:
+        return "watch_carefully"
+    return "early"
+
+
+def _learning_setup_state(row: dict, flags: dict | None = None) -> str:
+    flags = flags if isinstance(flags, dict) else {}
+    classic = flags.get("classic_small_stock") if isinstance(flags.get("classic_small_stock"), dict) else {}
+    setup = _s(classic.get("setup_state") or row.get("classic_state") or row.get("small_stock_classic_state"))
+    if setup:
+        return setup
+    bucket = _s(row.get("opportunity_bucket"))
+    if bucket == "pre_trigger":
+        return "pre_trigger"
+    if bucket == "reclaim":
+        return "vwap_reclaim_hold" if row.get("vwap") else "reclaim"
+    if bucket == "support_bounce":
+        return "support_bounce"
+    if bucket == "high_risk_day_trade":
+        return "chase_risk_wait_pullback"
+    if bucket == "catalyst_watch":
+        return "catalyst_watch"
+    return "unknown_setup"
+
+
+def _learning_pattern_key_for_row(row: dict, flags: dict | None = None, market_phase: str = "") -> str:
+    return "|".join([
+        _learning_setup_state(row, flags),
+        _learning_phase_for_row(row, market_phase),
+        _learning_prior_session_state(row),
+        _learning_chase_state(row, flags),
+    ])
+
+
+def _learning_overlay_for_row(row: dict, flags: dict | None = None, market_phase: str = "") -> dict[str, Any]:
+    key = _learning_pattern_key_for_row(row, flags, market_phase)
+    rule = LEARNING_PATTERN_LIBRARY.get(key)
+    chase_state = key.split("|")[-1] if "|" in key else _learning_chase_state(row, flags)
+    if rule:
+        priority_boost = 0.0
+        # Explanation-only ranking assist for watch panels. Do not touch decisions.
+        if rule.get("entry_bias") == "positive_watch":
+            priority_boost = 7.5
+        elif rule.get("entry_bias") in {"watch_needs_volume", "speculative_watch"}:
+            priority_boost = 3.0
+        elif rule.get("entry_bias") in {"weak_watch", "mixed_regular"}:
+            priority_boost = -3.0
+        return {
+            "ok": True,
+            "version": LEARNING_OVERLAY_VERSION,
+            "pattern_key": key,
+            "matched": True,
+            "label_ar": rule.get("label_ar"),
+            "action_ar": rule.get("action_ar"),
+            "risk_ar": rule.get("risk_ar"),
+            "rule_ar": rule.get("rule_ar"),
+            "confidence": rule.get("confidence"),
+            "sample_count": rule.get("sample_count"),
+            "peak20_pct": rule.get("peak20_pct"),
+            "runner_pct": rule.get("runner_pct"),
+            "quick_take_profit_pct": rule.get("quick_take_profit_pct"),
+            "entry_bias": rule.get("entry_bias"),
+            "exit_bias": rule.get("exit_bias"),
+            "priority_boost": priority_boost,
+            "applies_to_execution": False,
+        }
+    if chase_state in {"late", "very_late"}:
+        return {
+            "ok": True,
+            "version": LEARNING_OVERLAY_VERSION,
+            "pattern_key": key,
+            "matched": False,
+            "label_ar": "تعلم: التقاط متأخر — تعامل كخطفة فقط",
+            "action_ar": "لا ترفع الوزن ولا تعتبره Runner؛ إن ظهر ربح فالأولوية لجني سريع أو انتظار Pullback.",
+            "risk_ar": "النافذتان أظهرتا أن late/very_late غالبًا تحتاج خروجًا سريعًا لا مطاردة.",
+            "confidence": "generic_late_rule",
+            "priority_boost": -5.0,
+            "entry_bias": "late_guard",
+            "exit_bias": "quick_take_profit",
+            "applies_to_execution": False,
+        }
+    return {
+        "ok": True,
+        "version": LEARNING_OVERLAY_VERSION,
+        "pattern_key": key,
+        "matched": False,
+        "label_ar": "تعلم: لا توجد عينة مؤكدة بعد",
+        "action_ar": "اعرضه كمراقبة عادية؛ لا ترفع الوزن حتى تتكرر العينة في نافذة لاحقة.",
+        "risk_ar": "لا يوجد نمط مؤكد من نافذتي التعلم لهذه التركيبة.",
+        "confidence": "unconfirmed",
+        "priority_boost": 0.0,
+        "entry_bias": "neutral_watch",
+        "exit_bias": "normal_management",
+        "applies_to_execution": False,
+    }
+
+
+def _learning_overlay_summary() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "version": LEARNING_OVERLAY_VERSION,
+        "mode_ar": "وسم تعلّم فقط — لا يغيّر Strong/Cautious ولا يفعّل شراء مباشر",
+        "best_confirmed_pattern_key": "fib_golden_pullback|premarket|prev_session|early",
+        "best_confirmed_pattern_ar": LEARNING_PATTERN_LIBRARY["fib_golden_pullback|premarket|prev_session|early"].get("label_ar"),
+        "best_confirmed_rule_ar": LEARNING_PATTERN_LIBRARY["fib_golden_pullback|premarket|prev_session|early"].get("rule_ar"),
+        "stable_patterns_count": len(LEARNING_PATTERN_LIBRARY),
+        "min_sample_for_weight": LEARNING_MIN_SAMPLE_FOR_WEIGHT,
+        "rules_ar": LEARNING_GENERIC_RULES_AR,
+        "pattern_library_sample": [
+            {"pattern_key": k, "label_ar": v.get("label_ar"), "sample_count": v.get("sample_count"), "confidence": v.get("confidence"), "peak20_pct": v.get("peak20_pct"), "runner_pct": v.get("runner_pct"), "quick_take_profit_pct": v.get("quick_take_profit_pct")}
+            for k, v in list(LEARNING_PATTERN_LIBRARY.items())[:7]
+        ],
+    }
+
 def _next_week_action_for_row(row: dict) -> str:
     bucket = _s(row.get("opportunity_bucket"))
     flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
@@ -405,6 +664,12 @@ def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | N
                 "opportunity_rank_score": _round(r.get("opportunity_rank_score"), 2),
             }
             cdet = r.get("catalyst_details") if isinstance(r.get("catalyst_details"), dict) else {}
+            lov = r.get("learning_overlay_v1") if isinstance(r.get("learning_overlay_v1"), dict) else {}
+            if lov:
+                item["learning_overlay_label_ar"] = lov.get("label_ar")
+                item["learning_overlay_action_ar"] = lov.get("action_ar")
+                item["learning_pattern_key"] = lov.get("pattern_key")
+                item["learning_exit_bias"] = lov.get("exit_bias")
             if key == "catalyst_watch" and cdet:
                 item["catalyst_type_ar"] = cdet.get("type_ar")
                 item["catalyst_date_ar"] = cdet.get("date_ar")
@@ -417,6 +682,7 @@ def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | N
         "generated_at": _now_text(),
         "mode_ar": "تحضير ومراقبة فقط — ليس شراء مباشر",
         "summary_ar": "هذه اللوحة تجمع المرشحين الذين يستحقون المتابعة للأسبوع القادم حسب مراحل Opportunity Radar، مع بقاء Strong/Cautious منفصلين كقرارات تنفيذ.",
+        "learning_overlay_summary": _learning_overlay_summary(),
         "groups": groups,
         "top_candidates": top[:24],
         "rules_ar": [
@@ -424,7 +690,7 @@ def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | N
             "مرشحو الأسهم الصغيرة وLow-Float يظهرون مبكرًا، لكن حجم الصفقة صغير والخروج أسرع.",
             "Catalyst/News Watch يعرض نوع وتاريخ المحفز، لكن الخبر وحده لا يضيف قرار شراء مباشر.",
         ],
-        "learning_archive_v1_note_ar": "جاهز لاحقًا لتغذية Learning Archive بملفات compact فقط: 10 أيام متابعة + 5 أيام نتائج، بدون raw على Railway.",
+        "learning_archive_v1_note_ar": "Learning Overlay V1 يستخدم نتائج نافذتين كوسم شرح وترتيب فقط، بدون تغيير Strong/Cautious وبدون raw على Railway.",
     }
 
 def _level_merge_threshold(price: float, atr: float) -> float:
@@ -1326,7 +1592,16 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
         high_price_note.extend(price_filter.get("exception_reasons") or [])
     catalyst_details = flags.get("catalyst_details") if isinstance(flags.get("catalyst_details"), dict) else _build_catalyst_details(out)
     catalyst_note = _catalyst_reasons(catalyst_details)
-    merged_reasons = _dedupe(stage_reasons + catalyst_note + technical_reasons + high_price_note, 12)
+    learning_overlay = _learning_overlay_for_row(out, flags, market_phase)
+    learning_note = []
+    if isinstance(learning_overlay, dict):
+        label = _s(learning_overlay.get("label_ar"))
+        action = _s(learning_overlay.get("action_ar"))
+        if label and learning_overlay.get("matched"):
+            learning_note.append(label)
+        if action and learning_overlay.get("matched"):
+            learning_note.append(action)
+    merged_reasons = _dedupe(stage_reasons + catalyst_note + learning_note + technical_reasons + high_price_note, 12)
     base_extra = 0.0
     if bucket == "support_bounce":
         base_extra = flags.get("support_score", 0.0)
@@ -1368,7 +1643,13 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     out["catalyst_time_line_ar"] = catalyst_details.get("time_line_ar")
     out["catalyst_actionability_ar"] = catalyst_details.get("actionability_ar")
     out["catalyst_summary_ar"] = catalyst_details.get("summary_ar")
-    out["opportunity_rank_score"] = _bucket_rank(out, base=base_extra)
+    learning_boost = _num((learning_overlay or {}).get("priority_boost"), 0.0) if isinstance(learning_overlay, dict) else 0.0
+    out["opportunity_rank_score"] = _bucket_rank(out, base=base_extra + learning_boost)
+    out["learning_overlay_v1"] = learning_overlay
+    out["learning_overlay_label_ar"] = (learning_overlay or {}).get("label_ar") if isinstance(learning_overlay, dict) else ""
+    out["learning_overlay_action_ar"] = (learning_overlay or {}).get("action_ar") if isinstance(learning_overlay, dict) else ""
+    out["learning_overlay_exit_bias"] = (learning_overlay or {}).get("exit_bias") if isinstance(learning_overlay, dict) else ""
+    out["learning_pattern_key"] = (learning_overlay or {}).get("pattern_key") if isinstance(learning_overlay, dict) else ""
     out["opportunity_flow_flags"] = flags
     out["small_stock_classic_setup"] = flags.get("classic_small_stock") or {}
     out["why_appeared_ar"] = "، ".join(merged_reasons[:4])
@@ -1525,6 +1806,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "suppressed_high_price_count": len(set(suppressed_high_price)),
         "suppressed_high_price_symbols_sample": _dedupe(suppressed_high_price, 20),
         "high_price_rule_ar": "الأسهم فوق 150$ تُخفى من الأقسام العملية إلا إذا كانت فرصة استثنائية من حيث الجودة والجاهزية والسيولة.",
+        "learning_overlay_summary": _learning_overlay_summary(),
         "next_week_analysis": next_week_analysis,
         "next_week_watchlist": next_week_analysis.get("top_candidates", []),
         "next_week_analysis_count": len(next_week_analysis.get("top_candidates", [])),
