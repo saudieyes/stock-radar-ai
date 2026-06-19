@@ -646,8 +646,8 @@ def replay_lab_small_stock_classic_run_endpoint(path: str = "", max_files: int =
 
 @app.get("/replay-lab/small-stock-classic/pull-run")
 @app.get("/replay-lab/small-stock-classic/run-polygon")
-def replay_lab_small_stock_classic_pull_run_endpoint(end_date: str = "", minute_days: int = 5, max_rows: int = 250000, max_candidates: int = 120, daily_lookback_days: int = 14, force: bool = False):
-    return run_small_stock_classic_replay_from_polygon(end_date=end_date, minute_days=minute_days, max_rows=max_rows, max_candidates=max_candidates, daily_lookback_days=daily_lookback_days, force=force)
+def replay_lab_small_stock_classic_pull_run_endpoint(end_date: str = "", minute_days: int = 5, max_rows: int = 250000, max_candidates: int = 120, daily_lookback_days: int = 14, force: bool = False, redownload_processed: bool = True):
+    return run_small_stock_classic_replay_from_polygon(end_date=end_date, minute_days=minute_days, max_rows=max_rows, max_candidates=max_candidates, daily_lookback_days=daily_lookback_days, force=force, redownload_processed=redownload_processed)
 
 @app.get("/paper-trading/status")
 def paper_trading_status_endpoint():
