@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2k_learning_overlay_v1_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2k1_visible_learning_overlay_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -597,6 +597,88 @@ def _learning_overlay_summary() -> dict[str, Any]:
             {"pattern_key": k, "label_ar": v.get("label_ar"), "sample_count": v.get("sample_count"), "confidence": v.get("confidence"), "peak20_pct": v.get("peak20_pct"), "runner_pct": v.get("runner_pct"), "quick_take_profit_pct": v.get("quick_take_profit_pct")}
             for k, v in list(LEARNING_PATTERN_LIBRARY.items())[:7]
         ],
+    }
+
+
+
+def _learning_overlay_candidate_row(row: dict) -> dict[str, Any]:
+    lov = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+    sym = _u(row.get("symbol"))
+    return {
+        "symbol": sym,
+        "price": _round(_price(row), 4),
+        "decision": _s(row.get("decision")),
+        "opportunity_bucket": _s(row.get("opportunity_bucket")),
+        "stage_label": _s(row.get("opportunity_stage_label")),
+        "learning_label_ar": _s(lov.get("label_ar")),
+        "learning_action_ar": _s(lov.get("action_ar")),
+        "learning_risk_ar": _s(lov.get("risk_ar")),
+        "learning_pattern_key": _s(lov.get("pattern_key")),
+        "learning_confidence": _s(lov.get("confidence")),
+        "learning_entry_bias": _s(lov.get("entry_bias")),
+        "learning_exit_bias": _s(lov.get("exit_bias")),
+        "learning_matched": bool(lov.get("matched")),
+        "opportunity_rank_score": _round(row.get("opportunity_rank_score"), 2),
+        "why_ar": _s(row.get("why_appeared_ar") or row.get("quick_explainer") or row.get("special_bucket_reason")),
+    }
+
+
+def _build_visible_learning_overlay_candidates(rows: list[dict], limit: int = 16) -> dict[str, Any]:
+    """Build a visible learning panel from all enriched rows, not only Opportunity buckets.
+
+    This fixes the UI case where today's candidates are mainly Early Movement / Watch,
+    while the learning overlay exists only in row metadata. The panel remains
+    educational and never promotes execution decisions.
+    """
+    positive: list[dict] = []
+    quick: list[dict] = []
+    weak: list[dict] = []
+    sample: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        if not isinstance(row, dict) or _is_blocked(row):
+            continue
+        if not _is_personal_section_eligible(row):
+            continue
+        lov = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else None
+        if not isinstance(lov, dict):
+            continue
+        sym = _u(row.get("symbol"))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        item = _learning_overlay_candidate_row(row)
+        bias = _s(lov.get("entry_bias"))
+        exit_bias = _s(lov.get("exit_bias"))
+        confidence = _s(lov.get("confidence"))
+        matched = bool(lov.get("matched"))
+        if matched and bias in {"positive_watch", "watch_needs_volume"}:
+            positive.append(item)
+        elif exit_bias == "quick_take_profit" or bias in {"speculative_watch", "late_guard"}:
+            quick.append(item)
+        elif confidence in {"weak_two_windows", "mixed_two_windows"} or bias in {"weak_watch", "mixed_regular", "mixed_watch"}:
+            weak.append(item)
+        elif matched:
+            sample.append(item)
+    def sort_items(items: list[dict]) -> list[dict]:
+        return sorted(items, key=lambda x: _num(x.get("opportunity_rank_score"), 0.0), reverse=True)[:max(1, int(limit or 16))]
+    positive = sort_items(positive)
+    quick = sort_items(quick)
+    weak = sort_items(weak)
+    sample = sort_items(sample)
+    return {
+        "ok": True,
+        "version": LEARNING_OVERLAY_VERSION,
+        "mode_ar": "ظاهر دائمًا — وسم تعلّم فقط لا يغيّر Strong/Cautious",
+        "visible_note_ar": "إذا لم تظهر فرص في أقسام Opportunity، تعرض هذه اللوحة إشارات التعلم من Early Movement / Watch أيضًا حتى لا تختفي طبقة التعلم.",
+        "positive_count": len(positive),
+        "quick_take_profit_count": len(quick),
+        "weak_or_mixed_count": len(weak),
+        "sample_only_count": len(sample),
+        "positive_watch": positive,
+        "quick_take_profit_watch": quick,
+        "weak_or_mixed_watch": weak,
+        "sample_only_watch": sample,
     }
 
 def _next_week_action_for_row(row: dict) -> str:
@@ -1796,6 +1878,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
+    learning_overlay_candidates = _build_visible_learning_overlay_candidates(rows or [], limit=16)
     return {
         "ok": True,
         "version": OPPORTUNITY_RADAR_VERSION,
@@ -1807,6 +1890,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "suppressed_high_price_symbols_sample": _dedupe(suppressed_high_price, 20),
         "high_price_rule_ar": "الأسهم فوق 150$ تُخفى من الأقسام العملية إلا إذا كانت فرصة استثنائية من حيث الجودة والجاهزية والسيولة.",
         "learning_overlay_summary": _learning_overlay_summary(),
+        "learning_overlay_candidates": learning_overlay_candidates,
+        "learning_overlay_candidates_count": int((learning_overlay_candidates or {}).get("positive_count", 0) or 0) + int((learning_overlay_candidates or {}).get("quick_take_profit_count", 0) or 0) + int((learning_overlay_candidates or {}).get("weak_or_mixed_count", 0) or 0) + int((learning_overlay_candidates or {}).get("sample_only_count", 0) or 0),
         "next_week_analysis": next_week_analysis,
         "next_week_watchlist": next_week_analysis.get("top_candidates", []),
         "next_week_analysis_count": len(next_week_analysis.get("top_candidates", [])),
