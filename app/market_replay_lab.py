@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from app.opportunity_radar import OPPORTUNITY_RADAR_VERSION, enrich_row_opportunity_radar
 
-MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1_small_classic_2026_06_19"
+MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1a_polygon_pull_run_2026_06_19"
 
 
 def _s(v: Any) -> str:
@@ -161,7 +161,10 @@ def market_replay_lab_status() -> dict:
         "ok": True,
         "version": MARKET_REPLAY_LAB_VERSION,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
-        "available_runs": ["/replay-lab/small-stock-classic/run?path=/tmp/your_polygon_minutes.zip"],
+        "available_runs": [
+            "/replay-lab/small-stock-classic/run?path=/tmp/your_polygon_minutes.zip",
+            "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5",
+        ],
         "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume.",
         "small_stock_rules_ar": [
             "فريم 5د/15د عند المضاربة اللحظية.",
@@ -299,3 +302,82 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "candidates": candidates,
         "rule_ar": "هذه نتائج Replay مختصرة لا تخزن raw؛ تقيس متى ظهر السهم وأين ذهب بعد ظهوره.",
     }
+
+
+
+def run_small_stock_classic_replay_from_polygon(
+    *,
+    end_date: str = "",
+    minute_days: int = 5,
+    max_rows: int = 250_000,
+    max_candidates: int = 120,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Pull Polygon minute flat files to /tmp, replay them, then delete raw files.
+
+    This is the production-safe path for Railway: the user does not need to
+    manually place a ZIP in /tmp.  It uses the existing Polygon/Massive flat-file
+    credentials and the fetcher's attempt cap.  Raw files are temporary only and
+    are cleaned after compact replay results are produced.
+    """
+    try:
+        from app.polygon_flatfile_fetcher import cleanup_tmp_path, flatfiles_config_status, pull_flatfiles_for_window
+    except Exception as exc:
+        return {
+            "ok": False,
+            "version": MARKET_REPLAY_LAB_VERSION,
+            "error": "polygon_fetcher_unavailable",
+            "detail": f"{type(exc).__name__}: {str(exc)[:180]}",
+        }
+
+    days = max(1, min(10, int(minute_days or 5)))
+    pull = pull_flatfiles_for_window(end_date=end_date or None, minute_days=days, daily_days=1, force=bool(force))
+    tmp_dir = str(pull.get("tmp_dir") or "")
+    try:
+        if not pull.get("ok"):
+            return {
+                "ok": False,
+                "version": MARKET_REPLAY_LAB_VERSION,
+                "error": "polygon_pull_failed_or_empty",
+                "pull_status": pull,
+                "config": flatfiles_config_status(),
+                "hint_ar": "تأكد من تفعيل POLYGON_FLATFILES_ENABLED ومفاتيح Flat Files S3. لن تُحفظ الملفات الخام؛ التحميل مؤقت في /tmp فقط.",
+            }
+        minute_paths = [str(x) for x in (pull.get("minute_paths") or []) if str(x)]
+        if not minute_paths:
+            return {
+                "ok": False,
+                "version": MARKET_REPLAY_LAB_VERSION,
+                "error": "no_minute_files_downloaded",
+                "pull_status": pull,
+                "hint_ar": "تم الاتصال لكن لم يتم تنزيل ملفات minute. ربما التاريخ غير متاح بعد أو وصل حد المحاولات.",
+            }
+        replay = run_small_stock_classic_replay_from_path(
+            path=tmp_dir or str(Path(minute_paths[0]).parent),
+            max_files=days,
+            max_rows=max_rows,
+            max_candidates=max_candidates,
+        )
+        replay["polygon_pull"] = {
+            "ok": True,
+            "minute_dates": pull.get("minute_dates"),
+            "minute_files_downloaded": len(minute_paths),
+            "results_summary": [
+                {
+                    "dataset": r.get("dataset"),
+                    "trade_date": r.get("trade_date"),
+                    "status": r.get("status"),
+                    "ok": r.get("ok"),
+                    "attempts": r.get("attempts"),
+                    "skipped": r.get("skipped"),
+                    "error": r.get("error", ""),
+                }
+                for r in (pull.get("results") or [])
+                if str(r.get("dataset")) == "minute"
+            ],
+        }
+        replay["storage_rule_ar"] = "تم تنزيل ملفات Polygon مؤقتًا إلى /tmp للتشغيل ثم تنظيفها؛ لا يتم حفظ raw في SQLite/GitHub/Railway volume."
+        return replay
+    finally:
+        if tmp_dir:
+            cleanup_tmp_path(tmp_dir)
