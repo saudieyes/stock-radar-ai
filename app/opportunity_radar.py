@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1a_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1b_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -154,6 +154,32 @@ def _abs_pct_distance(a: float, b: float) -> float:
     if a <= 0 or b <= 0:
         return 999.0
     return abs((a - b) / b) * 100.0
+
+
+def _change_pct(row: dict) -> float:
+    """Read displayed/live percent change using all known source field names.
+
+    Some rows carry the visible +% under UI/source-specific keys, so relying on
+    display_change_pct only can make a stock that is already +8% look flat and
+    slip into Support Bounce.
+    """
+    keys = [
+        "display_change_pct", "change_pct", "percent_change", "change_percent",
+        "changesPercentage", "changes_percentage", "changePercent",
+        "regularMarketChangePercent", "fmp_change_pct", "live_change_pct",
+        "today_change_pct", "day_change_pct", "session_change_pct",
+        "change_from_open_pct", "pm_change_pct", "pre_market_change_pct",
+    ]
+    for key in keys:
+        if key not in row:
+            continue
+        val = row.get(key)
+        if val is None or val == "":
+            continue
+        n = _num(val, 999999.0)
+        if n != 999999.0:
+            return n
+    return 0.0
 
 
 def _level_merge_threshold(price: float, atr: float) -> float:
@@ -330,12 +356,17 @@ def build_support_resistance_zones(row: dict) -> dict:
         notes.append("لا توجد مستويات كافية لبناء مناطق دعم/مقاومة موثوقة من البيانات الحالية.")
 
     summary_bits = []
-    if price_zone:
-        summary_bits.append(f"السعر داخل {price_zone['label']}: {price_zone['low']} - {price_zone['high']}")
-    if nearest_support:
-        summary_bits.append(f"الدعم/المنطقة الأقرب: {nearest_support['low']} - {nearest_support['high']} ({nearest_support['strength']})")
-    if nearest_resistance:
-        summary_bits.append(f"المقاومة/التفعيل الأقرب: {nearest_resistance['low']} - {nearest_resistance['high']} ({nearest_resistance['strength']})")
+    if price_zone and price_zone.get("kind") == "congestion":
+        summary_bits.append(f"السعر داخل منطقة قرار: {price_zone['low']} - {price_zone['high']}")
+        summary_bits.append(f"حد الفشل أسفل {price_zone['low']}")
+        summary_bits.append(f"حد التفعيل فوق {price_zone['high']}")
+    else:
+        if price_zone:
+            summary_bits.append(f"السعر داخل {price_zone['label']}: {price_zone['low']} - {price_zone['high']}")
+        if nearest_support:
+            summary_bits.append(f"الدعم/المنطقة الأقرب: {nearest_support['low']} - {nearest_support['high']} ({nearest_support['strength']})")
+        if nearest_resistance:
+            summary_bits.append(f"المقاومة/التفعيل الأقرب: {nearest_resistance['low']} - {nearest_resistance['high']} ({nearest_resistance['strength']})")
     if not summary_bits:
         summary_bits.append("لا توجد منطقة قرار موثوقة كفاية من المستويات الحالية.")
 
@@ -360,13 +391,13 @@ def _is_true_no_chase(row: dict) -> bool:
         return True
     status = _s(row.get("no_chase_guard_status")).lower()
     if status == "no_chase":
-        change = _num(row.get("display_change_pct", row.get("change_pct", 0)), 0.0)
+        change = _change_pct(row)
         entry = _entry(row)
         price = _price(row)
         dist = _pct_distance(price, entry) if price > 0 and entry > 0 else 0.0
         return change >= 7.0 or dist >= 3.0
     text = " ".join([_s(row.get("owner_action")), _s(row.get("execution_readiness_label")), _s(row.get("move_stage_label"))])
-    return bool(("لا تطارد" in text or "No-Chase" in text) and _num(row.get("display_change_pct", row.get("change_pct", 0)), 0.0) >= 7.0)
+    return bool(("لا تطارد" in text or "No-Chase" in text) and _change_pct(row) >= 7.0)
 
 
 def _liquidity_score(row: dict) -> tuple[float, list[str]]:
@@ -405,7 +436,7 @@ def _price_filter(row: dict) -> dict:
     readiness = _num(row.get("execution_readiness_score"), 0.0)
     decision = _s(row.get("decision"))
     final_code = _s(row.get("final_decision_code"))
-    change = _num(row.get("display_change_pct", row.get("change_pct", 0)), 0.0)
+    change = _change_pct(row)
     liquidity_points, liquidity_reasons = _liquidity_score(row)
     if price <= 0:
         return {
@@ -533,7 +564,7 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     target = _target1(row)
     atr, atr_pct = _atr(row, price)
     no_chase = _is_true_no_chase(row)
-    change = _num(row.get("display_change_pct", row.get("change_pct", row.get("change_from_open_pct", 0))), 0.0)
+    change = _change_pct(row)
     from_open = _num(row.get("change_from_open_pct", 0), 0.0)
     quality = _num(row.get("quality_score"), 0.0)
     readiness = _num(row.get("execution_readiness_score"), 0.0)
@@ -545,8 +576,18 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     nr = zones.get("nearest_resistance_zone") or {}
 
     support_center = _num(ns.get("center"), _first(row, ["nearest_support", "support_price", "display_support_price"], 0.0))
+    resistance_center = _num(nr.get("center"), _first(row, ["nearest_resistance", "resistance_price", "display_resistance_price"], 0.0))
     support_dist = _pct_distance(price, support_center) if price > 0 and support_center > 0 else 999.0
-    near_support = bool(price > 0 and ns and (ns.get("low", 0) <= price <= ns.get("high", 0) * 1.012 or 0 <= support_dist <= max(2.2, atr_pct * 0.75)))
+    resistance_dist = ((resistance_center - price) / price * 100.0) if price > 0 and resistance_center > 0 else 999.0
+    close_pos = _num(row.get("close_position_pct", row.get("session_position_pct", row.get("day_range_position_pct", 0))), 0.0)
+    pz_low = _num(pz.get("low"), 0.0)
+    pz_high = _num(pz.get("high"), 0.0)
+    pz_mid = (pz_low + pz_high) / 2.0 if pz_low > 0 and pz_high > 0 else 0.0
+    in_upper_congestion = bool(_s(pz.get("kind")) == "congestion" and pz_mid > 0 and price >= pz_mid)
+    near_resistance_now = bool(nr and -0.25 <= resistance_dist <= max(1.2, atr_pct * 0.55))
+    extended_after_move = bool((change >= 5.0 or from_open >= 4.0) and (near_resistance_now or in_upper_congestion or close_pos >= 70))
+    near_support_raw = bool(price > 0 and ns and (ns.get("low", 0) <= price <= ns.get("high", 0) * 1.012 or 0 <= support_dist <= max(2.2, atr_pct * 0.75)))
+    near_support = bool(near_support_raw and not extended_after_move)
     reclaim = bool(row.get("support_reclaimed_flag") or row.get("reclaimed_support_level") or final_code == "RECLAIM_REQUIRED" or _s(pz.get("kind")) == "reclaim")
     broken_needs_reclaim = bool(row.get("support_broken_flag") or row.get("broken_support_level") or final_code == "RECLAIM_REQUIRED")
 
@@ -561,6 +602,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     high_activity = bool(change >= 4.0 or from_open >= 3.0 or liquidity_points >= 30)
     high_risk_day = bool(low_price and high_activity and not no_chase)
     low_float_pm = bool(low_price and (high_activity or _num(row.get("pre_market_volume"), 0.0) > 100_000 or _num(row.get("pre_market_change_pct"), 0.0) >= 2.0))
+    if extended_after_move and low_price:
+        high_risk_day = True
 
     gap_up = _num(row.get("open_gap_pct", row.get("gap_from_prev_close_pct", 0)), 0.0)
     gap_watch = bool(abs(gap_up) >= 2.5 or row.get("gap_fill_candidate") or row.get("gap_retest_success") or row.get("gap_fade_flag"))
@@ -575,10 +618,14 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     support_reasons = []
     if near_support:
         support_score += 35; support_reasons.append("قريب من منطقة دعم ذات معنى")
+    elif near_support_raw and extended_after_move:
+        support_reasons.append("كان قريبًا من منطقة قرار/دعم، لكنه تحرك وأصبح قريبًا من مقاومة؛ لا يصنف كارتداد دعم مبكر.")
     if support_dist != 999.0:
         support_reasons.append(f"المسافة عن الدعم {round(support_dist, 2)}%")
-    if change <= 1.5:
+    if change <= 2.0 and not extended_after_move:
         support_score += 8; support_reasons.append("لم يتحرك بعيدًا بعد")
+    elif change >= 5.0:
+        support_reasons.append(f"السهم متحرك الآن {round(change, 2)}%؛ يحتاج تصنيف مخاطرة/استمرار لا Support Bounce.")
     if readiness >= 45:
         support_score += 8; support_reasons.append("جاهزية أولية مقبولة")
     if liquidity_points >= 18:
@@ -622,6 +669,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "pre_trigger_reasons": _dedupe(pre_reasons, 8),
         "high_risk_day": high_risk_day,
         "low_float_pm": low_float_pm,
+        "extended_after_move": extended_after_move,
+        "near_resistance_now": near_resistance_now,
         "gap_watch": gap_watch,
         "catalyst": catalyst,
         "continuation_pullback": continuation_pullback,
@@ -630,6 +679,7 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "trigger_price": _round(trigger, 2),
         "trigger_distance_pct": _round(trigger_dist, 2) if trigger_dist != 999.0 else 999.0,
         "support_distance_pct": _round(support_dist, 2) if support_dist != 999.0 else 999.0,
+        "resistance_distance_pct": _round(resistance_dist, 2) if resistance_dist != 999.0 else 999.0,
         "atr_pct": _round(atr_pct, 2),
     }
 
@@ -652,16 +702,19 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
         return "reclaim", label, "reclaim", flags.get("reclaim_reasons", [])
     if flags.get("near_support"):
         return "support_bounce", "↩️ بدأ ارتداد / قريب من دعم", "support_bounce", flags.get("support_reasons", [])
+    if flags.get("high_risk_day"):
+        base = "سهم صغير متحرك؛ يعامل كحجم صغير عالي المخاطرة لا كدخول قوي عادي."
+        if flags.get("extended_after_move"):
+            base = "تحرك قوي وقريب من مقاومة/منطقة قرار؛ لا يصنف Support Bounce ولا يُطارد."
+        return "high_risk_day_trade", "⚡ مضاربة عالية المخاطرة", "high_risk_day_trade", [base]
+    if flags.get("low_float_pm"):
+        return "low_float_premarket", "🚀 مرشح Low-Float / بري ماركت", "low_float_premarket", ["سهم صغير/نشط يحتاج مراقبة مبكرة وليس Strong عادي."]
     if flags.get("continuation_pullback"):
         return "continuation_pullback", "📈 Continuation Pullback Candidate", "continuation_pullback", ["استمرار مشروط؛ لا تطارد القمة وانتظر Pullback صحي."]
     if flags.get("gap_watch"):
         return "gap_fill_watch", "🕳️ Gap Fill Watch", "gap_fill_watch", ["توجد فجوة أو إعادة اختبار فجوة؛ ليست كل فجوة يجب أن تغلق."]
     if flags.get("catalyst"):
         return "catalyst_watch", "📰 Catalyst / News Watch", "catalyst_watch", ["يوجد سياق خبر/محفز؛ القرار ليس شراء مباشر من الخبر وحده."]
-    if flags.get("low_float_pm"):
-        return "low_float_premarket", "🚀 مرشح Low-Float / بري ماركت", "low_float_premarket", ["سهم صغير/نشط يحتاج مراقبة مبكرة وليس Strong عادي."]
-    if flags.get("high_risk_day"):
-        return "high_risk_day_trade", "⚡ مضاربة عالية المخاطرة", "high_risk_day_trade", ["سهم صغير متحرك؛ يعامل كحجم صغير عالي المخاطرة لا كدخول قوي عادي."]
     if flags.get("no_chase"):
         return "no_chase", "⛔ تحرك وفات / لا تطارد", "no_chase", ["الفرصة أصبحت متأخرة؛ انتظر Pullback أو Reclaim جديد."]
     return "watch", "👀 مراقبة", "watchlist", ["تحت المراقبة حتى تظهر مرحلة أوضح."]
@@ -729,7 +782,7 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     if bucket not in {"no_chase"} and flags.get("no_chase") is False:
         for key in ["owner_action", "execution_readiness_label", "execution_gate_label"]:
             txt = _s(out.get(key))
-            if "لا تطارد" in txt and price > 0 and _num(out.get("display_change_pct", out.get("change_pct", 0)), 0.0) < 7.0:
+            if "لا تطارد" in txt and price > 0 and _change_pct(out) < 7.0:
                 out[key] = txt.replace("لا تطارد", "انتظر تأكيد")
 
     # Let old UI plan badge show the new flow if it was generic monitoring.
@@ -954,6 +1007,10 @@ def _evaluate_memory_plan(plan: dict, row: dict) -> dict:
         status = "target_1_hit"
         reason = "target_hit"
         action = f"✅ وصلت الهدف الأول الأصلي {round(target, 2)} — قيّم تأمين الربح."
+    elif _s(plan.get("original_bucket")) == "support_bounce" and isinstance(row.get("opportunity_flow_flags"), dict) and row.get("opportunity_flow_flags", {}).get("extended_after_move"):
+        status = "extended_after_support_bounce"
+        reason = "moved_near_resistance"
+        action = "🟡 لم تعد Support Bounce مبكرة؛ السهم تحرك واقترب من مقاومة/منطقة قرار، فانتظر Pullback أو Reclaim جديد."
     elif trigger > 0 and price < trigger * 0.992 and _s(plan.get("original_bucket")) in {"pre_trigger", "reclaim"}:
         status = "needs_reclaim_or_trigger"
         reason = "trigger_lost"
