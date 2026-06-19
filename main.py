@@ -591,25 +591,49 @@ def opportunity_plan_memory_status_endpoint(limit: int = 100):
     return opportunity_plan_memory_status(limit=limit)
 
 
-@app.get("/small-stock-classic-radar/status")
-def small_stock_classic_radar_status_endpoint():
+def _small_stock_classic_radar_status_payload():
     snapshot = get_json("last_trade_scan_snapshot", {}) or {}
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
-    rows = enrich_rows_opportunity_radar(rows if isinstance(rows, list) else [], market_phase=snapshot.get("market_phase", ""))
-    sections = build_opportunity_radar_sections(rows, market_phase=snapshot.get("market_phase", ""))
+    market_phase = snapshot.get("market_phase", "") if isinstance(snapshot, dict) else ""
+    rows = enrich_rows_opportunity_radar(rows if isinstance(rows, list) else [], market_phase=market_phase)
+    sections = build_opportunity_radar_sections(rows, market_phase=market_phase)
+    items = sections.get("small_stock_classic_radar", []) or []
     return {
         "ok": True,
         "version": OPPORTUNITY_RADAR_VERSION,
         "section": "small_stock_classic_radar",
-        "count": len(sections.get("small_stock_classic_radar", [])),
-        "items": sections.get("small_stock_classic_radar", []),
+        "count": len(items),
+        "items": items,
+        "aliases": [
+            "/small-stock-classic-radar/status",
+            "/small-stock-classic-radar",
+            "/small-stock-classic/status",
+            "/opportunity-radar/small-stock-classic/status",
+            "/opportunity-radar/small-stock-classic-radar/status",
+        ],
         "rule_ar": "فلتر الأسهم الصغيرة: Fib 61.8/78.6 + VWAP بإغلاق شمعة + قمة اليوم السابق، ولا يطارد الشمعة الخضراء.",
+        "note_ar": "إذا كان العدد صفرًا فهذا لا يعني عطلًا؛ يعني أنه لا توجد أسهم صغيرة مطابقة في آخر لقطة محفوظة."
     }
 
 
+@app.get("/small-stock-classic-radar/status")
+@app.get("/small-stock-classic-radar")
+@app.get("/small-stock-classic/status")
+@app.get("/small_stock_classic_radar/status")
+@app.get("/opportunity-radar/small-stock-classic/status")
+@app.get("/opportunity-radar/small-stock-classic-radar/status")
+def small_stock_classic_radar_status_endpoint():
+    return _small_stock_classic_radar_status_payload()
+
+
 @app.get("/replay-lab/status")
+@app.get("/replay-lab")
 def replay_lab_status_endpoint():
-    return market_replay_lab_status()
+    payload = market_replay_lab_status()
+    if isinstance(payload, dict):
+        payload["aliases"] = ["/replay-lab/status", "/replay-lab"]
+        payload["small_stock_status_endpoint"] = "/small-stock-classic-radar/status"
+    return payload
 
 
 @app.get("/replay-lab/small-stock-classic/run")
