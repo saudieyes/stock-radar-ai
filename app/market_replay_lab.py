@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from app.opportunity_radar import OPPORTUNITY_RADAR_VERSION, enrich_row_opportunity_radar
 
-MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1d_exit_behavior_performance_2026_06_19"
+MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1e_exit_decision_overlay_2026_06_19"
 
 
 def _s(v: Any) -> str:
@@ -225,6 +225,105 @@ def _candidate_is_danger_winner(c: dict) -> bool:
     )
 
 
+def _candidate_is_clean_entry_winner(c: dict) -> bool:
+    # Clean entry means the radar caught the setup early enough and the trade did
+    # not first punish the entry with a deep drawdown.  It does NOT guarantee the
+    # stock held its peak.
+    return _candidate_is_clean_winner(c)
+
+
+def _candidate_is_clean_runner_winner(c: dict) -> bool:
+    # Clean runner is stricter: it was a clean entry AND it kept much of its move
+    # after the peak.  This is the bucket useful for “hold longer / scale out”.
+    return (
+        _candidate_is_clean_entry_winner(c)
+        and _num(c.get("post_peak_drawdown_pct"), 0.0) > -10.0
+        and _num(c.get("gain_retention_pct"), 0.0) >= 70.0
+        and _num(c.get("minutes_to_peak"), 0.0) >= 120.0
+    )
+
+
+def _candidate_is_quick_fade(c: dict) -> bool:
+    return (
+        _num(c.get("max_after_pct"), 0.0) >= 20.0
+        and _num(c.get("minutes_to_peak"), 9999.0) <= 60.0
+        and _num(c.get("post_peak_drawdown_pct"), 0.0) <= -10.0
+    )
+
+
+def _exit_decision_overlay(c: dict) -> dict[str, Any]:
+    peak = _num(c.get("max_after_pct"), 0.0)
+    worst = _num(c.get("min_after_pct"), 0.0)
+    post_drop = _num(c.get("post_peak_drawdown_pct"), 0.0)
+    retention = _num(c.get("gain_retention_pct"), 0.0)
+    minutes_to_peak = _num(c.get("minutes_to_peak"), -1.0)
+    drop10 = c.get("minutes_to_drop_10pct_from_peak")
+    drop10_min = _num(drop10, 9999.0) if drop10 is not None else 9999.0
+    chase = str(c.get("chase_risk_at_detection") or "")
+    flags: list[str] = []
+    if chase in {"late", "very_late"}:
+        flags.append("التقاط متأخر/مطاردة محتملة")
+    if worst <= -10.0:
+        flags.append("هبط أكثر من 10% بعد الالتقاط")
+    if post_drop <= -20.0:
+        flags.append("تلاشى أكثر من 20% بعد القمة")
+    if drop10_min <= 5.0:
+        flags.append("فقد 10% من القمة خلال دقائق")
+    if minutes_to_peak <= 60.0 and peak >= 20.0:
+        flags.append("القمة جاءت بسرعة")
+
+    runner_hold = (
+        peak >= 20.0
+        and minutes_to_peak >= 240.0
+        and post_drop > -10.0
+        and retention >= 70.0
+        and chase not in {"late", "very_late"}
+    )
+    quick_take = (
+        _candidate_is_quick_fade(c)
+        or chase in {"late", "very_late"}
+        or drop10_min <= 5.0
+        or post_drop <= -20.0
+    )
+
+    if runner_hold:
+        label = "Runner صالح للتدرج والاحتفاظ الجزئي"
+        rule = "لا تبيع كل الكمية مبكرًا؛ بيع تدريجي عند الأهداف، واترك جزءًا صغيرًا ما دام فوق VWAP/قاع آخر 5د ولم يفقد 10% من القمة."
+        plan = "بيع جزء عند +20%/+30%، ثم حماية الباقي بتريلينغ 8-10% من القمة أو كسر VWAP."
+        score = 86
+    elif quick_take:
+        label = "خطفة / جني ربح سريع"
+        rule = "هذه الحركة غالبًا تتبخر؛ لا تنتظر القمة المثالية. عند تسارع قوي أو ربح سريع، خذ جزءًا كبيرًا وارفع الوقف فورًا."
+        plan = "بيع 50-70% عند أول اندفاع قوي، ثم اخرج من الباقي عند فقد 10% من القمة أو كسر VWAP/قاع 5د."
+        score = 34
+    elif peak >= 20.0 and retention >= 50.0 and post_drop > -20.0:
+        label = "حركة جيدة تحتاج إدارة نشطة"
+        rule = "يمكن أن تمتد، لكنها ليست Runner نظيفًا؛ الأفضل بيع تدريجي وحماية الربح بعد كل قمة جديدة."
+        plan = "بيع جزء عند +15%/+25%، واترك جزءًا صغيرًا بشرط عدم فقد 10% من القمة."
+        score = 62
+    elif peak >= 10.0:
+        label = "ربح متوسط / لا تطمع"
+        rule = "الحركة ليست كافية لإعطاء مجال واسع؛ تعامل معها كفرصة يومية عادية."
+        plan = "بيع تدريجي سريع عند +8% إلى +15% أو عند فشل VWAP."
+        score = 48
+    else:
+        label = "مراقبة فقط"
+        rule = "لم تظهر حركة كافية في الاختبار؛ لا تعتمد عليها كفرصة بيع/شراء."
+        plan = "انتظر تأكيد جديد أو استبعد السهم من الأولوية."
+        score = 20
+
+    return {
+        "exit_action_label_ar": label,
+        "exit_action_rule_ar": rule,
+        "suggested_sell_plan_ar": plan,
+        "exit_action_score": score,
+        "runner_hold_candidate": bool(runner_hold),
+        "quick_take_profit_candidate": bool(quick_take),
+        "fade_after_peak_flag": bool(post_drop <= -20.0 or drop10_min <= 5.0),
+        "risk_exit_flags": flags,
+    }
+
+
 def _build_performance_summary(candidates: list[dict]) -> dict[str, Any]:
     total = max(1, len(candidates))
     peaks = [_num(c.get("max_after_pct"), 0.0) for c in candidates]
@@ -233,6 +332,8 @@ def _build_performance_summary(candidates: list[dict]) -> dict[str, Any]:
     post_peak_drawdowns = [_num(c.get("post_peak_drawdown_pct"), 0.0) for c in candidates]
     retention = [_num(c.get("gain_retention_pct"), 0.0) for c in candidates if _num(c.get("gain_retention_pct"), -999.0) > -998.0]
     clean = [c for c in candidates if _candidate_is_clean_winner(c)]
+    clean_runner = [c for c in candidates if _candidate_is_clean_runner_winner(c)]
+    quick_fades = [c for c in candidates if _candidate_is_quick_fade(c)]
     danger = [c for c in candidates if _candidate_is_danger_winner(c)]
 
     def pct(pred) -> float:
@@ -246,6 +347,12 @@ def _build_performance_summary(candidates: list[dict]) -> dict[str, Any]:
         "candidate_count": len(candidates),
         "clean_winners_count": len(clean),
         "clean_winners_pct": round(len(clean) / total * 100.0, 1),
+        "clean_winners_meaning_ar": "فائز من ناحية الالتقاط المبكر وعدم هبوطه بقوة قبل الصعود؛ قد يتلاشى بعد القمة لذلك لا يعني Hold.",
+        "clean_runner_winners_count": len(clean_runner),
+        "clean_runner_winners_pct": round(len(clean_runner) / total * 100.0, 1),
+        "clean_runner_meaning_ar": "فائز حافظ على جزء كبير من الصعود بعد القمة؛ هذا أقرب لسهم يمكن التدرج في بيعه بدل الخروج السريع.",
+        "quick_fade_winners_count": len(quick_fades),
+        "quick_fade_winners_pct": round(len(quick_fades) / total * 100.0, 1),
         "danger_winners_count": len(danger),
         "danger_winners_pct": round(len(danger) / total * 100.0, 1),
         "weak_under_20pct_count": sum(1 for p in peaks if p < 20.0),
@@ -351,6 +458,11 @@ def _summary_item_for_exit(c: dict) -> dict[str, Any]:
         "gain_retention_pct": c.get("gain_retention_pct"),
         "chase_risk_label_ar": c.get("chase_risk_label_ar"),
         "detected_previous_session": c.get("detected_previous_session"),
+        "exit_action_label_ar": c.get("exit_action_label_ar"),
+        "suggested_sell_plan_ar": c.get("suggested_sell_plan_ar"),
+        "runner_hold_candidate": c.get("runner_hold_candidate"),
+        "quick_take_profit_candidate": c.get("quick_take_profit_candidate"),
+        "risk_exit_flags": c.get("risk_exit_flags"),
     }
 
 
@@ -425,7 +537,7 @@ def market_replay_lab_status() -> dict:
             "/replay-lab/small-stock-classic/run?path=/tmp/your_polygon_minutes.zip",
             "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5&daily_lookback_days=14&max_rows=250000",
         ],
-        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2f يقرأ عدة أيام فعليًا، يستخدم daily lookback أوسع، ويضيف ملخص أعلى قمة بعد الالتقاط مع سلوك الخروج بعد القمة: وقت الوصول للقمة، سرعة الهبوط، نسبة الاحتفاظ بالمكسب، وتفريق Clean Winners عن Danger Winners.",
+        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2g يقرأ عدة أيام فعليًا، يستخدم daily lookback أوسع، ويضيف طبقة خروج لا تمنع ظهور الفرص: تميز بين Clean Entry وClean Runner، وتضيف خطة بيع مختصرة حسب سرعة القمة/التلاشي.",
         "small_stock_rules_ar": [
             "فريم 5د/15د عند المضاربة اللحظية.",
             "مستويات Fib 38.2/50/61.8/78.6 من آخر قاع إلى آخر قمة، مع تركيز على 61.8/78.6.",
@@ -714,6 +826,7 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
                     ev["exit_behavior_label_ar"] = "Runner حافظ نسبيًا"
                 else:
                     ev["exit_behavior_label_ar"] = "حركة عادية تحتاج إدارة"
+                ev.update(_exit_decision_overlay(ev))
         rows_by_file[source_name] = file_rows
         # Finalize this file's daily high/low/close so the next downloaded minute
         # file can use it as previous session context even when daily files are unavailable.
@@ -770,12 +883,19 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
             "minutes_to_drop_10pct_from_peak": c.get("minutes_to_drop_10pct_from_peak"),
             "gain_retention_pct": c.get("gain_retention_pct"),
             "exit_behavior_label_ar": c.get("exit_behavior_label_ar"),
+            "exit_action_label_ar": c.get("exit_action_label_ar"),
+            "suggested_sell_plan_ar": c.get("suggested_sell_plan_ar"),
+            "runner_hold_candidate": c.get("runner_hold_candidate"),
+            "quick_take_profit_candidate": c.get("quick_take_profit_candidate"),
+            "risk_exit_flags": c.get("risk_exit_flags"),
         }
 
     top_peak_movers = [_summary_item(c) for c in candidates[:20]]
     top_previous_session_peak_movers = [_summary_item(c) for c in candidates if c.get("detected_previous_session")][:20]
     late_or_chase_peak_movers = [_summary_item(c) for c in candidates if str(c.get("chase_risk_at_detection")) in {"late", "very_late"}][:20]
     clean_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_clean_winner(c)][:20]
+    clean_runner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_clean_runner_winner(c)][:20]
+    quick_take_profit_movers = [_summary_item(c) for c in candidates if c.get("quick_take_profit_candidate")][:20]
     danger_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_danger_winner(c)][:20]
     peak_summary = {
         "note_ar": "أعلى ارتفاع هنا هو أعلى High ظهر في شموع الدقيقة بعد الالتقاط، حتى لو لم يغلق السهم عليه. استخدمه لقياس الإمكانات، وليس كربح مضمون.",
@@ -783,6 +903,8 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "top_previous_session_peak_movers": top_previous_session_peak_movers,
         "late_or_chase_peak_movers": late_or_chase_peak_movers,
         "clean_winner_peak_movers": clean_winner_peak_movers,
+        "clean_runner_peak_movers": clean_runner_peak_movers,
+        "quick_take_profit_movers": quick_take_profit_movers,
         "danger_winner_peak_movers": danger_winner_peak_movers,
     }
     performance_summary = _build_performance_summary(candidates)
