@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v1c_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2_replay_small_classic_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -527,6 +527,220 @@ def _price_filter(row: dict) -> dict:
         "rule_ar": "فوق 150$ لا يدخل الأقسام العملية ولا Plan Memory إلا إذا اجتمعت جودة عالية + جاهزية + سيولة واضحة.",
     }
 
+
+
+def _nested(row: dict, keys: list[str], default: Any = None) -> Any:
+    """Read a value from flat keys or common nested intraday/live blocks."""
+    if not isinstance(row, dict):
+        return default
+    for key in keys:
+        if key in row and row.get(key) not in (None, ""):
+            return row.get(key)
+    for parent in ["intraday_context", "intraday", "live_intraday", "polygon_intraday", "evidence", "market_context"]:
+        block = row.get(parent)
+        if isinstance(block, dict):
+            for key in keys:
+                if key in block and block.get(key) not in (None, ""):
+                    return block.get(key)
+    return default
+
+
+def _first_nested(row: dict, keys: list[str], default: float = 0.0) -> float:
+    val = _nested(row, keys, None)
+    return _num(val, default)
+
+
+def _company_text(row: dict) -> str:
+    return " ".join([
+        _s(row.get("symbol")), _s(row.get("company_name")), _s(row.get("name")),
+        _s(row.get("sector")), _s(row.get("industry")), _s(row.get("country")),
+    ]).lower()
+
+
+def _behavior_group(row: dict, price: float) -> dict:
+    text = _company_text(row)
+    sector = _s(row.get("sector") or row.get("Sector") or row.get("industry"))
+    shares_float = _first_nested(row, ["shares_float", "float_shares", "free_float", "public_float", "float"], 0.0)
+    market_cap = _first_nested(row, ["market_cap", "marketCap", "mkt_cap", "approx_market_cap"], 0.0)
+    tags: list[str] = []
+    if any(w in text for w in ["china", "chinese", "hong kong", "beijing", "shanghai", "shenzhen", "cayman"]):
+        tags.append("موجة صينية/ADR")
+    if any(w in text for w in ["japan", "japanese", "tokyo"]):
+        tags.append("موجة يابانية")
+    if 0 < shares_float <= 1_000_000:
+        tags.append("Float تحت مليون")
+    elif 0 < shares_float <= 10_000_000:
+        tags.append("Low Float")
+    if 0 < price < 5:
+        tags.append("موجة سنتات")
+    if sector:
+        tags.append(f"قطاع: {sector[:40]}")
+    if market_cap and market_cap <= 300_000_000:
+        tags.append("Micro Cap")
+    elif market_cap and market_cap <= 2_000_000_000:
+        tags.append("Small Cap")
+    return {
+        "shares_float": _round(shares_float, 0),
+        "market_cap": _round(market_cap, 0),
+        "tags": _dedupe(tags, 6),
+    }
+
+
+def _classic_small_stock_setup(row: dict, zones: dict, flags_hint: dict | None = None) -> dict:
+    """Small active stock logic based on the user's shared classic rules.
+
+    This does not create BUY_NOW. It separates small-stock/speculation setups
+    from normal Strong/Cautious and looks for: Fib 38/50/61.8/78.6 zones, VWAP
+    reclaim/pullback, and previous daily high reclaim/hold. It also marks chase
+    risk when the stock has already run away from these areas.
+    """
+    price = _price(row)
+    change = _change_pct(row)
+    rv = _num(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", 0))), 0.0)
+    dollar = _first_nested(row, ["dollar_volume", "live_dollar_volume", "day_dollar_volume", "pre_market_dollar_volume"], 0.0)
+    volume = _first_nested(row, ["volume", "day_volume", "pre_market_volume"], 0.0)
+    spread_pct = _first_nested(row, ["spread_pct", "bid_ask_spread_pct", "spread_percent"], 0.0)
+    vwap = _first_nested(row, ["vwap_proxy", "vwap", "current_vwap", "session_vwap"], 0.0)
+    above_vwap = bool(_nested(row, ["above_vwap_proxy", "above_vwap", "price_above_vwap"], False))
+    prev_high = _first_nested(row, ["previous_day_high", "prev_day_high", "prior_day_high", "previous_high", "prev_high"], 0.0)
+    day_low = _first_nested(row, ["session_low", "day_low", "low_live", "low"], 0.0)
+    day_high = _first_nested(row, ["session_high", "day_high", "high_live", "high"], 0.0)
+    if day_low <= 0:
+        day_low = _first_nested(row, ["nearest_support", "support_price", "display_support_price"], 0.0)
+    if day_high <= 0:
+        day_high = _first_nested(row, ["nearest_resistance", "resistance_price", "display_resistance_price"], 0.0)
+
+    # User comfort: small/speculation candidates; not normal high-priced flow.
+    eligible_price = bool(1.0 <= price <= 20.0)
+    penny_or_low = bool(1.0 <= price <= 12.0)
+    liquid_enough = bool(rv >= 1.2 or dollar >= 500_000 or volume >= 120_000 or _first_nested(row, ["pre_market_volume"], 0.0) >= 80_000)
+    spread_ok = bool(spread_pct <= 0 or spread_pct <= (2.5 if price < 5 else 1.4))
+
+    fib_levels = {}
+    fib_state = "unavailable"
+    fib_reasons: list[str] = []
+    if day_low > 0 and day_high > day_low * 1.015:
+        rng = day_high - day_low
+        # Pullback retracement levels drawn from latest clear low to latest high.
+        fib_levels = {
+            "38.2": _round(day_high - rng * 0.382, 4),
+            "50": _round(day_high - rng * 0.500, 4),
+            "61.8": _round(day_high - rng * 0.618, 4),
+            "78.6": _round(day_high - rng * 0.786, 4),
+        }
+        f382, f50, f618, f786 = fib_levels["38.2"], fib_levels["50"], fib_levels["61.8"], fib_levels["78.6"]
+        golden_low = min(f618, f786)
+        golden_high = max(f50, f618)
+        near_golden = golden_low * 0.992 <= price <= golden_high * 1.008
+        reclaimed_618 = bool(price >= f618 and _abs_pct_distance(price, f618) <= 1.8 and change < 9.0)
+        if near_golden:
+            fib_state = "golden_zone_watch"
+            fib_reasons.append(f"داخل/قريب المنطقة الذهبية Fib 61.8–78.6 تقريبًا: {round(golden_low, 2)} - {round(max(f618, f786), 2)}")
+        elif reclaimed_618:
+            fib_state = "fib_618_reclaim"
+            fib_reasons.append(f"استعاد/قريب من Fib 61.8 عند {round(f618, 2)} بشرط إغلاق شمعة فوقه")
+        elif price > f382 * 1.018 and change >= 5.0:
+            fib_state = "extended_above_fib"
+            fib_reasons.append("ابتعد فوق مستويات الفيبو؛ لا تلحق الشمعة الخضراء وانتظر رجوع لمنطقة أدق")
+        else:
+            fib_state = "between_levels"
+            fib_reasons.append("بين مستويات الفيبو؛ الأفضل انتظار إغلاق واضح فوق 61.8 أو رجوع للمنطقة الذهبية")
+
+    vwap_state = "unavailable"
+    vwap_reasons: list[str] = []
+    vwap_dist = 999.0
+    if vwap > 0 and price > 0:
+        vwap_dist = ((price - vwap) / vwap) * 100.0
+        if -0.45 <= vwap_dist <= 0.9:
+            vwap_state = "vwap_pullback"
+            vwap_reasons.append(f"قريب من VWAP {round(vwap, 2)}؛ مناسب للمراقبة بشرط إغلاق شمعة 5د/15د فوقه")
+        elif 0.9 < vwap_dist <= 2.2 and above_vwap:
+            vwap_state = "vwap_reclaim_hold"
+            vwap_reasons.append(f"فوق VWAP {round(vwap, 2)} بعد استعادة/ثبات؛ لا يطارد إذا ابتعد كثيرًا")
+        elif vwap_dist < -0.45:
+            vwap_state = "below_vwap_wait_reclaim"
+            vwap_reasons.append(f"تحت VWAP {round(vwap, 2)}؛ انتظر إغلاق شمعة فوقه")
+        else:
+            vwap_state = "extended_from_vwap"
+            vwap_reasons.append("ابتعد عن VWAP؛ الأفضل انتظار Pullback بدل اللحاق")
+
+    prev_high_state = "unavailable"
+    prev_high_reasons: list[str] = []
+    prev_high_dist = 999.0
+    if prev_high > 0 and price > 0:
+        prev_high_dist = ((price - prev_high) / prev_high) * 100.0
+        if -0.6 <= prev_high_dist <= 1.2:
+            prev_high_state = "previous_high_zone"
+            prev_high_reasons.append(f"قريب من أعلى شمعة يومية سابقة {round(prev_high, 2)}؛ منطقة شراء/تفعيل كلاسيكية بشرط إغلاق فوقها")
+        elif 1.2 < prev_high_dist <= 3.0 and change < 7.0:
+            prev_high_state = "previous_high_reclaim_hold"
+            prev_high_reasons.append(f"استعاد قمة أمس {round(prev_high, 2)} ويحتاج ثبات بدون مطاردة")
+        elif prev_high_dist > 3.0:
+            prev_high_state = "extended_above_previous_high"
+            prev_high_reasons.append("ابتعد فوق قمة أمس؛ ليس دخولًا كلاسيكيًا جديدًا إلا بعد Pullback")
+        else:
+            prev_high_state = "below_previous_high"
+            prev_high_reasons.append("تحت قمة أمس؛ انتظر إغلاق شمعة فوقها")
+
+    score = 0.0
+    reasons: list[str] = []
+    if eligible_price:
+        score += 18; reasons.append("سعر مناسب لرادار الأسهم الصغيرة")
+    if penny_or_low:
+        score += 6; reasons.append("سعر منخفض سريع الحركة؛ حجم الصفقة يجب أن يكون صغيرًا")
+    if liquid_enough:
+        score += 20; reasons.append(f"نشاط/حجم مقبول للأسهم الصغيرة RVOL {round(rv, 2)}x")
+    if spread_ok:
+        score += 8; reasons.append("السبريد مقبول مبدئيًا إن توفرت بياناته")
+    if fib_state in {"golden_zone_watch", "fib_618_reclaim"}:
+        score += 18; reasons.extend(fib_reasons[:1])
+    if vwap_state in {"vwap_pullback", "vwap_reclaim_hold"}:
+        score += 18; reasons.extend(vwap_reasons[:1])
+    if prev_high_state in {"previous_high_zone", "previous_high_reclaim_hold"}:
+        score += 16; reasons.extend(prev_high_reasons[:1])
+    if change >= 8.0 and not (fib_state == "golden_zone_watch" or vwap_state == "vwap_pullback"):
+        score -= 22; reasons.append(f"مرتفع {round(change, 2)}%؛ خطر مطاردة إلا إذا رجع لمنطقة فيبو/VWAP/قمة أمس")
+    elif change <= 5.0:
+        score += 7; reasons.append("لم يتحول إلى مطاردة كبيرة بعد")
+
+    setup_state = "watch"
+    if not eligible_price:
+        setup_state = "not_small_price"
+    elif not liquid_enough:
+        setup_state = "needs_volume"
+    elif change >= 8.0 and score < 56:
+        setup_state = "chase_risk_wait_pullback"
+    elif fib_state in {"golden_zone_watch", "fib_618_reclaim"}:
+        setup_state = "fib_setup"
+    elif vwap_state in {"vwap_pullback", "vwap_reclaim_hold"}:
+        setup_state = "vwap_setup"
+    elif prev_high_state in {"previous_high_zone", "previous_high_reclaim_hold"}:
+        setup_state = "previous_high_setup"
+    elif score >= 52:
+        setup_state = "active_small_stock_watch"
+
+    behavior = _behavior_group(row, price)
+    return {
+        "version": OPPORTUNITY_RADAR_VERSION,
+        "eligible": bool(eligible_price and liquid_enough and spread_ok and score >= 48),
+        "candidate": bool(eligible_price and liquid_enough and spread_ok and setup_state not in {"not_small_price", "needs_volume"}),
+        "setup_state": setup_state,
+        "score": _round(score, 2),
+        "price": _round(price, 4),
+        "change_pct": _round(change, 2),
+        "fib_levels": fib_levels,
+        "fib_state": fib_state,
+        "vwap": _round(vwap, 4),
+        "vwap_state": vwap_state,
+        "vwap_distance_pct": _round(vwap_dist, 2) if vwap_dist != 999.0 else 999.0,
+        "previous_day_high": _round(prev_high, 4),
+        "previous_high_state": prev_high_state,
+        "previous_high_distance_pct": _round(prev_high_dist, 2) if prev_high_dist != 999.0 else 999.0,
+        "behavior_group": behavior,
+        "reasons": _dedupe(reasons + fib_reasons + vwap_reasons + prev_high_reasons, 10),
+        "rule_ar": "للأسهم الصغيرة: لا نلحق الشمعة الخضراء؛ نراقب Fib 61.8/78.6، VWAP بإغلاق شمعة، وقمة اليوم السابق.",
+    }
+
 def _technical_reasons(row: dict, zones: dict) -> list[str]:
     reasons: list[str] = []
     decision = _s(row.get("decision"))
@@ -610,11 +824,21 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         resistance_center = pz_high
         resistance_dist = ((resistance_center - price) / price * 100.0) if price > 0 else 999.0
     near_resistance_now = bool((nr or (_s(pz.get("kind")) == "congestion" and pz_high > 0)) and -0.25 <= resistance_dist <= max(1.2, atr_pct * 0.55))
-    extended_after_move = bool((change >= 4.5 or from_open >= 4.0) and (near_resistance_now or in_upper_congestion or close_pos >= 70))
-    structural_support_near = bool(price > 0 and ns and (ns.get("low", 0) <= price <= ns.get("high", 0) * 1.012 or 0 <= support_dist <= max(2.2, atr_pct * 0.75)))
-    lower_decision_zone_bounce = bool(_s(pz.get("kind")) == "congestion" and pz_low > 0 and pz_pos <= 0.35 and change <= 2.0)
+    resistance_closer_than_support = bool(
+        resistance_dist != 999.0 and support_dist != 999.0 and resistance_dist >= -0.25 and resistance_dist < max(0.15, support_dist * 0.72)
+    )
+    support_bounce_distance_limit = max(1.45, min(2.15, atr_pct * 0.55 if atr_pct > 0 else 1.45))
+    extended_after_move = bool((change >= 3.8 or from_open >= 3.5) and (near_resistance_now or in_upper_congestion or close_pos >= 68 or resistance_closer_than_support))
+    structural_support_near = bool(
+        price > 0 and ns and not resistance_closer_than_support
+        and (
+            ns.get("low", 0) <= price <= ns.get("high", 0) * 1.006
+            or 0 <= support_dist <= support_bounce_distance_limit
+        )
+    )
+    lower_decision_zone_bounce = bool(_s(pz.get("kind")) == "congestion" and pz_low > 0 and pz_pos <= 0.28 and change <= 1.8 and not resistance_closer_than_support)
     near_support_raw = bool(structural_support_near or lower_decision_zone_bounce)
-    near_support = bool(near_support_raw and not extended_after_move and change < 4.5)
+    near_support = bool(near_support_raw and not extended_after_move and change < 3.5 and not resistance_closer_than_support)
     reclaim = bool(row.get("support_reclaimed_flag") or row.get("reclaimed_support_level") or final_code == "RECLAIM_REQUIRED" or _s(pz.get("kind")) == "reclaim")
     broken_needs_reclaim = bool(row.get("support_broken_flag") or row.get("broken_support_level") or final_code == "RECLAIM_REQUIRED")
 
@@ -638,6 +862,10 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     news_context = " ".join([_s(row.get("news_badge")), _s(row.get("news_title")), _s(row.get("news_category")), _s(row.get("news_scope")), _s(row.get("news_context_note"))]).lower()
     catalyst_keywords = ["fda", "clinical", "trial", "earnings", "merger", "acquisition", "upgrade", "downgrade", "price target", "contract", "approval", "biotech", "عقد", "ترقية", "أرباح", "اندماج", "استحواذ"]
     catalyst = bool(_s(row.get("news_badge")) and any(k in news_context for k in catalyst_keywords + ["positive", "negative", "legal"]))
+
+    classic_small = _classic_small_stock_setup(row, zones, {})
+    classic_candidate = bool(classic_small.get("eligible") or classic_small.get("candidate"))
+    classic_chase_risk = _s(classic_small.get("setup_state")) == "chase_risk_wait_pullback"
 
     continuation_pullback = bool((change >= 2.0 or _s(row.get("move_stage")) in {"Continuation Watch", "Requires Pullback"}) and not no_chase and (entry > 0 and price <= entry * 1.035) and quality >= 58)
 
@@ -699,8 +927,12 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "pre_trigger_reasons": _dedupe(pre_reasons, 8),
         "high_risk_day": high_risk_day,
         "low_float_pm": low_float_pm,
+        "classic_small_stock": classic_small,
+        "classic_small_candidate": classic_candidate,
+        "classic_small_chase_risk": classic_chase_risk,
         "extended_after_move": extended_after_move,
         "near_resistance_now": near_resistance_now,
+        "resistance_closer_than_support": resistance_closer_than_support,
         "gap_watch": gap_watch,
         "catalyst": catalyst,
         "continuation_pullback": continuation_pullback,
@@ -725,8 +957,11 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
         if flags.get("reclaim"):
             return "cautious_reclaim", "🟠 دخول بحذر — Reclaim", "cautious_entries", flags.get("reclaim_reasons", [])
         return "cautious", "🟠 دخول بحذر", "cautious_entries", ["خطة جيدة لكنها تحتاج انضباطًا وحجمًا أصغر من Strong."]
-    if flags.get("extended_after_move") and flags.get("high_risk_day"):
+    if flags.get("extended_after_move") and (flags.get("high_risk_day") or (flags.get("classic_small_stock") or {}).get("candidate")):
         return "high_risk_day_trade", "⚡ مضاربة عالية المخاطرة", "high_risk_day_trade", ["تحرك قوي وقريب من مقاومة/منطقة قرار؛ لا يصنف Support Bounce ولا يُطارد."]
+    classic = flags.get("classic_small_stock") or {}
+    if flags.get("classic_small_candidate") and not flags.get("classic_small_chase_risk") and not flags.get("extended_after_move"):
+        return "small_stock_classic", "🎯 أسهم صغيرة — Fib/VWAP/قمة أمس", "small_stock_classic", classic.get("reasons", []) or ["مرشح سهم صغير وفق فيبو/VWAP/قمة اليوم السابق؛ ليس Strong عادي."]
     if flags.get("pre_trigger") and not flags.get("extended_after_move"):
         return "pre_trigger", "⏳ قريب من التفعيل", "pre_trigger", flags.get("pre_trigger_reasons", [])
     if flags.get("reclaim"):
@@ -776,6 +1011,8 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
         base_extra = flags.get("reclaim_score", 0.0)
     elif bucket == "pre_trigger":
         base_extra = flags.get("pre_trigger_score", 0.0)
+    elif bucket == "small_stock_classic":
+        base_extra = 24.0 + _num((flags.get("classic_small_stock") or {}).get("score"), 0.0) * 0.55
     elif bucket == "low_float_premarket":
         base_extra = 20.0 + flags.get("liquidity_score", 0.0)
     elif bucket == "high_risk_day_trade":
@@ -804,6 +1041,7 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     out["technical_explainer_reasons"] = merged_reasons
     out["opportunity_rank_score"] = _bucket_rank(out, base=base_extra)
     out["opportunity_flow_flags"] = flags
+    out["small_stock_classic_setup"] = flags.get("classic_small_stock") or {}
     out["why_appeared_ar"] = "، ".join(merged_reasons[:4])
 
     # Make cards educational without overriding stronger existing summaries.
@@ -818,7 +1056,7 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
                 out[key] = txt.replace("لا تطارد", "انتظر تأكيد")
 
     # Let old UI plan badge show the new flow if it was generic monitoring.
-    if bucket in {"support_bounce", "reclaim", "pre_trigger", "continuation_pullback", "gap_fill_watch", "catalyst_watch", "low_float_premarket", "high_risk_day_trade"}:
+    if bucket in {"support_bounce", "reclaim", "pre_trigger", "continuation_pullback", "small_stock_classic", "gap_fill_watch", "catalyst_watch", "low_float_premarket", "high_risk_day_trade"}:
         if _s(out.get("display_plan_family_label")) in {"", "الخطة الحالية"}:
             out["display_plan_family_label"] = stage_label
         out["special_bucket_reason"] = out["why_appeared_ar"]
@@ -839,6 +1077,7 @@ def enrich_rows_opportunity_radar(rows: list[dict], market_phase: str = "") -> l
 
 
 OPPORTUNITY_BUCKET_KEYS = [
+    "small_stock_classic_radar",
     "support_bounce_candidates",
     "reclaim_candidates",
     "pre_trigger_candidates",
@@ -907,6 +1146,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             bucket_map["pre_trigger_candidates"].append(row)
         elif bucket == "continuation_pullback":
             bucket_map["continuation_pullback_candidates"].append(row)
+        elif bucket == "small_stock_classic":
+            bucket_map["small_stock_classic_radar"].append(row)
         elif bucket == "high_risk_day_trade":
             bucket_map["high_risk_day_trades"].append(row)
         elif bucket == "low_float_premarket":
@@ -919,6 +1160,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
     ordered_keys = [
+        "small_stock_classic_radar",
         "pre_trigger_candidates",
         "support_bounce_candidates",
         "reclaim_candidates",
@@ -1074,7 +1316,7 @@ def _should_record(row: dict) -> bool:
     bucket = _s(row.get("opportunity_bucket"))
     if decision in {"دخول قوي", "دخول بحذر"}:
         return True
-    return bucket in {"pre_trigger", "support_bounce", "reclaim", "low_float_premarket", "high_risk_day_trade", "continuation_pullback"}
+    return bucket in {"pre_trigger", "support_bounce", "reclaim", "small_stock_classic", "low_float_premarket", "high_risk_day_trade", "continuation_pullback"}
 
 
 def _deprioritize_existing_high_price_plan(store: dict[str, dict], row: dict) -> bool:
@@ -1262,5 +1504,6 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
             "exception_rule_ar": "الاستثناء يحتاج عادة جودة >= 90 تقريبًا + جاهزية عالية + سيولة واضحة، أو Strong BUY_NOW مكتمل.",
         },
         "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
+        "small_stock_classic_rule_ar": "للأسهم الصغيرة: فريم 5د/15د، Fib 61.8/78.6، VWAP بإغلاق شمعة، وقمة اليوم السابق؛ لا نطارد الشمعة الخضراء.",
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }
