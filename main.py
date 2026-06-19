@@ -589,7 +589,32 @@ def active_plans_status_endpoint(limit: int = 100):
 def opportunity_radar_status_endpoint():
     snapshot = get_json("last_trade_scan_snapshot", {}) or {}
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
-    return opportunity_radar_status_payload(rows if isinstance(rows, list) else [])
+    rows = rows if isinstance(rows, list) else []
+    phase = snapshot.get("market_phase", "") if isinstance(snapshot, dict) else ""
+    if not phase:
+        phase = get_market_phase()
+    payload = opportunity_radar_status_payload(rows)
+    payload["snapshot_rows_count"] = len(rows)
+    payload["status_note_ar"] = "status لا يعرض كل الفرص؛ الصفحة تعتمد على /trade-scan و /radar-live-refresh. V2L2 يصلح خطأ trade-scan الذي كان يمنع تحميل الأقسام."
+    try:
+        enriched = enrich_rows_opportunity_radar(rows, market_phase=phase)
+        sections_preview = build_opportunity_radar_sections(enriched, market_phase=phase)
+        payload["status_enriched_rows_current_version"] = len(enriched)
+        payload["sections_preview_counts"] = {
+            "learning_opportunity_candidates_count": int(sections_preview.get("learning_opportunity_candidates_count", 0) or 0),
+            "small_stock_classic_radar_count": int(sections_preview.get("small_stock_classic_radar_count", 0) or 0),
+            "pre_trigger_candidates_count": int(sections_preview.get("pre_trigger_candidates_count", 0) or 0),
+            "support_bounce_candidates_count": int(sections_preview.get("support_bounce_candidates_count", 0) or 0),
+            "reclaim_candidates_count": int(sections_preview.get("reclaim_candidates_count", 0) or 0),
+            "continuation_pullback_candidates_count": int(sections_preview.get("continuation_pullback_candidates_count", 0) or 0),
+            "low_float_premarket_radar_count": int(sections_preview.get("low_float_premarket_radar_count", 0) or 0),
+            "high_risk_day_trades_count": int(sections_preview.get("high_risk_day_trades_count", 0) or 0),
+        }
+        payload["closed_market_prep_added_count"] = int(sections_preview.get("closed_market_prep_added_count", 0) or 0)
+        payload["closed_market_opportunity_mode"] = sections_preview.get("closed_market_opportunity_mode", {})
+    except Exception as exc:
+        payload["sections_preview_error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+    return payload
 
 
 @app.get("/opportunity-radar/plan-memory/status")
@@ -2825,7 +2850,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "learning_bridge_debug": opportunity_radar_payload.get("learning_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_bridge_rule_ar": opportunity_radar_payload.get("learning_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
-        "learning_opportunity_candidates": learning_opportunity_candidates[:limit],
+        "learning_opportunity_candidates": learning_opportunity_candidates[:25],
         "support_bounce_candidates_count": len(support_bounce_candidates),
         "reclaim_candidates_count": len(reclaim_candidates),
         "pre_trigger_candidates_count": len(pre_trigger_candidates),
