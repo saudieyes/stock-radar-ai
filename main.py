@@ -241,6 +241,11 @@ from app.market_replay_lab import (
     run_small_stock_classic_replay_from_path,
     run_small_stock_classic_replay_from_polygon,
 )
+from app.learning_archive_v1 import (
+    LEARNING_ARCHIVE_VERSION,
+    learning_archive_status,
+    build_learning_archive_from_polygon,
+)
 from app.polygon_weekly_builder import (
     build_weekly_candidates_from_path,
     build_weekly_candidates_from_paths,
@@ -648,6 +653,41 @@ def replay_lab_small_stock_classic_run_endpoint(path: str = "", max_files: int =
 @app.get("/replay-lab/small-stock-classic/run-polygon")
 def replay_lab_small_stock_classic_pull_run_endpoint(end_date: str = "", minute_days: int = 5, max_rows: int = 250000, max_candidates: int = 120, daily_lookback_days: int = 14, force: bool = False, redownload_processed: bool = True):
     return run_small_stock_classic_replay_from_polygon(end_date=end_date, minute_days=minute_days, max_rows=max_rows, max_candidates=max_candidates, daily_lookback_days=daily_lookback_days, force=force, redownload_processed=redownload_processed)
+
+
+
+@app.get("/learning-archive/status")
+@app.get("/replay-lab/learning-archive/status")
+def learning_archive_status_endpoint():
+    return learning_archive_status()
+
+
+@app.get("/learning-archive/build")
+@app.get("/replay-lab/learning-archive/build")
+def learning_archive_build_endpoint(
+    end_date: str = "",
+    minute_days: int = 5,
+    daily_lookback_days: int = 14,
+    max_rows: int = 250000,
+    max_candidates: int = 120,
+    redownload_processed: bool = True,
+    force: bool = False,
+    persist: bool = False,
+    include_rows: bool = False,
+    window_label: str = "",
+):
+    return build_learning_archive_from_polygon(
+        end_date=end_date,
+        minute_days=minute_days,
+        daily_lookback_days=daily_lookback_days,
+        max_rows=max_rows,
+        max_candidates=max_candidates,
+        redownload_processed=redownload_processed,
+        force=force,
+        persist=persist,
+        include_rows=include_rows,
+        window_label=window_label,
+    )
 
 @app.get("/paper-trading/status")
 def paper_trading_status_endpoint():
