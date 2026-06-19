@@ -3554,6 +3554,19 @@
     }
 
     function renderLevelQuickGrid(stock, livePrice) {
+      const zonesV2 = stock?.support_resistance_zones_v2 || null;
+      const priceZone = zonesV2?.price_zone || null;
+      if (priceZone && String(priceZone.kind || '') === 'congestion') {
+        const low = numericValue(priceZone.low);
+        const high = numericValue(priceZone.high);
+        const quickLevels = [
+          levelQuickChip('منطقة قرار', `${formatNumber(low)} - ${formatNumber(high)}`, 'لا قرار من داخلها', 'support'),
+          low > 0 ? levelQuickChip('حد الفشل', formatNumber(low), 'كسرها يضعف الخطة', 'broken-support') : '',
+          high > 0 ? levelQuickChip('حد التفعيل', formatNumber(high), 'الخروج فوقها أهم من فروقات السنت', 'resistance') : '',
+          levelQuickChip('قرب القمة', stock?.major_resistance ? formatNumber(stock.major_resistance) : (stock?.high_52w ? formatNumber(stock.high_52w) : (stock?.year_high ? formatNumber(stock.year_high) : '')), stock?.major_resistance_label || stock?.high_label || stock?.ath_label || '', 'high')
+        ].filter(Boolean).join('');
+        return quickLevels ? `<div class="level-quick-grid" data-dynamic-levels="1">${quickLevels}</div>` : '';
+      }
       const supportSanity = buildSupportSanity(stock, livePrice);
       const resistanceSanity = buildResistanceSanity(stock, livePrice);
       const quickLevels = [
