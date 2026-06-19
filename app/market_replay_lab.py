@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from app.opportunity_radar import OPPORTUNITY_RADAR_VERSION, enrich_row_opportunity_radar
 
-MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1c_peak_summary_daily_lookback_2026_06_19"
+MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1d_exit_behavior_performance_2026_06_19"
 
 
 def _s(v: Any) -> str:
@@ -153,6 +153,207 @@ def _chase_risk(max_gain_before: float, change_at_detection: float) -> tuple[str
     return "early", "مبكر"
 
 
+def _hhmm_to_minutes(hhmm: Any) -> int | None:
+    try:
+        txt = str(hhmm or "")[:5]
+        if len(txt) != 5 or ":" not in txt:
+            return None
+        h, m = txt.split(":", 1)
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
+
+
+def _minutes_between(start: Any, end: Any) -> int | None:
+    a = _hhmm_to_minutes(start)
+    b = _hhmm_to_minutes(end)
+    if a is None or b is None:
+        return None
+    return max(0, b - a)
+
+
+def _time_to_label_ar(minutes: Any) -> str:
+    m = _num(minutes, -1)
+    if m < 0:
+        return "غير متاح"
+    if m <= 30:
+        return "سريع جدًا (أقل من 30 دقيقة)"
+    if m <= 60:
+        return "سريع (30-60 دقيقة)"
+    if m <= 120:
+        return "متوسط السرعة (1-2 ساعة)"
+    if m <= 240:
+        return "يمتد لعدة ساعات (2-4 ساعات)"
+    if m <= 480:
+        return "Runner بطيء/ممتد (4-8 ساعات)"
+    return "استمرار طويل حتى آخر اليوم/بعده"
+
+
+def _distribution(values: list[float], bins: list[tuple[float, float, str]]) -> list[dict[str, Any]]:
+    total = max(1, len(values))
+    out: list[dict[str, Any]] = []
+    for lo, hi, label in bins:
+        count = 0
+        for v in values:
+            if lo <= v < hi:
+                count += 1
+        out.append({"range": label, "count": count, "pct": round(count / total * 100.0, 1)})
+    return out
+
+
+def _candidate_is_late(c: dict) -> bool:
+    return str(c.get("chase_risk_at_detection") or "") in {"late", "very_late"}
+
+
+def _candidate_is_clean_winner(c: dict) -> bool:
+    return (
+        bool(c.get("detected_previous_session"))
+        and str(c.get("chase_risk_at_detection") or "") in {"early", "watch_carefully"}
+        and _num(c.get("max_after_pct"), 0.0) >= 20.0
+        and _num(c.get("min_after_pct"), 0.0) > -10.0
+    )
+
+
+def _candidate_is_danger_winner(c: dict) -> bool:
+    return (
+        _num(c.get("max_after_pct"), 0.0) >= 20.0
+        and (
+            _candidate_is_late(c)
+            or _num(c.get("min_after_pct"), 0.0) <= -10.0
+            or _num(c.get("post_peak_drawdown_pct"), 0.0) <= -20.0
+        )
+    )
+
+
+def _build_performance_summary(candidates: list[dict]) -> dict[str, Any]:
+    total = max(1, len(candidates))
+    peaks = [_num(c.get("max_after_pct"), 0.0) for c in candidates]
+    worst = [_num(c.get("min_after_pct"), 0.0) for c in candidates]
+    time_to_peak = [_num(c.get("minutes_to_peak"), -1.0) for c in candidates if _num(c.get("minutes_to_peak"), -1.0) >= 0]
+    post_peak_drawdowns = [_num(c.get("post_peak_drawdown_pct"), 0.0) for c in candidates]
+    retention = [_num(c.get("gain_retention_pct"), 0.0) for c in candidates if _num(c.get("gain_retention_pct"), -999.0) > -998.0]
+    clean = [c for c in candidates if _candidate_is_clean_winner(c)]
+    danger = [c for c in candidates if _candidate_is_danger_winner(c)]
+
+    def pct(pred) -> float:
+        return round(sum(1 for c in candidates if pred(c)) / total * 100.0, 1)
+
+    # Important: this is not the true all-market missed-opportunity rate.  The
+    # run receives already-detected candidates; a separate missed-opportunity
+    # replay over all symbols is required to measure winners the radar never saw.
+    return {
+        "note_ar": "هذه الإحصاءات من المرشحين الـ replay فقط، وليست قياسًا لكل السوق. قياس الأسهم الرابحة التي لم تلتقطها الأداة يحتاج مسح missed-opportunities على كل الرموز.",
+        "candidate_count": len(candidates),
+        "clean_winners_count": len(clean),
+        "clean_winners_pct": round(len(clean) / total * 100.0, 1),
+        "danger_winners_count": len(danger),
+        "danger_winners_pct": round(len(danger) / total * 100.0, 1),
+        "weak_under_20pct_count": sum(1 for p in peaks if p < 20.0),
+        "weak_under_20pct_pct": round(sum(1 for p in peaks if p < 20.0) / total * 100.0, 1),
+        "risk_failure_drawdown_over_10pct_count": sum(1 for d in worst if d <= -10.0),
+        "risk_failure_drawdown_over_10pct_pct": round(sum(1 for d in worst if d <= -10.0) / total * 100.0, 1),
+        "peak_gain_distribution": _distribution(peaks, [
+            (0, 10, "0-10%"), (10, 20, "10-20%"), (20, 30, "20-30%"),
+            (30, 50, "30-50%"), (50, 10_000, "50%+")
+        ]),
+        "worst_drawdown_distribution_after_detection": _distribution(worst, [
+            (0, 10_000, "لم ينزل تحت سعر الالتقاط"), (-3, 0, "0 إلى -3%"),
+            (-5, -3, "-3 إلى -5%"), (-10, -5, "-5 إلى -10%"),
+            (-20, -10, "-10 إلى -20%"), (-10_000, -20, "أكثر من -20%")
+        ]),
+        "post_peak_drawdown_distribution": _distribution(post_peak_drawdowns, [
+            (-3, 1, "تراجع خفيف بعد القمة <3%"), (-5, -3, "تراجع 3-5% بعد القمة"),
+            (-10, -5, "تراجع 5-10% بعد القمة"), (-20, -10, "تراجع 10-20% بعد القمة"),
+            (-10_000, -20, "تراجع عنيف >20% بعد القمة")
+        ]),
+        "time_to_peak_distribution": _distribution(time_to_peak, [
+            (0, 31, "أقل من 30 دقيقة"), (31, 61, "30-60 دقيقة"),
+            (61, 121, "1-2 ساعة"), (121, 241, "2-4 ساعات"),
+            (241, 481, "4-8 ساعات"), (481, 10_000, "أكثر من 8 ساعات")
+        ]),
+        "phase_performance": _phase_performance_summary(candidates),
+        "exit_hint_ar": "لا تستخدم أعلى High كهدف بيع وحيد. راقب سرعة الوصول للقمة، ثم أي كسر VWAP/فشل قمة/هبوط 10% من القمة. V2f يضيف مقاييس تساعدك ترى هل الحركة سريعة وتتبخر أو تمتد لساعات.",
+    }
+
+
+def _phase_performance_summary(candidates: list[dict]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    phases = ["premarket", "open", "regular", "after_hours", "overnight", "unknown"]
+    for ph in phases:
+        sub = [c for c in candidates if str(c.get("phase_at_detection") or "unknown") == ph]
+        if not sub:
+            continue
+        total = len(sub)
+        peaks = [_num(c.get("max_after_pct"), 0.0) for c in sub]
+        worst = [_num(c.get("min_after_pct"), 0.0) for c in sub]
+        times = [_num(c.get("minutes_to_peak"), -1.0) for c in sub if _num(c.get("minutes_to_peak"), -1.0) >= 0]
+        out.append({
+            "phase": ph,
+            "label_ar": _phase_label_ar(ph),
+            "count": total,
+            "peak_20pct_plus_count": sum(1 for p in peaks if p >= 20.0),
+            "peak_20pct_plus_pct": round(sum(1 for p in peaks if p >= 20.0) / total * 100.0, 1),
+            "peak_30pct_plus_count": sum(1 for p in peaks if p >= 30.0),
+            "peak_30pct_plus_pct": round(sum(1 for p in peaks if p >= 30.0) / total * 100.0, 1),
+            "drawdown_10pct_plus_count": sum(1 for d in worst if d <= -10.0),
+            "drawdown_10pct_plus_pct": round(sum(1 for d in worst if d <= -10.0) / total * 100.0, 1),
+            "median_peak_gain_pct": _round(sorted(peaks)[len(peaks)//2] if peaks else 0.0, 2),
+            "median_worst_drawdown_pct": _round(sorted(worst)[len(worst)//2] if worst else 0.0, 2),
+            "median_minutes_to_peak": _round(sorted(times)[len(times)//2] if times else 0.0, 0),
+        })
+    return out
+
+
+def _build_exit_behavior_summary(candidates: list[dict]) -> dict[str, Any]:
+    total = max(1, len(candidates))
+    def avg(vals: list[float]) -> float:
+        return round(sum(vals) / max(1, len(vals)), 2)
+    def med(vals: list[float]) -> float:
+        if not vals:
+            return 0.0
+        vals = sorted(vals)
+        return round(vals[len(vals)//2], 2)
+    times = [_num(c.get("minutes_to_peak"), -1.0) for c in candidates if _num(c.get("minutes_to_peak"), -1.0) >= 0]
+    post_drop = [_num(c.get("post_peak_drawdown_pct"), 0.0) for c in candidates]
+    retention = [_num(c.get("gain_retention_pct"), 0.0) for c in candidates if _num(c.get("gain_retention_pct"), -999.0) > -998.0]
+    fast = [c for c in candidates if 0 <= _num(c.get("minutes_to_peak"), -1) <= 60]
+    extended = [c for c in candidates if _num(c.get("minutes_to_peak"), -1) >= 240]
+    return {
+        "note_ar": "مقاييس ما بعد القمة تقريبية لأنها مبنية على شموع دقيقة: نعرف High/Low للدقيقة وليس ترتيب الصفقات داخل نفس الدقيقة.",
+        "median_minutes_to_peak": med(times),
+        "avg_minutes_to_peak": avg(times),
+        "median_post_peak_drawdown_pct": med(post_drop),
+        "avg_post_peak_drawdown_pct": avg(post_drop),
+        "median_gain_retention_pct_to_last_seen": med(retention),
+        "fast_peak_within_60m_count": len(fast),
+        "fast_peak_within_60m_pct": round(len(fast) / total * 100.0, 1),
+        "extended_peak_after_4h_count": len(extended),
+        "extended_peak_after_4h_pct": round(len(extended) / total * 100.0, 1),
+        "quick_fade_candidates": [_summary_item_for_exit(c) for c in candidates if _num(c.get("minutes_to_peak"), 9999) <= 60 and _num(c.get("post_peak_drawdown_pct"), 0.0) <= -10.0][:20],
+        "extended_runners": [_summary_item_for_exit(c) for c in candidates if _num(c.get("minutes_to_peak"), -1) >= 240 and _num(c.get("post_peak_drawdown_pct"), 0.0) > -10.0][:20],
+        "sell_behavior_rule_ar": "إذا وصلت القمة سريعًا جدًا ثم بدأ السهم يفقد 10% من القمة أو يكسر VWAP/قمة شمعة 5د، فغالبًا الحركة سريعة وتحتاج جني ربح أسرع. أما المرشحات النظيفة التي تتأخر قمتها 4 ساعات+ ولا تتراجع أكثر من 10% من القمة فهي Runner أفضل للتدرج في البيع.",
+    }
+
+
+def _summary_item_for_exit(c: dict) -> dict[str, Any]:
+    return {
+        "symbol": c.get("symbol"),
+        "date": c.get("date"),
+        "phase_at_detection_ar": c.get("phase_at_detection_ar"),
+        "first_seen_time_utc": c.get("first_seen_time_utc"),
+        "first_seen_price": c.get("first_seen_price"),
+        "peak_gain_after_detection_pct": c.get("max_after_pct"),
+        "peak_time_utc": c.get("max_after_time_utc"),
+        "minutes_to_peak": c.get("minutes_to_peak"),
+        "time_to_peak_label_ar": c.get("time_to_peak_label_ar"),
+        "post_peak_drawdown_pct": c.get("post_peak_drawdown_pct"),
+        "minutes_to_drop_10pct_from_peak": c.get("minutes_to_drop_10pct_from_peak"),
+        "gain_retention_pct": c.get("gain_retention_pct"),
+        "chase_risk_label_ar": c.get("chase_risk_label_ar"),
+        "detected_previous_session": c.get("detected_previous_session"),
+    }
+
+
 def _iter_zip_sources(path: Path, max_files: int, kind: str | None = None) -> Iterator[tuple[str, Iterable[dict]]]:
     with zipfile.ZipFile(path) as z:
         infos = [i for i in z.infolist() if i.filename.lower().endswith((".csv", ".csv.gz")) and _include_source(i.filename, kind)]
@@ -224,7 +425,7 @@ def market_replay_lab_status() -> dict:
             "/replay-lab/small-stock-classic/run?path=/tmp/your_polygon_minutes.zip",
             "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5&daily_lookback_days=14&max_rows=250000",
         ],
-        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2e يقرأ عدة أيام فعليًا، يستخدم daily lookback أوسع لقمة/إغلاق آخر جلسة تداول، ويضيف ملخص أعلى قمة بعد الالتقاط من شموع الدقيقة لا من الإغلاق فقط.",
+        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2f يقرأ عدة أيام فعليًا، يستخدم daily lookback أوسع، ويضيف ملخص أعلى قمة بعد الالتقاط مع سلوك الخروج بعد القمة: وقت الوصول للقمة، سرعة الهبوط، نسبة الاحتفاظ بالمكسب، وتفريق Clean Winners عن Danger Winners.",
         "small_stock_rules_ar": [
             "فريم 5د/15د عند المضاربة اللحظية.",
             "مستويات Fib 38.2/50/61.8/78.6 من آخر قاع إلى آخر قمة، مع تركيز على 61.8/78.6.",
@@ -434,26 +635,85 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
                     "min_after_pct": _round(((l - c) / c * 100.0) if c > 0 else 0.0, 2),
                     "peak_gain_after_detection_pct": _round(((h - c) / c * 100.0) if c > 0 else 0.0, 2),
                     "peak_price_note_ar": "أعلى سعر بعد الالتقاط محسوب من High لشموع الدقيقة، وليس شرطًا أنه إغلاق.",
+                    "last_seen_price": _round(c, 4),
+                    "last_seen_time_utc": hhmm,
+                    "minutes_to_peak": 0,
+                    "time_to_peak_label_ar": "سريع جدًا (أقل من 30 دقيقة)",
+                    "post_peak_low_price": _round(l, 4),
+                    "post_peak_low_time_utc": hhmm,
+                    "post_peak_drawdown_pct": _round(((l - h) / h * 100.0) if h > 0 else 0.0, 2),
+                    "drop_10_from_peak_time_utc": "",
+                    "drop_20_from_peak_time_utc": "",
+                    "minutes_to_drop_10pct_from_peak": None,
+                    "minutes_to_drop_20pct_from_peak": None,
+                    "minutes_after_peak_observed": 0,
+                    "near_peak_10pct_minutes_after_peak": 0,
+                    "end_gain_after_detection_pct": _round(((c - c) / c * 100.0) if c > 0 else 0.0, 2),
+                    "gain_retention_pct": 0.0,
+                    "exit_behavior_label_ar": "قيد التقييم",
                 }
                 prior_candidate_dates_by_symbol[sym].add(date)
             if event_key in events:
                 ev = events[event_key]
                 old_max = _num(ev.get("max_after_price"), c)
                 old_min = _num(ev.get("min_after_price"), c)
-                if h > old_max:
+                new_peak = h > old_max
+                if new_peak:
                     ev["max_after_price"] = _round(h, 4)
                     ev["max_after_time_utc"] = hhmm
+                    # Reset post-peak tracking when a new final high is made.
+                    ev["post_peak_low_price"] = _round(l, 4)
+                    ev["post_peak_low_time_utc"] = hhmm
+                    ev["drop_10_from_peak_time_utc"] = ""
+                    ev["drop_20_from_peak_time_utc"] = ""
+                    ev["minutes_to_drop_10pct_from_peak"] = None
+                    ev["minutes_to_drop_20pct_from_peak"] = None
+                    ev["near_peak_10pct_minutes_after_peak"] = 0
                 else:
                     ev["max_after_price"] = _round(old_max, 4)
+                    peak_px_now = _num(ev.get("max_after_price"), old_max)
+                    post_low = _num(ev.get("post_peak_low_price"), peak_px_now)
+                    if l < post_low:
+                        ev["post_peak_low_price"] = _round(l, 4)
+                        ev["post_peak_low_time_utc"] = hhmm
+                    if peak_px_now > 0:
+                        if not ev.get("drop_10_from_peak_time_utc") and l <= peak_px_now * 0.90:
+                            ev["drop_10_from_peak_time_utc"] = hhmm
+                            ev["minutes_to_drop_10pct_from_peak"] = _minutes_between(ev.get("max_after_time_utc"), hhmm)
+                        if not ev.get("drop_20_from_peak_time_utc") and l <= peak_px_now * 0.80:
+                            ev["drop_20_from_peak_time_utc"] = hhmm
+                            ev["minutes_to_drop_20pct_from_peak"] = _minutes_between(ev.get("max_after_time_utc"), hhmm)
+                        if c >= peak_px_now * 0.90:
+                            ev["near_peak_10pct_minutes_after_peak"] = int(_num(ev.get("near_peak_10pct_minutes_after_peak"), 0)) + 1
                 if l < old_min:
                     ev["min_after_price"] = _round(l, 4)
                     ev["min_after_time_utc"] = hhmm
                 else:
                     ev["min_after_price"] = _round(old_min, 4)
+                ev["last_seen_price"] = _round(c, 4)
+                ev["last_seen_time_utc"] = hhmm
                 base = _num(ev.get("first_seen_price"), c)
-                ev["max_after_pct"] = _round(((ev["max_after_price"] - base) / base * 100.0) if base > 0 else 0.0, 2)
+                peak_px = _num(ev.get("max_after_price"), c)
+                ev["max_after_pct"] = _round(((peak_px - base) / base * 100.0) if base > 0 else 0.0, 2)
                 ev["peak_gain_after_detection_pct"] = ev["max_after_pct"]
-                ev["min_after_pct"] = _round(((ev["min_after_price"] - base) / base * 100.0) if base > 0 else 0.0, 2)
+                ev["min_after_pct"] = _round(((_num(ev.get("min_after_price"), c) - base) / base * 100.0) if base > 0 else 0.0, 2)
+                ev["minutes_to_peak"] = _minutes_between(ev.get("first_seen_time_utc"), ev.get("max_after_time_utc"))
+                ev["time_to_peak_label_ar"] = _time_to_label_ar(ev.get("minutes_to_peak"))
+                ev["minutes_after_peak_observed"] = _minutes_between(ev.get("max_after_time_utc"), hhmm)
+                post_low_px = _num(ev.get("post_peak_low_price"), peak_px)
+                ev["post_peak_drawdown_pct"] = _round(((post_low_px - peak_px) / peak_px * 100.0) if peak_px > 0 else 0.0, 2)
+                end_gain = ((c - base) / base * 100.0) if base > 0 else 0.0
+                ev["end_gain_after_detection_pct"] = _round(end_gain, 2)
+                peak_gain = _num(ev.get("max_after_pct"), 0.0)
+                ev["gain_retention_pct"] = _round((end_gain / peak_gain * 100.0) if peak_gain > 0 else 0.0, 1)
+                if _num(ev.get("post_peak_drawdown_pct"), 0.0) <= -20.0:
+                    ev["exit_behavior_label_ar"] = "تلاشى بقوة بعد القمة"
+                elif _num(ev.get("minutes_to_peak"), 0.0) <= 60 and _num(ev.get("post_peak_drawdown_pct"), 0.0) <= -10.0:
+                    ev["exit_behavior_label_ar"] = "قمة سريعة ثم هبوط"
+                elif _num(ev.get("minutes_to_peak"), 0.0) >= 240 and _num(ev.get("post_peak_drawdown_pct"), 0.0) > -10.0:
+                    ev["exit_behavior_label_ar"] = "Runner حافظ نسبيًا"
+                else:
+                    ev["exit_behavior_label_ar"] = "حركة عادية تحتاج إدارة"
         rows_by_file[source_name] = file_rows
         # Finalize this file's daily high/low/close so the next downloaded minute
         # file can use it as previous session context even when daily files are unavailable.
@@ -503,24 +763,38 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
             "chase_risk_label_ar": c.get("chase_risk_label_ar"),
             "classic_state": c.get("classic_state"),
             "stage": c.get("stage"),
+            "minutes_to_peak": c.get("minutes_to_peak"),
+            "time_to_peak_label_ar": c.get("time_to_peak_label_ar"),
+            "post_peak_drawdown_pct": c.get("post_peak_drawdown_pct"),
+            "drop_10_from_peak_time_utc": c.get("drop_10_from_peak_time_utc"),
+            "minutes_to_drop_10pct_from_peak": c.get("minutes_to_drop_10pct_from_peak"),
+            "gain_retention_pct": c.get("gain_retention_pct"),
+            "exit_behavior_label_ar": c.get("exit_behavior_label_ar"),
         }
 
     top_peak_movers = [_summary_item(c) for c in candidates[:20]]
     top_previous_session_peak_movers = [_summary_item(c) for c in candidates if c.get("detected_previous_session")][:20]
     late_or_chase_peak_movers = [_summary_item(c) for c in candidates if str(c.get("chase_risk_at_detection")) in {"late", "very_late"}][:20]
+    clean_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_clean_winner(c)][:20]
+    danger_winner_peak_movers = [_summary_item(c) for c in candidates if _candidate_is_danger_winner(c)][:20]
     peak_summary = {
         "note_ar": "أعلى ارتفاع هنا هو أعلى High ظهر في شموع الدقيقة بعد الالتقاط، حتى لو لم يغلق السهم عليه. استخدمه لقياس الإمكانات، وليس كربح مضمون.",
         "top_peak_movers": top_peak_movers,
         "top_previous_session_peak_movers": top_previous_session_peak_movers,
         "late_or_chase_peak_movers": late_or_chase_peak_movers,
+        "clean_winner_peak_movers": clean_winner_peak_movers,
+        "danger_winner_peak_movers": danger_winner_peak_movers,
     }
+    performance_summary = _build_performance_summary(candidates)
+    exit_behavior_summary = _build_exit_behavior_summary(candidates)
     railway_usage_guard = {
         "raw_storage": "temporary_tmp_only_deleted_after_pull_run",
         "row_cap_mode": "per_file_day",
         "max_rows_per_file": max_rows_per_file,
         "minute_files_seen": len(files_seen),
         "daily_files_seen": len(daily_files_seen),
-        "note_ar": "للحفاظ على Railway: لا يتم حفظ raw، القراءة محدودة لكل يوم، والملخص فقط هو الذي يرجع في JSON. زد max_rows أو minute_days تدريجيًا فقط عند الحاجة.",
+        "analytics_mode": "compact_online_exit_metrics_no_raw_series",
+        "note_ar": "للحفاظ على Railway: لا يتم حفظ raw، القراءة محدودة لكل يوم، ولا نخزن سلاسل الشموع الخام لكل سهم؛ نحسب مقاييس الخروج أونلاين ثم نرجع الملخص فقط. زد max_rows أو minute_days تدريجيًا فقط عند الحاجة.",
     }
     return {
         "ok": True,
@@ -537,6 +811,8 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "candidate_count": len(candidates),
         "timing_summary": dict(timing_counts),
         "peak_summary": peak_summary,
+        "performance_summary": performance_summary,
+        "exit_behavior_summary": exit_behavior_summary,
         "railway_usage_guard": railway_usage_guard,
         "phase_counts": [{"phase": k, "label_ar": _phase_label_ar(k), "count": v} for k, v in sorted(phase_counts.items())],
         "behavior_groups": sorted([{"tag": k, "count": v} for k, v in grouped.items()], key=lambda x: x["count"], reverse=True)[:20],
