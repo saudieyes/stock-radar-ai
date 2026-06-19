@@ -3421,6 +3421,14 @@
       return { low: support, high: resistance, source: 'frontend_fallback' };
     }
 
+    function supportResistanceDistanceView(stock, price) {
+      const support = numericValue(stock?.nearest_support || stock?.display_support_price || stock?.support_price || stock?.support);
+      const resistance = numericValue(stock?.nearest_resistance || stock?.display_resistance_price || stock?.resistance_price || stock?.resistance);
+      const supportDist = (price > 0 && support > 0) ? ((price - support) / price * 100) : 999;
+      const resistanceDist = (price > 0 && resistance > 0) ? ((resistance - price) / price * 100) : 999;
+      return { support, resistance, supportDist, resistanceDist, resistanceCloser: resistanceDist !== 999 && supportDist !== 999 && resistanceDist >= -0.25 && resistanceDist < Math.max(0.15, supportDist * 0.75) };
+    }
+
     function normalizedOpportunityView(stock) {
       const price = numericValue(stock?.current_price_live ?? stock?.display_price ?? stock?.price ?? stock?.current_price);
       const change = stockChangePct(stock);
@@ -3428,15 +3436,26 @@
       let label = String(stock?.opportunity_stage_label || '').trim();
       let reasons = Array.isArray(stock?.opportunity_reasons) ? [...stock.opportunity_reasons] : (Array.isArray(stock?.technical_explainer_reasons) ? [...stock.technical_explainer_reasons] : []);
       const zone = fallbackDecisionZone(stock, price);
+      const d = supportResistanceDistanceView(stock, price);
       const lowPrice = price >= 1 && price <= 12;
       const nearDecisionTop = zone && price > 0 && numericValue(zone.high) > 0 && ((numericValue(zone.high) - price) / price * 100) <= 1.2;
-      if (bucket === 'support_bounce' && change >= 4.5 && (lowPrice || nearDecisionTop || zone)) {
-        bucket = 'high_risk_day_trade';
-        label = '⚡ مضاربة عالية المخاطرة';
+      const shouldNotBeBounce = bucket === 'support_bounce' && (
+        (change >= 3.5 && (nearDecisionTop || d.resistanceCloser || d.supportDist > 2.2)) ||
+        (d.resistanceCloser && d.resistanceDist <= 1.25) ||
+        (change >= 5.0)
+      );
+      if (shouldNotBeBounce) {
+        if (lowPrice || change >= 7.0) {
+          bucket = 'high_risk_day_trade';
+          label = '⚡ مضاربة عالية المخاطرة';
+        } else {
+          bucket = 'continuation_pullback';
+          label = '📈 Continuation Pullback Candidate';
+        }
         reasons = [
-          `السهم متحرك الآن ${formatNumber(change)}%؛ لا يصنف ارتداد دعم مبكر.`,
-          zone ? `السعر داخل/قرب منطقة قرار ${formatNumber(zone.low)} - ${formatNumber(zone.high)}.` : 'قريب من مقاومة أو منطقة قرار.',
-          'انتظر Pullback أو Reclaim جديد بدل مطاردة الحركة.'
+          `السهم ليس ارتداد دعم الآن: الحركة ${formatNumber(change)}%، والدعم يبعد ${formatNumber(d.supportDist)}% بينما المقاومة تبعد ${formatNumber(d.resistanceDist)}%.`,
+          zone ? `السعر داخل/قرب منطقة قرار ${formatNumber(zone.low)} - ${formatNumber(zone.high)}.` : 'أقرب إلى مقاومة/اختراق من ارتداد دعم.',
+          'انتظر Pullback أو إغلاق شمعة فوق مستوى تفعيل واضح بدل مطاردة الحركة.'
         ];
       }
       return { bucket, label, reasons, changed: bucket !== String(stock?.opportunity_bucket || '').trim() };
@@ -3707,6 +3726,7 @@
 
     const SECTION_DEFAULT_LIMIT = 5;
     const OPPORTUNITY_RADAR_GROUP_KEYS = [
+      'small_stock_classic_radar',
       'pre_trigger_candidates',
       'support_bounce_candidates',
       'reclaim_candidates',
@@ -3723,6 +3743,7 @@
       'support-bounce-section-content',
       'reclaim-section-content',
       'continuation-pullback-section-content',
+      'small-stock-classic-section-content',
       'early-movement-section-content',
       'low-float-premarket-section-content',
       'high-risk-day-trades-section-content',
@@ -4327,6 +4348,7 @@
         <div class="stat"><div class="stat-label">دخول بحذر</div><div class="stat-value">${formatNumber(data.cautious_entries_count)}</div></div>
         <div class="stat"><div class="stat-label">قريب من التفعيل</div><div class="stat-value">${formatNumber(data.pre_trigger_candidates_count || (data.pre_trigger_candidates || []).length || 0)}</div></div>
         <div class="stat"><div class="stat-label">ارتداد/Reclaim</div><div class="stat-value">${formatNumber((data.support_bounce_candidates_count || (data.support_bounce_candidates || []).length || 0) + (data.reclaim_candidates_count || (data.reclaim_candidates || []).length || 0))}</div></div>
+        <div class="stat"><div class="stat-label">Small Classic</div><div class="stat-value">${formatNumber(data.small_stock_classic_radar_count || (data.small_stock_classic_radar || []).length || 0)}</div></div>
         <div class="stat"><div class="stat-label">Low-Float</div><div class="stat-value">${formatNumber(data.low_float_premarket_radar_count || (data.low_float_premarket_radar || []).length || 0)}</div></div>
         <div class="stat"><div class="stat-label">تهيئة قوية</div><div class="stat-value">${formatNumber(data.premarket_setups_count || 0)}</div></div>
         <div class="stat"><div class="stat-label">حركة مبكرة</div><div class="stat-value">${formatNumber(data.early_movement_count || 0)}</div></div>
@@ -4486,6 +4508,7 @@
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
       const oppRowsRaw = [
+        ...(data.small_stock_classic_radar || []),
         ...(data.pre_trigger_candidates || []),
         ...(data.support_bounce_candidates || []),
         ...(data.reclaim_candidates || []),
@@ -4507,6 +4530,7 @@
       const supportBounce = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'support_bounce'));
       const reclaim = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'reclaim'));
       const continuationPullback = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'continuation_pullback'));
+      const smallStockClassic = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'small_stock_classic'));
       const lowFloatPM = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'low_float_premarket'));
       const highRiskDay = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'high_risk_day_trade'));
       const gapFill = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'gap_fill_watch'));
@@ -4523,6 +4547,7 @@
         'support-bounce-section-content': supportBounce,
         'reclaim-section-content': reclaim,
         'continuation-pullback-section-content': continuationPullback,
+        'small-stock-classic-section-content': smallStockClassic,
         'early-movement-section-content': earlyMovement,
         'low-float-premarket-section-content': lowFloatPM,
         'high-risk-day-trades-section-content': highRiskDay,
@@ -4540,6 +4565,7 @@
         ${renderSection('↩️ ارتداد من دعم / Support Bounce', supportBounce.length, 'support-bounce-section-content', 'support-bounce-section', supportBounce, { tone: 'open', orderedText: 'فرص مبكرة قرب دعم حقيقي فقط؛ إذا تحرك السهم بقوة أو اقترب من مقاومة ينتقل إلى مضاربة/استمرار ولا يبقى ارتداد دعم.' })}
         ${renderSection('🔁 Reclaim / استعادة مستوى', reclaim.length, 'reclaim-section-content', 'reclaim-section', reclaim, { tone: 'open', orderedText: 'أسهم كسرت أو اختبرت مستوى مهمًا ثم بدأت استعادته؛ تحتاج ثبات وحجم.' })}
         ${renderSection('📈 Continuation Pullback', continuationPullback.length, 'continuation-pullback-section-content', 'continuation-pullback-section', continuationPullback, { tone: 'cautious', orderedText: 'استمرار مشروط: لا نطارد القمة، ننتظر Pullback صحي داخل الحركة.' })}
+        ${renderSection('🎯 الأسهم الصغيرة الكلاسيكية', smallStockClassic.length, 'small-stock-classic-section-content', 'small-stock-classic-section', smallStockClassic, { tone: 'cautious', orderedText: 'فلتر مضاربة للأسهم الصغيرة: Fib 61.8/78.6، VWAP بإغلاق شمعة، وقمة أمس؛ لا يطارد الشمعة الخضراء.' })}
         ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط.' })}
         ${renderSection('🚀 Low-Float / Pre-Market Radar', lowFloatPM.length, 'low-float-premarket-section-content', 'low-float-premarket-section', lowFloatPM, { tone: 'cautious', orderedText: 'أسهم صغيرة أو نشطة مبكرًا؛ تعامل كمضاربة عالية المخاطر وليست Strong عادي.' })}
         ${renderSection('⚡ مضاربة عالية المخاطرة', highRiskDay.length, 'high-risk-day-trades-section-content', 'high-risk-day-trades-section', highRiskDay, { tone: 'cautious', orderedText: 'فرص سريعة وصغيرة الحجم؛ تظهر منفصلة حتى لا تختلط مع Strong/Cautious العادي.' })}

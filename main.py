@@ -235,6 +235,11 @@ from app.intraday_early_source_radar import get_last_intraday_early_source_radar
 from app.decision_contract import compact_decision_diagnostics
 from app.quote_resolver import resolve_symbol_quote
 from app.early_watch_lifecycle import enrich_rows_early_watch_lifecycle, summarize_early_watch_lifecycle
+from app.market_replay_lab import (
+    MARKET_REPLAY_LAB_VERSION,
+    market_replay_lab_status,
+    run_small_stock_classic_replay_from_path,
+)
 from app.polygon_weekly_builder import (
     build_weekly_candidates_from_path,
     build_weekly_candidates_from_paths,
@@ -584,6 +589,32 @@ def opportunity_radar_status_endpoint():
 @app.get("/opportunity-radar/plan-memory/status")
 def opportunity_plan_memory_status_endpoint(limit: int = 100):
     return opportunity_plan_memory_status(limit=limit)
+
+
+@app.get("/small-stock-classic-radar/status")
+def small_stock_classic_radar_status_endpoint():
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    rows = enrich_rows_opportunity_radar(rows if isinstance(rows, list) else [], market_phase=snapshot.get("market_phase", ""))
+    sections = build_opportunity_radar_sections(rows, market_phase=snapshot.get("market_phase", ""))
+    return {
+        "ok": True,
+        "version": OPPORTUNITY_RADAR_VERSION,
+        "section": "small_stock_classic_radar",
+        "count": len(sections.get("small_stock_classic_radar", [])),
+        "items": sections.get("small_stock_classic_radar", []),
+        "rule_ar": "فلتر الأسهم الصغيرة: Fib 61.8/78.6 + VWAP بإغلاق شمعة + قمة اليوم السابق، ولا يطارد الشمعة الخضراء.",
+    }
+
+
+@app.get("/replay-lab/status")
+def replay_lab_status_endpoint():
+    return market_replay_lab_status()
+
+
+@app.get("/replay-lab/small-stock-classic/run")
+def replay_lab_small_stock_classic_run_endpoint(path: str = "", max_files: int = 5, max_rows: int = 250000, max_candidates: int = 120):
+    return run_small_stock_classic_replay_from_path(path=path, max_files=max_files, max_rows=max_rows, max_candidates=max_candidates)
 
 
 @app.get("/paper-trading/status")
