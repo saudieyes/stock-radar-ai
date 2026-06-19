@@ -2957,9 +2957,10 @@
     }
 
     function opportunityBadge(stock) {
-      const label = String(stock?.opportunity_stage_label || '').trim();
+      const v = normalizedOpportunityView(stock || {});
+      const label = String(v.label || stock?.opportunity_stage_label || '').trim();
       if (!label) return '';
-      const bucket = String(stock?.opportunity_bucket || '').trim();
+      const bucket = String(v.bucket || stock?.opportunity_bucket || '').trim();
       let cls = 'badge-stage';
       if (bucket === 'high_risk_day_trade' || bucket === 'low_float_premarket') cls = 'badge-cautious';
       if (bucket === 'no_chase') cls = 'badge-news-neg';
@@ -3382,6 +3383,89 @@
     function numericValue(value) {
       const n = Number(value);
       return Number.isFinite(n) ? n : 0;
+    }
+
+    function stockChangePct(stock) {
+      const keys = [
+        'display_change_pct','change_vs_prev_close_pct','live_change_pct','change_pct',
+        'percent_change','change_percent','changePercentage','changesPercentage','changePercent',
+        'regularMarketChangePercent','fmp_change_pct','today_change_pct','session_change_pct',
+        'current_gain','change_from_open_pct','day_change_pct','gap_from_prev_close_pct'
+      ];
+      for (const key of keys) {
+        if (!stock || stock[key] === undefined || stock[key] === null || stock[key] === '') continue;
+        let n = Number(String(stock[key]).replace('%','').replace(',',''));
+        if (!Number.isFinite(n)) continue;
+        if (['day_change_pct','session_change_pct','change_from_open_pct','gap_from_prev_close_pct'].includes(key) && Math.abs(n) >= 0.015 && Math.abs(n) <= 1) n *= 100;
+        return n;
+      }
+      const price = numericValue(stock?.current_price_live ?? stock?.display_price ?? stock?.price ?? stock?.current_price);
+      const prev = numericValue(stock?.previous_close ?? stock?.prev_close ?? stock?.prior_close ?? stock?.regularMarketPreviousClose);
+      if (price > 0 && prev > 0) return ((price - prev) / prev) * 100;
+      const openPx = numericValue(stock?.open_price ?? stock?.day_open ?? stock?.open ?? stock?.regularMarketOpen);
+      if (price > 0 && openPx > 0) return ((price - openPx) / openPx) * 100;
+      return 0;
+    }
+
+    function fallbackDecisionZone(stock, livePrice) {
+      const price = numericValue(livePrice || stock?.current_price_live || stock?.display_price || stock?.price);
+      const z = stock?.support_resistance_zones_v2?.price_zone;
+      if (z && String(z.kind || '') === 'congestion') return { low: numericValue(z.low), high: numericValue(z.high), source: 'backend' };
+      const support = numericValue(stock?.nearest_support || stock?.display_support_price || stock?.support_price || stock?.support);
+      const resistance = numericValue(stock?.nearest_resistance || stock?.display_resistance_price || stock?.resistance_price || stock?.resistance);
+      if (!(price > 0 && support > 0 && resistance > 0 && support < resistance)) return null;
+      const widthPct = ((resistance - support) / price) * 100;
+      const containsPrice = support * 0.995 <= price && price <= resistance * 1.005;
+      const tooCloseForSeparateLevels = widthPct <= Math.max(1.15, numericValue(stock?.atr_pct || stock?.atr_percent || 0) * 0.55);
+      if (!containsPrice || !tooCloseForSeparateLevels) return null;
+      return { low: support, high: resistance, source: 'frontend_fallback' };
+    }
+
+    function normalizedOpportunityView(stock) {
+      const price = numericValue(stock?.current_price_live ?? stock?.display_price ?? stock?.price ?? stock?.current_price);
+      const change = stockChangePct(stock);
+      let bucket = String(stock?.opportunity_bucket || '').trim();
+      let label = String(stock?.opportunity_stage_label || '').trim();
+      let reasons = Array.isArray(stock?.opportunity_reasons) ? [...stock.opportunity_reasons] : (Array.isArray(stock?.technical_explainer_reasons) ? [...stock.technical_explainer_reasons] : []);
+      const zone = fallbackDecisionZone(stock, price);
+      const lowPrice = price >= 1 && price <= 12;
+      const nearDecisionTop = zone && price > 0 && numericValue(zone.high) > 0 && ((numericValue(zone.high) - price) / price * 100) <= 1.2;
+      if (bucket === 'support_bounce' && change >= 4.5 && (lowPrice || nearDecisionTop || zone)) {
+        bucket = 'high_risk_day_trade';
+        label = '⚡ مضاربة عالية المخاطرة';
+        reasons = [
+          `السهم متحرك الآن ${formatNumber(change)}%؛ لا يصنف ارتداد دعم مبكر.`,
+          zone ? `السعر داخل/قرب منطقة قرار ${formatNumber(zone.low)} - ${formatNumber(zone.high)}.` : 'قريب من مقاومة أو منطقة قرار.',
+          'انتظر Pullback أو Reclaim جديد بدل مطاردة الحركة.'
+        ];
+      }
+      return { bucket, label, reasons, changed: bucket !== String(stock?.opportunity_bucket || '').trim() };
+    }
+
+    function applyClientOpportunityGuard(stock) {
+      if (!stock || typeof stock !== 'object') return stock;
+      const out = { ...stock };
+      const price = numericValue(out.current_price_live ?? out.display_price ?? out.price ?? out.current_price);
+      const zone = fallbackDecisionZone(out, price);
+      if (zone && !(out.support_resistance_zones_v2?.price_zone && String(out.support_resistance_zones_v2.price_zone.kind || '') === 'congestion')) {
+        out.support_resistance_zones_v2 = {
+          ...(out.support_resistance_zones_v2 || {}),
+          price_zone: { kind: 'congestion', label: 'منطقة قرار', low: zone.low, high: zone.high },
+          summary_ar: `السعر داخل منطقة قرار: ${formatNumber(zone.low)} - ${formatNumber(zone.high)} | حد الفشل أسفل ${formatNumber(zone.low)} | حد التفعيل فوق ${formatNumber(zone.high)}`
+        };
+        out.levels_summary = out.support_resistance_zones_v2.summary_ar;
+      }
+      const v = normalizedOpportunityView(out);
+      if (v.changed) {
+        out.opportunity_bucket = v.bucket;
+        out.opportunity_stage = v.bucket;
+        out.opportunity_stage_label = v.label;
+        out.display_plan_family_label = v.label;
+        out.opportunity_reasons = v.reasons;
+        out.technical_explainer_reasons = v.reasons;
+        out.why_appeared_ar = v.reasons.join('، ');
+      }
+      return out;
     }
 
     function firstLevelBelowLivePrice(stock, livePrice, excludeLevel=0) {
@@ -3929,6 +4013,7 @@
     }
 
     function createCard(stock, sectionKey='', index=0) {
+      stock = applyClientOpportunityGuard(stock);
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
       const displayPrice = stock.current_price_live ?? stock.display_price ?? stock.financials?.current_price ?? 0;
@@ -4400,14 +4485,32 @@
     function renderSections(data) {
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
-      const preTrigger = sortDisplayItems(data.pre_trigger_candidates || []);
-      const supportBounce = sortDisplayItems(data.support_bounce_candidates || []);
-      const reclaim = sortDisplayItems(data.reclaim_candidates || []);
-      const continuationPullback = sortDisplayItems(data.continuation_pullback_candidates || []);
-      const lowFloatPM = sortDisplayItems(data.low_float_premarket_radar || []);
-      const highRiskDay = sortDisplayItems(data.high_risk_day_trades || []);
-      const gapFill = sortDisplayItems(data.gap_fill_watch || []);
-      const catalystWatch = sortDisplayItems(data.catalyst_watch || []);
+      const oppRowsRaw = [
+        ...(data.pre_trigger_candidates || []),
+        ...(data.support_bounce_candidates || []),
+        ...(data.reclaim_candidates || []),
+        ...(data.continuation_pullback_candidates || []),
+        ...(data.low_float_premarket_radar || []),
+        ...(data.high_risk_day_trades || []),
+        ...(data.gap_fill_watch || []),
+        ...(data.catalyst_watch || [])
+      ];
+      const oppSeen = new Set();
+      const oppRows = oppRowsRaw.map(applyClientOpportunityGuard).filter(x => {
+        const sym = String(x?.symbol || '').toUpperCase();
+        const key = `${sym}:${String(x?.opportunity_bucket || '')}`;
+        if (!sym || oppSeen.has(key)) return false;
+        oppSeen.add(key);
+        return true;
+      });
+      const preTrigger = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'pre_trigger'));
+      const supportBounce = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'support_bounce'));
+      const reclaim = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'reclaim'));
+      const continuationPullback = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'continuation_pullback'));
+      const lowFloatPM = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'low_float_premarket'));
+      const highRiskDay = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'high_risk_day_trade'));
+      const gapFill = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'gap_fill_watch'));
+      const catalystWatch = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'catalyst_watch'));
       const premarket = sortDisplayItems(data.premarket_setups || []);
       const grayStrong = sortDisplayItems(data.gray_strong || []);
       const earlyMovement = sortDisplayItems(data.early_movement_watchlist || []);
@@ -4434,7 +4537,7 @@
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
         ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0 })}
         ${renderSection('⏳ قريب من التفعيل / Pre-Trigger', preTrigger.length, 'pre-trigger-section-content', 'pre-trigger-section', preTrigger, { tone: 'open', orderedText: 'أسهم قريبة من التفعيل قبل أن تفوت الحركة؛ ليست BUY_NOW حتى تظهر شروط التنفيذ.' })}
-        ${renderSection('↩️ ارتداد من دعم / Support Bounce', supportBounce.length, 'support-bounce-section-content', 'support-bounce-section', supportBounce, { tone: 'open', orderedText: 'فرص مبكرة قرب دعم حقيقي أو منطقة قرار؛ الهدف رؤيتها قبل الاختراق وليس بعده.' })}
+        ${renderSection('↩️ ارتداد من دعم / Support Bounce', supportBounce.length, 'support-bounce-section-content', 'support-bounce-section', supportBounce, { tone: 'open', orderedText: 'فرص مبكرة قرب دعم حقيقي فقط؛ إذا تحرك السهم بقوة أو اقترب من مقاومة ينتقل إلى مضاربة/استمرار ولا يبقى ارتداد دعم.' })}
         ${renderSection('🔁 Reclaim / استعادة مستوى', reclaim.length, 'reclaim-section-content', 'reclaim-section', reclaim, { tone: 'open', orderedText: 'أسهم كسرت أو اختبرت مستوى مهمًا ثم بدأت استعادته؛ تحتاج ثبات وحجم.' })}
         ${renderSection('📈 Continuation Pullback', continuationPullback.length, 'continuation-pullback-section-content', 'continuation-pullback-section', continuationPullback, { tone: 'cautious', orderedText: 'استمرار مشروط: لا نطارد القمة، ننتظر Pullback صحي داخل الحركة.' })}
         ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط.' })}
