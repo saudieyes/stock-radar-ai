@@ -239,6 +239,7 @@ from app.market_replay_lab import (
     MARKET_REPLAY_LAB_VERSION,
     market_replay_lab_status,
     run_small_stock_classic_replay_from_path,
+    run_small_stock_classic_replay_from_polygon,
 )
 from app.polygon_weekly_builder import (
     build_weekly_candidates_from_path,
@@ -640,6 +641,13 @@ def replay_lab_status_endpoint():
 def replay_lab_small_stock_classic_run_endpoint(path: str = "", max_files: int = 5, max_rows: int = 250000, max_candidates: int = 120):
     return run_small_stock_classic_replay_from_path(path=path, max_files=max_files, max_rows=max_rows, max_candidates=max_candidates)
 
+
+
+
+@app.get("/replay-lab/small-stock-classic/pull-run")
+@app.get("/replay-lab/small-stock-classic/run-polygon")
+def replay_lab_small_stock_classic_pull_run_endpoint(end_date: str = "", minute_days: int = 5, max_rows: int = 250000, max_candidates: int = 120, force: bool = False):
+    return run_small_stock_classic_replay_from_polygon(end_date=end_date, minute_days=minute_days, max_rows=max_rows, max_candidates=max_candidates, force=force)
 
 @app.get("/paper-trading/status")
 def paper_trading_status_endpoint():
