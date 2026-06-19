@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from app.opportunity_radar import OPPORTUNITY_RADAR_VERSION, enrich_row_opportunity_radar
 
-MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1f_next_week_learning_overlay_2026_06_19"
+MARKET_REPLAY_LAB_VERSION = "market_replay_lab_v1g_true_daily_lookback_learning_seed_2026_06_19"
 
 
 def _s(v: Any) -> str:
@@ -538,9 +538,9 @@ def market_replay_lab_status() -> dict:
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
         "available_runs": [
             "/replay-lab/small-stock-classic/run?path=/tmp/your_polygon_minutes.zip",
-            "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5&daily_lookback_days=14&max_rows=250000",
+            "/replay-lab/small-stock-classic/pull-run?end_date=2026-06-18&minute_days=5&daily_lookback_days=14&max_rows=250000&redownload_processed=true",
         ],
-        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2g يقرأ عدة أيام فعليًا، يستخدم daily lookback أوسع، ويضيف طبقة خروج لا تمنع ظهور الفرص: تميز بين Clean Entry وClean Runner، وتضيف خطة بيع مختصرة حسب سرعة القمة/التلاشي.",
+        "storage_rule_ar": "المحاكي يقرأ raw Polygon من /tmp فقط ويعيد نتائج مختصرة؛ لا يحفظ raw في SQLite/GitHub/Railway volume. V2i يثبت daily lookback الحقيقي حتى عند وجود تواريخ processed، ويضيف ملخص سياق آخر جلسة تداول وبذرة Learning Archive V1 بدون أي raw storage.",
         "small_stock_rules_ar": [
             "فريم 5د/15د عند المضاربة اللحظية.",
             "مستويات Fib 38.2/50/61.8/78.6 من آخر قاع إلى آخر قمة، مع تركيز على 61.8/78.6.",
@@ -590,7 +590,68 @@ def _latest_prior_daily(daily_by_date: dict[str, dict[str, dict[str, float]]], d
     return "", {}
 
 
-def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_rows: int = 250_000, max_candidates: int = 120) -> dict:
+def _calendar_gap_days(current_date: str, prior_date: str) -> int:
+    try:
+        a = datetime.strptime(str(current_date)[:10], "%Y-%m-%d").date()
+        b = datetime.strptime(str(prior_date)[:10], "%Y-%m-%d").date()
+        return max(0, (a - b).days)
+    except Exception:
+        return 0
+
+
+def _previous_session_gap_label_ar(gap_days: int) -> str:
+    if gap_days <= 1:
+        return "آخر جلسة تداول مباشرة"
+    if gap_days <= 3:
+        return "آخر جلسة قبل الويكند/فاصل قصير"
+    return "آخر جلسة قبل إجازة أو فجوة طويلة"
+
+
+def _build_previous_session_context_summary(
+    *,
+    dates_seen: set[str],
+    daily_by_date: dict[str, dict[str, dict[str, float]]],
+    daily_files_seen: list[str],
+    pull_status: dict | None = None,
+) -> dict[str, Any]:
+    daily_dates_available = sorted(daily_by_date.keys())
+    replay_dates = sorted(dates_seen)
+    per_replay_date = []
+    for dt in replay_dates:
+        prior_dates = [d for d in daily_dates_available if d < dt]
+        prev = prior_dates[-1] if prior_dates else ""
+        gap = _calendar_gap_days(dt, prev) if prev else 0
+        per_replay_date.append({
+            "date": dt,
+            "previous_trading_session_found": bool(prev),
+            "previous_trading_session_date": prev,
+            "previous_session_age_days": gap,
+            "previous_session_gap_label_ar": _previous_session_gap_label_ar(gap) if prev else "غير متاح",
+        })
+    pull = pull_status or {}
+    results = pull.get("results") or []
+    daily_results = [r for r in results if str(r.get("dataset")) == "daily"]
+    return {
+        "label_ar": "سياق آخر جلسة تداول",
+        "purpose_ar": "يتأكد أن Replay لا يبدأ يوم الاثنين أو بعد الإجازة بدون معرفة آخر جلسة تداول سابقة.",
+        "daily_files_seen_count": len(daily_files_seen),
+        "daily_files_seen": daily_files_seen[:40],
+        "daily_dates_available": daily_dates_available[-40:],
+        "replay_dates": replay_dates,
+        "per_replay_date": per_replay_date,
+        "daily_dates_requested": pull.get("daily_dates", []),
+        "daily_files_downloaded": len([str(x) for x in (pull.get("daily_paths") or []) if str(x)]),
+        "redownload_processed": bool(pull.get("redownload_processed")),
+        "processed_redownloaded_count": sum(1 for r in daily_results if str(r.get("status")) == "processed_redownloaded_to_tmp"),
+        "already_processed_skipped_count": sum(1 for r in daily_results if str(r.get("status")) == "already_processed"),
+        "attempt_cap_reached_count": sum(1 for r in daily_results if str(r.get("status")) == "attempt_cap_reached"),
+        "downloaded_to_tmp_count": sum(1 for r in daily_results if str(r.get("status")) == "downloaded_to_tmp"),
+        "coverage_ok": bool(per_replay_date and all(x.get("previous_trading_session_found") for x in per_replay_date[1:])),
+        "note_ar": "V2i يعيد تنزيل الملفات processed مؤقتًا عند تشغيل Replay حتى لا تضيع daily lookback بعد حذف raw من /tmp؛ لا يحفظ raw ولا يغير حالة processed الدائمة.",
+    }
+
+
+def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_rows: int = 250_000, max_candidates: int = 120, pull_status: dict | None = None) -> dict:
     ok, resolved = _safe_path(path)
     if not ok:
         return {"ok": False, "version": MARKET_REPLAY_LAB_VERSION, "error": resolved, "hint_ar": "ضع ملف Polygon minute zip مؤقتًا في /tmp ثم مرر path=/tmp/file.zip."}
@@ -729,10 +790,17 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
                     "chase_risk_at_detection": chase_code,
                     "chase_risk_label_ar": chase_label,
                     "previous_session_date": daily_dt,
+                    "previous_trading_session_found": bool(daily_dt),
+                    "previous_trading_session_date": daily_dt,
+                    "previous_session_age_days": _calendar_gap_days(date, daily_dt) if daily_dt else 0,
+                    "previous_session_gap_label_ar": _previous_session_gap_label_ar(_calendar_gap_days(date, daily_dt)) if daily_dt else "غير متاح",
                     "previous_day_high": _round(pday_high, 4),
                     "previous_day_high_distance_pct": _round(prev_high_dist, 2) if pday_high > 0 else 999.0,
                     "previous_close_gap_pct": _round(prev_close_gap, 2) if pday_close > 0 else 0.0,
                     "detected_previous_session": bool(was_prior_candidate),
+                    "candidate_from_any_prior_session": bool(was_prior_candidate),
+                    "candidate_from_previous_trading_session": bool(daily_dt and daily_dt in (prior_candidate_dates_by_symbol.get(sym) or set())),
+                    "prior_candidate_count": len(prior_candidate_dates_by_symbol.get(sym) or []),
                     "previous_candidate_dates": sorted(list(prior_candidate_dates_by_symbol.get(sym) or []))[-5:],
                     "stage": enriched.get("opportunity_stage"),
                     "bucket": enriched.get("opportunity_bucket"),
@@ -850,8 +918,16 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         phase_counts[str(c.get("phase_at_detection") or "unknown")] += 1
         if c.get("detected_previous_session"):
             timing_counts["detected_previous_session"] += 1
+        if c.get("candidate_from_previous_trading_session"):
+            timing_counts["candidate_from_previous_trading_session"] += 1
+        if c.get("candidate_from_any_prior_session"):
+            timing_counts["candidate_from_any_prior_session"] += 1
+        if c.get("previous_trading_session_found"):
+            timing_counts["previous_trading_session_context_found"] += 1
         if c.get("detected_premarket_before_5pct"):
             timing_counts["premarket_before_5pct"] += 1
+            if not c.get("candidate_from_any_prior_session"):
+                timing_counts["new_premarket_before_5pct"] += 1
         if c.get("detected_at_or_before_open"):
             timing_counts["at_or_before_open"] += 1
         if str(c.get("chase_risk_at_detection")) in {"late", "very_late"}:
@@ -905,6 +981,13 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
             "worst_pullback_after_detection_pct": c.get("min_after_pct"),
             "detected_previous_session": c.get("detected_previous_session"),
             "previous_candidate_dates": c.get("previous_candidate_dates"),
+            "previous_trading_session_found": c.get("previous_trading_session_found"),
+            "previous_trading_session_date": c.get("previous_trading_session_date"),
+            "previous_session_age_days": c.get("previous_session_age_days"),
+            "previous_session_gap_label_ar": c.get("previous_session_gap_label_ar"),
+            "candidate_from_previous_trading_session": c.get("candidate_from_previous_trading_session"),
+            "candidate_from_any_prior_session": c.get("candidate_from_any_prior_session"),
+            "prior_candidate_count": c.get("prior_candidate_count"),
             "chase_risk_at_detection": c.get("chase_risk_at_detection"),
             "chase_risk_label_ar": c.get("chase_risk_label_ar"),
             "classic_state": c.get("classic_state"),
@@ -945,6 +1028,12 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
     performance_summary = _build_performance_summary(candidates)
     exit_behavior_summary = _build_exit_behavior_summary(candidates)
     next_week_replay_playbook = _build_next_week_replay_playbook(candidates)
+    previous_session_context_summary = _build_previous_session_context_summary(
+        dates_seen=dates_seen,
+        daily_by_date=daily_by_date,
+        daily_files_seen=daily_files_seen,
+        pull_status=pull_status,
+    )
     railway_usage_guard = {
         "raw_storage": "temporary_tmp_only_deleted_after_pull_run",
         "row_cap_mode": "per_file_day",
@@ -972,6 +1061,13 @@ def run_small_stock_classic_replay_from_path(path: str, max_files: int = 5, max_
         "performance_summary": performance_summary,
         "exit_behavior_summary": exit_behavior_summary,
         "next_week_replay_playbook": next_week_replay_playbook,
+        "previous_session_context_summary": previous_session_context_summary,
+        "learning_archive_v1_seed": {
+            "status_ar": "تصميم جاهز خفيف — لا يوجد تدريب ثقيل في هذا التشغيل",
+            "recommended_window_ar": "10 أيام متابعة + 5 أيام نتائج بنظام rolling",
+            "safe_storage_rule_ar": "احفظ compact features/outcomes فقط؛ لا raw minute في GitHub العادي ولا SQLite.",
+            "next_step_ar": "بعد تثبيت daily lookback، نبني endpoint يولّد learning/features و learning/outcomes كملفات JSONL.GZ صغيرة.",
+        },
         "railway_usage_guard": railway_usage_guard,
         "phase_counts": [{"phase": k, "label_ar": _phase_label_ar(k), "count": v} for k, v in sorted(phase_counts.items())],
         "behavior_groups": sorted([{"tag": k, "count": v} for k, v in grouped.items()], key=lambda x: x["count"], reverse=True)[:20],
@@ -989,6 +1085,7 @@ def run_small_stock_classic_replay_from_polygon(
     max_candidates: int = 120,
     daily_lookback_days: int = 14,
     force: bool = False,
+    redownload_processed: bool = True,
 ) -> dict[str, Any]:
     """Pull Polygon minute flat files to /tmp, replay them, then delete raw files.
 
@@ -1013,7 +1110,7 @@ def run_small_stock_classic_replay_from_polygon(
     # fetcher's safe limit so this stays Railway-friendly.
     daily_days = max(days + 8, int(daily_lookback_days or 14), 10)
     daily_days = max(1, min(35, daily_days))
-    pull = pull_flatfiles_for_window(end_date=end_date or None, minute_days=days, daily_days=daily_days, force=bool(force))
+    pull = pull_flatfiles_for_window(end_date=end_date or None, minute_days=days, daily_days=daily_days, force=bool(force), redownload_processed=bool(redownload_processed))
     tmp_dir = str(pull.get("tmp_dir") or "")
     try:
         if not pull.get("ok"):
@@ -1039,6 +1136,7 @@ def run_small_stock_classic_replay_from_polygon(
             max_files=days,
             max_rows=max_rows,
             max_candidates=max_candidates,
+            pull_status=pull,
         )
         replay["polygon_pull"] = {
             "ok": True,
@@ -1048,6 +1146,20 @@ def run_small_stock_classic_replay_from_polygon(
             "daily_files_downloaded": len([str(x) for x in (pull.get("daily_paths") or []) if str(x)]),
             "daily_days_requested_for_previous_session_context": daily_days,
             "daily_lookback_days_param": daily_lookback_days,
+            "redownload_processed": bool(redownload_processed),
+            "daily_results_summary": [
+                {
+                    "dataset": r.get("dataset"),
+                    "trade_date": r.get("trade_date"),
+                    "status": r.get("status"),
+                    "ok": r.get("ok"),
+                    "attempts": r.get("attempts"),
+                    "skipped": r.get("skipped"),
+                    "error": r.get("error", ""),
+                }
+                for r in (pull.get("results") or [])
+                if str(r.get("dataset")) == "daily"
+            ],
             "results_summary": [
                 {
                     "dataset": r.get("dataset"),

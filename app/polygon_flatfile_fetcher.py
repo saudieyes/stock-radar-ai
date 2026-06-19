@@ -23,7 +23,7 @@ from typing import Any
 
 from .settings import DATA_DIR
 
-POLYGON_FLATFILE_FETCHER_VERSION = "polygon_flatfile_fetcher_v1a_stale_processed_recovery_2026_06_06"
+POLYGON_FLATFILE_FETCHER_VERSION = "polygon_flatfile_fetcher_v1b_replay_processed_redownload_2026_06_19"
 STATE_PATH = Path(DATA_DIR) / "polygon_flatfile_pull_state.json"
 
 DATASET_MINUTE = "minute"
@@ -398,6 +398,7 @@ def fetch_flatfile_to_tmp(
     *,
     tmp_dir: str | Path | None = None,
     force: bool = False,
+    redownload_processed: bool = False,
 ) -> dict[str, Any]:
     """Download a single flat file to /tmp and return its path.
 
@@ -422,7 +423,8 @@ def fetch_flatfile_to_tmp(
 
     prev = attempt_state(kind, d)
     attempts = int(prev.get("attempt_count", 0) or 0)
-    if not force and str(prev.get("status") or "") == "processed":
+    processed_redownload = bool(redownload_processed and not force and str(prev.get("status") or "") == "processed")
+    if not force and str(prev.get("status") or "") == "processed" and not processed_redownload:
         return FetchResult(True, "already_processed", kind, d.isoformat(), skipped=True, attempts=attempts).to_dict()
     cap_statuses = {"checking", "not_available_yet", "unavailable_after_retries", "download_failed", "download_failed_after_retries"}
     if not force and attempts >= max_attempts() and str(prev.get("status") or "") in cap_statuses:
@@ -434,14 +436,23 @@ def fetch_flatfile_to_tmp(
 
     key = flatfile_key(kind, d)
     bucket = flatfiles_bucket()
-    rec = _record_attempt(kind, d, "checking")
-    attempts = int(rec.get("attempt_count", attempts + 1) or attempts + 1)
+    if processed_redownload:
+        # Replay/Learning may need the raw file again even after it was processed
+        # previously.  Do not consume the normal availability-attempt budget for
+        # this safe temporary redownload.
+        rec = dict(prev or {})
+        attempts = int(rec.get("attempt_count", attempts) or attempts)
+    else:
+        rec = _record_attempt(kind, d, "checking")
+        attempts = int(rec.get("attempt_count", attempts + 1) or attempts + 1)
     try:
         head = client.head_object(Bucket=bucket, Key=key)
         size = int(head.get("ContentLength", 0) or 0)
     except Exception as exc:
         err = f"not_available_or_head_failed: {type(exc).__name__}: {str(exc)[:180]}"
         status = "unavailable_after_retries" if attempts >= max_attempts() else "not_available_yet"
+        if processed_redownload:
+            return FetchResult(False, "processed_redownload_unavailable", kind, d.isoformat(), s3_key=key, error=err, attempts=attempts).to_dict()
         rec = _record_attempt(kind, d, status, err)
         # _record_attempt increments a second time for the failed download phase; normalize user-facing attempts.
         rec["attempt_count"] = attempts
@@ -454,12 +465,20 @@ def fetch_flatfile_to_tmp(
     try:
         with out_path.open("wb") as f:
             client.download_fileobj(bucket, key, f)
-        _record_downloaded_tmp(kind, d, key, size)
-        return FetchResult(True, "downloaded_to_tmp", kind, d.isoformat(), path=str(out_path), s3_key=key, attempts=attempts, file_size_bytes=size).to_dict()
+        if processed_redownload:
+            # Keep the persistent state as processed; this is a temporary replay-only fetch.
+            status = "processed_redownloaded_to_tmp"
+        else:
+            _record_downloaded_tmp(kind, d, key, size)
+            status = "downloaded_to_tmp"
+        return FetchResult(True, status, kind, d.isoformat(), path=str(out_path), s3_key=key, attempts=attempts, file_size_bytes=size).to_dict()
     except Exception as exc:
         err = f"download_failed: {type(exc).__name__}: {str(exc)[:180]}"
         status = "download_failed_after_retries" if attempts >= max_attempts() else "download_failed"
-        _record_attempt(kind, d, status, err)
+        if processed_redownload:
+            status = "processed_redownload_failed"
+        else:
+            _record_attempt(kind, d, status, err)
         try:
             out_path.unlink(missing_ok=True)
         except Exception:
@@ -473,6 +492,7 @@ def pull_flatfiles_for_window(
     minute_days: int = 10,
     daily_days: int = 25,
     force: bool = False,
+    redownload_processed: bool = False,
 ) -> dict[str, Any]:
     tmp_dir = make_tmp_dir()
     minute_dates = trading_days_ending(end_date, max(1, min(14, int(minute_days or 10))))
@@ -482,12 +502,12 @@ def pull_flatfiles_for_window(
     results: list[dict[str, Any]] = []
     try:
         for d in minute_dates:
-            r = fetch_flatfile_to_tmp(DATASET_MINUTE, d, tmp_dir=tmp_dir, force=force)
+            r = fetch_flatfile_to_tmp(DATASET_MINUTE, d, tmp_dir=tmp_dir, force=force, redownload_processed=redownload_processed)
             results.append(r)
             if r.get("ok") and r.get("path"):
                 minute_paths.append(str(r.get("path")))
         for d in daily_dates:
-            r = fetch_flatfile_to_tmp(DATASET_DAILY, d, tmp_dir=tmp_dir, force=force)
+            r = fetch_flatfile_to_tmp(DATASET_DAILY, d, tmp_dir=tmp_dir, force=force, redownload_processed=redownload_processed)
             results.append(r)
             if r.get("ok") and r.get("path"):
                 daily_paths.append(str(r.get("path")))
@@ -500,6 +520,8 @@ def pull_flatfiles_for_window(
             "minute_dates": [d.isoformat() for d in minute_dates],
             "daily_dates": [d.isoformat() for d in daily_dates],
             "results": results,
+            "redownload_processed": bool(redownload_processed),
+            "note_ar": "إذا redownload_processed=true فهذا تنزيل مؤقت لإعادة التشغيل/التعلم فقط ولا يغير حالة processed الدائمة.",
             "config": flatfiles_config_status(),
         }
     except Exception as exc:
