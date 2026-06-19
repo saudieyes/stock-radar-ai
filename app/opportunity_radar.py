@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2l_closed_market_prep_sections_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2l1_closed_market_prep_sections_bool_fix_2026_06_19"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -188,6 +188,17 @@ def _first(row: dict, keys: list[str], default: float = 0.0) -> float:
         except Exception:
             continue
     return default
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "ok", "on", "نعم", "صحيح"}
 
 
 def _as_list(value: Any) -> list[str]:
