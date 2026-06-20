@@ -23,10 +23,12 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u4_live_critical_pre_explosion_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u4b_prepared_watch_ui_bridge_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
+PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
+PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u4b_2026_06_20"
 
 PERSONAL_PRICE_COMFORT = 50.0
 PERSONAL_PRICE_MAX_NORMAL = 150.0
@@ -1837,6 +1839,159 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
 
 
 
+
+def _fast_sharia_for_prepared_symbol(symbol: str) -> dict[str, Any]:
+    """Best-effort local Sharia label for direct Prepared Watch UI rows.
+
+    This is display-only. It never allows execution and never overrides the
+    final Sharia filter. If local data is missing, the symbol is shown as urgent
+    review rather than clean, so the user can review it before premarket.
+    """
+    sym = _u(symbol)
+    if not sym:
+        return {"status": "needs_review", "label": "يحتاج مراجعة شرعية", "reason": "لا يوجد رمز صالح", "gray": True, "blocked": False}
+    try:
+        from app.sharia_filter import assess_sharia_source_fast
+        a = assess_sharia_source_fast(sym) or {}
+        status = _s(a.get("status") or a.get("sharia_status") or ("compliant" if a.get("is_halal") else "needs_review")).lower()
+        blocked = bool(a.get("should_block") or a.get("manual_excluded") or status in {"non_compliant", "haram", "excluded"})
+        gray = bool(a.get("is_gray") or status in {"needs_review", "unknown", "gray", "review"})
+        if blocked:
+            status = "non_compliant"
+        elif gray:
+            status = "needs_review"
+        elif status not in {"compliant", "halal"}:
+            status = "needs_review"
+            gray = True
+        return {
+            "status": status,
+            "label": _s(a.get("label")) or ("متوافق مبدئيًا" if status in {"compliant", "halal"} else "يحتاج مراجعة شرعية"),
+            "reason": _s(a.get("reason")) or "تقييم شرعي سريع من البيانات المحلية فقط.",
+            "gray": gray,
+            "blocked": blocked,
+            "manual_excluded": bool(a.get("manual_excluded")),
+        }
+    except Exception as exc:
+        return {"status": "needs_review", "label": "يحتاج مراجعة شرعية", "reason": f"تعذر التقييم السريع: {type(exc).__name__}", "gray": True, "blocked": False}
+
+
+def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+    """V2U4b: surface Prepared Watch memory directly in the visible UI section.
+
+    V2U4 correctly saved EHGO/ICCM/TPC/SNBR-like candidates in SQLite, but the
+    normal clean-only universe can remove gray/non-compliant symbols before
+    `build_opportunity_radar_sections` sees them. This bridge reads the compact
+    memory directly and creates non-actionable cards for the critical section.
+    """
+    lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
+    debug: dict[str, Any] = {
+        "version": PREPARED_WATCH_UI_BRIDGE_VERSION,
+        "enabled": True,
+        "memory_key": PREPARED_EXPLOSION_WATCH_MEMORY_KEY,
+        "stored_count": 0,
+        "bridge_count": 0,
+        "symbols": [],
+        "reason_ar": "يعرض مرشحي Prepared Watch مباشرة حتى لو أسقطتهم فلترة clean-only؛ مراقبة/مراجعة فقط وليست شراء.",
+    }
+    try:
+        payload = get_json(PREPARED_EXPLOSION_WATCH_MEMORY_KEY, {}) or {}
+    except Exception as exc:
+        debug["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+        return [], debug
+    if not isinstance(payload, dict):
+        debug["error"] = "payload_not_dict"
+        return [], debug
+    items = list(payload.get("items") or [])
+    debug["stored_count"] = int(payload.get("count", len(items)) or 0)
+    debug["trade_date"] = payload.get("trade_date", "")
+    debug["updated_at_utc"] = payload.get("updated_at_utc", "")
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for idx, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        sym = _u(it.get("symbol"))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        metrics = dict(it.get("metrics") or {})
+        raw_reasons = [str(x) for x in list(it.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or []) if str(x or "").strip()]
+        sh = _fast_sharia_for_prepared_symbol(sym)
+        blocked = bool(sh.get("blocked"))
+        gray = bool(sh.get("gray"))
+        if sym == "TPC" or metrics.get("critical_tpc_probe_v2u3"):
+            label = "🚨 انفجار افتتاح محتمل — راقب أول دقيقة"
+            head_reason = "مسار TPC/Opening Gap: موجود في قائمة التحضير قبل السوق حتى لا يظهر بعد +300%."
+        elif sym == "ICCM" or metrics.get("critical_iccm_probe_v2u3"):
+            label = "🚨 اشتعال مبكر قبل +20%"
+            head_reason = "مسار ICCM: راقب +3%/+5% مع حجم قبل أن يتحول إلى انفجار كبير."
+        elif sym in {"EHGO", "SNBR"} or metrics.get("critical_micro_probe_v2u3"):
+            label = "🚨 Micro/Ultra-Low قبل الانفجار"
+            head_reason = "مسار EHGO/SNBR: سهم صغير جدًا يحتاج مراجعة/مراقبة قبل البري ماركت."
+        else:
+            label = "🚨 مرشح انفجار حرج قبل السوق"
+            head_reason = "مرشح من مسح جلسة أمس الكامل؛ لا يُدفن داخل الأقسام العامة."
+        if blocked:
+            label = "⛔ مرشح انفجار محجوب شرعيًا — تعلم فقط"
+            head_reason = "مرفوض/مستبعد شرعيًا: يظهر للتعلم والوعي فقط وليس فرصة شراء."
+        elif gray:
+            label = "⚠️ مرشح انفجار — مراجعة شرعية عاجلة"
+            head_reason = "الحكم الشرعي غير محسوم: راجعه قبل البري ماركت لا أثناء الانفجار."
+        price = _num(metrics.get("price", metrics.get("close", metrics.get("last_price", 0))), 0.0)
+        change_pct = _num(metrics.get("change_pct", metrics.get("day_change_pct", 0)), 0.0)
+        score = _num(it.get("score", metrics.get("big_explosion_prepared_score", 0)), 0.0)
+        reasons = _dedupe([head_reason, _s(sh.get("reason"))] + raw_reasons, 12)
+        row = {
+            "symbol": sym,
+            "company": sym,
+            "current_price_live": price,
+            "display_price": price,
+            "price": price,
+            "change_vs_prev_close_pct": change_pct,
+            "display_change_pct": change_pct,
+            "decision": "مراقبة حرجة قبل الانفجار — ليست شراء مباشر",
+            "effective_decision": "مراقبة",
+            "opportunity_bucket": "critical_pre_explosion_watch",
+            "opportunity_stage": "critical_pre_explosion_watch",
+            "opportunity_stage_label": label,
+            "display_plan_family_label": label,
+            "trade_type_label_ar": "Critical Pre-Explosion Watch",
+            "opportunity_rank_score": 100000.0 - idx + min(score, 999.0),
+            "opportunity_reasons": reasons,
+            "technical_explainer_reasons": reasons,
+            "why_appeared_ar": "، ".join(reasons[:5]),
+            "non_actionable_prep": True,
+            "critical_pre_explosion_watch_v2u4": {
+                "matched": True,
+                "version": PREPARED_WATCH_UI_BRIDGE_VERSION,
+                "source": "prepared_watch_memory_direct_bridge",
+                "score": score,
+                "sharia_status": sh.get("status"),
+                "blocked": blocked,
+                "gray": gray,
+                "rule_ar": "مراقبة/مراجعة فقط؛ لا شراء مباشر ولا تجاوز للشرعية.",
+            },
+            "critical_pre_explosion_label_ar": label,
+            "critical_pre_explosion_rule_ar": "V2U4b: يعرض Prepared Watch مباشرة في الواجهة كمراقبة حرجة قبل السوق فقط.",
+            "big_explosion_prepared_watch_v2u": True,
+            "critical_promotion_gate_v2u3": True,
+            "critical_promotion_reason_ar": head_reason,
+            "sharia_status": sh.get("status"),
+            "sharia_label": sh.get("label"),
+            "sharia_reason": sh.get("reason"),
+            "sharia_is_gray": gray,
+            "sharia_manual_excluded": bool(sh.get("manual_excluded")),
+        }
+        rows.append(row)
+        if len(rows) >= lim:
+            break
+    debug["bridge_count"] = len(rows)
+    debug["symbols"] = [r.get("symbol") for r in rows]
+    if not rows:
+        debug["empty_reason_ar"] = "لا توجد ذاكرة Prepared Watch نشطة؛ شغّل /maintenance/prior-session-explosion-scan?persist=true أولًا."
+    return rows, debug
+
+
 def _critical_pre_explosion_profile(row: dict, flags: dict | None = None) -> dict[str, Any]:
     """V2U4: identify prepared critical explosion candidates before the move.
 
@@ -3255,6 +3410,26 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
                 break
         final_map[key] = items
 
+    # V2U4b bridge: the Prepared Watch memory may contain gray/non-compliant
+    # critical candidates that were intentionally removed from the clean-only
+    # deep universe. Surface them directly in the non-actionable critical section.
+    prepared_watch_ui_bridge_rows, prepared_watch_ui_bridge_debug = _prepared_watch_ui_bridge_rows(limit=limit)
+    if prepared_watch_ui_bridge_rows:
+        existing = final_map.get("critical_pre_explosion_watch", []) or []
+        merged = []
+        seen_bridge: set[str] = set()
+        for item in list(prepared_watch_ui_bridge_rows) + list(existing):
+            if not isinstance(item, dict):
+                continue
+            sym = _u(item.get("symbol"))
+            if not sym or sym in seen_bridge:
+                continue
+            seen_bridge.add(sym)
+            merged.append(item)
+            if len(merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                break
+        final_map["critical_pre_explosion_watch"] = merged
+
     # V2k2 bridge: when the live tool only shows Watch/Early Movement, expose
     # non-execution learning/prep candidates in their own visible section.
     specific_seen = set()
@@ -3303,6 +3478,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "fast_lane_funnel_rule_ar": fast_lane_funnel_display_debug.get("rule_ar"),
         "low_float_fast_lane_raw_watch_count": len(fast_lane_raw_watch_rows),
         "low_float_fast_lane_raw_watch": fast_lane_raw_watch_rows,
+        "prepared_watch_ui_bridge_debug": prepared_watch_ui_bridge_debug,
+        "prepared_watch_ui_bridge_rule_ar": prepared_watch_ui_bridge_debug.get("reason_ar"),
         "promotion_bridge_debug": promotion_bridge_debug,
         "promotion_bridge_rule_ar": promotion_bridge_debug.get("rule_ar"),
         "promotion_bridge_candidates_count": len(promotion_bridge_rows),
