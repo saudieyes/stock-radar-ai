@@ -1,0 +1,165 @@
+{
+  "data_gaps": [],
+  "decision": "العينة غير كافية بعد",
+  "gap_evidence_fields": [
+    "after_hours_change_pct",
+    "pre_market_change_pct",
+    "pre_market_volume",
+    "pre_market_dollar_volume",
+    "previous_close_near_high",
+    "close_position_pct",
+    "late_day_volume_spike",
+    "open_gap_pct",
+    "first_15m_followthrough",
+    "first_30m_followthrough",
+    "held_above_open",
+    "held_above_vwap_proxy",
+    "gap_fade_flag",
+    "gap_retest_success"
+  ],
+  "gap_quality_groups": [],
+  "generated_at": "2026-06-19 22:46:31",
+  "hypotheses": [],
+  "loss_pattern_groups": [
+    {
+      "avg_max_gain_pct": 2.04,
+      "avg_max_loss_pct": -2.43,
+      "cases": 4,
+      "signature": "pullback | near_resistance | liquidity_not_persistent | support_break",
+      "unique_symbols": 3
+    },
+    {
+      "avg_max_gain_pct": 1.95,
+      "avg_max_loss_pct": -3.25,
+      "cases": 3,
+      "signature": "breakout | near_resistance | liquidity_not_persistent | support_break | high_volatility",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 0.21,
+      "avg_max_loss_pct": -4.86,
+      "cases": 3,
+      "signature": "breakout | near_52w_high | support_break | high_volatility",
+      "unique_symbols": 3
+    },
+    {
+      "avg_max_gain_pct": 0.16,
+      "avg_max_loss_pct": -3.47,
+      "cases": 2,
+      "signature": "breakout | near_resistance | near_52w_high | support_break | high_volatility",
+      "unique_symbols": 2
+    },
+    {
+      "avg_max_gain_pct": 1.08,
+      "avg_max_loss_pct": -4.91,
+      "cases": 2,
+      "signature": "pullback | near_resistance | near_52w_high | liquidity_not_persistent | support_break",
+      "unique_symbols": 2
+    },
+    {
+      "avg_max_gain_pct": 0.97,
+      "avg_max_loss_pct": -2.98,
+      "cases": 2,
+      "signature": "pullback | near_resistance | near_52w_high | liquidity_not_persistent | support_break | high_volatility",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 1.47,
+      "avg_max_loss_pct": -2.89,
+      "cases": 2,
+      "signature": "pullback | near_resistance | liquidity_not_persistent | support_break | high_volatility",
+      "unique_symbols": 2
+    },
+    {
+      "avg_max_gain_pct": 0.36,
+      "avg_max_loss_pct": -2.2,
+      "cases": 2,
+      "signature": "breakout | near_resistance | liquidity_not_persistent | support_break",
+      "unique_symbols": 2
+    },
+    {
+      "avg_max_gain_pct": 0.11,
+      "avg_max_loss_pct": -3.62,
+      "cases": 1,
+      "signature": "breakout | near_resistance | near_52w_high | support_break",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 1.22,
+      "avg_max_loss_pct": -2.55,
+      "cases": 1,
+      "signature": "breakout | near_52w_high | liquidity_not_persistent | support_break",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 0.83,
+      "avg_max_loss_pct": -5.01,
+      "cases": 1,
+      "signature": "breakout | near_resistance | liquidity_not_persistent | high_volatility",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 2.06,
+      "avg_max_loss_pct": -1.8,
+      "cases": 1,
+      "signature": "reentry | near_52w_high | liquidity_not_persistent | support_break",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 2.21,
+      "avg_max_loss_pct": -1.93,
+      "cases": 1,
+      "signature": "reentry | near_resistance | support_break",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 0.04,
+      "avg_max_loss_pct": -2.88,
+      "cases": 1,
+      "signature": "breakout | near_resistance | support_break",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 1.04,
+      "avg_max_loss_pct": -1.77,
+      "cases": 1,
+      "signature": "reentry | near_52w_high | support_break",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 0.71,
+      "avg_max_loss_pct": -5.33,
+      "cases": 1,
+      "signature": "breakout | near_resistance | support_break | high_volatility",
+      "unique_symbols": 1
+    },
+    {
+      "avg_max_gain_pct": 5.91,
+      "avg_max_loss_pct": -3.11,
+      "cases": 1,
+      "signature": "pullback | near_52w_high | support_break | high_volatility",
+      "unique_symbols": 1
+    }
+  ],
+  "notes": "لا تغيّر هذه النتائج السكور أو الترتيب. V4b يثبت حقول دراسة القاب/خطر القاب ضمن Evidence ويضيف Retention Guard آمنًا بلا حذف فعلي.",
+  "ok": true,
+  "summary": {
+    "gap_unknown_winners": 0,
+    "historical_visibility_winners": 0,
+    "low_tradability_winners": 0,
+    "missing_historical_visibility": 0,
+    "snapshot_only_visibility_winners": 0,
+    "source_unknown_winners": 0,
+    "tracking_loss_rows": 29,
+    "tracking_rows": 153,
+    "tracking_success_rows": 9,
+    "tradability_unknown_winners": 0,
+    "winner_profiles": 0
+  },
+  "tradability_groups": [],
+  "trade_date": "2026-06-19",
+  "version": "pattern_lab_v4b_read_only_gap_evidence",
+  "visibility_groups": [],
+  "week_key": "2026-06-15_2026-06-19",
+  "winner_pattern_groups": []
+}
