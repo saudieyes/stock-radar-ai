@@ -2733,6 +2733,7 @@
     const INFO_TEXTS = {
       '🔥 دخول قوي': { title: 'دخول قوي', body: 'أفضل فرص القائمة حاليًا. الترتيب داخل القسم من الأعلى جودة ثم الأفضل تنفيذًا ثم الأنسب عائدًا.' },
       '🟠 دخول بحذر': { title: 'دخول بحذر', body: 'فرصة جيدة لكنها تحتاج تأكيدًا أكبر أو تنفيذًا أدق أو أن عائدها/مخاطرتها ليست مثالية بعد.' },
+      '🚨 مرشحو انفجار حرجة قبل السوق': { title: 'مرشحو انفجار حرجة قبل السوق', body: 'قائمة مراقبة ومراجعة شرعية مبكرة لأسهم قد تتحرك بسرعة مثل EHGO/ICCM/TPC/SNBR. ليست شراء مباشر ولا تتجاوز الشرعية.' },
       '🚀 تهيئة قوية قبل الافتتاح': { title: 'تهيئة قوية قبل الافتتاح', body: 'أسهم قوية فنيًا لكنها تحتاج تأكيد السعر والحجم عند الافتتاح قبل أن تتحول إلى دخول قوي أو دخول بحذر.' },
       '⚠️ فرص قوية غير محسومة شرعيًا': { title: 'فرص قوية غير محسومة شرعيًا', body: 'التحليل الفني قوي، لكن الحكم الشرعي غير محسوم بسبب نقص بيانات أو حاجة لمراجعة يدوية. لا تُخصم نقاط السهم فنيًا بسبب الرمادي، لكنه يُفصل عن الدخول القوي النظيف.' },
       '👀 المراقبة': { title: 'المراقبة', body: 'سهم تحت المتابعة وليس جاهزًا للتنفيذ الآن. استخدمه للترقب لا للدخول السريع.' },
@@ -3778,7 +3779,8 @@
     const SECTION_DEFAULT_LIMIT = 5;
     const OPPORTUNITY_RADAR_GROUP_KEYS = [
       'promotion_bridge_candidates',
-      'learning_opportunity_candidates',
+      'critical_pre_explosion_watch',
+        'learning_opportunity_candidates',
       'small_stock_classic_radar',
       'pre_trigger_candidates',
       'support_bounce_candidates',
@@ -4654,6 +4656,7 @@
       const cautious = sortDisplayItems(data.cautious_entries || []);
       const learningOverlay = normalizeLearningOverlayItems(data);
       const oppRowsRaw = [
+        ...(data.critical_pre_explosion_watch || []),
         ...(data.promotion_bridge_candidates || []),
         ...(data.learning_opportunity_candidates || []),
         ...(data.small_stock_classic_radar || []),
@@ -4675,6 +4678,7 @@
         oppSeen.add(key);
         return true;
       });
+      const criticalPreExplosion = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'critical_pre_explosion_watch'));
       const promotionBridge = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'promotion_bridge'));
       const learningOpportunity = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'learning_opportunity'));
       const preTrigger = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'pre_trigger'));
@@ -4693,6 +4697,7 @@
       const watch = sortDisplayItems(data.watchlist || []);
       window.__sectionCursor = {};
       window.__sectionItems = {
+        'critical-pre-explosion-section-content': criticalPreExplosion,
         'strong-section-content': strong,
         'cautious-section-content': cautious,
         'learning-overlay-section-content': learningOverlay,
@@ -4717,6 +4722,7 @@
         ${renderLearningOverlayPanel(data, learningOverlay)}
         ${renderNextWeekAnalysisPanel(data)}
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
+        ${renderSection('🚨 مرشحو انفجار حرجة قبل السوق', criticalPreExplosion.length, 'critical-pre-explosion-section-content', 'critical-pre-explosion-section', criticalPreExplosion, { tone: 'cautious', defaultOpen: criticalPreExplosion.length > 0, orderedText: 'هذه قائمة مراقبة حرجة قبل الانفجار: راجع الشرعية الآن، وراقب +3%/+5% مع حجم في البري ماركت/الافتتاح. ليست شراء مباشر ولا تتجاوز فلتر الشرعية.' })}
         ${renderSection('🧭 جسر الترقية قبل الافتتاح', promotionBridge.length, 'promotion-bridge-section-content', 'promotion-bridge-section', promotionBridge, { tone: 'open', defaultOpen: promotionBridge.length > 0, orderedText: 'يجمع أفضل مرشحي Low-Float وSmall Classic وPre-Trigger وSupport ويحدد من قد يترقى عند تحقق الحجم والسعر. هذا ليس شراء مباشر ولا يغير Strong/Cautious.' })}
         ${renderSection('🧠 مرشحو طبقة التعلم / تحضير مبكر', learningOpportunity.length, 'learning-opportunity-section-content', 'learning-opportunity-section', learningOpportunity, { tone: 'open', defaultOpen: learningOpportunity.length > 0, orderedText: 'هذا القسم يجسر البيانات الموجودة في المراقبة/الحركة المبكرة إلى طبقة تعلم مرئية. ليس Strong ولا Cautious، لكنه يمنع اختفاء الفرص التحضيرية عندما لا تكتمل شروط الأقسام المتخصصة.' })}
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
