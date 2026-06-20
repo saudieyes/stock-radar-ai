@@ -33,6 +33,7 @@ from app.source_discovery import (
     _collect_low_float_fast_lane_candidates,
     _collect_micro_explosion_full_market_candidates,
     _collect_big_explosion_live_lane_candidates,
+    _big_explosion_live_lane_score,
 )
 try:
     from app.polygon_flatfile_fetcher import is_us_market_trading_day, fetch_flatfile_to_tmp, cleanup_tmp_path
@@ -48,7 +49,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t_big_explosion_live_lane_timing_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t1_early_big_explosion_timing_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -831,7 +832,8 @@ def _minute_between(start_hhmm: str, end_hhmm: str) -> int | None:
     try:
         sh, sm = str(start_hhmm or "").split(":", 1)
         eh, em = str(end_hhmm or "").split(":", 1)
-        return max(0, int(eh) * 60 + int(em) - (int(sh) * 60 + int(sm)))
+        # V2T1: allow negative values to expose detections that happened after the peak.
+        return int(eh) * 60 + int(em) - (int(sh) * 60 + int(sm))
     except Exception:
         return None
 
@@ -895,18 +897,47 @@ def _finalize_slice_map(raw_map: dict[str, dict]) -> dict[str, dict]:
 
 
 def _default_replay_slices() -> list[dict[str, Any]]:
-    return [
-        {"key": "premarket_0800", "time_utc": "08:00", "minute": 8 * 60, "label_ar": "بداية البري ماركت"},
-        {"key": "premarket_1000", "time_utc": "10:00", "minute": 10 * 60, "label_ar": "منتصف البري ماركت"},
-        {"key": "premarket_1230", "time_utc": "12:30", "minute": 12 * 60 + 30, "label_ar": "قبل الافتتاح بساعة تقريبًا"},
-        {"key": "open_1330", "time_utc": "13:30", "minute": 13 * 60 + 30, "label_ar": "الافتتاح"},
-        {"key": "open_1345", "time_utc": "13:45", "minute": 13 * 60 + 45, "label_ar": "أول 15 دقيقة"},
-        {"key": "open_1400", "time_utc": "14:00", "minute": 14 * 60, "label_ar": "أول 30 دقيقة"},
-        {"key": "regular_1500", "time_utc": "15:00", "minute": 15 * 60, "label_ar": "بعد ساعة ونصف من الافتتاح"},
-        {"key": "regular_1700", "time_utc": "17:00", "minute": 17 * 60, "label_ar": "منتصف الجلسة"},
-        {"key": "regular_1930", "time_utc": "19:30", "minute": 19 * 60 + 30, "label_ar": "قبل الإغلاق"},
-        {"key": "after_2200", "time_utc": "22:00", "minute": 22 * 60, "label_ar": "بعد الإغلاق"},
-    ]
+    """V2T1: denser replay checkpoints around PM/open explosions.
+
+    We keep this compact enough for Railway, but add 5-minute slices in the
+    danger window where ICCM/EHGO/CLWT-type moves cross +20/+50 very quickly.
+    Times are UTC in US summer market hours.
+    """
+    points: list[tuple[int, str]] = []
+    def add(minute: int, label: str) -> None:
+        if minute < 0:
+            return
+        points.append((int(minute), label))
+    # Sparse early premarket.
+    for m in range(8 * 60, 9 * 60, 30):
+        add(m, "بري ماركت مبكر")
+    # Dense premarket / opening ramp: 09:00-14:30 UTC every 5 minutes.
+    for m in range(9 * 60, 14 * 60 + 31, 5):
+        if m < 13 * 60 + 30:
+            lab = "بري ماركت كثيف V2T1"
+        elif m == 13 * 60 + 30:
+            lab = "الافتتاح"
+        elif m <= 14 * 60 + 30:
+            lab = "أول ساعة — كل 5 دقائق"
+        else:
+            lab = "شرائح كثيفة"
+        add(m, lab)
+    # Regular session after first hour every 15 minutes.
+    for m in range(14 * 60 + 45, 20 * 60 + 1, 15):
+        add(m, "الجلسة الرسمية — كل 15 دقيقة")
+    # After-hours checkpoints.
+    for m in (20 * 60 + 30, 21 * 60, 22 * 60):
+        add(m, "بعد الإغلاق")
+    seen: set[int] = set()
+    out: list[dict[str, Any]] = []
+    for minute, label in sorted(points):
+        if minute in seen:
+            continue
+        seen.add(minute)
+        hhmm = _minute_label(minute)
+        key = hhmm.replace(":", "")
+        out.append({"key": f"slice_{key}", "time_utc": hhmm, "minute": minute, "label_ar": label})
+    return out
 
 
 def _read_minute_file_for_replay(
@@ -922,7 +953,7 @@ def _read_minute_file_for_replay(
     target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug = {
-        "version": "minute_replay_loader_v2t_2026_06_20",
+        "version": "minute_replay_loader_v2t1_dense_slices_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "target_symbols_count": len(target_symbols),
@@ -973,6 +1004,7 @@ def _read_minute_file_for_replay(
                         "volume": _round(v, 0),
                         "dollar_volume": _round(c * v, 2),
                     })
+                # V2T1: slices are sorted; skip checkpoints that already passed for speed.
                 for sl in slices:
                     if t_min <= int(sl["minute"]):
                         bucket = slice_aggs[str(sl["key"])].setdefault(sym, {})
@@ -1098,6 +1130,37 @@ def _stage_for_slice(row: dict, current_gain: float, layer: str, sharia: dict) -
     return "source_detected", "دخل المصدر"
 
 
+def _apply_selection_baseline_to_slice_map(m: dict[str, dict], selection_prices: dict[str, float], target_symbols: set[str]) -> dict[str, dict]:
+    """Simulate live FMP percent-change in historical minute slices.
+
+    Minute aggregates open at the first traded minute, which hides gap runners.
+    In the real tool FMP reports change from previous close.  For target replay
+    we reset the candle open to the after-close selection/previous close so
+    Big Explosion sees TPC/ICCM/EHGO-style gap-and-go moves at the right time.
+    """
+    out = dict(m or {})
+    for sym in target_symbols or set():
+        sym = _u(sym)
+        row = dict(out.get(sym) or {})
+        base = _num(selection_prices.get(sym), 0.0)
+        price = _num(row.get("price") or row.get("close"), 0.0)
+        high = _num(row.get("high"), price)
+        low = _num(row.get("low"), price)
+        if not sym or not row or base <= 0 or price <= 0:
+            continue
+        row["open_intraday_first"] = row.get("open")
+        row["open"] = base
+        row["previous_close_proxy"] = base
+        row["selection_price_proxy"] = base
+        row["price"] = price
+        row["close"] = price
+        row["change_pct"] = _safe_gain(price, base)
+        row["day_change_pct"] = _safe_gain(price, base)
+        row["range_pct"] = ((high - low) / price) if price > 0 and high > 0 and low > 0 else _num(row.get("range_pct"), 0.0)
+        out[sym] = row
+    return out
+
+
 def _run_source_on_minute_slices(
     *,
     outcome_date: str,
@@ -1111,14 +1174,26 @@ def _run_source_on_minute_slices(
     slice_debug: list[dict] = []
     for sl in slices:
         key = str(sl["key"])
-        m = dict(slice_maps.get(key) or {})
+        m_raw = dict(slice_maps.get(key) or {})
+        m = _apply_selection_baseline_to_slice_map(m_raw, selection_prices, target_symbols)
         if not m:
-            slice_debug.append({"key": key, "time_utc": sl.get("time_utc"), "rows": 0, "micro": 0, "fast": 0})
+            slice_debug.append({"key": key, "time_utc": sl.get("time_utc"), "rows": 0, "micro": 0, "fast": 0, "big": 0})
             continue
-        micro_rows, micro_debug = _collect_micro_explosion_full_market_candidates(m, phase_detail=f"historical_minute_slice_v2t:{outcome_date}:{sl.get('time_utc')}")
-        fast_rows, fast_debug = _collect_low_float_fast_lane_candidates(m, phase_detail=f"historical_minute_slice_v2t:{outcome_date}:{sl.get('time_utc')}")
-        big_rows, big_debug = _collect_big_explosion_live_lane_candidates(m, phase_detail=f"historical_minute_slice_v2t:{outcome_date}:{sl.get('time_utc')}")
-        source_rows: list[tuple[dict, str]] = [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
+        phase_tag = f"historical_minute_slice_v2t1:{outcome_date}:{sl.get('time_utc')}"
+        micro_rows, micro_debug = _collect_micro_explosion_full_market_candidates(m, phase_detail=phase_tag)
+        fast_rows, fast_debug = _collect_low_float_fast_lane_candidates(m, phase_detail=phase_tag)
+        big_rows, big_debug = _collect_big_explosion_live_lane_candidates(m, phase_detail=phase_tag)
+        # V2T1 target probe: same Big Explosion scoring function, but not hidden by source cap/ranking.
+        # This tells us whether production logic would flag the symbol if reserved seats existed.
+        target_probe_rows = []
+        for _sym in sorted(target_symbols or set()):
+            _row = m.get(_sym) or {}
+            if not _row:
+                continue
+            _ok, _score, _reasons, _flags = _big_explosion_live_lane_score(_sym, _row, phase_detail=phase_tag, source_kind="historical_minute_slice_v2t1")
+            if _ok:
+                target_probe_rows.append({"symbol": _sym, "score": _round(_score, 3), "reasons": _reasons, "metrics": {**_row, **_flags}})
+        source_rows: list[tuple[dict, str]] = [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "big_explosion_live_lane_v2t1_target_probe") for r in target_probe_rows] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
         slice_debug.append({
             "key": key,
             "time_utc": sl.get("time_utc"),
@@ -1127,6 +1202,7 @@ def _run_source_on_minute_slices(
             "micro": len(micro_rows or []),
             "fast": len(fast_rows or []),
             "big": len(big_rows or []),
+            "target_probe_big": len(target_probe_rows or []),
             "micro_top": (micro_debug or {}).get("top_symbols", [])[:10],
             "fast_top": (fast_debug or {}).get("top_symbols", [])[:10],
             "big_top": (big_debug or {}).get("top_symbols", [])[:10],
@@ -1170,7 +1246,7 @@ def _run_source_on_minute_slices(
         rec["promotion_count"] = len(hist)
         rec["promotion_summary_ar"] = " → ".join([f"{x.get('time_utc')} {x.get('stage_ar')} ({x.get('gain_pct_at_stage')}%)" for x in hist[:8]]) if hist else "لم يظهر في شرائح المصدر الدقيقة"
     return {
-        "version": "minute_source_slice_replay_v2t_2026_06_20",
+        "version": "minute_source_slice_replay_v2t1_baseline_dense_2026_06_20",
         "outcome_date": outcome_date,
         "target_symbols": sorted(target_symbols),
         "slice_debug": slice_debug,
@@ -1222,7 +1298,7 @@ def _build_big_explosion_timing_report(
     if not loader_debug.get("ok"):
         return {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
             "outcome_date": outcome_date,
             "target_symbols": sorted(target_symbols),
             "minute_loader": loader_debug,
@@ -1247,10 +1323,14 @@ def _build_big_explosion_timing_report(
         det_gain = _num(capture.get("first_detected_gain_pct"), 0.0)
         peak_gain = _num(timeline.get("peak_gain_from_selection_pct"), _num(w.get("next_session_max_gain_pct"), 0.0))
         if capture.get("detected_by_minute_replay"):
-            if det_gain <= 8:
-                timing_label = "التقطه مبكرًا"
+            if minutes_det_to_peak is not None and minutes_det_to_peak < 0:
+                timing_label = "التقطه بعد القمة — متأخر جدًا"
+            elif det_gain <= 8:
+                timing_label = "التقطه مبكرًا جدًا"
             elif det_gain <= 20:
-                timing_label = "التقطه بعد بداية الحركة"
+                timing_label = "التقطه مبكرًا حول بداية الانفجار"
+            elif det_gain <= 50:
+                timing_label = "التقطه أثناء الانفجار — قابل للمراقبة"
             else:
                 timing_label = "التقطه متأخرًا/بعد انفجار واضح"
         else:
@@ -1274,14 +1354,15 @@ def _build_big_explosion_timing_report(
             "promotion_history_ar": capture.get("promotion_summary_ar") or "لا توجد ترقية في شرائح المصدر الدقيقة",
         })
     detected_count = sum(1 for r in reports if r.get("detected_by_minute_replay"))
-    early_count = sum(1 for r in reports if _num(r.get("first_detected_gain_pct"), 9999) <= 8 and r.get("detected_by_minute_replay"))
+    early_count = sum(1 for r in reports if r.get("detected_by_minute_replay") and _num(r.get("first_detected_gain_pct"), 9999) <= 20 and (_num(r.get("minutes_from_detection_to_peak"), 0) >= 0))
     return {
         "ok": True,
-        "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
+        "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
         "outcome_date": outcome_date,
         "target_count": len(reports),
         "detected_by_minute_replay_count": detected_count,
         "early_detected_count": early_count,
+        "early_definition_ar": "V2T1 يعتبر الالتقاط مبكرًا إذا كان عند <=20% وقبل القمة، لأن الهدف التقاط +20/+50 قبل أن تصبح +100/+200.",
         "late_or_missed_count": len(reports) - early_count,
         "minute_loader": loader_debug,
         "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
@@ -1424,7 +1505,7 @@ def run_historical_replay(
         except Exception as exc:
             timing_report = {
                 "ok": False,
-                "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
+                "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
                 "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
             }
@@ -1432,7 +1513,7 @@ def run_historical_replay(
     else:
         payload["big_explosion_timing_report"] = {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
             "disabled": not bool(minute_timing),
             "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
         }
@@ -1472,7 +1553,7 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     prep = payload.get("after_close_tomorrow_prep") or {}
     missed = payload.get("missed_winners_audit") or {}
     lines = [
-        "Historical Replay Simulator V2T",
+        "Historical Replay Simulator V2T1",
         f"تاريخ الاختيار: {payload.get('selection_date')} → جلسة التقييم: {payload.get('outcome_date')}",
         f"وضع الاختبار: {payload.get('mode')}",
         f"أيام السياق: {', '.join(context_debug.get('context_dates') or [])}",
@@ -1514,7 +1595,10 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
         lines.append(f"- هدف التقرير: {timing.get('target_count')} سهم | التقطت شرائح الدقيقة: {timing.get('detected_by_minute_replay_count')} | التقاط مبكر: {timing.get('early_detected_count')} | متأخر/مفقود: {timing.get('late_or_missed_count')}")
         for r in (timing.get("symbols") or [])[:10]:
             tl = r.get("timeline") or {}
-            lines.append(f"- {r.get('symbol')}: peak {tl.get('peak_gain_from_selection_pct')}% at {tl.get('peak_time_utc')} ({tl.get('peak_phase_ar')}), detected {r.get('first_detected_time_utc') or 'لم يلتقط'} at {r.get('first_detected_gain_pct')}%, stage {r.get('first_detected_stage_ar') or '-'}, promo {r.get('promotion_history_ar')}")
+            th = tl.get("threshold_hits") or {}
+            f20 = (th.get("first_20pct") or {}).get("time_utc") or "-"
+            f50 = (th.get("first_50pct") or {}).get("time_utc") or "-"
+            lines.append(f"- {r.get('symbol')}: +20 عند {f20}, +50 عند {f50}, peak {tl.get('peak_gain_from_selection_pct')}% at {tl.get('peak_time_utc')} ({tl.get('peak_phase_ar')}), detected {r.get('first_detected_time_utc') or 'لم يلتقط'} at {r.get('first_detected_gain_pct')}%, timing {r.get('timing_label_ar')}, stage {r.get('first_detected_stage_ar') or '-'}, promo {r.get('promotion_history_ar')}")
     else:
         lines.append(f"- غير متاح: {(timing.get('minute_loader') or {}).get('reason') or timing.get('error') or timing.get('note_ar')}")
     lines += ["", "أضعف/أخطر المرشحين:"]

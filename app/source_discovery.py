@@ -107,13 +107,13 @@ MICRO_EXPLOSION_REFERENCE_FALLBACK_LIMIT = _env_int("MICRO_EXPLOSION_REFERENCE_F
 # with time/price/gain diagnostics.  This lane never creates BUY_NOW.
 BIG_EXPLOSION_LIVE_LANE_ENABLED = _env_bool("BIG_EXPLOSION_LIVE_LANE_ENABLED", True)
 BIG_EXPLOSION_LIVE_MIN_PRICE = float(os.getenv("BIG_EXPLOSION_LIVE_MIN_PRICE", "0.10") or 0.10)
-BIG_EXPLOSION_LIVE_MAX_PRICE = float(os.getenv("BIG_EXPLOSION_LIVE_MAX_PRICE", "45") or 45)
-BIG_EXPLOSION_LIVE_MIN_CHANGE_PCT = float(os.getenv("BIG_EXPLOSION_LIVE_MIN_CHANGE_PCT", "5") or 5)
+BIG_EXPLOSION_LIVE_MAX_PRICE = float(os.getenv("BIG_EXPLOSION_LIVE_MAX_PRICE", "85") or 85)
+BIG_EXPLOSION_LIVE_MIN_CHANGE_PCT = float(os.getenv("BIG_EXPLOSION_LIVE_MIN_CHANGE_PCT", "3") or 3)
 BIG_EXPLOSION_LIVE_MAX_CHANGE_PCT = float(os.getenv("BIG_EXPLOSION_LIVE_MAX_CHANGE_PCT", "450") or 450)
-BIG_EXPLOSION_LIVE_MIN_DOLLAR_VOLUME = float(os.getenv("BIG_EXPLOSION_LIVE_MIN_DOLLAR_VOLUME", "75000") or 75_000)
-BIG_EXPLOSION_LIVE_MAX_DOLLAR_VOLUME = float(os.getenv("BIG_EXPLOSION_LIVE_MAX_DOLLAR_VOLUME", "180000000") or 180_000_000)
+BIG_EXPLOSION_LIVE_MIN_DOLLAR_VOLUME = float(os.getenv("BIG_EXPLOSION_LIVE_MIN_DOLLAR_VOLUME", "25000") or 25_000)
+BIG_EXPLOSION_LIVE_MAX_DOLLAR_VOLUME = float(os.getenv("BIG_EXPLOSION_LIVE_MAX_DOLLAR_VOLUME", "260000000") or 260_000_000)
 BIG_EXPLOSION_LIVE_SCAN_CAP = _env_int("BIG_EXPLOSION_LIVE_SCAN_CAP", 9000, 500, 12000)
-BIG_EXPLOSION_LIVE_INJECT_LIMIT = _env_int("BIG_EXPLOSION_LIVE_INJECT_LIMIT", 260, 40, 420)
+BIG_EXPLOSION_LIVE_INJECT_LIMIT = _env_int("BIG_EXPLOSION_LIVE_INJECT_LIMIT", 320, 40, 520)
 
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # User-provided low-float / China-momentum seed universe.  These names are not
@@ -1142,12 +1142,14 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
     elif price <= 20:
         score += 14; reasons.append("سعر متوسط لكن قابل لانفجار سريع")
     elif price <= BIG_EXPLOSION_LIVE_MAX_PRICE:
-        score += 6; reasons.append("سعر أعلى قليلًا — مراقبة انفجار لا Low-Float")
+        score += 10; reasons.append("سعر أعلى من Low-Float لكنه ضمن انفجار الافتتاح/الجلسة")
     else:
         blockers.append("فوق نطاق Big Explosion Live Lane")
 
     if chg < BIG_EXPLOSION_LIVE_MIN_CHANGE_PCT:
         blockers.append("لم يبدأ تسارع كافٍ بعد")
+    elif BIG_EXPLOSION_LIVE_MIN_CHANGE_PCT <= chg < 5:
+        score += 18; reasons.append("بداية مبكرة جدًا +3% مع حجم — مراقبة قبل الانفجار")
     elif 5 <= chg < 12:
         score += 26; reasons.append("بداية تسارع +5% قبل الانفجار الكبير")
     elif 12 <= chg < 25:
@@ -1167,6 +1169,8 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
         score += 18; reasons.append("سيولة انفجار نشطة")
     elif 12_000_000 < dollar_volume <= BIG_EXPLOSION_LIVE_MAX_DOLLAR_VOLUME:
         score += 8; reasons.append("سيولة عالية — مناسب للتقرير/استمرار فقط")
+    elif 10_000 <= dollar_volume < BIG_EXPLOSION_LIVE_MIN_DOLLAR_VOLUME and chg >= 10:
+        score += 6; reasons.append("سيولة مبكرة منخفضة لكن الحركة قوية — تقرير مبكر")
     elif dollar_volume < BIG_EXPLOSION_LIVE_MIN_DOLLAR_VOLUME:
         blockers.append("السيولة لم تؤكد الانفجار بعد")
     else:
@@ -1178,10 +1182,10 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
         score += 8; reasons.append("يتداول قرب قمة الشريحة/اليوم")
     if near_high:
         score += 5; reasons.append("قريب من القمة — زخم نشط")
-    if source_kind in {"fmp_mover", "fmp_live", "historical_minute_slice", "polygon_grouped_v2t"}:
+    if source_kind in {"fmp_mover", "fmp_live", "historical_minute_slice", "historical_minute_slice_v2t1", "polygon_grouped_v2t", "polygon_grouped_v2t1"}:
         score += 6; reasons.append("مصدر حي/زمني مستقل وليس قائمة قديمة")
 
-    eligible = bool(not blockers and score >= 50)
+    eligible = bool(not blockers and score >= 44)
     flags = {
         "price": price,
         "day_change_pct": chg,
@@ -1192,6 +1196,7 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
         "close_strength": close_strength,
         "near_high": near_high,
         "big_explosion_live_lane_v2t": True,
+        "big_explosion_live_lane_v2t1": True,
         "big_explosion_live_score": safe_round(score, 3),
         "big_explosion_live_eligible": eligible,
         "big_explosion_live_source_kind": source_kind,
@@ -1204,13 +1209,13 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
 
 def _collect_big_explosion_live_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
     debug = {
-        "version": "big_explosion_live_lane_v2t_2026_06_20",
+        "version": "big_explosion_live_lane_v2t1_early_timing_2026_06_20",
         "enabled": bool(BIG_EXPLOSION_LIVE_LANE_ENABLED),
         "scan_cap": int(BIG_EXPLOSION_LIVE_SCAN_CAP),
         "scanned": 0,
         "eligible_count": 0,
         "top_symbols": [],
-        "rule_ar": "V2T: مسار مراقبة فقط للانفجارات الكبيرة في البري ماركت/الافتتاح/الجلسة؛ يظهر التوقيت والسعر ولا يفتح BUY_NOW.",
+        "rule_ar": "V2T1: مسار مراقبة فقط للانفجارات الكبيرة؛ يبدأ من +3% مع حجم، يحاكي تغير FMP مقابل إغلاق أمس، ولا يفتح BUY_NOW.",
     }
     if not BIG_EXPLOSION_LIVE_LANE_ENABLED or not grouped_map:
         return [], debug
@@ -1229,7 +1234,7 @@ def _collect_big_explosion_live_lane_candidates(grouped_map: dict, phase_detail:
             continue
         chg = to_float(metrics.get("day_change_pct")) * 100.0
         metrics = {**metrics, "change_pct": chg, "day_change_pct": chg}
-        eligible, score, reasons, flags = _big_explosion_live_lane_score(sym, metrics, phase_detail=phase_detail, source_kind="polygon_grouped_v2t")
+        eligible, score, reasons, flags = _big_explosion_live_lane_score(sym, metrics, phase_detail=phase_detail, source_kind="polygon_grouped_v2t1")
         if not eligible:
             continue
         out.append({"symbol": sym, "score": safe_round(score, 3), "reasons": reasons[:8], "metrics": {**metrics, **flags}})
@@ -2083,9 +2088,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3h_big_explosion_live_lane_v2t_2026_06_20",
+        "engine_version": "dynamic_discovery_v3h1_big_explosion_early_timing_v2t1_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_big_explosion_live_lane_v2t_and_micro_low_float",
+        "dynamic_discovery_mode": "candidate_pool_plus_big_explosion_early_timing_v2t1_and_micro_low_float",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
