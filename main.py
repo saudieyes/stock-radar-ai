@@ -1342,6 +1342,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     continuation_pullback_candidates = opportunity_radar_payload.get("continuation_pullback_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     high_risk_day_trades = opportunity_radar_payload.get("high_risk_day_trades", []) if isinstance(opportunity_radar_payload, dict) else []
     low_float_premarket_radar = opportunity_radar_payload.get("low_float_premarket_radar", []) if isinstance(opportunity_radar_payload, dict) else []
+    low_float_fast_lane_raw_watch = opportunity_radar_payload.get("low_float_fast_lane_raw_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
@@ -1437,6 +1438,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "learning_bridge_rule_ar": opportunity_radar_payload.get("learning_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "low_float_capture_debug": opportunity_radar_payload.get("low_float_capture_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "low_float_capture_rule_ar": opportunity_radar_payload.get("low_float_capture_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "fast_lane_funnel_debug": opportunity_radar_payload.get("fast_lane_funnel_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "fast_lane_funnel_rule_ar": opportunity_radar_payload.get("fast_lane_funnel_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "low_float_fast_lane_raw_watch_count": len(low_float_fast_lane_raw_watch),
+        "low_float_fast_lane_raw_watch": low_float_fast_lane_raw_watch[:limit] if 'limit' in locals() else low_float_fast_lane_raw_watch[:25],
         "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
         "learning_opportunity_candidates": learning_opportunity_candidates[:limit],
         "support_bounce_candidates_count": len(support_bounce_candidates),
@@ -1445,6 +1450,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "continuation_pullback_candidates_count": len(continuation_pullback_candidates),
         "high_risk_day_trades_count": len(high_risk_day_trades),
         "low_float_premarket_radar_count": len(low_float_premarket_radar),
+        "low_float_fast_lane_raw_watch_count": len(low_float_fast_lane_raw_watch),
         "gap_fill_watch_count": len(gap_fill_watch),
         "catalyst_watch_count": len(catalyst_watch),
         "support_bounce_candidates": support_bounce_candidates[:limit],
@@ -1453,6 +1459,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "continuation_pullback_candidates": continuation_pullback_candidates[:limit],
         "high_risk_day_trades": high_risk_day_trades[:limit],
         "low_float_premarket_radar": low_float_premarket_radar[:limit],
+        "low_float_fast_lane_raw_watch": low_float_fast_lane_raw_watch[:limit],
         "gap_fill_watch": gap_fill_watch[:limit],
         "catalyst_watch": catalyst_watch[:limit],
         "source_promotion_v2a": summarize_source_promotion_v2a(overlaid),
@@ -1472,6 +1479,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
             "continuation_pullback_candidates": _live_bucket_payload(continuation_pullback_candidates, limit),
             "high_risk_day_trades": _live_bucket_payload(high_risk_day_trades, limit),
             "low_float_premarket_radar": _live_bucket_payload(low_float_premarket_radar, limit),
+            "low_float_fast_lane_raw_watch": _live_bucket_payload(low_float_fast_lane_raw_watch, limit),
             "gap_fill_watch": _live_bucket_payload(gap_fill_watch, limit),
             "catalyst_watch": _live_bucket_payload(catalyst_watch, limit),
             "watchlist": _live_bucket_payload(watch, limit if include_watch else 1),
@@ -2805,6 +2813,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     continuation_pullback_candidates = opportunity_radar_payload.get("continuation_pullback_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     high_risk_day_trades = opportunity_radar_payload.get("high_risk_day_trades", []) if isinstance(opportunity_radar_payload, dict) else []
     low_float_premarket_radar = opportunity_radar_payload.get("low_float_premarket_radar", []) if isinstance(opportunity_radar_payload, dict) else []
+    low_float_fast_lane_raw_watch = opportunity_radar_payload.get("low_float_fast_lane_raw_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
@@ -2865,6 +2874,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "learning_bridge_rule_ar": opportunity_radar_payload.get("learning_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "low_float_capture_debug": opportunity_radar_payload.get("low_float_capture_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "low_float_capture_rule_ar": opportunity_radar_payload.get("low_float_capture_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "fast_lane_funnel_debug": opportunity_radar_payload.get("fast_lane_funnel_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "fast_lane_funnel_rule_ar": opportunity_radar_payload.get("fast_lane_funnel_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "low_float_fast_lane_raw_watch_count": len(low_float_fast_lane_raw_watch),
+        "low_float_fast_lane_raw_watch": low_float_fast_lane_raw_watch[:limit] if 'limit' in locals() else low_float_fast_lane_raw_watch[:25],
         "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
         "learning_opportunity_candidates": learning_opportunity_candidates[:25],
         "support_bounce_candidates_count": len(support_bounce_candidates),
@@ -2873,6 +2886,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "continuation_pullback_candidates_count": len(continuation_pullback_candidates),
         "high_risk_day_trades_count": len(high_risk_day_trades),
         "low_float_premarket_radar_count": len(low_float_premarket_radar),
+        "low_float_fast_lane_raw_watch_count": len(low_float_fast_lane_raw_watch),
         "gap_fill_watch_count": len(gap_fill_watch),
         "catalyst_watch_count": len(catalyst_watch),
         "source_promotion_v2a": summarize_source_promotion_v2a(results),
@@ -2895,6 +2909,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "continuation_pullback_candidates": continuation_pullback_candidates[:25],
         "high_risk_day_trades": high_risk_day_trades[:25],
         "low_float_premarket_radar": low_float_premarket_radar[:25],
+        "low_float_fast_lane_raw_watch": low_float_fast_lane_raw_watch[:25],
         "gap_fill_watch": gap_fill_watch[:25],
         "catalyst_watch": catalyst_watch[:25],
         "early_movement": early_movement_payload,
@@ -2921,6 +2936,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "fmp_movers_count": int(scan_debug.get("dynamic_fmp_movers_count", 0) or 0),
             "low_float_fast_lane_count": int(scan_debug.get("dynamic_low_float_fast_lane_count", 0) or 0),
             "low_float_fast_lane": scan_debug.get("dynamic_low_float_fast_lane", {}),
+            "low_float_fast_lane_funnel_debug": scan_debug.get("dynamic_low_float_fast_lane_funnel_debug", {}),
             "live_ignition_hot_lane_count": int(scan_debug.get("dynamic_live_ignition_hot_lane_count", 0) or 0),
             "pre_move_engine_v2_count": int(scan_debug.get("dynamic_pre_move_engine_v2_count", 0) or 0),
             "late_mover_review_count": int(scan_debug.get("dynamic_late_mover_review_count", 0) or 0),

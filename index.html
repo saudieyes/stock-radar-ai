@@ -3785,6 +3785,7 @@
       'reclaim_candidates',
       'continuation_pullback_candidates',
       'low_float_premarket_radar',
+      'low_float_fast_lane_raw_watch',
       'high_risk_day_trades',
       'gap_fill_watch',
       'catalyst_watch'
@@ -4661,6 +4662,7 @@
         ...(data.reclaim_candidates || []),
         ...(data.continuation_pullback_candidates || []),
         ...(data.low_float_premarket_radar || []),
+        ...(data.low_float_fast_lane_raw_watch || []),
         ...(data.high_risk_day_trades || []),
         ...(data.gap_fill_watch || []),
         ...(data.catalyst_watch || [])
@@ -4681,6 +4683,7 @@
       const continuationPullback = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'continuation_pullback'));
       const smallStockClassic = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'small_stock_classic'));
       const lowFloatPM = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'low_float_premarket'));
+      const lowFloatRawWatch = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'low_float_fast_lane_raw_watch'));
       const highRiskDay = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'high_risk_day_trade'));
       const gapFill = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'gap_fill_watch'));
       const catalystWatch = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'catalyst_watch'));
@@ -4702,6 +4705,7 @@
         'small-stock-classic-section-content': smallStockClassic,
         'early-movement-section-content': earlyMovement,
         'low-float-premarket-section-content': lowFloatPM,
+        'low-float-fast-lane-raw-section-content': lowFloatRawWatch,
         'high-risk-day-trades-section-content': highRiskDay,
         'gap-fill-section-content': gapFill,
         'catalyst-watch-section-content': catalystWatch,
@@ -4724,6 +4728,7 @@
         ${renderSection('🎯 الأسهم الصغيرة الكلاسيكية', smallStockClassic.length, 'small-stock-classic-section-content', 'small-stock-classic-section', smallStockClassic, { tone: 'cautious', orderedText: 'فلتر مضاربة للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ نعاملها كمنطقة قرار صغيرة وننتظر Fib/VWAP/قمة أمس أو إغلاق فوق حد التفعيل، ولا نطارد الشمعة الخضراء.' })}
         ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط.' })}
         ${renderSection('🚀 Low-Float / Pre-Market Radar', lowFloatPM.length, 'low-float-premarket-section-content', 'low-float-premarket-section', lowFloatPM, { tone: 'cautious', orderedText: 'أسهم صغيرة أو نشطة مبكرًا؛ تعامل كمضاربة عالية المخاطر وليست Strong عادي.' })}
+        ${renderSection('🧪 مرشحو Fast Lane الخام — مراقبة عالية المخاطر', lowFloatRawWatch.length, 'low-float-fast-lane-raw-section-content', 'low-float-fast-lane-raw-section', lowFloatRawWatch, { tone: 'watch', defaultOpen: lowFloatRawWatch.length > 0, orderedText: 'هذا القسم يوضح مرشحي Fast Lane الذين لم يصلوا إلى Low-Float النهائي أو ظهروا في قسم آخر/خرجوا بسبب Limit. مراقبة فقط، وليس Strong أو Cautious.' })}
         ${renderSection('⚡ مضاربة عالية المخاطرة', highRiskDay.length, 'high-risk-day-trades-section-content', 'high-risk-day-trades-section', highRiskDay, { tone: 'cautious', orderedText: 'فرص سريعة وصغيرة الحجم؛ تظهر منفصلة حتى لا تختلط مع Strong/Cautious العادي.' })}
         ${renderSection('🕳️ Gap Fill Watch', gapFill.length, 'gap-fill-section-content', 'gap-fill-section', gapFill, { tone: 'watch', orderedText: 'ليست كل فجوة تُغلق؛ هذا القسم يراقب دخول السعر داخل الفجوة أو احترامها.' })}
         ${renderSection('📰 Catalyst / News Watch', catalystWatch.length, 'catalyst-watch-section-content', 'catalyst-watch-section', catalystWatch, { tone: 'watch', orderedText: 'الأخبار والمحفزات سياق مساعد وليست قرار شراء مباشر.' })}
