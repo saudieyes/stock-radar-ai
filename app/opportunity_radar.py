@@ -23,17 +23,30 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u4c_root_ui_bridge_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u5_sharia_replacement_visible_blocked_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
-PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u4c_top_level_2026_06_20"
+PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u5_sharia_replacement_visible_blocked_2026_06_20"
 
 PERSONAL_PRICE_COMFORT = 50.0
 PERSONAL_PRICE_MAX_NORMAL = 150.0
 DEFAULT_SECTION_LIMIT = 12
 ACTIVE_MEMORY_STATUSES = {"active", "unknown_price", "needs_reclaim_or_trigger", "under_original_entry", "extended_from_original_entry"}
+
+
+# V2U5 user-reviewed Sharia handling for the critical pre-explosion lane.
+# These are display/execution-safety overrides for the fast UI bridge only.
+# Blocked symbols remain visible in the critical section as "learning / blocked",
+# so classification mistakes can be noticed quickly, but they never become buyable.
+V2U5_USER_BLOCKED_SHARIA = {
+    "TPC", "SNBR", "BDTX", "BLND", "PRFX", "GUTS", "KUST",
+}
+V2U5_USER_PLATFORM_SHARIA_REVIEW = {"EHGO", "ICCM", "NIXX"}
+V2U5_USER_CONFIRMED_COMPLIANT = {"HOUR"}
+V2U5_SECTOR_CONFLICT_REVIEW = {"EU"}
+V2U5_SHARIA_REPLACEMENT_VERSION = "sharia_replacement_engine_v2u5_2026_06_20"
 
 
 # Learning Overlay V1
@@ -1850,6 +1863,50 @@ def _fast_sharia_for_prepared_symbol(symbol: str) -> dict[str, Any]:
     sym = _u(symbol)
     if not sym:
         return {"status": "needs_review", "label": "يحتاج مراجعة شرعية", "reason": "لا يوجد رمز صالح", "gray": True, "blocked": False}
+
+    # V2U5: user reviewed the visible critical list against the platform.
+    # Keep blocked names visible in the critical lane to avoid hidden mistakes,
+    # but mark them clearly as non-actionable / learning only.
+    if sym in V2U5_USER_BLOCKED_SHARIA:
+        return {
+            "status": "manual_excluded",
+            "label": "محجوب شرعيًا حسب مراجعتك",
+            "reason": "V2U5: غير شرعي حسب مراجعة المنصة؛ يبقى ظاهرًا فقط لتجنب خطأ التصنيف وللتعلم، وليس فرصة شراء.",
+            "gray": False,
+            "blocked": True,
+            "manual_excluded": True,
+            "user_reviewed_v2u5": True,
+        }
+    if sym in V2U5_SECTOR_CONFLICT_REVIEW:
+        return {
+            "status": "needs_review",
+            "label": "تعارض تصنيف — مراجعة شرعية عاجلة",
+            "reason": "V2U5: المنصة تصنف النشاط كطاقة بينما الأداة قد تعرضه ماليًا؛ لا تعتمد حكم الأداة حتى المراجعة.",
+            "gray": True,
+            "blocked": False,
+            "sector_conflict_v2u5": True,
+            "user_reviewed_v2u5": True,
+        }
+    if sym in V2U5_USER_PLATFORM_SHARIA_REVIEW:
+        return {
+            "status": "needs_review",
+            "label": "غير محسوم في الأداة — المنصة تعرضه شرعيًا",
+            "reason": "V2U5: المنصة تعرضه شرعيًا لكن الأداة لا تعتمده تلقائيًا؛ أبقه في مراجعة عاجلة قبل الحركة ولا ترفعه لشراء مباشر إلا باعتماد يدوي لاحق.",
+            "gray": True,
+            "blocked": False,
+            "platform_sharia_review_v2u5": True,
+            "user_reviewed_v2u5": True,
+        }
+    if sym in V2U5_USER_CONFIRMED_COMPLIANT:
+        return {
+            "status": "manual_approved",
+            "label": "متوافق — مؤكد في الأداة والمنصة",
+            "reason": "V2U5: متوافق في الأداة والمنصة حسب مراجعتك؛ مراقبة فقط حتى تكتمل شروط السعر والحجم.",
+            "gray": False,
+            "blocked": False,
+            "manual_approved": True,
+            "user_reviewed_v2u5": True,
+        }
     try:
         from app.sharia_filter import assess_sharia_source_fast
         a = assess_sharia_source_fast(sym) or {}
@@ -1873,6 +1930,109 @@ def _fast_sharia_for_prepared_symbol(symbol: str) -> dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "needs_review", "label": "يحتاج مراجعة شرعية", "reason": f"تعذر التقييم السريع: {type(exc).__name__}", "gray": True, "blocked": False}
+
+
+def _prepared_item_symbol(item: dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return _u(item.get("symbol") or (item.get("metrics") or {}).get("symbol"))
+
+
+def _prepared_item_score(item: dict) -> float:
+    if not isinstance(item, dict):
+        return 0.0
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    return _num(item.get("score", metrics.get("big_explosion_prepared_score", metrics.get("opportunity_rank_score", 0))), 0.0)
+
+
+def _prepared_item_bucket(item: dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    return _s(item.get("bucket") or item.get("prepared_bucket") or metrics.get("critical_pre_explosion_bucket_v2u3") or metrics.get("prepared_bucket") or metrics.get("opportunity_bucket"))
+
+
+def _prepared_item_price(item: dict) -> float:
+    metrics = item.get("metrics") if isinstance(item, dict) and isinstance(item.get("metrics"), dict) else {}
+    return _num(metrics.get("price", metrics.get("close", metrics.get("last_price", 0))), 0.0)
+
+
+def _find_sharia_replacements_for_blocked_prepared(
+    blocked_symbol: str,
+    blocked_item: dict,
+    all_items: list[dict],
+    sharia_cache: dict[str, dict[str, Any]],
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """V2U5: suggest visible Sharia-safe/review alternatives for blocked critical candidates.
+
+    Blocked candidates remain visible because the user wants to catch platform/tool
+    mismatches such as EU.  But they should immediately point to nearby compliant
+    or reviewable replacements from the same Prepared Watch memory.
+    """
+    blocked_symbol = _u(blocked_symbol)
+    blocked_bucket = _prepared_item_bucket(blocked_item)
+    blocked_price = _prepared_item_price(blocked_item)
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for it in all_items or []:
+        sym = _prepared_item_symbol(it)
+        if not sym or sym == blocked_symbol:
+            continue
+        sh = sharia_cache.get(sym) or _fast_sharia_for_prepared_symbol(sym)
+        if bool(sh.get("blocked")):
+            continue
+        status = _s(sh.get("status"))
+        gray = bool(sh.get("gray"))
+        # Prefer compliant names, but allow urgent review names because the user
+        # explicitly wants them visible before the move rather than hidden.
+        item_bucket = _prepared_item_bucket(it)
+        item_price = _prepared_item_price(it)
+        score = _prepared_item_score(it)
+        same_bucket = bool(blocked_bucket and item_bucket and blocked_bucket == item_bucket)
+        critical = bool(item_bucket.startswith("critical_") or sym in {"EHGO", "ICCM", "NIXX", "HOUR"})
+        price_similarity = 0.0
+        if blocked_price > 0 and item_price > 0:
+            price_similarity = max(0.0, 18.0 - min(abs(item_price - blocked_price) / max(blocked_price, 0.01) * 18.0, 18.0))
+        rank = 0.0
+        rank += 90.0 if status in {"manual_approved", "compliant", "halal"} or bool(sh.get("manual_approved")) else 0.0
+        rank += 55.0 if gray else 0.0
+        rank += 38.0 if same_bucket else 0.0
+        rank += 22.0 if critical else 0.0
+        rank += price_similarity
+        rank += min(score, 220.0) / 10.0
+        why = []
+        if same_bucket:
+            why.append("نفس نمط الانفجار تقريبًا")
+        if critical:
+            why.append("ضمن المسارات الحرجة قبل السوق")
+        if status in {"manual_approved", "compliant", "halal"} or bool(sh.get("manual_approved")):
+            why.append("أفضل شرعيًا من السهم المحجوب")
+        elif gray:
+            why.append("قابل للمراجعة العاجلة بدل المحجوب")
+        if item_price > 0:
+            why.append(f"السعر {round(item_price, 4)}")
+        scored.append((rank, {
+            "symbol": sym,
+            "price": _round(item_price, 4),
+            "bucket": item_bucket,
+            "score": _round(score, 2),
+            "sharia_status": status,
+            "sharia_label": sh.get("label"),
+            "gray": gray,
+            "reason_ar": "، ".join(_dedupe(why, 4)) or "بديل من قائمة التحضير قبل السوق",
+        }))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    out = []
+    seen: set[str] = set()
+    for _, item in scored:
+        sym = _u(item.get("symbol"))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        out.append(item)
+        if len(out) >= max(1, int(limit or 3)):
+            break
+    return out
 
 
 def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
@@ -1905,6 +2065,12 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
     debug["stored_count"] = int(payload.get("count", len(items)) or 0)
     debug["trade_date"] = payload.get("trade_date", "")
     debug["updated_at_utc"] = payload.get("updated_at_utc", "")
+    sharia_cache: dict[str, dict[str, Any]] = {}
+    for it0 in items:
+        sym0 = _prepared_item_symbol(it0)
+        if sym0 and sym0 not in sharia_cache:
+            sharia_cache[sym0] = _fast_sharia_for_prepared_symbol(sym0)
+    debug["v2u5_visible_blocked_rule_ar"] = "غير الشرعي يبقى ظاهرًا في القسم الحرِج لتجنب أخطاء التصنيف، لكنه محجوب من الشراء وتظهر له بدائل شرعية/قابلة للمراجعة."
     rows: list[dict] = []
     seen: set[str] = set()
     for idx, it in enumerate(items):
@@ -1916,9 +2082,10 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
         seen.add(sym)
         metrics = dict(it.get("metrics") or {})
         raw_reasons = [str(x) for x in list(it.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or []) if str(x or "").strip()]
-        sh = _fast_sharia_for_prepared_symbol(sym)
+        sh = sharia_cache.get(sym) or _fast_sharia_for_prepared_symbol(sym)
         blocked = bool(sh.get("blocked"))
         gray = bool(sh.get("gray"))
+        replacements = _find_sharia_replacements_for_blocked_prepared(sym, it, items, sharia_cache, limit=3) if blocked else []
         if sym == "TPC" or metrics.get("critical_tpc_probe_v2u3"):
             label = "🚨 انفجار افتتاح محتمل — راقب أول دقيقة"
             head_reason = "مسار TPC/Opening Gap: موجود في قائمة التحضير قبل السوق حتى لا يظهر بعد +300%."
@@ -1932,15 +2099,19 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
             label = "🚨 مرشح انفجار حرج قبل السوق"
             head_reason = "مرشح من مسح جلسة أمس الكامل؛ لا يُدفن داخل الأقسام العامة."
         if blocked:
-            label = "⛔ مرشح انفجار محجوب شرعيًا — تعلم فقط"
-            head_reason = "مرفوض/مستبعد شرعيًا: يظهر للتعلم والوعي فقط وليس فرصة شراء."
+            label = "⛔ مرشح انفجار محجوب شرعيًا — ظاهر للتأكد + تعلم فقط"
+            head_reason = "مرفوض/مستبعد شرعيًا حسب المراجعة: يبقى ظاهرًا لتجنب خطأ التصنيف، لكنه ليس فرصة شراء."
         elif gray:
             label = "⚠️ مرشح انفجار — مراجعة شرعية عاجلة"
             head_reason = "الحكم الشرعي غير محسوم: راجعه قبل البري ماركت لا أثناء الانفجار."
         price = _num(metrics.get("price", metrics.get("close", metrics.get("last_price", 0))), 0.0)
         change_pct = _num(metrics.get("change_pct", metrics.get("day_change_pct", 0)), 0.0)
         score = _num(it.get("score", metrics.get("big_explosion_prepared_score", 0)), 0.0)
-        reasons = _dedupe([head_reason, _s(sh.get("reason"))] + raw_reasons, 12)
+        replacement_symbols = [_u(x.get("symbol")) for x in replacements if _u(x.get("symbol"))]
+        replacement_reason = ""
+        if blocked and replacement_symbols:
+            replacement_reason = "بدائل شرعية/قابلة للمراجعة بدل السهم المحجوب: " + ", ".join(replacement_symbols)
+        reasons = _dedupe([head_reason, _s(sh.get("reason")), replacement_reason] + raw_reasons, 12)
         row = {
             "symbol": sym,
             "company": sym,
@@ -1969,10 +2140,22 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
                 "sharia_status": sh.get("status"),
                 "blocked": blocked,
                 "gray": gray,
-                "rule_ar": "مراقبة/مراجعة فقط؛ لا شراء مباشر ولا تجاوز للشرعية.",
+                "visible_blocked_v2u5": bool(blocked),
+                "replacement_count": len(replacements),
+                "rule_ar": "V2U5: مراقبة/مراجعة فقط؛ غير الشرعي يبقى ظاهرًا للتأكد والتعلم مع بدائل، ولا شراء مباشر ولا تجاوز للشرعية.",
             },
+            "visible_even_if_non_sharia_v2u5": bool(blocked),
+            "sharia_replacement_engine_v2u5": {
+                "version": V2U5_SHARIA_REPLACEMENT_VERSION,
+                "enabled": bool(blocked),
+                "replacement_count": len(replacements),
+                "rule_ar": "إذا كان المرشح الحرج محجوبًا شرعيًا، يبقى ظاهرًا للتأكد وتعرض الأداة بدائل من نفس/قريب نمط الانفجار.",
+            },
+            "sharia_replacement_candidates": replacements,
+            "sharia_replacement_symbols": replacement_symbols,
+            "sharia_replacement_summary_ar": replacement_reason,
             "critical_pre_explosion_label_ar": label,
-            "critical_pre_explosion_rule_ar": "V2U4c: يعرض Prepared Watch في root payload والواجهة كمراقبة حرجة قبل السوق فقط.",
+            "critical_pre_explosion_rule_ar": "V2U5: يعرض Prepared Watch كمراقبة حرجة؛ المحجوب شرعيًا يبقى ظاهرًا للتأكد/التعلم وتظهر بدائله، وليس شراء.",
             "big_explosion_prepared_watch_v2u": True,
             "critical_promotion_gate_v2u3": True,
             "critical_promotion_reason_ar": head_reason,
@@ -1981,6 +2164,9 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
             "sharia_reason": sh.get("reason"),
             "sharia_is_gray": gray,
             "sharia_manual_excluded": bool(sh.get("manual_excluded")),
+            "sharia_blocked_from_buy_v2u5": bool(blocked),
+            "user_reviewed_sharia_v2u5": bool(sh.get("user_reviewed_v2u5")),
+            "sector_conflict_v2u5": bool(sh.get("sector_conflict_v2u5")),
         }
         rows.append(row)
         if len(rows) >= lim:
