@@ -115,6 +115,16 @@ BIG_EXPLOSION_LIVE_MAX_DOLLAR_VOLUME = float(os.getenv("BIG_EXPLOSION_LIVE_MAX_D
 BIG_EXPLOSION_LIVE_SCAN_CAP = _env_int("BIG_EXPLOSION_LIVE_SCAN_CAP", 9000, 500, 12000)
 BIG_EXPLOSION_LIVE_INJECT_LIMIT = _env_int("BIG_EXPLOSION_LIVE_INJECT_LIMIT", 320, 40, 520)
 
+# V2U: Real pre-explosion capture pipeline.  A scheduled/manual prior-session
+# scan stores compact prepared candidates after all sessions close.  Live
+# discovery loads them before premarket/open so names like ICCM/EHGO are already
+# on the radar before the move, and TPC-like open explosions get a reserved lane.
+BIG_EXPLOSION_PREPARED_WATCH_ENABLED = _env_bool("BIG_EXPLOSION_PREPARED_WATCH_ENABLED", True)
+BIG_EXPLOSION_PREPARED_WATCH_LIMIT = _env_int("BIG_EXPLOSION_PREPARED_WATCH_LIMIT", 160, 20, 300)
+BIG_EXPLOSION_PREPARED_WATCH_TTL_HOURS = _env_int("BIG_EXPLOSION_PREPARED_WATCH_TTL_HOURS", 72, 12, 144)
+BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
+BIG_EXPLOSION_OPENING_INSTANT_ENABLED = _env_bool("BIG_EXPLOSION_OPENING_INSTANT_ENABLED", True)
+
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # User-provided low-float / China-momentum seed universe.  These names are not
     # buy calls and are not injected as opportunities by themselves.  They are only
@@ -170,6 +180,118 @@ def get_recommended_deep_scan_target(default: int = 190) -> int:
 
 def get_last_dynamic_discovery_status() -> dict:
     return dict(_LAST_DYNAMIC_DISCOVERY_STATUS or {})
+
+
+def save_prepared_big_explosion_watch(items: list[dict] | None, trade_date: str = "", source: str = "", debug: dict | None = None) -> dict:
+    """Persist compact V2U prepared watch candidates for the live scanner.
+
+    This stores only compact per-symbol summaries (symbol, score, metrics,
+    reasons).  It never stores raw Polygon/FMP rows.  The live source layer will
+    load this list before premarket/open and pass it through normal Sharia/deep
+    analysis; it does not create BUY_NOW.
+    """
+    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        sym = _clean_symbol(it.get("symbol") or it.get("ticker") or it.get("T"))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        metrics = dict(it.get("metrics") or {})
+        clean.append({
+            "symbol": sym,
+            "score": safe_round(to_float(it.get("score") or metrics.get("big_explosion_prepared_score") or 0), 3),
+            "stage": str(it.get("stage") or it.get("prepared_stage") or "prepared_watch"),
+            "reasons": [str(x)[:140] for x in list(it.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or [])[:8] if str(x or "").strip()],
+            "metrics": {
+                k: v for k, v in metrics.items()
+                if k in {
+                    "price", "open", "high", "low", "close", "volume", "dollar_volume",
+                    "change_pct", "day_change_pct", "range_pct", "close_strength", "near_high",
+                    "first_minute", "last_minute", "prior_session_phase", "prior_session_source",
+                    "big_explosion_prepared_score", "big_explosion_prepared_watch_v2u",
+                    "big_explosion_prepared_reasons_ar", "urgent_sharia_review_v2u",
+                    "opening_instant_watch_v2u", "source_note"
+                }
+            },
+        })
+        if len(clean) >= int(BIG_EXPLOSION_PREPARED_WATCH_LIMIT or 160):
+            break
+    payload = {
+        "version": "big_explosion_prepared_watch_v2u_2026_06_20",
+        "updated_at_utc": now,
+        "trade_date": str(trade_date or ""),
+        "source": str(source or ""),
+        "count": len(clean),
+        "items": clean,
+        "debug": dict(debug or {}),
+        "rule_ar": "V2U: قائمة جاهزة بعد مسح جلسة الأمس كاملة؛ تمر عبر الشرعية والتحليل العميق ولا تعني شراء مباشر.",
+    }
+    ok = False
+    try:
+        ok = bool(_sqlite_set_json(BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY, payload))
+    except Exception:
+        ok = False
+    payload["saved"] = ok
+    return payload
+
+
+def load_prepared_big_explosion_watch() -> tuple[list[dict], dict]:
+    payload = {}
+    try:
+        payload = _sqlite_get_json(BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY, {}) or {}
+    except Exception:
+        payload = {}
+    debug = {
+        "version": "prepared_big_explosion_watch_loader_v2u_2026_06_20",
+        "enabled": bool(BIG_EXPLOSION_PREPARED_WATCH_ENABLED),
+        "memory_key": BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY,
+        "stored_count": int((payload or {}).get("count", 0) or 0),
+        "trade_date": (payload or {}).get("trade_date", ""),
+        "updated_at_utc": (payload or {}).get("updated_at_utc", ""),
+        "active_count": 0,
+        "expired": False,
+        "rule_ar": "يحمل المرشحين الجاهزين قبل السوق من مسح الأمس الكامل؛ المرشح الرمادي يظهر كمراجعة شرعية عاجلة، ولا يفتح شراء مباشر.",
+    }
+    if not BIG_EXPLOSION_PREPARED_WATCH_ENABLED or not isinstance(payload, dict):
+        return [], debug
+    try:
+        updated = str(payload.get("updated_at_utc") or "").replace("Z", "+00:00")
+        if updated:
+            dt = datetime.fromisoformat(updated)
+            age_h = (datetime.now(dt.tzinfo) - dt).total_seconds() / 3600.0
+            debug["age_hours"] = safe_round(age_h, 2)
+            if age_h > float(BIG_EXPLOSION_PREPARED_WATCH_TTL_HOURS or 72):
+                debug["expired"] = True
+                return [], debug
+    except Exception:
+        pass
+    out: list[dict] = []
+    for it in list(payload.get("items") or [])[: int(BIG_EXPLOSION_PREPARED_WATCH_LIMIT or 160)]:
+        sym = _clean_symbol((it or {}).get("symbol"))
+        if not sym:
+            continue
+        metrics = dict((it or {}).get("metrics") or {})
+        metrics.update({
+            "big_explosion_prepared_watch_v2u": True,
+            "urgent_sharia_review_v2u": True,
+            "prepared_watch_trade_date": payload.get("trade_date", ""),
+            "prepared_watch_updated_at_utc": payload.get("updated_at_utc", ""),
+            "big_explosion_live_lane_v2t": True,
+            "big_explosion_live_lane_v2t2": True,
+        })
+        out.append({
+            "symbol": sym,
+            "score": safe_round((it or {}).get("score", 0), 3),
+            "reasons": list((it or {}).get("reasons") or [])[:8],
+            "metrics": metrics,
+        })
+    debug["active_count"] = len(out)
+    debug["symbols"] = [x.get("symbol") for x in out[:80]]
+    return out, debug
 
 
 def _clean_symbol(symbol) -> str:
@@ -1182,8 +1304,8 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
         score += 8; reasons.append("يتداول قرب قمة الشريحة/اليوم")
     if near_high:
         score += 5; reasons.append("قريب من القمة — زخم نشط")
-    if source_kind in {"fmp_mover", "fmp_live", "historical_minute_slice", "historical_minute_slice_v2t1", "polygon_grouped_v2t", "polygon_grouped_v2t1"}:
-        score += 6; reasons.append("مصدر حي/زمني مستقل وليس قائمة قديمة")
+    if source_kind in {"fmp_mover", "fmp_live", "historical_minute_slice", "historical_minute_slice_v2t1", "polygon_grouped_v2t", "polygon_grouped_v2t1", "prior_session_prepared_v2u", "opening_instant_v2u"}:
+        score += 8; reasons.append("مصدر حي/زمني مستقل أو قائمة جاهزة قبل السوق")
 
     eligible = bool(not blockers and score >= 44)
     flags = {
@@ -1198,6 +1320,7 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
         "big_explosion_live_lane_v2t": True,
         "big_explosion_live_lane_v2t1": True,
         "big_explosion_live_lane_v2t2": True,
+        "big_explosion_live_lane_v2u": True,
         "big_explosion_live_score": safe_round(score, 3),
         "big_explosion_live_eligible": eligible,
         "big_explosion_live_source_kind": source_kind,
@@ -1210,13 +1333,13 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
 
 def _collect_big_explosion_live_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
     debug = {
-        "version": "big_explosion_live_lane_v2t2b_prior_session_safe_2026_06_20",
+        "version": "big_explosion_live_lane_v2u_real_capture_pipeline_2026_06_20",
         "enabled": bool(BIG_EXPLOSION_LIVE_LANE_ENABLED),
         "scan_cap": int(BIG_EXPLOSION_LIVE_SCAN_CAP),
         "scanned": 0,
         "eligible_count": 0,
         "top_symbols": [],
-        "rule_ar": "V2T2: مسار مراقبة فقط للانفجارات الكبيرة؛ يبدأ من +3% مع حجم، ومصمم ليستقبل أيضًا مرشحي مسح اليوم السابق الكامل بعد الإغلاق، ولا يفتح BUY_NOW.",
+        "rule_ar": "V2U: مسار مراقبة حي + قائمة جاهزة بعد مسح الأمس الكامل؛ يبدأ من +3% مع حجم ويعطي مقاعد محجوزة للانفجارات المبكرة، ولا يفتح BUY_NOW.",
     }
     if not BIG_EXPLOSION_LIVE_LANE_ENABLED or not grouped_map:
         return [], debug
@@ -1413,7 +1536,38 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     big_explosion_live_count = 0
     big_explosion_live_symbols: list[str] = []
     big_explosion_live_debug: dict = {}
+    prepared_big_explosion_watch_rows: list[dict] = []
+    prepared_big_explosion_watch_debug: dict = {}
     micro_watch_rows: list[dict] = []
+
+    # V2U prepared explosion watch: load compact prior-session scan candidates
+    # before premarket/open so Sharia review and deep analysis start before the
+    # first explosive candle.  This is only a source/watch lane.
+    try:
+        prepared_big_explosion_watch_rows, prepared_big_explosion_watch_debug = load_prepared_big_explosion_watch()
+        for item in prepared_big_explosion_watch_rows or []:
+            sym = _clean_symbol((item or {}).get("symbol"))
+            if not sym:
+                continue
+            metrics = dict((item or {}).get("metrics") or {})
+            reasons = list((item or {}).get("reasons") or [])
+            score = float((item or {}).get("score", 0) or metrics.get("big_explosion_prepared_score") or 0)
+            _add_candidate(
+                candidates,
+                sym,
+                142 + score * 0.42,
+                "big_explosion_prepared_watch_v2u",
+                "V2U قائمة جاهزة قبل السوق من مسح جلسة الأمس: " + "، ".join(reasons[:3]),
+                {**metrics, "big_explosion_prepared_watch_v2u": True, "urgent_sharia_review_v2u": True, "big_explosion_live_lane_v2u": True},
+            )
+            big_explosion_live_symbols.append(sym)
+            if record_detection is not None:
+                try:
+                    record_detection(sym, price=float(metrics.get("price", 0) or metrics.get("close", 0) or 0), change_pct=float(metrics.get("change_pct", 0) or metrics.get("day_change_pct", 0) or 0), source_reason="V2U prepared watch from prior full-session scan", source_layer="big_explosion_prepared_watch_v2u", source_tags=["prior_session_full_scan", "big_explosion_prepared_watch_v2u", "urgent_sharia_review"], move_stage="Prepared Explosion Watch", early_or_late_detection="prepared_before_move")
+                except Exception:
+                    pass
+    except Exception as exc:
+        prepared_big_explosion_watch_debug = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:140]}"}
 
     # V2R1 sticky close watch: candidates detected after close / premarket /
     # regular session are put back into the source before FMP confirmation.
@@ -1905,11 +2059,13 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # change: do not wait for them to enter Watch first.
     seed_confirm_symbols = [s for s in sorted(MICRO_EXPLOSION_SEED_SYMBOLS)[:MICRO_EXPLOSION_SEED_CONFIRM_LIMIT]]
     memory_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (micro_watch_rows or [])[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT]]
+    prepared_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (prepared_big_explosion_watch_rows or [])[:BIG_EXPLOSION_PREPARED_WATCH_LIMIT]]
     fmp_confirm_symbols = _scanner.unique_keep_order(
-        [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
+        prepared_confirm_symbols
+        + [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
         + memory_confirm_symbols
         + seed_confirm_symbols
-    )[: max(DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT, min(420, DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT + MICRO_EXPLOSION_SEED_CONFIRM_LIMIT))]
+    )[: max(DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT, min(520, DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT + MICRO_EXPLOSION_SEED_CONFIRM_LIMIT + BIG_EXPLOSION_PREPARED_WATCH_LIMIT))]
     fmp_quotes = {}
     fmp_diag = {}
     if DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION and FMP_API_KEY and fmp_confirm_symbols:
@@ -1990,6 +2146,22 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                         pass
         except Exception:
             pass
+        try:
+            bx_metrics = _big_explosion_live_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_live")
+            bx_ok, bx_score, bx_reasons, bx_flags = _big_explosion_live_lane_score(sym, bx_metrics, phase_detail=str(phase_info.get("detail", "") or ""), source_kind="fmp_live")
+            if bx_ok:
+                big_explosion_live_count += 1
+                big_explosion_live_symbols.append(sym)
+                opening_flag = bool(BIG_EXPLOSION_OPENING_INSTANT_ENABLED and str(phase_info.get("detail", "") or "").startswith("regular"))
+                _add_candidate(candidates, sym, 110 + bx_score * 0.44, "big_explosion_live_lane_v2u", "V2U التقاط حي سريع للانفجار/الافتتاح: " + "، ".join(bx_reasons[:3]), {**bx_metrics, **bx_flags, "opening_instant_watch_v2u": opening_flag})
+                if record_detection is not None:
+                    try:
+                        stage = "Opening Explosion Watch" if opening_flag else ("Big Explosion Active" if change_pct >= 50 else "Explosion Active" if change_pct >= 20 else "Early Acceleration Watch")
+                        record_detection(sym, price=price, change_pct=change_pct, source_reason="Big Explosion Live Lane V2U from FMP live confirmation", source_layer="big_explosion_live_lane_v2u", source_tags=["fmp_live_confirmed", "big_explosion_live_lane_v2u", "monitoring_only"], move_stage=stage, early_or_late_detection="early_or_opening_watch")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         if change_pct >= 4.0:
             _add_candidate(candidates, sym, 14, "live_mover", "الحركة الحية مستمرة")
         try:
@@ -2028,6 +2200,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Balanced order: V2a gives known weekly-priority names a front-row seat,
     # then today's live/new movers, with the old baseline as support only.
     selected_order = []
+    selected_order += from_source("big_explosion_prepared_watch_v2u", min(BIG_EXPLOSION_PREPARED_WATCH_LIMIT, max_symbols))
+    selected_order += from_source("big_explosion_live_lane_v2u", min(120, max_symbols))
+    selected_order += from_source("big_explosion_live_lane_v2t", min(90, max_symbols))
     # Official launch source order: early/prepared lanes first, then live ignition,
     # then constructive liquidity.  Late movers stay visible for review, but they
     # must never crowd out early builders or weekly-priority names.
@@ -2089,9 +2264,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3h2b_big_explosion_prior_session_safe_v2t2b_2026_06_20",
+        "engine_version": "dynamic_discovery_v3i_real_pre_explosion_capture_v2u_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_big_explosion_prior_session_v2t2_and_micro_low_float",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2u_prepared_watch_plus_opening_instant",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -2127,7 +2302,10 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "micro_explosion_close_watch_count": int(source_bucket_counts.get("micro_explosion_close_watch_v2r1", 0)) if 'source_bucket_counts' in locals() else 0,
         "micro_explosion_close_watch_memory": micro_explosion_watch_memory_debug,
         "micro_explosion_seed_confirm_count": len(seed_confirm_symbols) if 'seed_confirm_symbols' in locals() else 0,
-        "big_explosion_live_count": int(source_bucket_counts.get("big_explosion_live_lane_v2t", 0) or big_explosion_live_count) if 'source_bucket_counts' in locals() else int(big_explosion_live_count or 0),
+        "big_explosion_live_count": int((source_bucket_counts.get("big_explosion_live_lane_v2u", 0) or 0) + (source_bucket_counts.get("big_explosion_live_lane_v2t", 0) or 0) or big_explosion_live_count) if 'source_bucket_counts' in locals() else int(big_explosion_live_count or 0),
+        "big_explosion_live_v2u_count": int(source_bucket_counts.get("big_explosion_live_lane_v2u", 0) or 0) if 'source_bucket_counts' in locals() else 0,
+        "big_explosion_prepared_watch_count": int(source_bucket_counts.get("big_explosion_prepared_watch_v2u", 0) or 0) if 'source_bucket_counts' in locals() else len(prepared_big_explosion_watch_rows or []),
+        "big_explosion_prepared_watch_debug": prepared_big_explosion_watch_debug,
         "big_explosion_live_symbols": _scanner.unique_keep_order(big_explosion_live_symbols)[:160],
         "big_explosion_live_debug": big_explosion_live_debug,
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,

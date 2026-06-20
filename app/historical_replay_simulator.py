@@ -35,6 +35,8 @@ from app.source_discovery import (
     _collect_micro_explosion_full_market_candidates,
     _collect_big_explosion_live_lane_candidates,
     _big_explosion_live_lane_score,
+    save_prepared_big_explosion_watch,
+    load_prepared_big_explosion_watch,
 )
 try:
     from app.polygon_flatfile_fetcher import is_us_market_trading_day, fetch_flatfile_to_tmp, cleanup_tmp_path
@@ -50,7 +52,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2d_target_minute_replay_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u_real_pre_explosion_capture_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -284,6 +286,105 @@ def _agg_to_grouped_row(sym: str, agg: dict, *, base_open: float | None = None, 
     }
 
 
+def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: dict | None = None) -> tuple[bool, float, list[str], dict]:
+    """Detect the missing premarket preparation candidates from the prior session.
+
+    This is deliberately different from Big Explosion Live Lane: the stock may
+    not have exploded yet.  It looks for strong close/late-session pressure,
+    range, dollar volume and AH continuation so the live tool can start Sharia
+    review before the next premarket/open.
+    """
+    price = _num(row.get("price") or row.get("close"), 0.0)
+    opn = _num(row.get("open"), 0.0)
+    high = _num(row.get("high"), 0.0)
+    low = _num(row.get("low"), 0.0)
+    vol = _num(row.get("volume"), 0.0)
+    dollar = _num(row.get("dollar_volume"), 0.0) or price * vol
+    rng = ((high - low) / price) if price > 0 and high > low else 0.0
+    chg = ((price - opn) / opn * 100.0) if price > 0 and opn > 0 else 0.0
+    close_strength = ((price - low) / max(high - low, 0.0001)) if price > 0 and high > low else 0.0
+    ah_change = 0.0
+    ah_vol = 0.0
+    if after_row:
+        ah_price = _num(after_row.get("price") or after_row.get("close"), 0.0)
+        ah_base = _num(after_row.get("open"), 0.0) or price
+        ah_change = ((ah_price - ah_base) / ah_base * 100.0) if ah_price > 0 and ah_base > 0 else 0.0
+        ah_vol = _num(after_row.get("volume"), 0.0)
+    score = 0.0
+    reasons: list[str] = []
+    blockers: list[str] = []
+    if price <= 0:
+        blockers.append("سعر غير صالح")
+    elif price < 0.10:
+        blockers.append("أقل من نطاق المتابعة")
+    elif price <= 2:
+        score += 24; reasons.append("سعر micro قد ينفجر بسرعة في البري ماركت")
+    elif price <= 8:
+        score += 22; reasons.append("سعر صغير مناسب لانفجار سريع")
+    elif price <= 25:
+        score += 18; reasons.append("سعر متوسط داخل نطاق TPC/JLHL")
+    elif price <= 85:
+        score += 11; reasons.append("سعر أعلى لكن مسموح للانفجارات الاستثنائية")
+    else:
+        blockers.append("خارج نطاق V2U")
+    if vol >= 50_000:
+        score += min(18.0, vol / 1_000_000 * 6.0); reasons.append("حجم أمس كافٍ للمراقبة")
+    else:
+        blockers.append("حجم أمس ضعيف جدًا")
+    if dollar >= 80_000:
+        score += min(20.0, dollar / 2_500_000 * 7.0); reasons.append("دولار فوليوم كافٍ لمسح ما قبل الانفجار")
+    else:
+        blockers.append("دولار فوليوم ضعيف جدًا")
+    if 0.018 <= rng <= 0.42:
+        score += min(18.0, rng * 90.0); reasons.append("نطاق جلسة أمس قابل للاشتعال")
+    if close_strength >= 0.60:
+        score += 16; reasons.append("إغلاق أمس قرب القمة — تجهيز قبل السوق")
+    elif close_strength >= 0.48:
+        score += 8; reasons.append("إغلاق أمس مقبول داخل النطاق")
+    if -6.0 <= chg <= 18.0:
+        score += 8; reasons.append("لم ينفجر أمس بشكل متأخر؛ يصلح للتحضير")
+    elif chg > 18.0:
+        score += 2; reasons.append("تحرك أمس قوي؛ لا يلغى لكنه يحتاج حذر")
+    if ah_change >= 2.0 or ah_vol >= 20_000:
+        score += 18; reasons.append("نشاط بعد الإغلاق يسبق بري ماركت اليوم التالي")
+    if price >= 15 and (close_strength >= 0.55 or rng >= 0.025) and dollar >= 250_000:
+        score += 18; reasons.append("استثناء TPC/JLHL: سعر أعلى لكن ضغط جلسة أمس واضح")
+    eligible = bool(not blockers and score >= 44) or bool(score >= 58 and price > 0 and vol >= 25_000 and dollar >= 50_000)
+    metrics = {
+        "price": price, "open": opn, "high": high, "low": low, "close": price,
+        "volume": vol, "dollar_volume": dollar, "change_pct": round(chg, 3),
+        "day_change_pct": round(chg, 3), "range_pct": round(rng, 5),
+        "close_strength": round(close_strength, 4), "near_high": bool(close_strength >= 0.70),
+        "after_hours_change_pct": round(ah_change, 3), "after_hours_volume": ah_vol,
+        "big_explosion_prepared_watch_v2u": True, "urgent_sharia_review_v2u": True,
+        "big_explosion_prepared_score": round(score, 3),
+        "big_explosion_prepared_reasons_ar": reasons[:8],
+        "prior_session_source": "full_session_plus_after_hours",
+        "prior_session_phase": "after_close_pre_market_prep",
+    }
+    return eligible, score, reasons[:8], metrics
+
+
+def _collect_prior_session_pre_explosion_watch_candidates(full_map: dict, after_map: dict | None = None, *, limit: int = 260) -> tuple[list[dict], dict[str, Any]]:
+    out: list[dict] = []
+    debug = {
+        "version": "prior_session_pre_explosion_watch_v2u_2026_06_20",
+        "scanned": 0, "eligible_count": 0, "top_symbols": [],
+        "rule_ar": "يمسح جلسة أمس كاملة بعد الإغلاق لاكتشاف المرشحين قبل انفجار البري ماركت/الافتتاح، وليس لإطلاق شراء مباشر.",
+    }
+    for sym, row in (full_map or {}).items():
+        debug["scanned"] += 1
+        ok, score, reasons, metrics = _prior_session_pre_explosion_watch_score(_u(sym), row or {}, after_row=(after_map or {}).get(_u(sym)))
+        if not ok:
+            continue
+        out.append({"symbol": _u(sym), "score": round(float(score or 0), 3), "reasons": reasons, "metrics": metrics})
+    out.sort(key=lambda r: float(r.get("score", 0) or 0), reverse=True)
+    out = out[:max(20, min(400, int(limit or 260)))]
+    debug["eligible_count"] = len(out)
+    debug["top_symbols"] = [r.get("symbol") for r in out[:60]]
+    return out, debug
+
+
 def _read_prior_full_session_minute_scan(
     *,
     trade_date: str,
@@ -412,8 +513,10 @@ def _build_prior_session_source_rows(
     full_micro, full_micro_debug = _collect_micro_explosion_full_market_candidates(full_map, phase_detail="prior_full_session_after_close_v2t2")
     full_fast, full_fast_debug = _collect_low_float_fast_lane_candidates(full_map, phase_detail="prior_full_session_after_close_v2t2")
     full_big, full_big_debug = _collect_big_explosion_live_lane_candidates(full_map, phase_detail="prior_full_session_after_close_v2t2")
+    prior_prepared, prior_prepared_debug = _collect_prior_session_pre_explosion_watch_candidates(full_map, after_map, limit=260)
     ah_big, ah_big_debug = _collect_big_explosion_live_lane_candidates(after_map, phase_detail="prior_after_hours_after_close_v2t2")
     ah_micro, ah_micro_debug = _collect_micro_explosion_full_market_candidates(after_map, phase_detail="prior_after_hours_after_close_v2t2")
+    rows.extend(_annotate_source_rows(prior_prepared, selection_date, 99, "prior_session_pre_explosion_watch_v2u"))
     rows.extend(_annotate_source_rows(full_micro, selection_date, 100, "prior_full_session_micro_v2t2"))
     rows.extend(_annotate_source_rows(full_fast, selection_date, 100, "prior_full_session_fast_lane_v2t2"))
     rows.extend(_annotate_source_rows(full_big, selection_date, 100, "prior_full_session_big_explosion_v2t2"))
@@ -421,6 +524,9 @@ def _build_prior_session_source_rows(
     rows.extend(_annotate_source_rows(ah_big, selection_date, 101, "prior_after_hours_big_explosion_v2t2"))
     debug.update({
         "source_rows_total": len(rows),
+        "prior_pre_explosion_watch_count": len(prior_prepared or []),
+        "prior_pre_explosion_watch_top_symbols": (prior_prepared_debug or {}).get("top_symbols", [])[:30],
+        "prior_pre_explosion_watch_debug": prior_prepared_debug,
         "full_micro_count": len(full_micro or []),
         "full_fast_count": len(full_fast or []),
         "full_big_count": len(full_big or []),
@@ -430,7 +536,7 @@ def _build_prior_session_source_rows(
         "after_hours_big_top": (ah_big_debug or {}).get("top_symbols", [])[:20],
         "full_micro_top": (full_micro_debug or {}).get("top_symbols", [])[:20],
         "full_fast_top": (full_fast_debug or {}).get("top_symbols", [])[:20],
-        "rule_ar": "نفس دوال المصدر الحالية تُشغّل على ملخص دقيقة كامل ليوم الاختيار بعد إغلاق كل الجلسات، ثم تدخل نتائجها في قائمة الغد قبل البري ماركت.",
+        "rule_ar": "V2U يشغّل مسح ما بعد الإغلاق الكامل + prior_session_pre_explosion_watch حتى يدخل المرشح قبل بري ماركت/الافتتاح، ثم يمر بالشرعية والتحليل العميق.",
     })
     return rows, debug, full_map, after_map
 
@@ -1481,6 +1587,57 @@ def _run_source_on_minute_slices(
     }
 
 
+def build_prior_session_explosion_watch(
+    *,
+    trade_date: str,
+    max_minute_rows: int = 400_000,
+    max_seconds: float = 8.0,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+    persist: bool = True,
+) -> dict[str, Any]:
+    rows, debug, full_map, after_map = _build_prior_session_source_rows(
+        selection_date=trade_date,
+        max_minute_rows=max_minute_rows,
+        max_seconds=max_seconds,
+        force_minute_pull=force_minute_pull,
+        redownload_processed=redownload_processed,
+    )
+    prepared = [r for r in rows or [] if _s(r.get("historical_source_family")) == "prior_session_pre_explosion_watch_v2u"]
+    # Put the prepared-watch lane first, but keep other prior-session rows as secondary context.
+    compact: list[dict] = []
+    seen: set[str] = set()
+    for r in list(prepared or []) + list(rows or []):
+        sym = _extract_symbol(r)
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        metrics = _candidate_metrics(r)
+        compact.append({
+            "symbol": sym,
+            "score": _candidate_score(r),
+            "reasons": list(r.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or [])[:8],
+            "metrics": {**metrics, "big_explosion_prepared_watch_v2u": True, "urgent_sharia_review_v2u": True},
+        })
+    save_payload = {}
+    if persist:
+        save_payload = save_prepared_big_explosion_watch(compact, trade_date=trade_date, source="prior_session_explosion_scan_v2u", debug=debug)
+    loaded_items, loaded_debug = load_prepared_big_explosion_watch()
+    return {
+        "ok": bool((debug or {}).get("ok", False)),
+        "version": "prior_session_explosion_watch_builder_v2u_2026_06_20",
+        "trade_date": trade_date,
+        "rows_total": len(rows or []),
+        "prepared_watch_count": len(prepared or []),
+        "compact_count": len(compact),
+        "top_symbols": [x.get("symbol") for x in compact[:80]],
+        "scan_debug": debug,
+        "persisted": save_payload,
+        "loaded_after_persist": loaded_debug,
+        "rule_ar": "هذا هو مسح ما بعد الإغلاق الذي يغذي الأداة الحية قبل البري ماركت؛ يحفظ ملخصات فقط ولا يغير قرارات الشراء.",
+    }
+
+
 def _build_big_explosion_timing_report(
     *,
     payload: dict[str, Any],
@@ -1496,6 +1653,7 @@ def _build_big_explosion_timing_report(
     prior_full_session_scan: bool = True,
     prior_scan_max_rows: int = 400_000,
     prior_scan_timeout_sec: float = 8.0,
+    persist_prepared_watch: bool = False,
 ) -> dict[str, Any]:
     missed = payload.get("missed_winners_audit") or {}
     winners = list(missed.get("top_outcome_winners") or [])
@@ -1625,6 +1783,7 @@ def run_historical_replay(
     prior_full_session_scan: bool = True,
     prior_scan_max_rows: int = 400_000,
     prior_scan_timeout_sec: float = 8.0,
+    persist_prepared_watch: bool = False,
 ) -> dict[str, Any]:
     selection_date, selection_map, selection_debug = _resolve_selection_grouped(date_value, recovery_days=recovery_days)
     if not selection_map:
@@ -1740,8 +1899,8 @@ def run_historical_replay(
         "top_failures": top_failures,
         "late_weak_sample": top_late_weak,
         "anti_lookahead_rule_ar": "اختيارات الأداة مبنية على سياق الأيام حتى تاريخ الاختيار فقط؛ نتائج الجلسة التالية تُستخدم للتقييم فقط بعد اكتمال قائمة الغد.",
-        "storage_rule_ar": "V2T2 يستخدم Polygon grouped + minute flat file من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw files في Railway/GitHub/SQLite.",
-        "timing_limit_note_ar": "V2T2 يضيف افتتاح كل دقيقة + مسح اليوم السابق كاملًا: وقت الانفجار، وقت الالتقاط، نسبة السهم وقت الالتقاط، وترقياته داخل replay stages.",
+        "storage_rule_ar": "V2U يستخدم Polygon grouped + minute flat file من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw files في Railway/GitHub/SQLite.",
+        "timing_limit_note_ar": "V2U يضيف مسح أمس الكامل + قائمة جاهزة قبل السوق + افتتاح كل دقيقة: الهدف نقل الالتقاط إلى الأداة الحية قبل الانفجار لا مجرد تقرير.",
         "next_step_ar": "شغّل V2T على عدة أيام. إذا كان الالتقاط متأخرًا أو مفقودًا، ننقل قواعد التوقيت الناجحة لاحقًا إلى المصدر الحي بدون فتح Strong/Cautious عشوائيًا.",
     }
     if bool(minute_timing) and outcome_date and outcome_map:

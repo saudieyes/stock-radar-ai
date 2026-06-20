@@ -2207,6 +2207,7 @@ def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
     source_text = _source_text_for_capture(row)
     matched = bool(
         row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2t2")
+        or row.get("big_explosion_live_lane_v2u") or row.get("big_explosion_prepared_watch_v2u")
         or row.get("big_explosion_live_eligible")
         or "big_explosion_live_lane_v2t" in source_text
         or "big explosion v2t" in source_text
@@ -2218,7 +2219,10 @@ def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
     score = _num(row.get("big_explosion_live_score", 0.0), 0.0)
     reasons = []
     if matched:
-        reasons.append("V2T التقط انفجارًا كبيرًا نشطًا — مراقبة توقيت/تقرير لا شراء مباشر")
+        if row.get("big_explosion_prepared_watch_v2u"):
+            reasons.append("V2U: مرشح جاهز قبل السوق من مسح جلسة أمس — مراجعة شرعية/مراقبة مبكرة لا شراء مباشر")
+        else:
+            reasons.append("V2U/V2T التقط انفجارًا كبيرًا أو بداية انفجار — مراقبة توقيت وترقية لا شراء مباشر")
     if change >= 5:
         reasons.append(f"الارتفاع الحالي {round(change, 2)}%")
     if price > 0:
@@ -2228,7 +2232,7 @@ def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
     if score > 0:
         reasons.append(f"درجة V2T {round(score, 1)}")
     return {
-        "version": "big_explosion_live_profile_v2t1_2026_06_20",
+        "version": "big_explosion_live_profile_v2u_2026_06_20",
         "matched": matched,
         "price": price,
         "change_pct": change,
@@ -2237,7 +2241,7 @@ def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
         "already_big": bool(change >= 20),
         "very_extended": bool(change >= 50),
         "reasons": _dedupe(reasons + list(row.get("big_explosion_live_reasons_ar") or [])[:5], 8),
-        "rule_ar": "مسار مراقبة وتوقيت فقط للانفجارات الكبيرة؛ لا يغيّر Strong/Cautious ولا يعني دخول مباشر.",
+        "rule_ar": "V2U: مسار مراقبة/تحضير مبكر للانفجارات الكبيرة وقائمة الأمس الجاهزة؛ لا يغيّر Strong/Cautious ولا يعني دخول مباشر.",
     }
 
 
@@ -2617,9 +2621,14 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     micro_capture = _micro_explosion_capture_profile(row)
     big_explosion = _big_explosion_live_profile(row)
     if big_explosion.get("matched"):
-        reasons = ["V2T: انفجار كبير/تسارع حي تحت المراقبة — تقرير توقيت وترقية وليس شراء مباشر."]
-        reasons.extend(list(big_explosion.get("reasons") or [])[:6])
-        add("high_risk_day_trade", 46.0 if not big_explosion.get("very_extended") else 32.0, reasons)
+        if row.get("big_explosion_prepared_watch_v2u"):
+            reasons = ["V2U: مرشح انفجار جاهز قبل السوق من مسح جلسة أمس — راجع الشرعية مبكرًا وراقب البري ماركت/الافتتاح."]
+            reasons.extend(list(big_explosion.get("reasons") or [])[:6])
+            add("high_risk_day_trade", 58.0 if not big_explosion.get("very_extended") else 38.0, reasons)
+        else:
+            reasons = ["V2U: انفجار كبير/تسارع حي تحت المراقبة — تقرير توقيت وترقية وليس شراء مباشر."]
+            reasons.extend(list(big_explosion.get("reasons") or [])[:6])
+            add("high_risk_day_trade", 48.0 if not big_explosion.get("very_extended") else 32.0, reasons)
     if micro_capture.get("matched"):
         reasons = ["التقاط V2R1: مراقبة لصيقة لبوادر تجميع/شموع قوية/احتمال انفجار — ليس شراء مباشر."]
         reasons.extend(list(micro_capture.get("reasons") or [])[:6])
