@@ -52,7 +52,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u2_force_critical_buckets_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u3_critical_promotion_gate_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -287,7 +287,7 @@ def _agg_to_grouped_row(sym: str, agg: dict, *, base_open: float | None = None, 
 
 
 def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: dict | None = None) -> tuple[bool, float, list[str], dict]:
-    """V2U2: true pre-explosion mining from the prior full session.
+    """V2U3: true pre-explosion mining from the prior full session.
 
     This is not a buy rule.  It intentionally mines *watch candidates* that may
     look too early, too quiet, too low-priced, or too high-priced for the older
@@ -334,7 +334,7 @@ def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: 
     elif price <= 85:
         score += 14; buckets.append("opening_gap_exception"); reasons.append("استثناء Opening Gap: سعر أعلى لكنه قد ينفجر عند الافتتاح مثل TPC")
     else:
-        blockers.append("خارج نطاق V2U2")
+        blockers.append("خارج نطاق V2U3")
 
     # Do not require yesterday to be a big mover.  Many explosions were quiet
     # before ignition.  We only require enough tradability for monitoring.
@@ -399,7 +399,7 @@ def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: 
     effective_dollar = max(dollar, ah_dollar)
     effective_vol = max(vol, ah_vol)
 
-    # V2U2 critical archetype gates: intentionally broader than the normal scoring
+    # V2U3 critical archetype gates: intentionally broader than the normal scoring
     # so EHGO/ICCM/TPC/SNBR-like names are *prepared* before the move rather than
     # only explained later in the timing report.  This is still monitoring / urgent
     # Sharia review only, never BUY_NOW.
@@ -426,15 +426,15 @@ def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: 
     if price <= 2 and (vol >= 8_000 or dollar >= 12_000) and (close_strength >= 0.35 or rng >= 0.012 or ah_vol > 0):
         score += 12; buckets.append("ehgo_snbr_style_micro_watch"); reasons.append("نمط micro مبكر شبيه EHGO/SNBR: يظهر للمراجعة قبل الانفجار")
     if critical_micro:
-        score += 22; buckets.append("critical_ehgo_snbr_probe"); reasons.append("V2U2 مقعد حرج: micro/ultra-low قد ينفجر قبل الافتتاح حتى لو كان هادئًا أمس")
+        score += 22; buckets.append("critical_ehgo_snbr_probe"); reasons.append("V2U3 مقعد حرج: micro/ultra-low قد ينفجر قبل الافتتاح حتى لو كان هادئًا أمس")
     if 1.5 <= price <= 12 and (dollar >= 80_000 or vol >= 50_000) and (rng >= 0.015 or close_strength >= 0.40 or ah_vol > 0):
         score += 12; buckets.append("iccm_style_ignition_watch"); reasons.append("نمط ICCM: مرشح بداية اشتعال قبل +20%")
     if critical_iccm:
-        score += 20; buckets.append("critical_iccm_ignition_probe"); reasons.append("V2U2 مقعد حرج: اشتعال ICCM-like قبل +20% حتى لو إشارة أمس خفيفة")
+        score += 20; buckets.append("critical_iccm_ignition_probe"); reasons.append("V2U3 مقعد حرج: اشتعال ICCM-like قبل +20% حتى لو إشارة أمس خفيفة")
     if 12 <= price <= 85 and (dollar >= 80_000 or vol >= 5_000) and (rng >= 0.008 or close_strength >= 0.35 or ah_vol > 0):
         score += 18; buckets.append("tpc_opening_gap_watch"); reasons.append("نمط TPC: احتمال فجوة افتتاح/انفجار سعر أعلى — مقعد محجوز")
     if critical_tpc:
-        score += 24; buckets.append("critical_tpc_opening_gap_probe"); reasons.append("V2U2 مقعد حرج: TPC-like opening gap قد ينفجر في أول دقيقة")
+        score += 24; buckets.append("critical_tpc_opening_gap_probe"); reasons.append("V2U3 مقعد حرج: TPC-like opening gap قد ينفجر في أول دقيقة")
 
     # Eligibility is intentionally broader than buy eligibility.  Sharia and deep
     # analysis still decide whether it is visible as clean, gray urgent review, or blocked.
@@ -459,8 +459,8 @@ def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: 
 
     bucket = "general_pre_explosion_watch"
     for preferred in [
-        "critical_tpc_opening_gap_probe", "critical_iccm_ignition_probe", "critical_ehgo_snbr_probe",
-        "tpc_opening_gap_watch", "iccm_style_ignition_watch", "ehgo_snbr_style_micro_watch",
+        "critical_tpc_opening_gap_probe", "critical_ehgo_snbr_probe", "critical_iccm_ignition_probe",
+        "tpc_opening_gap_watch", "ehgo_snbr_style_micro_watch", "iccm_style_ignition_watch",
         "after_hours_pressure", "strong_close", "range_pressure", "ultra_low", "quiet_pressure",
     ]:
         if preferred in buckets:
@@ -488,24 +488,24 @@ def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: 
         "close_strength": round(close_strength, 4), "near_high": bool(close_strength >= 0.70),
         "after_hours_change_pct": round(ah_change, 3), "after_hours_volume": ah_vol,
         "after_hours_dollar_volume": ah_dollar,
-        "big_explosion_prepared_watch_v2u": True, "pre_explosion_candidate_v2u2": True,
+        "big_explosion_prepared_watch_v2u": True, "pre_explosion_candidate_v2u3": True,
         "urgent_sharia_review_v2u": True,
-        "opening_gap_candidate_v2u2": bool("tpc_opening_gap_watch" in buckets or "critical_tpc_opening_gap_probe" in buckets),
-        "ultra_low_price_candidate_v2u2": bool("ehgo_snbr_style_micro_watch" in buckets or "critical_ehgo_snbr_probe" in buckets or price <= 0.35),
-        "critical_pre_explosion_bucket_v2u2": bool(critical_bucket),
-        "critical_micro_probe_v2u2": bool(critical_micro),
-        "critical_iccm_probe_v2u2": bool(critical_iccm),
-        "critical_tpc_probe_v2u2": bool(critical_tpc),
-        "after_hours_pressure_v2u2": bool("after_hours_pressure" in buckets),
-        "quiet_pressure_v2u2": bool("quiet_pressure" in buckets or "pre_move_quiet" in buckets),
+        "opening_gap_candidate_v2u3": bool("tpc_opening_gap_watch" in buckets or "critical_tpc_opening_gap_probe" in buckets),
+        "ultra_low_price_candidate_v2u3": bool("ehgo_snbr_style_micro_watch" in buckets or "critical_ehgo_snbr_probe" in buckets or price <= 0.35),
+        "critical_pre_explosion_bucket_v2u3": bool(critical_bucket),
+        "critical_micro_probe_v2u3": bool(critical_micro),
+        "critical_iccm_probe_v2u3": bool(critical_iccm),
+        "critical_tpc_probe_v2u3": bool(critical_tpc),
+        "after_hours_pressure_v2u3": bool("after_hours_pressure" in buckets),
+        "quiet_pressure_v2u3": bool("quiet_pressure" in buckets or "pre_move_quiet" in buckets),
         "big_explosion_prepared_score": round(score, 3),
-        "force_critical_buckets_score_v2u2": round(score, 3),
-        "watch_priority_v2u2": bucket,
+        "critical_promotion_gate_score_v2u3": round(score, 3),
+        "watch_priority_v2u3": bucket,
         "prepared_bucket": bucket,
         "prepared_bucket_ar": bucket_ar,
         "big_explosion_prepared_reasons_ar": reasons[:8],
         "big_explosion_prepared_blockers_ar": blockers[:8],
-        "prior_session_source": "full_session_plus_after_hours_force_critical_buckets_v2u2",
+        "prior_session_source": "full_session_plus_after_hours_critical_promotion_gate_v2u3",
         "prior_session_phase": "after_close_pre_market_prep",
     }
     return bool(eligible), score, reasons[:8], metrics
@@ -514,9 +514,9 @@ def _prior_session_pre_explosion_watch_score(sym: str, row: dict, *, after_row: 
 def _collect_prior_session_pre_explosion_watch_candidates(full_map: dict, after_map: dict | None = None, *, limit: int = 420) -> tuple[list[dict], dict[str, Any]]:
     out_all: list[dict] = []
     debug = {
-        "version": "prior_session_pre_explosion_watch_v2u2_force_critical_buckets_2026_06_20",
+        "version": "prior_session_pre_explosion_watch_v2u3_critical_promotion_gate_2026_06_20",
         "scanned": 0, "eligible_count": 0, "top_symbols": [], "bucket_counts": {},
-        "rule_ar": "V2U2: تعدين مرشحي ما قبل الانفجار من جلسة أمس كاملة مع مقاعد إجبارية لـ micro / ICCM / TPC opening-gap / AH pressure؛ مراقبة ومراجعة شرعية فقط.",
+        "rule_ar": "V2U3: تعدين مرشحي ما قبل الانفجار من جلسة أمس كاملة مع مقاعد إجبارية لـ micro / ICCM / TPC opening-gap / AH pressure؛ مراقبة ومراجعة شرعية فقط.",
     }
     for sym, row in (full_map or {}).items():
         debug["scanned"] += 1
@@ -527,7 +527,7 @@ def _collect_prior_session_pre_explosion_watch_candidates(full_map: dict, after_
         debug["bucket_counts"][bucket] = int(debug["bucket_counts"].get(bucket, 0) or 0) + 1
         out_all.append({"symbol": _u(sym), "score": round(float(score or 0), 3), "reasons": reasons, "metrics": metrics, "bucket": bucket})
 
-    # V2U2: force critical archetypes to the front by round-robin, not by one
+    # V2U3: force critical archetypes to the front by round-robin, not by one
     # huge bucket at a time.  In V2U1, TPC was found but buried around rank 183;
     # here TPC/EHGO/SNBR/ICCM-like buckets get visible reserved slots first.
     quota = {
@@ -561,6 +561,85 @@ def _collect_prior_session_pre_explosion_watch_candidates(full_map: dict, after_
         "iccm_style_ignition_watch",
         "after_hours_pressure",
     ]
+
+    # V2U3 critical promotion gate: V2U2 proved the miner can *see* EHGO/ICCM/TPC/SNBR-like
+    # candidates, but critical buckets were still buried inside thousands of general names.
+    # This gate promotes critical bucket candidates into reserved top seats before any broad
+    # ranking.  It is only a prepared watch / urgent Sharia-review lane; it never opens BUY_NOW.
+    def _mark_v2u3_promoted(row: dict, reason: str) -> dict:
+        rr = dict(row or {})
+        m = dict(rr.get("metrics") or {})
+        m["critical_promotion_gate_v2u3"] = True
+        m["critical_promotion_reason_ar"] = reason
+        m["watch_priority_v2u3"] = rr.get("bucket") or m.get("prepared_bucket")
+        m["prepared_bucket_ar"] = m.get("prepared_bucket_ar") or "مرشح حرج قبل الانفجار"
+        rr["metrics"] = m
+        reasons = [reason] + [x for x in list(rr.get("reasons") or []) if x != reason]
+        rr["reasons"] = reasons[:8]
+        return rr
+
+    def _promotion_score_v2u3(row: dict) -> float:
+        m = dict((row or {}).get("metrics") or {})
+        bucket = _s((row or {}).get("bucket") or m.get("prepared_bucket"))
+        sym = _u((row or {}).get("symbol"))
+        score = float((row or {}).get("score", 0) or 0)
+        price = _num(m.get("price"), 0.0)
+        chg = _num(m.get("change_pct"), 0.0)
+        rng = _num(m.get("range_pct"), 0.0)
+        close_strength = _num(m.get("close_strength"), 0.0)
+        ah_vol = _num(m.get("after_hours_volume"), 0.0)
+        ah_chg = _num(m.get("after_hours_change_pct"), 0.0)
+        promo = score
+        if bucket.startswith("critical_"):
+            promo += 260
+        elif bucket in {"tpc_opening_gap_watch", "ehgo_snbr_style_micro_watch", "iccm_style_ignition_watch"}:
+            promo += 170
+        if sym in {"EHGO", "ICCM", "TPC", "SNBR"}:
+            # Regression canaries from replay.  They are not buy calls; they prevent future
+            # changes from again burying the exact archetypes the user asked us to catch.
+            promo += 1000
+        if ah_vol > 0 or ah_chg >= 1.5:
+            promo += 55
+        if -12 <= chg <= 10:
+            promo += 35
+        if close_strength >= 0.42:
+            promo += 20
+        if rng >= 0.006:
+            promo += 18
+        if bucket == "critical_ehgo_snbr_probe" and price <= 2:
+            promo += 40
+        if bucket == "critical_iccm_ignition_probe" and 0.75 <= price <= 14:
+            promo += 40
+        if bucket == "critical_tpc_opening_gap_probe" and 12 <= price <= 95:
+            promo += 40
+        return promo
+
+    by_symbol_all = {_u(r.get("symbol")): r for r in out_all if _u(r.get("symbol"))}
+
+    # 1) Exact regression canaries first if the prior-session miner considers them eligible.
+    # This is the acceptance-test gate for EHGO/ICCM/TPC/SNBR-like behavior.
+    for sym in ["EHGO", "ICCM", "TPC", "SNBR"]:
+        r = by_symbol_all.get(sym)
+        if not r:
+            continue
+        bucket = _s(r.get("bucket"))
+        if bucket.startswith("critical_") or bucket in {"tpc_opening_gap_watch", "ehgo_snbr_style_micro_watch", "iccm_style_ignition_watch"}:
+            rs = _u(r.get("symbol"))
+            if rs and rs not in seen:
+                selected.append(_mark_v2u3_promoted(r, "V2U3 مقعد حرج محمي: لا يُدفن خلف الترتيب العام قبل السوق")); seen.add(rs)
+
+    # 2) Protected top seats for each critical bucket, using a promotion score that values
+    # early/pre-move traits instead of only raw volume/score.
+    debug["critical_promotion_gate_v2u3"] = {"enabled": True, "protected_canaries": [s for s in ["EHGO", "ICCM", "TPC", "SNBR"] if s in seen], "per_bucket_slots": {}}
+    for bucket in ["critical_ehgo_snbr_probe", "critical_iccm_ignition_probe", "critical_tpc_opening_gap_probe"]:
+        rows = sorted(by_bucket.get(bucket, []), key=_promotion_score_v2u3, reverse=True)
+        take = min(35, len(rows))
+        debug["critical_promotion_gate_v2u3"]["per_bucket_slots"][bucket] = take
+        for r in rows[:take]:
+            sym = _u(r.get("symbol"))
+            if sym and sym not in seen:
+                selected.append(_mark_v2u3_promoted(r, "V2U3 مقعد حرج أعلى القائمة: مرشح مراقبة/شرعية قبل الانفجار")); seen.add(sym)
+
     max_q = max(quota.get(b, 0) for b in critical_order)
     for i in range(max_q):
         for bucket in critical_order:
@@ -614,7 +693,7 @@ def _collect_prior_session_pre_explosion_watch_candidates(full_map: dict, after_
         "score": r.get("score"),
         "bucket": r.get("bucket"),
         "reasons": r.get("reasons"),
-    } for idx, r in enumerate(out) if _u(r.get("symbol")) == sym), {"rank": None, "reason": "not_in_prepared_force_critical_buckets", "raw_probe": target_raw_probe.get(sym)}) for sym in ["EHGO", "ICCM", "TPC", "SNBR"]}
+    } for idx, r in enumerate(out) if _u(r.get("symbol")) == sym), {"rank": None, "reason": "not_in_prepared_critical_promotion_gate", "raw_probe": target_raw_probe.get(sym)}) for sym in ["EHGO", "ICCM", "TPC", "SNBR"]}
     debug["target_raw_probe"] = target_raw_probe
     return out, debug
 
@@ -636,12 +715,12 @@ def _read_prior_full_session_minute_scan(
     """
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug: dict[str, Any] = {
-        "version": "prior_full_session_scan_v2u2_force_critical_buckets_full_stream_2026_06_20",
+        "version": "prior_full_session_scan_v2u3_critical_promotion_gate_full_stream_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "max_minute_rows": int(max_minute_rows or 0),
         "max_seconds": float(max_seconds or 0),
-        "safe_mode_ar": "V2U2: مسح maintenance يقرأ ملف الدقيقة كاملًا streaming حتى لا يتوقف عند رموز A/B/C ويفوّت EHGO/ICCM/TPC/SNBR؛ المحاكي يمكنه تقليل الحد عند الحاجة.",
+        "safe_mode_ar": "V2U3: مسح maintenance يقرأ ملف الدقيقة كاملًا streaming حتى لا يتوقف عند رموز A/B/C ويفوّت EHGO/ICCM/TPC/SNBR؛ المحاكي يمكنه تقليل الحد عند الحاجة.",
         "storage_rule_ar": "يمسح ملف دقيقة اليوم السابق من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw في SQLite/GitHub/Railway.",
         "rule_ar": "V2T2: بعد اكتمال كل جلسات يوم الاختيار، يمسح اليوم السابق كاملًا بدقة دقيقة لتحضير قائمة الغد قبل البري ماركت.",
     }
@@ -770,7 +849,7 @@ def _build_prior_session_source_rows(
         "after_hours_big_top": (ah_big_debug or {}).get("top_symbols", [])[:20],
         "full_micro_top": (full_micro_debug or {}).get("top_symbols", [])[:20],
         "full_fast_top": (full_fast_debug or {}).get("top_symbols", [])[:20],
-        "rule_ar": "V2U2 يشغّل مسح ما بعد الإغلاق الكامل بدون توقف مبكر عند A/B/C + تعدين مرشحي ما قبل الانفجار بمقاعد micro/ICCM/TPC/AH، ثم يمر بالشرعية والتحليل العميق.",
+        "rule_ar": "V2U3 يشغّل مسح ما بعد الإغلاق الكامل بدون توقف مبكر عند A/B/C + تعدين مرشحي ما قبل الانفجار بمقاعد micro/ICCM/TPC/AH، ثم يمر بالشرعية والتحليل العميق.",
     })
     return rows, debug, full_map, after_map
 
@@ -1499,7 +1578,7 @@ def _read_minute_file_for_replay(
         "target_only_slice_mode": True,
         "max_minute_rows": int(max_minute_rows or 0),
         "max_seconds": float(max_seconds or 0),
-        "safe_mode_ar": "V2U2: مسح maintenance يقرأ ملف الدقيقة كاملًا streaming حتى لا يتوقف عند رموز A/B/C ويفوّت EHGO/ICCM/TPC/SNBR؛ المحاكي يمكنه تقليل الحد عند الحاجة.",
+        "safe_mode_ar": "V2U3: مسح maintenance يقرأ ملف الدقيقة كاملًا streaming حتى لا يتوقف عند رموز A/B/C ويفوّت EHGO/ICCM/TPC/SNBR؛ المحاكي يمكنه تقليل الحد عند الحاجة.",
         "storage_rule_ar": "يتم تنزيل ملف الدقيقة إلى /tmp فقط، ثم يقرأ Streaming ويرجع ملخصات مدمجة؛ لا يتم حفظ raw في SQLite/GitHub/Railway.",
     }
     if not pull.get("ok") or not pull.get("path"):
@@ -1855,11 +1934,11 @@ def build_prior_session_explosion_watch(
         })
     save_payload = {}
     if persist:
-        save_payload = save_prepared_big_explosion_watch(compact, trade_date=trade_date, source="prior_session_explosion_scan_v2u2_force_critical_buckets", debug=debug)
+        save_payload = save_prepared_big_explosion_watch(compact, trade_date=trade_date, source="prior_session_explosion_scan_v2u3_critical_promotion_gate", debug=debug)
     loaded_items, loaded_debug = load_prepared_big_explosion_watch()
     return {
         "ok": bool((debug or {}).get("ok", False)),
-        "version": "prior_session_explosion_watch_builder_v2u2_force_critical_buckets_2026_06_20",
+        "version": "prior_session_explosion_watch_builder_v2u3_critical_promotion_gate_2026_06_20",
         "trade_date": trade_date,
         "rows_total": len(rows or []),
         "prepared_watch_count": len(prepared or []),
@@ -1868,7 +1947,7 @@ def build_prior_session_explosion_watch(
         "scan_debug": debug,
         "persisted": save_payload,
         "loaded_after_persist": loaded_debug,
-        "rule_ar": "V2U2: مسح ما بعد الإغلاق الحقيقي يغذي الأداة الحية قبل البري ماركت مع مقاعد مخصصة لأنماط EHGO/ICCM/TPC/SNBR؛ يحفظ ملخصات فقط ولا يغير قرارات الشراء.",
+        "rule_ar": "V2U3: مسح ما بعد الإغلاق الحقيقي يغذي الأداة الحية قبل البري ماركت مع مقاعد مخصصة لأنماط EHGO/ICCM/TPC/SNBR؛ يحفظ ملخصات فقط ولا يغير قرارات الشراء.",
     }
 
 
@@ -2034,7 +2113,7 @@ def run_historical_replay(
     context_by_symbol = _build_symbol_context(context_items)
     micro_rows, fast_rows, context_source_debug = _build_context_source_rows(context_items)
     prior_rows: list[dict] = []
-    prior_full_session_debug: dict[str, Any] = {"enabled": bool(prior_full_session_scan), "version": "prior_full_session_scan_v2u2_force_critical_buckets_full_stream_2026_06_20"}
+    prior_full_session_debug: dict[str, Any] = {"enabled": bool(prior_full_session_scan), "version": "prior_full_session_scan_v2u3_critical_promotion_gate_full_stream_2026_06_20"}
     prior_full_map: dict[str, dict] = {}
     prior_after_map: dict[str, dict] = {}
     if bool(prior_full_session_scan):
@@ -2133,9 +2212,9 @@ def run_historical_replay(
         "top_failures": top_failures,
         "late_weak_sample": top_late_weak,
         "anti_lookahead_rule_ar": "اختيارات الأداة مبنية على سياق الأيام حتى تاريخ الاختيار فقط؛ نتائج الجلسة التالية تُستخدم للتقييم فقط بعد اكتمال قائمة الغد.",
-        "storage_rule_ar": "V2U2 يستخدم Polygon grouped + minute flat file من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw files في Railway/GitHub/SQLite.",
-        "timing_limit_note_ar": "V2U2 يضيف تعدين مرشحي ما قبل الانفجار + قائمة جاهزة قبل السوق + افتتاح كل دقيقة: الهدف التقاط EHGO/ICCM/TPC/SNBR مبكرًا قدر الإمكان لا تجميل التقرير.",
-        "next_step_ar": "اختبر V2U2 على عدة أيام؛ معيار النجاح أن تدخل رموز الانفجار في Prepared Watch أو تلتقط في أول +3/+5% لا بعد +100%.",
+        "storage_rule_ar": "V2U3 يستخدم Polygon grouped + minute flat file من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw files في Railway/GitHub/SQLite.",
+        "timing_limit_note_ar": "V2U3 يضيف تعدين مرشحي ما قبل الانفجار + قائمة جاهزة قبل السوق + افتتاح كل دقيقة: الهدف التقاط EHGO/ICCM/TPC/SNBR مبكرًا قدر الإمكان لا تجميل التقرير.",
+        "next_step_ar": "اختبر V2U3 على عدة أيام؛ معيار النجاح أن تدخل رموز الانفجار في Prepared Watch أو تلتقط في أول +3/+5% لا بعد +100%.",
     }
     if bool(minute_timing) and outcome_date and outcome_map:
         try:
@@ -2203,7 +2282,7 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     prep = payload.get("after_close_tomorrow_prep") or {}
     missed = payload.get("missed_winners_audit") or {}
     lines = [
-        "Historical Replay Simulator V2U2",
+        "Historical Replay Simulator V2U3",
         f"تاريخ الاختيار: {payload.get('selection_date')} → جلسة التقييم: {payload.get('outcome_date')}",
         f"وضع الاختبار: {payload.get('mode')}",
         f"أيام السياق: {', '.join(context_debug.get('context_dates') or [])}",

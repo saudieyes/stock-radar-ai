@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u2_force_critical_buckets_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u3_critical_promotion_gate_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2241,7 +2241,7 @@ def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
         "already_big": bool(change >= 20),
         "very_extended": bool(change >= 50),
         "reasons": _dedupe(reasons + list(row.get("big_explosion_live_reasons_ar") or [])[:5], 8),
-        "rule_ar": "V2U2: مسار تعدين ومراقبة ما قبل الانفجار وقائمة أمس الجاهزة؛ لا يغيّر Strong/Cautious ولا يعني دخول مباشر.",
+        "rule_ar": "V2U3: مسار تعدين ومراقبة ما قبل الانفجار وقائمة أمس الجاهزة؛ لا يغيّر Strong/Cautious ولا يعني دخول مباشر.",
     }
 
 
@@ -2622,7 +2622,7 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     big_explosion = _big_explosion_live_profile(row)
     if big_explosion.get("matched"):
         if row.get("big_explosion_prepared_watch_v2u"):
-            reasons = ["V2U2: مرشح انفجار جاهز قبل السوق من تعدين جلسة أمس الكامل — راجع الشرعية مبكرًا وراقب البري ماركت/الافتتاح."]
+            reasons = ["V2U3: مرشح انفجار جاهز قبل السوق من تعدين جلسة أمس الكامل — راجع الشرعية مبكرًا وراقب البري ماركت/الافتتاح."]
             reasons.extend(list(big_explosion.get("reasons") or [])[:6])
             add("high_risk_day_trade", 58.0 if not big_explosion.get("very_extended") else 38.0, reasons)
         else:
