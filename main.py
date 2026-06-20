@@ -758,7 +758,7 @@ def prepared_explosion_watch_endpoint(format: str = "json"):
     items, debug = load_prepared_big_explosion_watch()
     payload = {
         "ok": True,
-        "version": "prepared_explosion_watch_status_v2u1_true_mining_2026_06_20",
+        "version": "prepared_explosion_watch_status_v2u2_force_critical_buckets_2026_06_20",
         "count": len(items or []),
         "symbols": [x.get("symbol") for x in (items or [])[:120]],
         "items": items[:120],
@@ -766,7 +766,7 @@ def prepared_explosion_watch_endpoint(format: str = "json"):
         "rule_ar": "هذه قائمة ما بعد الإغلاق الجاهزة للأداة الحية قبل البري ماركت؛ مراقبة/مراجعة شرعية فقط وليست شراء مباشر.",
     }
     if str(format or "json").lower() in {"brief", "text", "txt"}:
-        lines = ["Prepared Explosion Watch V2U1", f"count: {payload['count']}", "symbols: " + ", ".join(payload["symbols"][:80]), str(debug)]
+        lines = ["Prepared Explosion Watch V2U2", f"count: {payload['count']}", "symbols: " + ", ".join(payload["symbols"][:80]), str(debug)]
         return PlainTextResponse("\n".join(lines), media_type="text/plain; charset=utf-8")
     return payload
 
@@ -799,7 +799,7 @@ def prior_session_explosion_scan_endpoint(
     if str(format or "json").lower() in {"brief", "text", "txt"}:
         scan = payload.get("scan_debug") or {}
         lines = [
-            "Prior Session Explosion Scan V2U1",
+            "Prior Session Explosion Scan V2U2",
             f"date: {trade_date}",
             f"ok: {payload.get('ok')}",
             f"prepared_watch_count: {payload.get('prepared_watch_count')}",
