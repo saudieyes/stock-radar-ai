@@ -149,6 +149,126 @@ def _add_candidate(candidates: dict, symbol: str, score: float, source: str, rea
             pass
 
 
+def _fast_lane_source_flags(source_kind: str) -> dict:
+    kind = str(source_kind or "").strip().lower()
+    return {
+        "from_fmp_movers": kind in {"fmp_mover", "fmp_small_mover"},
+        "from_fmp_live": kind == "fmp_live",
+        "from_polygon_grouped": kind in {"polygon_grouped", "grouped"},
+        "from_watch_early": False,
+        "from_previous_session_memory": False,
+    }
+
+
+def _fast_lane_trace_update(trace: dict, symbol: str, *, source_kind: str, metrics: dict | None = None,
+                            score: float = 0.0, reasons: list | None = None, eligible: bool = True,
+                            rejected_reason_code: str = "", rejected_reason_ar: str = "") -> None:
+    """Compact in-memory V2Q trace for Fast Lane source candidates.
+
+    This is diagnostic-only.  It does not store raw vendor payloads and does not
+    change source ranking, Sharia screening, Strong, or Cautious decisions.
+    """
+    sym = _clean_symbol(symbol)
+    if not sym:
+        return
+    metrics = metrics if isinstance(metrics, dict) else {}
+    entry = trace.setdefault(sym, {
+        "symbol": sym,
+        "source_kinds": [],
+        "source_flags": _fast_lane_source_flags(""),
+        "price": 0.0,
+        "change_pct": 0.0,
+        "volume": 0.0,
+        "dollar_volume": 0.0,
+        "score": 0.0,
+        "source_reasons_ar": [],
+        "source_eligible": False,
+        "source_stage": "raw_source",
+        "excluded_reason_code": "",
+        "excluded_reason_ar": "",
+    })
+    kind = str(source_kind or "unknown").strip() or "unknown"
+    if kind not in entry["source_kinds"]:
+        entry["source_kinds"].append(kind)
+    flags = _fast_lane_source_flags(kind)
+    for k, v in flags.items():
+        entry["source_flags"][k] = bool(entry["source_flags"].get(k) or v)
+    price = to_float(metrics.get("price") or metrics.get("fmp_price") or metrics.get("live_price"))
+    change = to_float(metrics.get("change_pct") or metrics.get("fmp_change_pct") or metrics.get("live_change_pct") or metrics.get("day_change_pct"))
+    # grouped metrics can be fractional; FMP/live are percentages.
+    if kind in {"polygon_grouped", "grouped"} and abs(change) <= 1.5:
+        change *= 100.0
+    volume = to_float(metrics.get("volume") or metrics.get("fmp_volume") or metrics.get("live_volume"))
+    dollar_volume = to_float(metrics.get("dollar_volume") or metrics.get("live_dollar_volume"))
+    if dollar_volume <= 0 and price > 0 and volume > 0:
+        dollar_volume = price * volume
+    for key, val in (("price", price), ("change_pct", change), ("volume", volume), ("dollar_volume", dollar_volume)):
+        if val and (not entry.get(key) or abs(float(val)) > abs(float(entry.get(key) or 0))):
+            entry[key] = safe_round(val, 4 if key == "price" else 3)
+    try:
+        entry["score"] = safe_round(max(float(entry.get("score", 0) or 0), float(score or 0)), 3)
+    except Exception:
+        pass
+    for reason in list(reasons or [])[:8]:
+        text = str(reason or "").strip()
+        if text and text not in entry["source_reasons_ar"]:
+            entry["source_reasons_ar"].append(text[:120])
+    if eligible:
+        entry["source_eligible"] = True
+        entry["source_stage"] = "source_eligible"
+    elif not entry.get("source_eligible"):
+        entry["source_stage"] = "source_rejected"
+        entry["excluded_reason_code"] = str(rejected_reason_code or "source_rejected")
+        entry["excluded_reason_ar"] = str(rejected_reason_ar or "لم يجتز شروط Fast Lane من المصدر")[:180]
+
+
+def _fast_lane_funnel_debug_payload(trace: dict, ranked: list[dict], final: list[str], max_symbols: int) -> dict:
+    ranked_map = {str((r or {}).get("symbol") or "").upper(): r for r in (ranked or []) if isinstance(r, dict)}
+    final_set = {str(x or "").upper() for x in (final or [])}
+    rows: list[dict] = []
+    stage_counts: dict[str, int] = {}
+    source_kind_counts: dict[str, int] = {}
+    for sym, item in (trace or {}).items():
+        if not isinstance(item, dict):
+            continue
+        out = dict(item)
+        out["source_kinds"] = list(item.get("source_kinds") or [])[:5]
+        for kind in out["source_kinds"]:
+            source_kind_counts[kind] = int(source_kind_counts.get(kind, 0) or 0) + 1
+        out["after_source_candidate_pool"] = bool(sym in ranked_map)
+        out["entered_final_universe_before_sharia"] = bool(sym in final_set)
+        out["source_rank_score"] = safe_round((ranked_map.get(sym) or {}).get("score", out.get("score", 0)), 3)
+        out["source_tags"] = list((ranked_map.get(sym) or {}).get("sources") or [])[:8]
+        if not out.get("source_eligible"):
+            stage = "source_rejected"
+        elif not out.get("after_source_candidate_pool"):
+            stage = "not_in_candidate_pool"
+            out["excluded_reason_code"] = out.get("excluded_reason_code") or "not_in_candidate_pool"
+            out["excluded_reason_ar"] = out.get("excluded_reason_ar") or "لم يدخل candidate pool بعد حساب المصدر."
+        elif not out.get("entered_final_universe_before_sharia"):
+            stage = "source_universe_limit"
+            out["excluded_reason_code"] = out.get("excluded_reason_code") or "source_universe_limit_or_lower_rank"
+            out["excluded_reason_ar"] = out.get("excluded_reason_ar") or f"مرشح Fast Lane لكنه خارج أول {int(max_symbols or 0)} رمز قبل فلتر الشرعية/التحليل العميق."
+        else:
+            stage = "entered_source_universe"
+        out["funnel_stage"] = stage
+        stage_counts[stage] = int(stage_counts.get(stage, 0) or 0) + 1
+        rows.append(out)
+    rows.sort(key=lambda x: float(x.get("source_rank_score", x.get("score", 0)) or 0), reverse=True)
+    return {
+        "version": "fast_lane_funnel_debug_v2q_source_2026_06_20",
+        "raw_fast_lane_source_count": len([x for x in rows if x.get("source_eligible")]),
+        "trace_count": len(rows),
+        "entered_source_universe_count": len([x for x in rows if x.get("entered_final_universe_before_sharia")]),
+        "source_universe_limit_count": len([x for x in rows if x.get("funnel_stage") == "source_universe_limit"]),
+        "stage_counts": stage_counts,
+        "source_kind_counts": source_kind_counts,
+        "candidate_traces": rows[:120],
+        "candidate_symbols": [x.get("symbol") for x in rows if x.get("source_eligible")][:80],
+        "rule_ar": "V2Q: هذا Funnel تشخيصي فقط. يشرح انتقال مرشح Fast Lane من المصدر إلى final universe قبل الشرعية ثم إلى العرض، ولا يغير Strong/Cautious أو قواعد الشراء.",
+    }
+
+
 def _source_metrics_from_grouped(daily: dict) -> dict:
     try:
         return _scanner.calc_metrics(daily or {})
@@ -326,7 +446,7 @@ def _normalize_candidate_rows(candidates: dict) -> list[dict]:
 def _low_float_fast_lane_score(ticker: str, metrics: dict, phase_detail: str = "", source_kind: str = "grouped") -> tuple[bool, float, list[str], dict]:
     """Dedicated obscure small-stock / low-float-like source lane.
 
-    V2P makes this lane usable even when the market is closed and Polygon grouped
+    V2Q keeps this lane usable when the market is closed and adds a visible funnel while Polygon grouped
     data is unavailable.  It accepts either grouped-day metrics or FMP mover/live
     metrics, but remains a *source/watch* lane only. It never creates BUY_NOW.
     """
@@ -456,7 +576,7 @@ def _low_float_metrics_from_price_change_volume(price: float, change_pct: float,
 
 def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
     debug = {
-        "version": "low_float_fast_lane_source_v2p_true_fast_lane_2026_06_20",
+        "version": "low_float_fast_lane_source_v2q_funnel_debug_2026_06_20",
         "enabled": bool(LOW_FLOAT_FAST_LANE_ENABLED),
         "scan_cap": int(LOW_FLOAT_FAST_LANE_SCAN_CAP),
         "inject_limit": int(LOW_FLOAT_FAST_LANE_INJECT_LIMIT),
@@ -464,7 +584,7 @@ def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str
         "eligible_count": 0,
         "rejected_price_or_known_count": 0,
         "top_symbols": [],
-        "rule_ar": "V2P: مصدر مستقل حقيقي. يستخدم Polygon grouped إن توفر، ويستخدم FMP movers/live عندما يكون السوق مغلقًا ولا توجد grouped data. لا يعتمد على Watch/Early فقط.",
+        "rule_ar": "V2Q: مصدر مستقل حقيقي مع Funnel واضح. يستخدم Polygon grouped إن توفر، ويستخدم FMP movers/live عندما يكون السوق مغلقًا ولا توجد grouped data. لا يعتمد على Watch/Early فقط.",
     }
     if not LOW_FLOAT_FAST_LANE_ENABLED or not grouped_map:
         return [], debug
@@ -528,6 +648,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     fmp_low_float_fast_lane_symbols: list[str] = []
     live_low_float_fast_lane_count = 0
     live_low_float_fast_lane_symbols: list[str] = []
+    low_float_fast_lane_trace: dict[str, dict] = {}
 
     # Source / Promotion V2a: explicitly inject the curated Early Movement
     # watchlist into the dynamic discovery source.  Previously it usually arrived
@@ -680,6 +801,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             score = float((item or {}).get("score", 0) or 0)
             reasons = list((item or {}).get("reasons") or [])
             metrics = dict((item or {}).get("metrics") or {})
+            _fast_lane_trace_update(low_float_fast_lane_trace, sym, source_kind="polygon_grouped", metrics=metrics, score=score, reasons=reasons, eligible=True)
             _add_candidate(
                 candidates,
                 sym,
@@ -809,6 +931,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         volume = to_float(row.get("volume") or row.get("dayVolume"))
         dollar_volume = price * volume if price > 0 and volume > 0 else 0.0
         if price and price < 1.5:
+            _fast_lane_trace_update(low_float_fast_lane_trace, sym, source_kind="fmp_mover", metrics=_low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_mover"), eligible=False, rejected_reason_code="price_below_source_min", rejected_reason_ar="السعر أقل من 1.5$ في مصدر FMP movers؛ لم يدخل مصدر Fast Lane الحالي.")
             continue
         fmp_mover_count += 1
         score, source_move_stage = _score_fmp_mover_source(change_pct, dollar_volume)
@@ -823,12 +946,13 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             lf_metrics = _low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_mover")
             lf_ok, lf_score, lf_reasons, lf_flags = _low_float_fast_lane_score(sym, lf_metrics, phase_detail=str(phase_info.get("detail", "") or ""), source_kind="fmp_mover")
             if lf_ok:
+                _fast_lane_trace_update(low_float_fast_lane_trace, sym, source_kind="fmp_mover", metrics=lf_metrics, score=lf_score, reasons=lf_reasons, eligible=True)
                 _add_candidate(
                     candidates,
                     sym,
                     58 + lf_score * 0.42,
                     "low_float_fast_lane_v1",
-                    "Low-Float Fast Lane V2P من FMP: " + "، ".join(lf_reasons[:3]),
+                    "Low-Float Fast Lane V2Q من FMP: " + "، ".join(lf_reasons[:3]),
                     {**lf_metrics, **lf_flags, "low_float_fast_lane": True, "low_float_fast_lane_reasons": lf_reasons},
                 )
                 fmp_low_float_fast_lane_count += 1
@@ -899,12 +1023,13 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             lf_metrics = _low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_live")
             lf_ok, lf_score, lf_reasons, lf_flags = _low_float_fast_lane_score(sym, lf_metrics, phase_detail=str(phase_info.get("detail", "") or ""), source_kind="fmp_live")
             if lf_ok:
+                _fast_lane_trace_update(low_float_fast_lane_trace, sym, source_kind="fmp_live", metrics=lf_metrics, score=lf_score, reasons=lf_reasons, eligible=True)
                 _add_candidate(
                     candidates,
                     sym,
                     48 + lf_score * 0.32,
                     "low_float_fast_lane_v1",
-                    "Low-Float Fast Lane V2P من FMP live: " + "، ".join(lf_reasons[:3]),
+                    "Low-Float Fast Lane V2Q من FMP live: " + "، ".join(lf_reasons[:3]),
                     {**lf_metrics, **lf_flags, "low_float_fast_lane": True, "low_float_fast_lane_reasons": lf_reasons},
                 )
                 live_low_float_fast_lane_count += 1
@@ -969,6 +1094,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
 
     final = _scanner.unique_keep_order(selected_order)[:max_symbols]
     reason_map = {r["symbol"]: r for r in ranked}
+    low_float_fast_lane_funnel_debug = _fast_lane_funnel_debug_payload(low_float_fast_lane_trace, ranked, final, max_symbols)
 
     elapsed = safe_round(time.time() - started, 2)
     source_bucket_counts = {}
@@ -980,20 +1106,25 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         low_float_fast_lane_status = dict(low_float_fast_lane_status or {})
         low_float_fast_lane_status.update({
             "v2p_fmp_fallback_enabled": True,
+            "v2q_funnel_debug_enabled": True,
             "fmp_fast_lane_count": int(fmp_low_float_fast_lane_count or 0),
             "fmp_fast_lane_symbols": _scanner.unique_keep_order(fmp_low_float_fast_lane_symbols)[:50],
             "live_fast_lane_count": int(live_low_float_fast_lane_count or 0),
             "live_fast_lane_symbols": _scanner.unique_keep_order(live_low_float_fast_lane_symbols)[:50],
             "total_fast_lane_source_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0) or 0),
-            "diagnostic_ar": "إذا كان broad_market_count=0 وقت الإغلاق، يستخدم V2P FMP movers/live كمنبع مستقل بدل ترك Fast Lane صفر.",
+            "funnel_debug_version": (low_float_fast_lane_funnel_debug or {}).get("version"),
+            "raw_fast_lane_source_count": int((low_float_fast_lane_funnel_debug or {}).get("raw_fast_lane_source_count", 0) or 0),
+            "entered_source_universe_count": int((low_float_fast_lane_funnel_debug or {}).get("entered_source_universe_count", 0) or 0),
+            "source_universe_limit_count": int((low_float_fast_lane_funnel_debug or {}).get("source_universe_limit_count", 0) or 0),
+            "diagnostic_ar": "إذا كان broad_market_count=0 وقت الإغلاق، يستخدم V2Q FMP movers/live كمنبع مستقل، ويعرض Funnel يشرح لماذا دخل/خرج كل مرشح Fast Lane.",
         })
     except Exception:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3c_true_low_float_fast_lane_2026_06_20",
+        "engine_version": "dynamic_discovery_v3d_fast_lane_funnel_debug_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_true_low_float_fast_lane_fmp_fallback",
+        "dynamic_discovery_mode": "candidate_pool_plus_true_low_float_fast_lane_funnel_debug",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -1019,6 +1150,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "fmp_extended_confirmed": extended_confirmed,
         "low_float_fast_lane_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0)) if 'source_bucket_counts' in locals() else int(low_float_fast_lane_count or 0),
         "low_float_fast_lane": low_float_fast_lane_status,
+        "low_float_fast_lane_funnel_debug": low_float_fast_lane_funnel_debug,
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,

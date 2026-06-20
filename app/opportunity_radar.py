@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2p_true_low_float_fast_lane_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2q_fast_lane_funnel_display_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -1998,6 +1998,7 @@ OPPORTUNITY_BUCKET_KEYS = [
     "continuation_pullback_candidates",
     "high_risk_day_trades",
     "low_float_premarket_radar",
+    "low_float_fast_lane_raw_watch",
     "gap_fill_watch",
     "catalyst_watch",
 ]
@@ -2047,7 +2048,7 @@ def _sort_bucket(rows: list[dict]) -> list[dict]:
 # final decision engine.
 CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
-LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2p_2026_06_20"
+LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2q_funnel_display_2026_06_20"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -2244,7 +2245,7 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
     rows = [r for r in (rows or []) if isinstance(r, dict) and not _is_blocked(r)]
     existing = existing if isinstance(existing, list) else []
     debug = {
-        "version": "low_float_capture_audit_v2p_true_fast_lane_2026_06_20",
+        "version": "low_float_capture_audit_v2q_funnel_display_2026_06_20",
         "rows_seen": len(rows),
         "price_0_35_to_20_count": 0,
         "price_0_35_to_12_count": 0,
@@ -2258,7 +2259,7 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
         "existing_low_float_section_count": len(existing),
         "sample_candidates": [],
         "excluded_known_watch_only_sample": [],
-        "rule_ar": "V2P: Low-Float Fast Lane لا يعتمد على Watch/Early فقط. يقبل مصادر مستقلة من Polygon grouped أو FMP movers/live عند إغلاق السوق، ويستبعد الأسماء المعروفة/الثقيلة إذا لم يوجد نشاط مستقل.",
+        "rule_ar": "V2Q: Low-Float Fast Lane لا يعتمد على Watch/Early فقط. يعرض Funnel من المصدر إلى الشرعية إلى final universe إلى القسم الظاهر، ويستبعد الأسماء المعروفة/الثقيلة إذا لم يوجد نشاط مستقل.",
     }
     samples = []
     for row in rows:
@@ -2295,6 +2296,169 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
             })
     debug["sample_candidates"] = samples[:15]
     return debug
+
+
+def _get_source_fast_lane_funnel_debug() -> dict[str, Any]:
+    try:
+        import scanner as _scanner
+        diag = dict(getattr(_scanner, "LAST_SOURCE_DIAGNOSTICS", {}) or {})
+        funnel = diag.get("low_float_fast_lane_funnel_debug")
+        if isinstance(funnel, dict):
+            return funnel
+        lf = diag.get("low_float_fast_lane") if isinstance(diag.get("low_float_fast_lane"), dict) else {}
+        funnel = (lf or {}).get("funnel_debug")
+        return funnel if isinstance(funnel, dict) else {}
+    except Exception:
+        return {}
+
+
+def _displayed_section_map(final_map: dict[str, list[dict]]) -> dict[str, str]:
+    section_labels = {
+        "promotion_bridge_candidates": "جسر الترقية",
+        "learning_opportunity_candidates": "طبقة التعلم",
+        "small_stock_classic_radar": "الأسهم الصغيرة الكلاسيكية",
+        "pre_trigger_candidates": "قريب من التفعيل",
+        "support_bounce_candidates": "ارتداد دعم",
+        "reclaim_candidates": "Reclaim",
+        "continuation_pullback_candidates": "Continuation Pullback",
+        "low_float_premarket_radar": "Low-Float / Pre-Market Radar",
+        "high_risk_day_trades": "مضاربة عالية المخاطر",
+        "gap_fill_watch": "Gap Fill Watch",
+        "catalyst_watch": "Catalyst Watch",
+    }
+    out: dict[str, str] = {}
+    for key, vals in (final_map or {}).items():
+        for row in vals or []:
+            if not isinstance(row, dict):
+                continue
+            sym = _u(row.get("symbol"))
+            if sym and sym not in out:
+                out[sym] = section_labels.get(key, key)
+    return out
+
+
+def _fast_lane_display_reason(trace: dict, rows_by_symbol: dict[str, dict], displayed: dict[str, str]) -> tuple[str, str]:
+    sym = _u((trace or {}).get("symbol"))
+    if not sym:
+        return "missing_symbol", "رمز غير صالح."
+    if (trace or {}).get("excluded_reason_code") == "sharia_blocked" or _s((trace or {}).get("sharia_stage")) == "sharia_blocked":
+        return "sharia_blocked", _s((trace or {}).get("excluded_reason_ar")) or "استبعده فلتر الشرعية."
+    if not (trace or {}).get("source_eligible"):
+        return _s((trace or {}).get("excluded_reason_code")) or "source_rejected", _s((trace or {}).get("excluded_reason_ar")) or "لم يجتز شروط Fast Lane من المصدر."
+    if not (trace or {}).get("entered_final_universe_before_sharia"):
+        return "source_universe_limit_or_lower_rank", _s((trace or {}).get("excluded_reason_ar")) or "دخل Fast Lane لكنه خرج من final universe قبل التحليل بسبب حد العدد/الترتيب."
+    if not (trace or {}).get("in_deep_analysis_universe") and _s((trace or {}).get("sharia_stage")) == "gray":
+        return "sharia_gray_not_used", _s((trace or {}).get("excluded_reason_ar")) or "يحتاج مراجعة شرعية ولم يدخل final universe بسبب حد الرمادي/توفر أسماء نظيفة."
+    if not (trace or {}).get("in_deep_analysis_universe"):
+        return "not_in_deep_analysis_universe", _s((trace or {}).get("excluded_reason_ar")) or "لم يصل إلى التحليل العميق بعد فلتر الشرعية/حد العدد."
+    if sym not in rows_by_symbol:
+        return "deep_analysis_missing_row", "دخل final universe لكن لم يرجع كصف تحليل قابل للعرض؛ غالبًا فشل plan/data للسهم."
+    if sym in displayed:
+        return "duplicate_or_visible_elsewhere", f"ظهر في قسم آخر: {displayed.get(sym)}؛ لم نكرره كـ Low-Float نهائي."
+    return "display_limit_or_bucket_mismatch", "وصل للتحليل لكنه لم يظهر في Low-Float بسبب حد العرض أو لأن bucket النهائي ليس Low-Float."
+
+
+def _make_fast_lane_raw_watch_row(trace: dict, base_row: dict | None, display_code: str, display_reason_ar: str) -> dict:
+    base = dict(base_row or {})
+    sym = _u((trace or {}).get("symbol") or base.get("symbol"))
+    price = _num(base.get("current_price_live", base.get("display_price", base.get("price", 0))), 0.0)
+    if price <= 0:
+        price = _num((trace or {}).get("price"), 0.0)
+    change = _num(base.get("change_pct", base.get("display_change_pct", base.get("day_change_pct", 0))), 0.0)
+    if change == 0:
+        change = _num((trace or {}).get("change_pct"), 0.0)
+    score = _num((trace or {}).get("source_rank_score", (trace or {}).get("score", 0)), 0.0)
+    source_kinds = list((trace or {}).get("source_kinds") or [])
+    source_flags = (trace or {}).get("source_flags") if isinstance((trace or {}).get("source_flags"), dict) else {}
+    source_label = ", ".join(source_kinds[:3]) or "Fast Lane"
+    reasons = [
+        "مرشح Fast Lane خام — مراقبة عالية المخاطر فقط، ليس Strong ولا Cautious.",
+        f"مصدر الالتقاط: {source_label}",
+        display_reason_ar,
+    ]
+    reasons.extend(list((trace or {}).get("source_reasons_ar") or [])[:6])
+    base.update({
+        "symbol": sym,
+        "company": base.get("company") or sym,
+        "current_price_live": price,
+        "display_price": price,
+        "change_pct": change,
+        "decision": "Fast Lane خام — مراقبة فقط",
+        "opportunity_bucket": "low_float_fast_lane_raw_watch",
+        "opportunity_stage": "low_float_fast_lane_raw_watch",
+        "opportunity_stage_label": "🧪 Fast Lane خام — مراقبة عالية المخاطر",
+        "display_plan_family_label": "🧪 Fast Lane خام — ليس دخول",
+        "trade_type_label_ar": "Fast Lane Raw Watch",
+        "opportunity_rank_score": round(max(score, _num(base.get("opportunity_rank_score"), 0.0), 1.0), 2),
+        "opportunity_reasons": _dedupe(reasons, 10),
+        "technical_explainer_reasons": _dedupe(reasons, 10),
+        "why_appeared_ar": "، ".join(_dedupe(reasons, 5)),
+        "special_bucket_reason": display_reason_ar,
+        "non_actionable_prep": True,
+        "low_float_fast_lane_raw_watch": True,
+        "low_float_fast_lane_funnel_v2q": {
+            "version": "fast_lane_funnel_display_v2q_2026_06_20",
+            "symbol": sym,
+            "source_kinds": source_kinds[:5],
+            "source_flags": source_flags,
+            "source_rank_score": score,
+            "source_stage": (trace or {}).get("funnel_stage") or (trace or {}).get("source_stage"),
+            "sharia_stage": (trace or {}).get("sharia_stage"),
+            "after_sharia_stage": (trace or {}).get("after_sharia_stage"),
+            "display_reason_code": display_code,
+            "display_reason_ar": display_reason_ar,
+            "in_deep_analysis_universe": bool((trace or {}).get("in_deep_analysis_universe")),
+            "entered_final_universe_before_sharia": bool((trace or {}).get("entered_final_universe_before_sharia")),
+            "applies_to_execution": False,
+        },
+    })
+    return base
+
+
+def _build_low_float_fast_lane_raw_watch(rows: list[dict], final_map: dict[str, list[dict]], limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+    funnel = _get_source_fast_lane_funnel_debug()
+    rows_by_symbol = {_u(r.get("symbol")): r for r in (rows or []) if isinstance(r, dict) and _u(r.get("symbol"))}
+    displayed = _displayed_section_map(final_map or {})
+    low_float_displayed_symbols = {_u(r.get("symbol")) for r in (final_map.get("low_float_premarket_radar", []) or []) if isinstance(r, dict) and _u(r.get("symbol"))}
+    debug: dict[str, Any] = {
+        "version": "fast_lane_funnel_display_v2q_2026_06_20",
+        "source_funnel_version": (funnel or {}).get("version"),
+        "raw_fast_lane_source_count": int((funnel or {}).get("raw_fast_lane_source_count", 0) or 0),
+        "source_trace_count": int((funnel or {}).get("trace_count", 0) or 0),
+        "entered_source_universe_count": int((funnel or {}).get("entered_source_universe_count", 0) or 0),
+        "deep_analysis_universe_count": int((funnel or {}).get("deep_analysis_universe_count", 0) or 0),
+        "displayed_low_float_count": len(final_map.get("low_float_premarket_radar", []) or []),
+        "displayed_raw_watch_count": 0,
+        "display_reason_counts": {},
+        "hidden_sharia_blocked_count": 0,
+        "candidate_symbols": [],
+        "rule_ar": "يعرض مرشحي Fast Lane الخام الذين لم يصلوا إلى Low-Float النهائي كقسم مراقبة فقط. لا يغير Strong/Cautious ولا يعطي شراء مباشر.",
+    }
+    if not isinstance(funnel, dict):
+        return [], debug
+    items: list[dict] = []
+    for trace in funnel.get("candidate_traces", []) or []:
+        if not isinstance(trace, dict):
+            continue
+        sym = _u(trace.get("symbol"))
+        if not sym:
+            continue
+        if sym in low_float_displayed_symbols:
+            continue
+        code, reason_ar = _fast_lane_display_reason(trace, rows_by_symbol, displayed)
+        debug["display_reason_counts"][code] = int(debug["display_reason_counts"].get(code, 0) or 0) + 1
+        if code == "sharia_blocked":
+            debug["hidden_sharia_blocked_count"] += 1
+            continue
+        if not trace.get("source_eligible"):
+            # Keep source rejects in the JSON debug, not in the trading UI.
+            continue
+        base_row = rows_by_symbol.get(sym)
+        items.append(_make_fast_lane_raw_watch_row(trace, base_row, code, reason_ar))
+    items = _sort_bucket(items)[:max(1, int(limit or DEFAULT_SECTION_LIMIT))]
+    debug["displayed_raw_watch_count"] = len(items)
+    debug["candidate_symbols"] = [_u(x.get("symbol")) for x in items[:30] if _u(x.get("symbol"))]
+    return items, debug
 
 
 def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
@@ -2804,6 +2968,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             bucket_map["high_risk_day_trades"].append(row)
         elif bucket == "low_float_premarket":
             bucket_map["low_float_premarket_radar"].append(row)
+        elif bucket == "low_float_fast_lane_raw_watch":
+            bucket_map["low_float_fast_lane_raw_watch"].append(row)
         elif bucket == "gap_fill_watch":
             bucket_map["gap_fill_watch"].append(row)
         elif bucket == "catalyst_watch":
@@ -2820,6 +2986,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "reclaim_candidates",
         "continuation_pullback_candidates",
         "low_float_premarket_radar",
+        "low_float_fast_lane_raw_watch",
         "high_risk_day_trades",
         "gap_fill_watch",
         "catalyst_watch",
@@ -2855,6 +3022,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     promotion_bridge_rows, promotion_bridge_debug = _build_promotion_bridge_candidates(final_map, market_phase=market_phase, limit=limit)
     final_map["promotion_bridge_candidates"] = promotion_bridge_rows
     low_float_capture = _low_float_capture_debug(rows or [], final_map.get("low_float_premarket_radar", []))
+    fast_lane_raw_watch_rows, fast_lane_funnel_display_debug = _build_low_float_fast_lane_raw_watch(rows or [], final_map, limit=limit)
+    final_map["low_float_fast_lane_raw_watch"] = fast_lane_raw_watch_rows
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
@@ -2880,6 +3049,10 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "closed_market_prep_rule_ar": closed_market_planning_debug.get("rule_ar"),
         "low_float_capture_debug": low_float_capture,
         "low_float_capture_rule_ar": low_float_capture.get("rule_ar"),
+        "fast_lane_funnel_debug": fast_lane_funnel_display_debug,
+        "fast_lane_funnel_rule_ar": fast_lane_funnel_display_debug.get("rule_ar"),
+        "low_float_fast_lane_raw_watch_count": len(fast_lane_raw_watch_rows),
+        "low_float_fast_lane_raw_watch": fast_lane_raw_watch_rows,
         "promotion_bridge_debug": promotion_bridge_debug,
         "promotion_bridge_rule_ar": promotion_bridge_debug.get("rule_ar"),
         "promotion_bridge_candidates_count": len(promotion_bridge_rows),
@@ -3197,7 +3370,7 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
         },
         "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
         "small_stock_classic_rule_ar": "للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ لا نعامل فروقات السنت كقرار منفصل. نعتمد Fib 61.8/78.6، VWAP بإغلاق شمعة 5د/15د، قمة أمس، أو اختراق واضح لمنطقة صغيرة، ولا نطارد الشمعة الخضراء.",
-        "low_float_capture_rule_ar": "V2P يجعل Low-Float Fast Lane مصدرًا فعليًا مستقلًا: Polygon grouped عند توفره، وFMP movers/live عندما يكون السوق مغلقًا أو grouped غير متاح، مع بقاء القرار مراقبة فقط.",
+        "low_float_capture_rule_ar": "V2Q يجعل Low-Float Fast Lane مصدرًا فعليًا مستقلًا مع Funnel واضح: مصدر → شرعية → final universe → عرض. القرار يبقى مراقبة فقط.",
         "promotion_bridge_rule_ar": "V2N/V2O يضيف جسر ترقية قبل الافتتاح: يقرأ Low-Float/Small Classic/Pre-Trigger/Support ويحدد من قد يترقى عند تحقق الحجم والسعر، بدون تغيير Strong/Cautious.",
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }

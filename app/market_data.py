@@ -267,6 +267,74 @@ def get_active_universe(max_symbols: int = 60):
         diag["sharia_prefilter_block_rate_pct"] = safe_round((len(sharia_blocked) / max(1, len(seen_candidates))) * 100, 1)
         diag["sharia_prefilter_sample_blocked"] = sharia_blocked[:25]
         diag["sharia_prefilter_errors"] = sharia_unknown_errors[:15]
+
+        # V2Q Fast Lane Funnel: annotate source traces with Sharia/refill status.
+        # Diagnostic-only; does not alter the selected universe.
+        try:
+            funnel = diag.get("low_float_fast_lane_funnel_debug")
+            if isinstance(funnel, dict):
+                clean_set = set(sharia_allowed or [])
+                gray_set = set(sharia_gray or [])
+                final_set = set(final or [])
+                blocked_map = {str((x or {}).get("symbol") or "").upper(): x for x in (sharia_blocked or []) if isinstance(x, dict)}
+                traces = []
+                stage_counts = {}
+                for item in funnel.get("candidate_traces", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    sym = str(item.get("symbol") or "").upper().strip()
+                    if not sym:
+                        continue
+                    out_item = dict(item)
+                    if sym in blocked_map:
+                        stage = "sharia_blocked"
+                        out_item["sharia_stage"] = stage
+                        out_item["after_sharia"] = False
+                        out_item["excluded_reason_code"] = "sharia_blocked"
+                        out_item["excluded_reason_ar"] = str((blocked_map.get(sym) or {}).get("reason") or "مستبعد من فلتر الشرعية")[:180]
+                        out_item["sharia_status"] = str((blocked_map.get(sym) or {}).get("status") or "blocked")
+                    elif sym in clean_set:
+                        stage = "sharia_clean_final_universe" if sym in final_set else "sharia_clean_but_not_final"
+                        out_item["sharia_stage"] = "clean"
+                        out_item["after_sharia"] = True
+                        out_item["sharia_status"] = "clean"
+                        if sym not in final_set:
+                            out_item["excluded_reason_code"] = out_item.get("excluded_reason_code") or "final_universe_limit_after_sharia"
+                            out_item["excluded_reason_ar"] = out_item.get("excluded_reason_ar") or "نظيف شرعيًا لكنه لم يدخل final universe بعد حدود العدد/الترتيب."
+                    elif sym in gray_set:
+                        stage = "sharia_gray_final_universe" if sym in final_set else "sharia_gray_not_used"
+                        out_item["sharia_stage"] = "gray"
+                        out_item["after_sharia"] = sym in final_set
+                        out_item["sharia_status"] = "needs_review"
+                        if sym not in final_set:
+                            out_item["excluded_reason_code"] = out_item.get("excluded_reason_code") or "sharia_gray_cap_or_clean_shortage_not_needed"
+                            out_item["excluded_reason_ar"] = out_item.get("excluded_reason_ar") or "يحتاج مراجعة شرعية ولم يستخدم لأن الكلين/حد الرمادي كان كافيًا."
+                    else:
+                        stage = "not_seen_by_sharia_prefilter"
+                        out_item["sharia_stage"] = "not_seen"
+                        out_item["after_sharia"] = False
+                        out_item["sharia_status"] = "unknown"
+                    out_item["in_deep_analysis_universe"] = bool(sym in final_set)
+                    out_item["after_sharia_stage"] = stage
+                    stage_counts[stage] = int(stage_counts.get(stage, 0) or 0) + 1
+                    traces.append(out_item)
+                funnel["candidate_traces"] = traces[:120]
+                funnel["after_sharia_stage_counts"] = stage_counts
+                funnel["after_sharia_clean_count"] = len([x for x in traces if x.get("sharia_stage") == "clean"])
+                funnel["after_sharia_gray_count"] = len([x for x in traces if x.get("sharia_stage") == "gray"])
+                funnel["after_sharia_blocked_count"] = len([x for x in traces if x.get("sharia_stage") == "sharia_blocked" or x.get("excluded_reason_code") == "sharia_blocked"])
+                funnel["deep_analysis_universe_count"] = len([x for x in traces if x.get("in_deep_analysis_universe")])
+                diag["low_float_fast_lane_funnel_debug"] = funnel
+                lf = diag.get("low_float_fast_lane")
+                if isinstance(lf, dict):
+                    lf["after_sharia_clean_count"] = funnel.get("after_sharia_clean_count", 0)
+                    lf["after_sharia_gray_count"] = funnel.get("after_sharia_gray_count", 0)
+                    lf["after_sharia_blocked_count"] = funnel.get("after_sharia_blocked_count", 0)
+                    lf["deep_analysis_universe_count"] = funnel.get("deep_analysis_universe_count", 0)
+                    diag["low_float_fast_lane"] = lf
+        except Exception:
+            pass
+
         _scanner.LAST_SOURCE_DIAGNOSTICS = diag
     except Exception:
         pass
