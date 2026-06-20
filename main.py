@@ -2945,6 +2945,16 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "price_under_2_deprioritized": int(scan_debug.get("dynamic_price_under_2_deprioritized", 0) or 0),
             "price_under_2_exception": int(scan_debug.get("dynamic_price_under_2_exception", 0) or 0),
             "price_over_300_deprioritized": int(scan_debug.get("dynamic_price_over_300_deprioritized", 0) or 0),
+            # V2R1b: expose the micro-explosion close-watch pipeline in trade-scan
+            # so we can audit whether candidates are detected, persisted, and
+            # re-injected before open / during session / after hours.
+            "micro_explosion_capture_count": int(scan_debug.get("dynamic_micro_explosion_capture_count", 0) or 0),
+            "micro_explosion_capture_symbols": scan_debug.get("dynamic_micro_explosion_capture_symbols", []),
+            "micro_explosion_capture_debug": scan_debug.get("dynamic_micro_explosion_capture_debug", {}),
+            "micro_explosion_full_market_scan": scan_debug.get("dynamic_micro_explosion_full_market_scan", {}),
+            "micro_explosion_close_watch_count": int(scan_debug.get("dynamic_micro_explosion_close_watch_count", 0) or 0),
+            "micro_explosion_close_watch_memory": scan_debug.get("dynamic_micro_explosion_close_watch_memory", {}),
+            "micro_explosion_seed_confirm_count": int(scan_debug.get("dynamic_micro_explosion_seed_confirm_count", 0) or 0),
             "elapsed_sec": scan_debug.get("dynamic_discovery_elapsed_sec", None),
         },
         "full_market_scan_status": {
