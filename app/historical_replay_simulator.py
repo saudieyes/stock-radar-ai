@@ -50,7 +50,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2c_timing_loader_fix_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2d_target_minute_replay_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -306,7 +306,7 @@ def _read_prior_full_session_minute_scan(
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "max_minute_rows": int(max_minute_rows or 0),
         "max_seconds": float(max_seconds or 0),
-        "safe_mode_ar": "V2T2c يثبت حارس الوقت أيضًا في قارئ minute timing حتى لا يفشل التقرير بخطأ max_seconds، ويبقي مسح اليوم السابق آمنًا داخل الطلب.",
+        "safe_mode_ar": "V2T2d يقرأ ملف دقيقة يوم التقييم بطريقة target-only للرموز الكبيرة فقط، حتى لا يستهلك الوقت في بناء شرائح لكل السوق ويضيع EHGO/ICCM/TPC بسبب timeout.",
         "storage_rule_ar": "يمسح ملف دقيقة اليوم السابق من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw في SQLite/GitHub/Railway.",
         "rule_ar": "V2T2: بعد اكتمال كل جلسات يوم الاختيار، يمسح اليوم السابق كاملًا بدقة دقيقة لتحضير قائمة الغد قبل البري ماركت.",
     }
@@ -1152,13 +1152,14 @@ def _read_minute_file_for_replay(
     target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug = {
-        "version": "minute_replay_loader_v2t2c_timing_loader_fix_2026_06_20",
+        "version": "minute_replay_loader_v2t2d_target_only_fast_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "target_symbols_count": len(target_symbols),
+        "target_only_slice_mode": True,
         "max_minute_rows": int(max_minute_rows or 0),
         "max_seconds": float(max_seconds or 0),
-        "safe_mode_ar": "V2T2c يثبت حارس الوقت أيضًا في قارئ minute timing حتى لا يفشل التقرير بخطأ max_seconds، ويبقي مسح اليوم السابق آمنًا داخل الطلب.",
+        "safe_mode_ar": "V2T2d يقرأ ملف دقيقة يوم التقييم بطريقة target-only للرموز الكبيرة فقط، حتى لا يستهلك الوقت في بناء شرائح لكل السوق ويضيع EHGO/ICCM/TPC بسبب timeout.",
         "storage_rule_ar": "يتم تنزيل ملف الدقيقة إلى /tmp فقط، ثم يقرأ Streaming ويرجع ملخصات مدمجة؛ لا يتم حفظ raw في SQLite/GitHub/Railway.",
     }
     if not pull.get("ok") or not pull.get("path"):
@@ -1199,19 +1200,26 @@ def _read_minute_file_for_replay(
                 v = _minute_price(raw, "volume", "v")
                 if c <= 0 or h <= 0 or l <= 0 or v <= 0:
                     continue
-                if sym in target_symbols:
-                    target_rows.setdefault(sym, []).append({
-                        "time_utc": hhmm,
-                        "minute": t_min,
-                        "phase": _utc_phase_from_minute(t_min),
-                        "open": _round(o or c, 4),
-                        "high": _round(h, 4),
-                        "low": _round(l, 4),
-                        "close": _round(c, 4),
-                        "volume": _round(v, 0),
-                        "dollar_volume": _round(c * v, 2),
-                    })
-                # V2T1: slices are sorted; skip checkpoints that already passed for speed.
+                # V2T2d: target-only minute replay.
+                # The previous V2T2c reader updated slice maps for the whole market,
+                # which could time out before reaching target winners such as EHGO/ICCM/TPC.
+                # For the timing report we only need to know whether the SAME source
+                # logic would trigger on the target symbols, so we build compact slices
+                # for target symbols only. This keeps the report faithful while avoiding
+                # Railway upstream/timeout failures.
+                if sym not in target_symbols:
+                    continue
+                target_rows.setdefault(sym, []).append({
+                    "time_utc": hhmm,
+                    "minute": t_min,
+                    "phase": _utc_phase_from_minute(t_min),
+                    "open": _round(o or c, 4),
+                    "high": _round(h, 4),
+                    "low": _round(l, 4),
+                    "close": _round(c, 4),
+                    "volume": _round(v, 0),
+                    "dollar_volume": _round(c * v, 2),
+                })
                 for sl in slices:
                     if t_min <= int(sl["minute"]):
                         bucket = slice_aggs[str(sl["key"])].setdefault(sym, {})
@@ -1513,14 +1521,14 @@ def _build_big_explosion_timing_report(
         trade_date=outcome_date,
         target_symbols=target_symbols,
         max_minute_rows=max_minute_rows,
-        max_seconds=max(8.0, float(prior_scan_timeout_sec or 8.0)),
+        max_seconds=max(20.0, float(prior_scan_timeout_sec or 8.0)),
         force_minute_pull=force_minute_pull,
         redownload_processed=redownload_processed,
     )
     if not loader_debug.get("ok"):
         return {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2d_target_minute_replay_2026_06_20",
             "outcome_date": outcome_date,
             "target_symbols": sorted(target_symbols),
             "minute_loader": loader_debug,
@@ -1579,12 +1587,12 @@ def _build_big_explosion_timing_report(
     early_count = sum(1 for r in reports if r.get("detected_by_minute_replay") and _num(r.get("first_detected_gain_pct"), 9999) <= 20 and (_num(r.get("minutes_from_detection_to_peak"), 0) >= 0))
     return {
         "ok": True,
-        "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
+        "version": "big_explosion_minute_timing_report_v2t2d_target_minute_replay_2026_06_20",
         "outcome_date": outcome_date,
         "target_count": len(reports),
         "detected_by_minute_replay_count": detected_count,
         "early_detected_count": early_count,
-        "early_definition_ar": "V2T2 يعتبر الالتقاط مبكرًا إذا كان عند <=20% وقبل القمة، لأن الهدف التقاط +20/+50 قبل أن تصبح +100/+200.",
+        "early_definition_ar": "V2T2d يعتبر الالتقاط مبكرًا إذا كان عند <=20% وقبل القمة، مع قارئ target-only سريع حتى لا تفشل رموز الانفجار بسبب timeout.",
         "late_or_missed_count": len(reports) - early_count,
         "minute_loader": loader_debug,
         "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
@@ -1753,7 +1761,7 @@ def run_historical_replay(
         except Exception as exc:
             timing_report = {
                 "ok": False,
-                "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
+                "version": "big_explosion_minute_timing_report_v2t2d_target_minute_replay_2026_06_20",
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
                 "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
             }
@@ -1761,7 +1769,7 @@ def run_historical_replay(
     else:
         payload["big_explosion_timing_report"] = {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2d_target_minute_replay_2026_06_20",
             "disabled": not bool(minute_timing),
             "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
         }
