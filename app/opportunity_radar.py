@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2t1_big_explosion_early_timing_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2t2_prior_session_opening_scan_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2206,7 +2206,7 @@ def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
 def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
     source_text = _source_text_for_capture(row)
     matched = bool(
-        row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2t1")
+        row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2t2")
         or row.get("big_explosion_live_eligible")
         or "big_explosion_live_lane_v2t" in source_text
         or "big explosion v2t" in source_text

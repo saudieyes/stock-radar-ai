@@ -49,7 +49,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t1_early_big_explosion_timing_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2_prior_session_opening_scan_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -247,6 +247,172 @@ def _build_context_source_rows(context_items: list[dict]) -> tuple[list[dict], l
     return all_micro, all_fast, debug
 
 
+def _empty_minute_agg() -> dict:
+    return {"first_minute": None, "last_minute": None, "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0, "dollar_volume": 0.0}
+
+
+def _update_full_session_agg(agg: dict, *, t_min: int, o: float, h: float, l: float, c: float, v: float) -> None:
+    if not agg:
+        return
+    if agg.get("first_minute") is None or t_min < int(agg.get("first_minute") or t_min):
+        agg["first_minute"] = t_min
+        agg["open"] = o or c
+    if agg.get("last_minute") is None or t_min >= int(agg.get("last_minute") or t_min):
+        agg["last_minute"] = t_min
+        agg["close"] = c
+    agg["high"] = max(_num(agg.get("high"), 0.0), h or c)
+    low_prev = _num(agg.get("low"), 0.0)
+    agg["low"] = (l or c) if low_prev <= 0 else min(low_prev, l or c)
+    agg["volume"] = _num(agg.get("volume"), 0.0) + max(0.0, v)
+    agg["dollar_volume"] = _num(agg.get("dollar_volume"), 0.0) + max(0.0, c * v)
+
+
+def _agg_to_grouped_row(sym: str, agg: dict, *, base_open: float | None = None, source_note: str = "") -> dict:
+    opn = _num(base_open, 0.0) or _num(agg.get("open"), 0.0) or _num(agg.get("close"), 0.0)
+    close = _num(agg.get("close"), 0.0)
+    high = _num(agg.get("high"), close)
+    low = _num(agg.get("low"), close)
+    vol = _num(agg.get("volume"), 0.0)
+    price = close or high or opn
+    return {
+        "symbol": _u(sym), "ticker": _u(sym), "T": _u(sym),
+        "open": opn, "high": high, "low": low, "close": price, "price": price,
+        "volume": vol, "v": vol, "dollar_volume": (price * vol) if price > 0 and vol > 0 else _num(agg.get("dollar_volume"), 0.0),
+        "first_minute": agg.get("first_minute"), "last_minute": agg.get("last_minute"),
+        "source_note": source_note,
+    }
+
+
+def _read_prior_full_session_minute_scan(
+    *,
+    trade_date: str,
+    max_minute_rows: int = 2_600_000,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+) -> tuple[dict[str, Any], dict[str, dict], dict[str, dict]]:
+    """Scan the full prior session after all sessions close.
+
+    This is the user's requested missing piece: after all previous-day sessions
+    have finished, scan the entire minute file (regular + extended where rows
+    exist), build compact per-symbol maps, and prepare tomorrow candidates
+    before the next premarket starts.  Raw files remain /tmp-only.
+    """
+    pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
+    debug: dict[str, Any] = {
+        "version": "prior_full_session_scan_v2t2_2026_06_20",
+        "trade_date": trade_date,
+        "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
+        "max_minute_rows": int(max_minute_rows or 0),
+        "storage_rule_ar": "يمسح ملف دقيقة اليوم السابق من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw في SQLite/GitHub/Railway.",
+        "rule_ar": "V2T2: بعد اكتمال كل جلسات يوم الاختيار، يمسح اليوم السابق كاملًا بدقة دقيقة لتحضير قائمة الغد قبل البري ماركت.",
+    }
+    if not pull.get("ok") or not pull.get("path"):
+        debug.update({"ok": False, "reason": pull.get("status") or pull.get("error") or "minute_file_unavailable"})
+        return debug, {}, {}
+    path = str(pull.get("path") or "")
+    rows_seen = 0
+    per: dict[str, dict] = {}
+    try:
+        fp = Path(path)
+        opener = gzip.open if fp.name.lower().endswith(".gz") else open
+        with opener(fp, "rt", encoding="utf-8", errors="ignore", newline="") as f:
+            reader = csv.DictReader(f)
+            for raw in reader:
+                rows_seen += 1
+                if rows_seen > max(50_000, min(4_000_000, int(max_minute_rows or 2_600_000))):
+                    break
+                sym = _minute_symbol(raw)
+                if not sym:
+                    continue
+                dt, hhmm, t_min = _minute_time_from_row(raw)
+                if dt and trade_date and str(dt)[:10] != str(trade_date)[:10]:
+                    continue
+                if t_min < 0:
+                    continue
+                o = _minute_price(raw, "open", "o")
+                h = _minute_price(raw, "high", "h")
+                l = _minute_price(raw, "low", "l")
+                c = _minute_price(raw, "close", "c")
+                v = _minute_price(raw, "volume", "v")
+                if c <= 0 or h <= 0 or l <= 0 or v <= 0:
+                    continue
+                rec = per.setdefault(sym, {"full": _empty_minute_agg(), "regular": _empty_minute_agg(), "after": _empty_minute_agg(), "pre": _empty_minute_agg()})
+                _update_full_session_agg(rec["full"], t_min=t_min, o=o or c, h=h, l=l, c=c, v=v)
+                phase = _utc_phase_from_minute(t_min)
+                if phase == "regular":
+                    _update_full_session_agg(rec["regular"], t_min=t_min, o=o or c, h=h, l=l, c=c, v=v)
+                elif phase == "after_hours":
+                    _update_full_session_agg(rec["after"], t_min=t_min, o=o or c, h=h, l=l, c=c, v=v)
+                elif phase == "premarket":
+                    _update_full_session_agg(rec["pre"], t_min=t_min, o=o or c, h=h, l=l, c=c, v=v)
+        full_map: dict[str, dict] = {}
+        after_map: dict[str, dict] = {}
+        for sym, rec in per.items():
+            full = rec.get("full") or {}
+            reg = rec.get("regular") or {}
+            aft = rec.get("after") or {}
+            if _num(full.get("close"), 0.0) > 0 and _num(full.get("volume"), 0.0) > 0:
+                full_map[sym] = _agg_to_grouped_row(sym, full, base_open=_num(reg.get("open"), 0.0) or _num(full.get("open"), 0.0), source_note="prior_full_session_v2t2")
+            if _num(aft.get("close"), 0.0) > 0 and _num(aft.get("volume"), 0.0) > 0:
+                # AH move is measured from regular close if available, because that is what matters for next-day PM prep.
+                after_map[sym] = _agg_to_grouped_row(sym, aft, base_open=_num(reg.get("close"), 0.0) or _num(aft.get("open"), 0.0), source_note="prior_after_hours_v2t2")
+        debug.update({
+            "ok": True,
+            "rows_seen": rows_seen,
+            "symbols_seen": len(per),
+            "full_session_symbols": len(full_map),
+            "after_hours_symbols": len(after_map),
+        })
+        return debug, full_map, after_map
+    except Exception as exc:
+        debug.update({"ok": False, "reason": f"prior_minute_parse_error:{type(exc).__name__}:{str(exc)[:160]}", "rows_seen": rows_seen})
+        return debug, {}, {}
+    finally:
+        cleanup_tmp_path(Path(path).parent if path else None)
+
+
+def _build_prior_session_source_rows(
+    *,
+    selection_date: str,
+    max_minute_rows: int = 2_600_000,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+) -> tuple[list[dict], dict[str, Any], dict[str, dict], dict[str, dict]]:
+    debug, full_map, after_map = _read_prior_full_session_minute_scan(
+        trade_date=selection_date,
+        max_minute_rows=max_minute_rows,
+        force_minute_pull=force_minute_pull,
+        redownload_processed=redownload_processed,
+    )
+    if not debug.get("ok"):
+        return [], debug, full_map, after_map
+    rows: list[dict] = []
+    full_micro, full_micro_debug = _collect_micro_explosion_full_market_candidates(full_map, phase_detail="prior_full_session_after_close_v2t2")
+    full_fast, full_fast_debug = _collect_low_float_fast_lane_candidates(full_map, phase_detail="prior_full_session_after_close_v2t2")
+    full_big, full_big_debug = _collect_big_explosion_live_lane_candidates(full_map, phase_detail="prior_full_session_after_close_v2t2")
+    ah_big, ah_big_debug = _collect_big_explosion_live_lane_candidates(after_map, phase_detail="prior_after_hours_after_close_v2t2")
+    ah_micro, ah_micro_debug = _collect_micro_explosion_full_market_candidates(after_map, phase_detail="prior_after_hours_after_close_v2t2")
+    rows.extend(_annotate_source_rows(full_micro, selection_date, 100, "prior_full_session_micro_v2t2"))
+    rows.extend(_annotate_source_rows(full_fast, selection_date, 100, "prior_full_session_fast_lane_v2t2"))
+    rows.extend(_annotate_source_rows(full_big, selection_date, 100, "prior_full_session_big_explosion_v2t2"))
+    rows.extend(_annotate_source_rows(ah_micro, selection_date, 101, "prior_after_hours_micro_v2t2"))
+    rows.extend(_annotate_source_rows(ah_big, selection_date, 101, "prior_after_hours_big_explosion_v2t2"))
+    debug.update({
+        "source_rows_total": len(rows),
+        "full_micro_count": len(full_micro or []),
+        "full_fast_count": len(full_fast or []),
+        "full_big_count": len(full_big or []),
+        "after_hours_micro_count": len(ah_micro or []),
+        "after_hours_big_count": len(ah_big or []),
+        "full_big_top": (full_big_debug or {}).get("top_symbols", [])[:20],
+        "after_hours_big_top": (ah_big_debug or {}).get("top_symbols", [])[:20],
+        "full_micro_top": (full_micro_debug or {}).get("top_symbols", [])[:20],
+        "full_fast_top": (full_fast_debug or {}).get("top_symbols", [])[:20],
+        "rule_ar": "نفس دوال المصدر الحالية تُشغّل على ملخص دقيقة كامل ليوم الاختيار بعد إغلاق كل الجلسات، ثم تدخل نتائجها في قائمة الغد قبل البري ماركت.",
+    })
+    return rows, debug, full_map, after_map
+
+
 def _build_symbol_context(context_items: list[dict]) -> dict[str, dict]:
     by_symbol: dict[str, dict] = {}
     for item in context_items or []:
@@ -310,7 +476,15 @@ def _context_quality_score(symbol_context: dict | None, source_trace: dict | Non
     trace = dict(source_trace or {})
     score = 0.0
     reasons: list[str] = []
+    layers = set(trace.get("source_layers") or [])
+    prior_full_seen = any(str(x).startswith("prior_full_session") or str(x).startswith("prior_after_hours") for x in layers)
     days_seen = int(trace.get("source_days_seen") or 0)
+    if prior_full_seen:
+        score += 14
+        reasons.append("مسح دقيقة كامل بعد إغلاق كل الجلسات رصده لقائمة الغد")
+    if any(str(x).startswith("prior_after_hours") for x in layers):
+        score += 8
+        reasons.append("ظهر في after-hours اليوم السابق؛ مهم قبل بري ماركت الغد")
     if days_seen >= 2:
         score += 12
         reasons.append("ظهر في المنبع خلال أكثر من يوم؛ مناسب لقائمة الغد")
@@ -412,7 +586,7 @@ def _candidate_metrics(row: dict) -> dict:
     return m
 
 
-def _combine_source_candidates(micro_rows: list[dict], fast_rows: list[dict], clean_only: bool = True) -> tuple[list[dict], dict]:
+def _combine_source_candidates(micro_rows: list[dict], fast_rows: list[dict], extra_rows: list[dict] | None = None, clean_only: bool = True) -> tuple[list[dict], dict]:
     by_symbol: dict[str, dict] = {}
     sharia_counts = {"clean": 0, "gray": 0, "blocked": 0, "manual_approved": 0}
     excluded: list[dict] = []
@@ -484,6 +658,8 @@ def _combine_source_candidates(micro_rows: list[dict], fast_rows: list[dict], cl
         add(r, "micro_explosion_full_market_v2r2")
     for r in fast_rows or []:
         add(r, "low_float_fast_lane_v2q")
+    for r in extra_rows or []:
+        add(r, _s(r.get("historical_source_family")) or "prior_full_session_v2t2")
 
     out = sorted(by_symbol.values(), key=lambda x: _num(x.get("source_score"), 0.0), reverse=True)
     return out, {"sharia_counts": sharia_counts, "excluded_by_sharia_sample": sorted(excluded, key=lambda x: _num(x.get("score"), 0.0), reverse=True)[:40]}
@@ -897,10 +1073,12 @@ def _finalize_slice_map(raw_map: dict[str, dict]) -> dict[str, dict]:
 
 
 def _default_replay_slices() -> list[dict[str, Any]]:
-    """V2T1: denser replay checkpoints around PM/open explosions.
+    """V2T2: opening 1-minute replay + dense PM checkpoints.
 
-    We keep this compact enough for Railway, but add 5-minute slices in the
-    danger window where ICCM/EHGO/CLWT-type moves cross +20/+50 very quickly.
+    V2T1 improved timing but still missed first-minute opening explosions
+    (TPC-style).  V2T2 keeps broad PM coverage and makes the critical opening
+    window minute-by-minute so the replay can catch the moment a stock crosses
+    +3/+5/+20 instead of waiting five minutes.
     Times are UTC in US summer market hours.
     """
     points: list[tuple[int, str]] = []
@@ -908,25 +1086,23 @@ def _default_replay_slices() -> list[dict[str, Any]]:
         if minute < 0:
             return
         points.append((int(minute), label))
-    # Sparse early premarket.
-    for m in range(8 * 60, 9 * 60, 30):
-        add(m, "بري ماركت مبكر")
-    # Dense premarket / opening ramp: 09:00-14:30 UTC every 5 minutes.
-    for m in range(9 * 60, 14 * 60 + 31, 5):
-        if m < 13 * 60 + 30:
-            lab = "بري ماركت كثيف V2T1"
-        elif m == 13 * 60 + 30:
-            lab = "الافتتاح"
-        elif m <= 14 * 60 + 30:
-            lab = "أول ساعة — كل 5 دقائق"
-        else:
-            lab = "شرائح كثيفة"
-        add(m, lab)
+    # Early premarket: every 15 minutes to catch AH/PM build before the rush.
+    for m in range(8 * 60, 9 * 60, 15):
+        add(m, "بري ماركت مبكر — كل 15 دقيقة")
+    # Active premarket: every 5 minutes.
+    for m in range(9 * 60, 13 * 60 + 30, 5):
+        add(m, "بري ماركت كثيف V2T2")
+    # Opening burst: every minute for first 20 minutes.
+    for m in range(13 * 60 + 30, 13 * 60 + 51, 1):
+        add(m, "الافتتاح — كل دقيقة V2T2")
+    # Rest of first hour: every 5 minutes.
+    for m in range(13 * 60 + 55, 14 * 60 + 31, 5):
+        add(m, "أول ساعة — كل 5 دقائق")
     # Regular session after first hour every 15 minutes.
     for m in range(14 * 60 + 45, 20 * 60 + 1, 15):
         add(m, "الجلسة الرسمية — كل 15 دقيقة")
     # After-hours checkpoints.
-    for m in (20 * 60 + 30, 21 * 60, 22 * 60):
+    for m in (20 * 60 + 15, 20 * 60 + 30, 21 * 60, 22 * 60):
         add(m, "بعد الإغلاق")
     seen: set[int] = set()
     out: list[dict[str, Any]] = []
@@ -953,7 +1129,7 @@ def _read_minute_file_for_replay(
     target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug = {
-        "version": "minute_replay_loader_v2t1_dense_slices_2026_06_20",
+        "version": "minute_replay_loader_v2t2_opening_1min_prior_scan_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "target_symbols_count": len(target_symbols),
@@ -1152,10 +1328,19 @@ def _apply_selection_baseline_to_slice_map(m: dict[str, dict], selection_prices:
         row["open"] = base
         row["previous_close_proxy"] = base
         row["selection_price_proxy"] = base
-        row["price"] = price
+        row["close_price_proxy"] = price
+        # V2T2 timing proxy: during the first opening minutes or a huge PM candle,
+        # a live quote could have seen the intra-minute high. Use it only for
+        # target timing replay, not for live BUY decisions.
+        high_gain = _safe_gain(high, base)
+        last_minute = int(row.get("last_minute") or row.get("first_minute") or 0)
+        use_high_proxy = bool(high > price and high_gain >= 3 and (last_minute <= 13 * 60 + 50 or high_gain >= 20))
+        price_for_detection = high if use_high_proxy else price
+        row["price"] = price_for_detection
+        row["big_explosion_high_proxy_v2t2"] = use_high_proxy
         row["close"] = price
-        row["change_pct"] = _safe_gain(price, base)
-        row["day_change_pct"] = _safe_gain(price, base)
+        row["change_pct"] = _safe_gain(price_for_detection, base)
+        row["day_change_pct"] = _safe_gain(price_for_detection, base)
         row["range_pct"] = ((high - low) / price) if price > 0 and high > 0 and low > 0 else _num(row.get("range_pct"), 0.0)
         out[sym] = row
     return out
@@ -1179,7 +1364,7 @@ def _run_source_on_minute_slices(
         if not m:
             slice_debug.append({"key": key, "time_utc": sl.get("time_utc"), "rows": 0, "micro": 0, "fast": 0, "big": 0})
             continue
-        phase_tag = f"historical_minute_slice_v2t1:{outcome_date}:{sl.get('time_utc')}"
+        phase_tag = f"historical_minute_slice_v2t2:{outcome_date}:{sl.get('time_utc')}"
         micro_rows, micro_debug = _collect_micro_explosion_full_market_candidates(m, phase_detail=phase_tag)
         fast_rows, fast_debug = _collect_low_float_fast_lane_candidates(m, phase_detail=phase_tag)
         big_rows, big_debug = _collect_big_explosion_live_lane_candidates(m, phase_detail=phase_tag)
@@ -1190,10 +1375,10 @@ def _run_source_on_minute_slices(
             _row = m.get(_sym) or {}
             if not _row:
                 continue
-            _ok, _score, _reasons, _flags = _big_explosion_live_lane_score(_sym, _row, phase_detail=phase_tag, source_kind="historical_minute_slice_v2t1")
+            _ok, _score, _reasons, _flags = _big_explosion_live_lane_score(_sym, _row, phase_detail=phase_tag, source_kind="historical_minute_slice_v2t2")
             if _ok:
                 target_probe_rows.append({"symbol": _sym, "score": _round(_score, 3), "reasons": _reasons, "metrics": {**_row, **_flags}})
-        source_rows: list[tuple[dict, str]] = [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "big_explosion_live_lane_v2t1_target_probe") for r in target_probe_rows] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
+        source_rows: list[tuple[dict, str]] = [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "big_explosion_live_lane_v2t2_target_probe") for r in target_probe_rows] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
         slice_debug.append({
             "key": key,
             "time_utc": sl.get("time_utc"),
@@ -1246,7 +1431,7 @@ def _run_source_on_minute_slices(
         rec["promotion_count"] = len(hist)
         rec["promotion_summary_ar"] = " → ".join([f"{x.get('time_utc')} {x.get('stage_ar')} ({x.get('gain_pct_at_stage')}%)" for x in hist[:8]]) if hist else "لم يظهر في شرائح المصدر الدقيقة"
     return {
-        "version": "minute_source_slice_replay_v2t1_baseline_dense_2026_06_20",
+        "version": "minute_source_slice_replay_v2t2_opening_1min_proxy_2026_06_20",
         "outcome_date": outcome_date,
         "target_symbols": sorted(target_symbols),
         "slice_debug": slice_debug,
@@ -1267,6 +1452,7 @@ def _build_big_explosion_timing_report(
     clean_only: bool = True,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
+    prior_full_session_scan: bool = True,
 ) -> dict[str, Any]:
     missed = payload.get("missed_winners_audit") or {}
     winners = list(missed.get("top_outcome_winners") or [])
@@ -1298,7 +1484,7 @@ def _build_big_explosion_timing_report(
     if not loader_debug.get("ok"):
         return {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
             "outcome_date": outcome_date,
             "target_symbols": sorted(target_symbols),
             "minute_loader": loader_debug,
@@ -1357,18 +1543,25 @@ def _build_big_explosion_timing_report(
     early_count = sum(1 for r in reports if r.get("detected_by_minute_replay") and _num(r.get("first_detected_gain_pct"), 9999) <= 20 and (_num(r.get("minutes_from_detection_to_peak"), 0) >= 0))
     return {
         "ok": True,
-        "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
+        "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
         "outcome_date": outcome_date,
         "target_count": len(reports),
         "detected_by_minute_replay_count": detected_count,
         "early_detected_count": early_count,
-        "early_definition_ar": "V2T1 يعتبر الالتقاط مبكرًا إذا كان عند <=20% وقبل القمة، لأن الهدف التقاط +20/+50 قبل أن تصبح +100/+200.",
+        "early_definition_ar": "V2T2 يعتبر الالتقاط مبكرًا إذا كان عند <=20% وقبل القمة، لأن الهدف التقاط +20/+50 قبل أن تصبح +100/+200.",
         "late_or_missed_count": len(reports) - early_count,
         "minute_loader": loader_debug,
         "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
         "symbols": reports,
         "top_problem_symbols": [r for r in reports if not r.get("detected_by_minute_replay") or _num(r.get("first_detected_gain_pct"), 0.0) > 20][:20],
-        "rule_ar": "V2T يسأل: متى ارتفع السهم؟ هل دخل مصدر الأداة في شرائح الوقت؟ كم كانت نسبته وقت الالتقاط؟ ومتى ترقى داخل replay stages. هذا لا يطلق شراء حي بعد.",
+        "capture_rate_split": {
+            "after_close_selected_count": sum(1 for r in reports if r.get("selected_by_after_close_tool")),
+            "minute_detected_count": detected_count,
+            "minute_early_detected_count": early_count,
+            "minute_late_or_missed_count": len(reports) - early_count,
+            "gray_or_blocked_detected_count": sum(1 for r in reports if str(((r.get("minute_capture") or {}).get("first_detected_stage") or "")) in {"sharia_gray_watch", "sharia_blocked"}),
+        },
+        "rule_ar": "V2T2 يسأل: متى ارتفع السهم؟ هل دخل مصدر الأداة في شرائح الوقت؟ كم كانت نسبته وقت الالتقاط؟ ومتى ترقى داخل replay stages. هذا لا يطلق شراء حي بعد.",
     }
 
 def run_historical_replay(
@@ -1385,6 +1578,7 @@ def run_historical_replay(
     max_minute_rows: int = 1_800_000,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
+    prior_full_session_scan: bool = True,
 ) -> dict[str, Any]:
     selection_date, selection_map, selection_debug = _resolve_selection_grouped(date_value, recovery_days=recovery_days)
     if not selection_map:
@@ -1400,13 +1594,25 @@ def run_historical_replay(
     context_items, context_debug = _resolve_context_grouped(selection_date, selection_map, context_days=context_days, recovery_days=recovery_days)
     context_by_symbol = _build_symbol_context(context_items)
     micro_rows, fast_rows, context_source_debug = _build_context_source_rows(context_items)
-    trace_by_symbol = _source_trace_from_rows((micro_rows or []) + (fast_rows or []))
+    prior_rows: list[dict] = []
+    prior_full_session_debug: dict[str, Any] = {"enabled": bool(prior_full_session_scan), "version": "prior_full_session_scan_v2t2_2026_06_20"}
+    prior_full_map: dict[str, dict] = {}
+    prior_after_map: dict[str, dict] = {}
+    if bool(prior_full_session_scan):
+        prior_rows, prior_full_session_debug, prior_full_map, prior_after_map = _build_prior_session_source_rows(
+            selection_date=selection_date,
+            max_minute_rows=max_minute_rows,
+            force_minute_pull=force_minute_pull,
+            redownload_processed=redownload_processed,
+        )
+    all_source_rows_for_trace = (micro_rows or []) + (fast_rows or []) + (prior_rows or [])
+    trace_by_symbol = _source_trace_from_rows(all_source_rows_for_trace)
 
     # Selection-day debug is kept separately so we can compare true after-close D vs sticky 3-day context.
     selection_micro_rows, selection_micro_debug = _collect_micro_explosion_full_market_candidates(selection_map, phase_detail="historical_after_close_selection_day_v2s1")
     selection_fast_rows, selection_fast_debug = _collect_low_float_fast_lane_candidates(selection_map, phase_detail="historical_after_close_selection_day_v2s1")
 
-    candidates, combine_debug = _combine_source_candidates(micro_rows, fast_rows, clean_only=bool(clean_only))
+    candidates, combine_debug = _combine_source_candidates(micro_rows, fast_rows, extra_rows=prior_rows, clean_only=bool(clean_only))
     limit = max(5, min(160, int(max_candidates or 40)))
     selected = candidates[:limit]
     selected_symbols = {_u(x.get("symbol")) for x in selected}
@@ -1439,6 +1645,7 @@ def run_historical_replay(
             "micro_full_scan": (selection_micro_debug or {}).get("version"),
             "fast_lane": (selection_fast_debug or {}).get("version"),
             "context_source_scan": (context_source_debug or {}).get("version"),
+            "prior_full_session_scan": (prior_full_session_debug or {}).get("version"),
         },
         "production_pipeline_reuse": {
             "version": "production_source_reuse_contract_v2s1_2026_06_20",
@@ -1446,7 +1653,7 @@ def run_historical_replay(
             "source_helpers": ["_collect_micro_explosion_full_market_candidates", "_collect_low_float_fast_lane_candidates", "_collect_big_explosion_live_lane_candidates"],
             "uses_production_sharia_filter": True,
             "uses_live_buy_decision": False,
-            "why_not_full_live_decision_ar": "V2T يضيف مسار Big Explosion للالتقاط والتوقيت، لكنه لا يطلق BUY_NOW ولا يغير Strong/Cautious الحي.",
+            "why_not_full_live_decision_ar": "V2T2 يضيف مسح دقيقة كامل لليوم السابق وشرائح افتتاح دقيقة للتوقيت، لكنه لا يطلق BUY_NOW ولا يغير Strong/Cautious الحي.",
             "anti_lookahead_ar": "كل الاختيارات مبنية على أيام <= تاريخ الاختيار فقط. جلسة التقييم لا تدخل إلا بعد اكتمال قائمة الغد.",
         },
         "source_counts": {
@@ -1454,6 +1661,7 @@ def run_historical_replay(
             "selection_day_fast_lane_candidates_before_sharia": len(selection_fast_rows or []),
             "context_micro_candidates_before_sharia": len(micro_rows or []),
             "context_fast_lane_candidates_before_sharia": len(fast_rows or []),
+            "prior_full_session_candidates_before_sharia": len(prior_rows or []),
             "combined_candidates_after_sharia_policy": len(candidates),
             "selected_for_evaluation": len(selected),
         },
@@ -1466,9 +1674,10 @@ def run_historical_replay(
             if k in {"version", "scanned", "eligible_count", "top_symbols", "raw_source_count", "rule_ar"}
         },
         "context_source_scan": context_source_debug,
+        "prior_full_session_scan": prior_full_session_debug,
         "sharia_debug": combine_debug,
         "after_close_tomorrow_prep": {
-            "version": "after_close_tomorrow_prep_v2s1_daily_context_2026_06_20",
+            "version": "after_close_tomorrow_prep_v2t2_prior_full_session_scan_2026_06_20",
             "selection_date": selection_date,
             "for_outcome_date": outcome_date,
             "prepared_count": len(tomorrow_prep_list),
@@ -1476,7 +1685,7 @@ def run_historical_replay(
             "watch_needs_confirmation_count": sum(1 for r in tomorrow_prep_list if r.get("tomorrow_prep_bucket") == "tomorrow_watch_needs_premarket_confirmation"),
             "quick_or_pullback_only_count": sum(1 for r in tomorrow_prep_list if r.get("tomorrow_prep_bucket") == "quick_take_profit_or_pullback_only"),
             "tomorrow_prep_list": tomorrow_prep_list[:50],
-            "rule_ar": "هذه هي قائمة الغد كما لو أن الأداة حللت إغلاق تاريخ الاختيار وجهزت مرشحين للمراقبة قبل بري ماركت اليوم التالي.",
+            "rule_ar": "هذه قائمة الغد بعد تحليل سياق 3 أيام + مسح دقيقة كامل ليوم الاختيار بعد إغلاق كل الجلسات؛ الهدف تجهيز المرشحين قبل بري ماركت اليوم التالي.",
         },
         "performance_summary": _summary(evaluated),
         "missed_winners_audit": missed_audit,
@@ -1484,8 +1693,8 @@ def run_historical_replay(
         "top_failures": top_failures,
         "late_weak_sample": top_late_weak,
         "anti_lookahead_rule_ar": "اختيارات الأداة مبنية على سياق الأيام حتى تاريخ الاختيار فقط؛ نتائج الجلسة التالية تُستخدم للتقييم فقط بعد اكتمال قائمة الغد.",
-        "storage_rule_ar": "V2S1 يستخدم Polygon grouped REST compact فقط ولا يحفظ raw files في Railway/GitHub/SQLite.",
-        "timing_limit_note_ar": "V2T يحاول تحديد دقائق البري ماركت/داخل الجلسة عند توفر minute flat file: وقت الانفجار، وقت الالتقاط، نسبة السهم وقت الالتقاط، وتاريخ الترقيات داخل replay stages.",
+        "storage_rule_ar": "V2T2 يستخدم Polygon grouped + minute flat file من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw files في Railway/GitHub/SQLite.",
+        "timing_limit_note_ar": "V2T2 يضيف افتتاح كل دقيقة + مسح اليوم السابق كاملًا: وقت الانفجار، وقت الالتقاط، نسبة السهم وقت الالتقاط، وترقياته داخل replay stages.",
         "next_step_ar": "شغّل V2T على عدة أيام. إذا كان الالتقاط متأخرًا أو مفقودًا، ننقل قواعد التوقيت الناجحة لاحقًا إلى المصدر الحي بدون فتح Strong/Cautious عشوائيًا.",
     }
     if bool(minute_timing) and outcome_date and outcome_map:
@@ -1505,7 +1714,7 @@ def run_historical_replay(
         except Exception as exc:
             timing_report = {
                 "ok": False,
-                "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
+                "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
                 "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
             }
@@ -1513,7 +1722,7 @@ def run_historical_replay(
     else:
         payload["big_explosion_timing_report"] = {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t1_early_detection_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
             "disabled": not bool(minute_timing),
             "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
         }
@@ -1530,10 +1739,10 @@ def historical_replay_status() -> dict[str, Any]:
         "version": HISTORICAL_REPLAY_SIMULATOR_VERSION,
         "endpoint": "/simulator/historical-replay?date=YYYY-MM-DD",
         "aliases": ["/simulator/historical-replay", "/historical-replay", "/replay/historical-market"],
-        "purpose_ar": "محاكاة تاريخية بعد الإغلاق + تقرير توقيت الانفجارات الكبيرة بالدقيقة: متى بدأ الصعود، هل التقطته الأداة، نسبة السهم وقت الالتقاط، ومتى ترقى داخل Replay stages.",
+        "purpose_ar": "محاكاة تاريخية بعد الإغلاق + مسح دقيقة كامل لليوم السابق + تقرير توقيت الانفجارات الكبيرة بالدقيقة: متى بدأ الصعود، هل التقطته الأداة، نسبة السهم وقت الالتقاط، ومتى ترقى داخل Replay stages.",
         "safe_mode_ar": "تقييم فقط؛ لا يغير Strong/Cautious ولا السوق الحي ولا يحفظ raw. ملفات الدقيقة تُقرأ من /tmp فقط عند توفر Polygon flat files.",
         "recommended_params_ar": "ابدأ max_candidates=40 و context_days=3 و missed_gain_threshold=20 و minute_timing=true و timing_symbols_limit=30 و format=brief، ثم كرر 5-10 أيام.",
-        "v2t_note_ar": "V2T يعيد استخدام دوال المصدر الحية على grouped يومي، ثم يبني شرائح دقيقة تاريخية cumulative ويشغل نفس Micro/Fast Lane عليها لقياس توقيت الالتقاط والترقية بدون lookahead.",
+        "v2t_note_ar": "V2T2 يعيد استخدام دوال المصدر الحية على grouped يومي، ويمسح دقيقة اليوم السابق كاملة بعد كل الجلسات، ثم يبني شرائح افتتاح كل دقيقة لقياس توقيت الالتقاط والترقية بدون lookahead.",
     }
 
 
@@ -1550,10 +1759,11 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     src = payload.get("source_counts") or {}
     micro = payload.get("micro_explosion_full_market_scan") or {}
     context_debug = payload.get("context_date_debug") or {}
+    prior_scan = payload.get("prior_full_session_scan") or {}
     prep = payload.get("after_close_tomorrow_prep") or {}
     missed = payload.get("missed_winners_audit") or {}
     lines = [
-        "Historical Replay Simulator V2T1",
+        "Historical Replay Simulator V2T2",
         f"تاريخ الاختيار: {payload.get('selection_date')} → جلسة التقييم: {payload.get('outcome_date')}",
         f"وضع الاختبار: {payload.get('mode')}",
         f"أيام السياق: {', '.join(context_debug.get('context_dates') or [])}",
@@ -1561,6 +1771,7 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
         "ملخص الالتقاط:",
         f"- Selection-day Micro scanned: {micro.get('scanned')} | eligible: {micro.get('eligible_count')} | seed: {micro.get('seed_match_count')}",
         f"- سياق 3 أيام قبل الشرعية: Micro {src.get('context_micro_candidates_before_sharia')} | Fast Lane {src.get('context_fast_lane_candidates_before_sharia')}",
+        f"- مسح دقيقة كامل لليوم السابق: rows {prior_scan.get('rows_seen')} | symbols {prior_scan.get('symbols_seen')} | source rows {src.get('prior_full_session_candidates_before_sharia')}",
         f"- بعد سياسة الشرعية: {src.get('combined_candidates_after_sharia_policy')} | المختار للتقييم: {src.get('selected_for_evaluation')}",
         "",
         "قائمة الغد بعد الإغلاق:",
@@ -1593,6 +1804,8 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     lines += ["", "Big Explosion Minute Timing:"]
     if timing.get("ok"):
         lines.append(f"- هدف التقرير: {timing.get('target_count')} سهم | التقطت شرائح الدقيقة: {timing.get('detected_by_minute_replay_count')} | التقاط مبكر: {timing.get('early_detected_count')} | متأخر/مفقود: {timing.get('late_or_missed_count')}")
+        split = timing.get('capture_rate_split') or {}
+        lines.append(f"- تقسيم الالتقاط: قائمة الإغلاق {split.get('after_close_selected_count')} | دقيقة {split.get('minute_detected_count')} | مبكر {split.get('minute_early_detected_count')} | رمادي/مرفوض {split.get('gray_or_blocked_detected_count')}")
         for r in (timing.get("symbols") or [])[:10]:
             tl = r.get("timeline") or {}
             th = tl.get("threshold_hits") or {}

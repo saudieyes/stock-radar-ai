@@ -1197,6 +1197,7 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
         "near_high": near_high,
         "big_explosion_live_lane_v2t": True,
         "big_explosion_live_lane_v2t1": True,
+        "big_explosion_live_lane_v2t2": True,
         "big_explosion_live_score": safe_round(score, 3),
         "big_explosion_live_eligible": eligible,
         "big_explosion_live_source_kind": source_kind,
@@ -1209,13 +1210,13 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
 
 def _collect_big_explosion_live_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
     debug = {
-        "version": "big_explosion_live_lane_v2t1_early_timing_2026_06_20",
+        "version": "big_explosion_live_lane_v2t2_prior_session_ready_2026_06_20",
         "enabled": bool(BIG_EXPLOSION_LIVE_LANE_ENABLED),
         "scan_cap": int(BIG_EXPLOSION_LIVE_SCAN_CAP),
         "scanned": 0,
         "eligible_count": 0,
         "top_symbols": [],
-        "rule_ar": "V2T1: مسار مراقبة فقط للانفجارات الكبيرة؛ يبدأ من +3% مع حجم، يحاكي تغير FMP مقابل إغلاق أمس، ولا يفتح BUY_NOW.",
+        "rule_ar": "V2T2: مسار مراقبة فقط للانفجارات الكبيرة؛ يبدأ من +3% مع حجم، ومصمم ليستقبل أيضًا مرشحي مسح اليوم السابق الكامل بعد الإغلاق، ولا يفتح BUY_NOW.",
     }
     if not BIG_EXPLOSION_LIVE_LANE_ENABLED or not grouped_map:
         return [], debug
@@ -2088,9 +2089,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3h1_big_explosion_early_timing_v2t1_2026_06_20",
+        "engine_version": "dynamic_discovery_v3h2_big_explosion_prior_session_v2t2_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_big_explosion_early_timing_v2t1_and_micro_low_float",
+        "dynamic_discovery_mode": "candidate_pool_plus_big_explosion_prior_session_v2t2_and_micro_low_float",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
