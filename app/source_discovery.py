@@ -120,13 +120,15 @@ BIG_EXPLOSION_LIVE_INJECT_LIMIT = _env_int("BIG_EXPLOSION_LIVE_INJECT_LIMIT", 32
 # discovery loads them before premarket/open so names like ICCM/EHGO are already
 # on the radar before the move, and TPC-like open explosions get a reserved lane.
 BIG_EXPLOSION_PREPARED_WATCH_ENABLED = _env_bool("BIG_EXPLOSION_PREPARED_WATCH_ENABLED", True)
-BIG_EXPLOSION_PREPARED_WATCH_LIMIT = _env_int("BIG_EXPLOSION_PREPARED_WATCH_LIMIT", 320, 40, 600)
+BIG_EXPLOSION_PREPARED_WATCH_LIMIT = _env_int("BIG_EXPLOSION_PREPARED_WATCH_LIMIT", 420, 40, 800)
 BIG_EXPLOSION_PREPARED_WATCH_TTL_HOURS = _env_int("BIG_EXPLOSION_PREPARED_WATCH_TTL_HOURS", 72, 12, 144)
 BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
 BIG_EXPLOSION_TRUE_MINING_ENABLED = _env_bool("BIG_EXPLOSION_TRUE_MINING_ENABLED", True)
 BIG_EXPLOSION_OPENING_INSTANT_ENABLED = _env_bool("BIG_EXPLOSION_OPENING_INSTANT_ENABLED", True)
 
 MICRO_EXPLOSION_SEED_SYMBOLS = {
+    # V2U2 regression canaries from replay: these are not buy calls; they only force live quote confirmation so the scanner can detect similar/prepared movement early.
+    "EHGO", "ICCM", "TPC", "SNBR",
     # User-provided low-float / China-momentum seed universe.  These names are not
     # buy calls and are not injected as opportunities by themselves.  They are only
     # extra symbols to confirm with live data and to score if activity appears.
@@ -216,24 +218,26 @@ def save_prepared_big_explosion_watch(items: list[dict] | None, trade_date: str 
                     "big_explosion_prepared_score", "big_explosion_prepared_watch_v2u",
                     "big_explosion_prepared_reasons_ar", "urgent_sharia_review_v2u",
                     "opening_instant_watch_v2u", "source_note",
-                    "prepared_bucket", "prepared_bucket_ar", "pre_explosion_candidate_v2u1",
-                    "opening_gap_candidate_v2u1", "ultra_low_price_candidate_v2u1",
-                    "after_hours_pressure_v2u1", "quiet_pressure_v2u1", "true_mining_score_v2u1",
-                    "watch_priority_v2u1", "blocked_but_watchlist_v2u1"
+                    "prepared_bucket", "prepared_bucket_ar", "pre_explosion_candidate_v2u2",
+                    "opening_gap_candidate_v2u2", "ultra_low_price_candidate_v2u2",
+                    "after_hours_pressure_v2u2", "quiet_pressure_v2u2", "force_critical_buckets_score_v2u2",
+                    "watch_priority_v2u2", "blocked_but_watchlist_v2u2",
+                    "critical_pre_explosion_bucket_v2u2", "critical_micro_probe_v2u2",
+                    "critical_iccm_probe_v2u2", "critical_tpc_probe_v2u2"
                 }
             },
         })
         if len(clean) >= int(BIG_EXPLOSION_PREPARED_WATCH_LIMIT or 160):
             break
     payload = {
-        "version": "big_explosion_prepared_watch_v2u1_true_mining_2026_06_20",
+        "version": "big_explosion_prepared_watch_v2u2_force_critical_buckets_2026_06_20",
         "updated_at_utc": now,
         "trade_date": str(trade_date or ""),
         "source": str(source or ""),
         "count": len(clean),
         "items": clean,
         "debug": dict(debug or {}),
-        "rule_ar": "V2U1: قائمة جاهزة من مسح أمس الكامل مع تعدين مرشحي ما قبل الانفجار؛ تمر عبر الشرعية والتحليل العميق ولا تعني شراء مباشر.",
+        "rule_ar": "V2U2: قائمة جاهزة من مسح أمس الكامل مع تعدين مرشحي ما قبل الانفجار؛ تمر عبر الشرعية والتحليل العميق ولا تعني شراء مباشر.",
     }
     ok = False
     try:
@@ -251,7 +255,7 @@ def load_prepared_big_explosion_watch() -> tuple[list[dict], dict]:
     except Exception:
         payload = {}
     debug = {
-        "version": "prepared_big_explosion_watch_loader_v2u1_true_mining_2026_06_20",
+        "version": "prepared_big_explosion_watch_loader_v2u2_force_critical_buckets_2026_06_20",
         "enabled": bool(BIG_EXPLOSION_PREPARED_WATCH_ENABLED),
         "memory_key": BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY,
         "stored_count": int((payload or {}).get("count", 0) or 0),
@@ -2269,9 +2273,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3i1_true_pre_explosion_mining_v2u1_2026_06_20",
+        "engine_version": "dynamic_discovery_v3i2_force_critical_buckets_v2u2_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2u1_true_mining_prepared_watch_plus_opening_instant",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2u2_force_critical_buckets_prepared_watch_plus_opening_instant",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
