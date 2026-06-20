@@ -601,6 +601,7 @@ def opportunity_radar_status_endpoint():
         sections_preview = build_opportunity_radar_sections(enriched, market_phase=phase)
         payload["status_enriched_rows_current_version"] = len(enriched)
         payload["sections_preview_counts"] = {
+            "promotion_bridge_candidates_count": int(sections_preview.get("promotion_bridge_candidates_count", 0) or 0),
             "learning_opportunity_candidates_count": int(sections_preview.get("learning_opportunity_candidates_count", 0) or 0),
             "small_stock_classic_radar_count": int(sections_preview.get("small_stock_classic_radar_count", 0) or 0),
             "pre_trigger_candidates_count": int(sections_preview.get("pre_trigger_candidates_count", 0) or 0),
@@ -1344,6 +1345,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    promotion_bridge_candidates = opportunity_radar_payload.get("promotion_bridge_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
 
     try:
         plan_ledger_live_stats = record_active_strong_plans(strong, source="radar_live_refresh")
@@ -1421,6 +1423,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "opportunity_radar": opportunity_radar_payload,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "promotion_bridge_debug": opportunity_radar_payload.get("promotion_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
+        "promotion_bridge_candidates": promotion_bridge_candidates[:limit] if 'limit' in locals() else promotion_bridge_candidates[:25],
         "learning_overlay_summary": opportunity_radar_payload.get("learning_overlay_summary", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates": opportunity_radar_payload.get("learning_overlay_candidates", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates_count": int(opportunity_radar_payload.get("learning_overlay_candidates_count", 0) or 0) if isinstance(opportunity_radar_payload, dict) else 0,
@@ -1459,6 +1465,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
             "gray_strong": _live_bucket_payload(gray_strong, limit),
             "premarket_setups": _live_bucket_payload(premarket_setups, limit),
             "early_movement_watchlist": _live_bucket_payload(early_movement_payload.get("early_movement_watchlist", []), limit),
+            "promotion_bridge_candidates": _live_bucket_payload(promotion_bridge_candidates, limit),
             "support_bounce_candidates": _live_bucket_payload(support_bounce_candidates, limit),
             "reclaim_candidates": _live_bucket_payload(reclaim_candidates, limit),
             "pre_trigger_candidates": _live_bucket_payload(pre_trigger_candidates, limit),
@@ -2801,6 +2808,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     gap_fill_watch = opportunity_radar_payload.get("gap_fill_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    promotion_bridge_candidates = opportunity_radar_payload.get("promotion_bridge_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
 
     out = {
         "market_phase": phase,
@@ -2843,6 +2851,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "opportunity_radar": opportunity_radar_payload,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "promotion_bridge_debug": opportunity_radar_payload.get("promotion_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
+        "promotion_bridge_candidates": promotion_bridge_candidates[:limit] if 'limit' in locals() else promotion_bridge_candidates[:25],
         "learning_overlay_summary": opportunity_radar_payload.get("learning_overlay_summary", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates": opportunity_radar_payload.get("learning_overlay_candidates", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates_count": int(opportunity_radar_payload.get("learning_overlay_candidates_count", 0) or 0) if isinstance(opportunity_radar_payload, dict) else 0,

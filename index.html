@@ -2964,8 +2964,19 @@
       let cls = 'badge-stage';
       if (bucket === 'high_risk_day_trade' || bucket === 'low_float_premarket') cls = 'badge-cautious';
       if (bucket === 'no_chase') cls = 'badge-news-neg';
-      if (bucket === 'pre_trigger' || bucket === 'support_bounce' || bucket === 'reclaim') cls = 'badge-plan';
+      if (bucket === 'pre_trigger' || bucket === 'support_bounce' || bucket === 'reclaim' || bucket === 'promotion_bridge') cls = 'badge-plan';
       return `<span class="badge ${cls}">${safeText(label)}</span>`;
+    }
+
+    function learningOverlayBadge(stock) {
+      if (!stock) return '';
+      const label = String(stock.learning_overlay_label_ar || stock.learning_label_ar || '').trim();
+      if (!label) return '';
+      const exitBias = String(stock.learning_exit_bias || stock.learning_entry_bias || '').trim();
+      let cls = 'badge-stage';
+      if (exitBias === 'quick_take_profit' || label.includes('خطفة') || label.includes('متأخر')) cls = 'badge-cautious';
+      if (label.includes('ضعيف') || label.includes('لا ترفع')) cls = 'badge-news-neg';
+      return `<span class="badge ${cls}">🧠 ${safeText(label)}</span>`;
     }
 
     function renderOriginalPlanBlock(stock) {
@@ -3766,6 +3777,7 @@
 
     const SECTION_DEFAULT_LIMIT = 5;
     const OPPORTUNITY_RADAR_GROUP_KEYS = [
+      'promotion_bridge_candidates',
       'learning_opportunity_candidates',
       'small_stock_classic_radar',
       'pre_trigger_candidates',
@@ -3780,6 +3792,8 @@
     const RADAR_SECTION_CONTENT_IDS = [
       'strong-section-content',
       'cautious-section-content',
+      'learning-overlay-section-content',
+      'promotion-bridge-section-content',
       'learning-opportunity-section-content',
       'pre-trigger-section-content',
       'support-bounce-section-content',
@@ -4093,6 +4107,7 @@
       const details = [];
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('مرحلة Opportunity Radar', `${safeText(stock.opportunity_stage_label || '')}<br>${renderReasonsList(stock.opportunity_reasons || stock.technical_explainer_reasons)}`, true));
+      details.push(detailBox('طبقة التعلم', `${safeText(stock.learning_overlay_label_ar || stock.learning_label_ar || '')}<br>${safeText(stock.learning_overlay_action_ar || stock.learning_action_ar || '')}<br>${safeText(stock.learning_risk_ar || '')}${stock.learning_pattern_key ? '<br><span style="direction:ltr;text-align:left;display:block;">' + safeText(stock.learning_pattern_key) + '</span>' : ''}`, true));
       details.push(detailBox('مناطق الدعم/المقاومة V2', renderOpportunityZonesBlock(stock), true));
       details.push(detailBox('الخطة الأصلية وحالتها الآن', renderOriginalPlanBlock(stock), true));
       details.push(detailBox('فلتر السعر الشخصي', safeText(stock.personal_price_label || ''), false));
@@ -4229,6 +4244,7 @@
               ${phaseBadge(stock.market_phase_label)}
               ${strengthBadge(stock)}
               ${opportunityBadge(stock)}
+              ${learningOverlayBadge(stock)}
               ${intelligenceBadge(stock)}
               ${moveStageBadge(stock)}
               ${earlyMovementBadge(stock)}
@@ -4549,65 +4565,52 @@
 
 
 
-    function renderLearningOverlayPanel(data={}) {
+    function normalizeLearningOverlayItems(data={}) {
+      const rootSummary = data?.learning_overlay_summary || data?.opportunity_radar?.learning_overlay_summary || data?.next_week_analysis?.learning_overlay_summary || {};
+      const cand = data?.learning_overlay_candidates || data?.opportunity_radar?.learning_overlay_candidates || {};
+      const groups = [
+        { key:'positive_watch', label:'نمط تعلّم إيجابي', exit:'normal_management' },
+        { key:'quick_take_profit_watch', label:'خطفة محتملة / بيع سريع', exit:'quick_take_profit' },
+        { key:'weak_or_mixed_watch', label:'نمط متذبذب / لا ترفع الوزن', exit:'quick_take_profit' },
+        { key:'sample_only_watch', label:'عينة قليلة / مراقبة فقط', exit:'normal_management' }
+      ];
+      const out = [];
+      groups.forEach(group => {
+        const arr = Array.isArray(cand[group.key]) ? cand[group.key] : [];
+        arr.forEach((item, idx) => {
+          const x = { ...(item || {}) };
+          x.decision = x.decision || 'مراقبة';
+          x.opportunity_bucket = 'learning_overlay';
+          x.opportunity_stage_label = x.opportunity_stage_label || x.stage_label || `🧠 ${group.label}`;
+          x.trade_type_label_ar = x.trade_type_label_ar || 'طبقة تعلم / تحضير فقط';
+          x.market_phase_label = x.market_phase_label || data?.market_phase_label || 'طبقة التعلم';
+          x.learning_overlay_label_ar = x.learning_overlay_label_ar || x.learning_label_ar || group.label;
+          x.learning_overlay_action_ar = x.learning_overlay_action_ar || x.learning_action_ar || x.why_ar || 'وسم تعلّم فقط — لا يغيّر Strong/Cautious.';
+          x.learning_exit_bias = x.learning_exit_bias || group.exit;
+          x.why_appeared_ar = x.why_appeared_ar || x.learning_overlay_action_ar || x.why_ar || rootSummary.best_confirmed_rule_ar || 'طبقة التعلم تعرض سبب المتابعة فقط ولا تجعل السهم دخولًا مباشرًا.';
+          x.special_bucket_reason = x.special_bucket_reason || x.why_appeared_ar;
+          x.display_rank_score = Number(x.display_rank_score || x.opportunity_rank_score || (100 - idx));
+          out.push(x);
+        });
+      });
+      return sortDisplayItems(out);
+    }
+
+    function renderLearningOverlayPanel(data={}, overlayItems=null) {
       const rootSummary = data?.learning_overlay_summary || data?.opportunity_radar?.learning_overlay_summary || data?.next_week_analysis?.learning_overlay_summary || {};
       const cand = data?.learning_overlay_candidates || data?.opportunity_radar?.learning_overlay_candidates || {};
       const hasSummary = Boolean(rootSummary?.ok || rootSummary?.best_confirmed_pattern_key || cand?.ok);
       if (!hasSummary) return '';
-      const positive = Array.isArray(cand.positive_watch) ? cand.positive_watch : [];
-      const quick = Array.isArray(cand.quick_take_profit_watch) ? cand.quick_take_profit_watch : [];
-      const weak = Array.isArray(cand.weak_or_mixed_watch) ? cand.weak_or_mixed_watch : [];
-      const sampleOnly = Array.isArray(cand.sample_only_watch) ? cand.sample_only_watch : [];
-      const total = positive.length + quick.length + weak.length + sampleOnly.length;
-      const renderLearningMiniRows = (items, emptyText) => {
-        if (!items.length) return `<div class="empty" style="padding:8px 0;">${safeText(emptyText)}</div>`;
-        return items.slice(0, 8).map((x, idx) => `
-          <div class="mini-row" style="padding:8px 0;border-top:1px solid var(--border-soft);">
-            <b>#${idx + 1} ${safeText(x.symbol || '—')}</b>
-            <span style="font-size:12px;color:var(--text-muted);"> — ${safeText(x.stage_label || x.opportunity_bucket || x.decision || '')}</span>
-            <div style="font-size:12px;line-height:1.7;color:var(--text-main);">🧠 ${safeText(x.learning_label_ar || 'طبقة تعلم')}</div>
-            <div style="font-size:12px;line-height:1.7;color:var(--text-muted);">${safeText(x.learning_action_ar || x.why_ar || '')}</div>
-            ${x.learning_pattern_key ? `<div style="font-size:11px;color:var(--text-muted);direction:ltr;text-align:left;">${safeText(x.learning_pattern_key)}</div>` : ''}
-          </div>`).join('');
-      };
-      const rules = Array.isArray(rootSummary.rules_ar) ? rootSummary.rules_ar : [];
-      const sample = Array.isArray(rootSummary.pattern_library_sample) ? rootSummary.pattern_library_sample : [];
+      const items = Array.isArray(overlayItems) ? overlayItems : normalizeLearningOverlayItems(data);
       const mode = rootSummary.mode_ar || cand.mode_ar || 'وسم تعلّم فقط — لا يغيّر Strong/Cautious ولا يفعّل شراء مباشر';
-      return `
-        <div class="section scroll-anchor" id="learning-overlay-section">
-          <div class="section-header section-tone-open">
-            <div class="section-heading">
-              <div class="section-title-row"><div class="section-title">🧠 طبقة التعلم</div><span class="section-count-pill">${formatNumber(total)}</span></div>
-              <div class="section-rank-note">${safeText(mode)}</div>
-              <div class="section-preview">أفضل نمط مؤكد حاليًا: ${safeText(rootSummary.best_confirmed_pattern_ar || 'Fib Golden + بري ماركت + مرشح من جلسة سابقة + غير متأخر')}</div>
-            </div>
-          </div>
-          <div style="padding:12px;">
-            <div class="info-box" style="margin-bottom:10px;">
-              <b>القاعدة:</b> ${safeText(rootSummary.best_confirmed_rule_ar || 'هذه الطبقة تظهر كشرح وترتيب فقط، ولا تحوّل أي سهم إلى دخول قوي أو دخول بحذر.')}<br>
-              <span style="font-size:12px;color:var(--text-muted);">${safeText(cand.visible_note_ar || 'تظهر هنا حتى لو كانت الفرص الحالية فقط في الحركة المبكرة أو المراقبة.')}</span>
-            </div>
-            <div class="stats-grid">
-              <div class="stat"><div class="stat-label">تعلم إيجابي</div><div class="stat-value">${formatNumber(positive.length)}</div></div>
-              <div class="stat"><div class="stat-label">خطفة / بيع سريع</div><div class="stat-value">${formatNumber(quick.length)}</div></div>
-              <div class="stat"><div class="stat-label">متذبذب / لا ترفع الوزن</div><div class="stat-value">${formatNumber(weak.length)}</div></div>
-              <div class="stat"><div class="stat-label">عينة قليلة</div><div class="stat-value">${formatNumber(sampleOnly.length)}</div></div>
-            </div>
-            ${rules.length ? `<ul class="flags" style="margin-top:10px;">${rules.slice(0,4).map(r => `<li>${safeText(r)}</li>`).join('')}</ul>` : ''}
-            <details style="margin-top:10px;" open>
-              <summary style="cursor:pointer;font-weight:900;">فرص عليها وسم تعلّم إيجابي</summary>
-              <div>${renderLearningMiniRows(positive, 'لا توجد مطابقة إيجابية الآن، لكن طبقة التعلم مفعّلة.')}</div>
-            </details>
-            <details style="margin-top:10px;">
-              <summary style="cursor:pointer;font-weight:900;">خطفة محتملة / بيع سريع</summary>
-              <div>${renderLearningMiniRows(quick, 'لا توجد خطف سريعة مصنفة الآن.')}</div>
-            </details>
-            <details style="margin-top:10px;">
-              <summary style="cursor:pointer;font-weight:900;">أنماط لا نرفع وزنها الآن</summary>
-              <div>${renderLearningMiniRows([...weak, ...sampleOnly], 'لا توجد أنماط ضعيفة/قليلة العينة ظاهرة الآن.')}</div>
-            </details>
-          </div>
-        </div>`;
+      const best = rootSummary.best_confirmed_pattern_ar || 'Fib Golden + بري ماركت + مرشح من جلسة سابقة + غير متأخر';
+      const rule = rootSummary.best_confirmed_rule_ar || 'هذه الطبقة تظهر كشرح وترتيب فقط، ولا تحوّل أي سهم إلى دخول قوي أو دخول بحذر.';
+      const orderedText = `${mode} — أفضل نمط مؤكد: ${best}. ${rule}`;
+      return renderSection('🧠 طبقة التعلم', items.length, 'learning-overlay-section-content', 'learning-overlay-section', items, {
+        tone: 'open',
+        defaultOpen: items.length > 0,
+        orderedText
+      });
     }
 
     function renderNextWeekAnalysisPanel(data={}) {
@@ -4648,7 +4651,9 @@
     function renderSections(data) {
       const strong = sortDisplayItems(data.strong_entries || []);
       const cautious = sortDisplayItems(data.cautious_entries || []);
+      const learningOverlay = normalizeLearningOverlayItems(data);
       const oppRowsRaw = [
+        ...(data.promotion_bridge_candidates || []),
         ...(data.learning_opportunity_candidates || []),
         ...(data.small_stock_classic_radar || []),
         ...(data.pre_trigger_candidates || []),
@@ -4668,6 +4673,7 @@
         oppSeen.add(key);
         return true;
       });
+      const promotionBridge = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'promotion_bridge'));
       const learningOpportunity = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'learning_opportunity'));
       const preTrigger = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'pre_trigger'));
       const supportBounce = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'support_bounce'));
@@ -4686,6 +4692,8 @@
       window.__sectionItems = {
         'strong-section-content': strong,
         'cautious-section-content': cautious,
+        'learning-overlay-section-content': learningOverlay,
+        'promotion-bridge-section-content': promotionBridge,
         'learning-opportunity-section-content': learningOpportunity,
         'pre-trigger-section-content': preTrigger,
         'support-bounce-section-content': supportBounce,
@@ -4702,9 +4710,10 @@
         'watch-section-content': watch,
       };
       document.getElementById('content').innerHTML = `
-        ${renderLearningOverlayPanel(data)}
+        ${renderLearningOverlayPanel(data, learningOverlay)}
         ${renderNextWeekAnalysisPanel(data)}
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
+        ${renderSection('🧭 جسر الترقية قبل الافتتاح', promotionBridge.length, 'promotion-bridge-section-content', 'promotion-bridge-section', promotionBridge, { tone: 'open', defaultOpen: promotionBridge.length > 0, orderedText: 'يجمع أفضل مرشحي Low-Float وSmall Classic وPre-Trigger وSupport ويحدد من قد يترقى عند تحقق الحجم والسعر. هذا ليس شراء مباشر ولا يغير Strong/Cautious.' })}
         ${renderSection('🧠 مرشحو طبقة التعلم / تحضير مبكر', learningOpportunity.length, 'learning-opportunity-section-content', 'learning-opportunity-section', learningOpportunity, { tone: 'open', defaultOpen: learningOpportunity.length > 0, orderedText: 'هذا القسم يجسر البيانات الموجودة في المراقبة/الحركة المبكرة إلى طبقة تعلم مرئية. ليس Strong ولا Cautious، لكنه يمنع اختفاء الفرص التحضيرية عندما لا تكتمل شروط الأقسام المتخصصة.' })}
         ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
         ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0 })}
