@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2o_low_float_fast_lane_source_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2p_true_low_float_fast_lane_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2047,7 +2047,7 @@ def _sort_bucket(rows: list[dict]) -> list[dict]:
 # final decision engine.
 CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
-LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v1_2026_06_20"
+LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2p_2026_06_20"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -2158,6 +2158,8 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
         or "low_float_fast_lane" in source_text
         or "low-float fast lane" in source_text
         or "fast lane low-float" in source_text
+        or "low-float fast lane v2p" in source_text
+        or "small_stock_explosive_source" in source_text
     )
     confirmed_float = bool(float_shares > 0 and float_shares <= 25_000_000)
     small_cap_proxy = bool(market_cap > 0 and market_cap <= 350_000_000)
@@ -2242,7 +2244,7 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
     rows = [r for r in (rows or []) if isinstance(r, dict) and not _is_blocked(r)]
     existing = existing if isinstance(existing, list) else []
     debug = {
-        "version": "low_float_capture_audit_v1_2026_06_19",
+        "version": "low_float_capture_audit_v2p_true_fast_lane_2026_06_20",
         "rows_seen": len(rows),
         "price_0_35_to_20_count": 0,
         "price_0_35_to_12_count": 0,
@@ -2256,7 +2258,7 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
         "existing_low_float_section_count": len(existing),
         "sample_candidates": [],
         "excluded_known_watch_only_sample": [],
-        "rule_ar": "V2O: Low-Float الحقيقي لا يأتي من Watch/Early فقط. نفضل Fast Lane مستقل أو سعر صغير جدًا مع نشاط، ونستبعد الأسماء المعروفة/الأكثر سيولة مثل NOK إذا لم يوجد float أو Fast Lane.",
+        "rule_ar": "V2P: Low-Float Fast Lane لا يعتمد على Watch/Early فقط. يقبل مصادر مستقلة من Polygon grouped أو FMP movers/live عند إغلاق السوق، ويستبعد الأسماء المعروفة/الثقيلة إذا لم يوجد نشاط مستقل.",
     }
     samples = []
     for row in rows:
@@ -3195,7 +3197,7 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
         },
         "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
         "small_stock_classic_rule_ar": "للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ لا نعامل فروقات السنت كقرار منفصل. نعتمد Fib 61.8/78.6، VWAP بإغلاق شمعة 5د/15د، قمة أمس، أو اختراق واضح لمنطقة صغيرة، ولا نطارد الشمعة الخضراء.",
-        "low_float_capture_rule_ar": "V2O يصلح مصدر Low-Float: لا يعتمد على Watch/Early فقط، ويستبعد الأسماء المعروفة/الأكثر سيولة من Low-Float إذا لم يوجد float أو Fast Lane مستقل.",
+        "low_float_capture_rule_ar": "V2P يجعل Low-Float Fast Lane مصدرًا فعليًا مستقلًا: Polygon grouped عند توفره، وFMP movers/live عندما يكون السوق مغلقًا أو grouped غير متاح، مع بقاء القرار مراقبة فقط.",
         "promotion_bridge_rule_ar": "V2N/V2O يضيف جسر ترقية قبل الافتتاح: يقرأ Low-Float/Small Classic/Pre-Trigger/Support ويحدد من قد يترقى عند تحقق الحجم والسعر، بدون تغيير Strong/Cautious.",
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }

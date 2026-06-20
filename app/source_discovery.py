@@ -61,10 +61,12 @@ DYNAMIC_DISCOVERY_MAX_PREFERRED_PRICE = float(os.getenv("DYNAMIC_DISCOVERY_MAX_P
 DYNAMIC_DISCOVERY_UNDER_2_EXCEPTION_CHANGE_PCT = float(os.getenv("DYNAMIC_DISCOVERY_UNDER_2_EXCEPTION_CHANGE_PCT", "8") or 8)
 DYNAMIC_DISCOVERY_MOVER_CACHE_TTL_SEC = _env_int("DYNAMIC_DISCOVERY_MOVER_CACHE_TTL_SEC", 120, 30, 600)
 LOW_FLOAT_FAST_LANE_ENABLED = _env_bool("LOW_FLOAT_FAST_LANE_ENABLED", True)
-LOW_FLOAT_FAST_LANE_SCAN_CAP = _env_int("LOW_FLOAT_FAST_LANE_SCAN_CAP", 2500, 300, 6000)
-LOW_FLOAT_FAST_LANE_INJECT_LIMIT = _env_int("LOW_FLOAT_FAST_LANE_INJECT_LIMIT", 180, 30, 300)
+LOW_FLOAT_FAST_LANE_SCAN_CAP = _env_int("LOW_FLOAT_FAST_LANE_SCAN_CAP", 6000, 300, 9000)
+LOW_FLOAT_FAST_LANE_INJECT_LIMIT = _env_int("LOW_FLOAT_FAST_LANE_INJECT_LIMIT", 220, 30, 350)
 LOW_FLOAT_FAST_LANE_MAX_PRICE = float(os.getenv("LOW_FLOAT_FAST_LANE_MAX_PRICE", "12") or 12)
 LOW_FLOAT_FAST_LANE_EXTENDED_MAX_PRICE = float(os.getenv("LOW_FLOAT_FAST_LANE_EXTENDED_MAX_PRICE", "20") or 20)
+LOW_FLOAT_FAST_LANE_MIN_PRICE = float(os.getenv("LOW_FLOAT_FAST_LANE_MIN_PRICE", "0.35") or 0.35)
+LOW_FLOAT_FAST_LANE_MAX_DOLLAR_VOLUME = float(os.getenv("LOW_FLOAT_FAST_LANE_MAX_DOLLAR_VOLUME", "60000000") or 60_000_000)
 
 _FMP_MOVERS_CACHE: dict = {"ts": 0.0, "rows": [], "error": ""}
 _LAST_DYNAMIC_DISCOVERY_STATUS: dict = {}
@@ -321,18 +323,25 @@ def _normalize_candidate_rows(candidates: dict) -> list[dict]:
 
 
 
-def _low_float_fast_lane_score(ticker: str, metrics: dict, phase_detail: str = "") -> tuple[bool, float, list[str], dict]:
+def _low_float_fast_lane_score(ticker: str, metrics: dict, phase_detail: str = "", source_kind: str = "grouped") -> tuple[bool, float, list[str], dict]:
     """Dedicated obscure small-stock / low-float-like source lane.
 
-    This lane is intentionally independent from Watch/Early/weekly/baseline. It
-    scans the broad grouped market map and tries to surface small, potentially
-    explosive names before they become obvious movers. It is a source layer only:
-    Sharia filtering and the final decision engine still run later.
+    V2P makes this lane usable even when the market is closed and Polygon grouped
+    data is unavailable.  It accepts either grouped-day metrics or FMP mover/live
+    metrics, but remains a *source/watch* lane only. It never creates BUY_NOW.
     """
-    price = to_float((metrics or {}).get("price"))
-    chg = to_float((metrics or {}).get("day_change_pct")) * 100.0
-    dollar_volume = to_float((metrics or {}).get("dollar_volume"))
-    volume = to_float((metrics or {}).get("volume"))
+    price = to_float((metrics or {}).get("price") or (metrics or {}).get("fmp_price") or (metrics or {}).get("live_price"))
+    raw_change = to_float((metrics or {}).get("day_change_pct"))
+    # grouped calc_metrics stores change as a fraction; FMP/live rows store it as percent.
+    chg = raw_change * 100.0 if abs(raw_change) <= 1.5 else raw_change
+    for _ck in ("change_pct", "fmp_change_pct", "live_change_pct"):
+        _cv = to_float((metrics or {}).get(_ck))
+        if _cv != 0:
+            chg = _cv
+    dollar_volume = to_float((metrics or {}).get("dollar_volume") or (metrics or {}).get("live_dollar_volume"))
+    volume = to_float((metrics or {}).get("volume") or (metrics or {}).get("fmp_volume") or (metrics or {}).get("live_volume"))
+    if dollar_volume <= 0 and price > 0 and volume > 0:
+        dollar_volume = price * volume
     range_pct = to_float((metrics or {}).get("range_pct"))
     close_strength = to_float((metrics or {}).get("close_strength"))
     near_high = bool((metrics or {}).get("near_high"))
@@ -341,77 +350,113 @@ def _low_float_fast_lane_score(ticker: str, metrics: dict, phase_detail: str = "
     flags = {
         "price": price,
         "day_change_pct": chg,
+        "change_pct": chg,
         "dollar_volume": dollar_volume,
         "volume": volume,
         "range_pct": range_pct,
         "close_strength": close_strength,
         "near_high": near_high,
+        "low_float_fast_lane_source_kind": source_kind,
     }
     if price <= 0:
         return False, 0.0, ["سعر غير متاح"], flags
-    if price < 0.35:
+    if price < LOW_FLOAT_FAST_LANE_MIN_PRICE:
         return False, 0.0, ["أقل من 0.35$ — خطر/ضجيج أعلى من الهدف"], flags
 
     core_price = price <= LOW_FLOAT_FAST_LANE_MAX_PRICE
+    explosive_micro = price <= 5.0
     extended_price = LOW_FLOAT_FAST_LANE_MAX_PRICE < price <= LOW_FLOAT_FAST_LANE_EXTENDED_MAX_PRICE
     if core_price:
-        score += 24 if price <= 5 else 18
+        score += 28 if explosive_micro else 20
         reasons.append("سعر صغير مناسب لرادار الانفجارات")
     elif extended_price:
-        # Do not let familiar 13–20$ names in unless they show unusual expansion.
-        if not (abs(chg) >= 4.0 and range_pct >= 0.055 and dollar_volume <= 80_000_000):
-            return False, 0.0, ["سعر 12–20$ بدون تمدد/نشاط كافٍ — لا يدخل Fast Lane"], flags
-        score += 7
-        reasons.append("سعر أعلى قليلًا لكن الحركة/النطاق غير عادي")
+        # 12–20$ names are allowed only if they show a real independent fast-lane clue.
+        if not (abs(chg) >= 5.0 and (range_pct >= 0.045 or dollar_volume <= 35_000_000)):
+            return False, 0.0, ["سعر 12–20$ بدون تمدد/نشاط مستقل كافٍ — لا يدخل Fast Lane"], flags
+        score += 8
+        reasons.append("سعر أعلى قليلًا لكن الحركة غير عادية")
     else:
         return False, 0.0, ["فوق نطاق Low-Float Fast Lane"], flags
 
-    # Obscure/small-stock runners usually start with enough liquidity to trade,
-    # but not institutional megaliquidity.  Very high dollar-volume names are
-    # more often known/liquid stocks, not simulator-style low-float runners.
-    if 100_000 <= dollar_volume <= 3_000_000:
-        score += 18; reasons.append("دولار فوليوم صغير/قابل للاشتعال")
-    elif 3_000_000 < dollar_volume <= 20_000_000:
-        score += 13; reasons.append("دولار فوليوم متوسط مناسب للمضاربة")
-    elif 20_000_000 < dollar_volume <= 80_000_000:
-        score += 5; reasons.append("سيولة مرتفعة نسبيًا — يحتاج فلترة مطاردة")
-    elif dollar_volume > 80_000_000:
-        score -= 22; reasons.append("سيولة كبيرة جدًا — غالبًا سهم معروف لا Low-Float")
+    # Require smaller/ignitable liquidity.  This intentionally avoids known, liquid names.
+    if 50_000 <= dollar_volume <= 800_000:
+        score += 24; reasons.append("دولار فوليوم صغير قابل للاشتعال")
+    elif 800_000 < dollar_volume <= 6_000_000:
+        score += 20; reasons.append("دولار فوليوم متوسط صغير مناسب للمضاربة")
+    elif 6_000_000 < dollar_volume <= 25_000_000:
+        score += 12; reasons.append("سيولة كافية لكن ليست ضخمة")
+    elif 25_000_000 < dollar_volume <= LOW_FLOAT_FAST_LANE_MAX_DOLLAR_VOLUME:
+        score += 2; reasons.append("سيولة عالية نسبيًا — يحتاج دليل أقوى")
+    elif dollar_volume > LOW_FLOAT_FAST_LANE_MAX_DOLLAR_VOLUME:
+        score -= 30; reasons.append("سيولة كبيرة جدًا — غالبًا اسم معروف وليس Low-Float")
     else:
-        score += 4; reasons.append("سيولة منخفضة جدًا — مراقبة فقط حتى يظهر حجم")
+        # Do not throw it away while market is closed; classify as watch-only until premarket volume arrives.
+        score += 3; reasons.append("سيولة منخفضة/غير واضحة — مراقبة فقط حتى يظهر حجم")
 
-    if 0.5 <= chg < 5.0:
-        score += 14; reasons.append("حركة مبكرة قبل الانفجار")
-    elif 5.0 <= chg < 12.0:
-        score += 10; reasons.append("نشاط قوي لكن ليس انفجارًا كاملًا")
-    elif 12.0 <= chg < 25.0:
-        score += 3; reasons.append("تحرك كبير — مراجعة عالية المخاطر لا مطاردة")
-    elif chg >= 25.0:
-        score -= 16; reasons.append("تحرك كبير جدًا — غالبًا متأخر")
-    elif -3.0 <= chg < 0.5:
+    if 0.5 <= chg < 4.0:
+        score += 13; reasons.append("حركة مبكرة قبل الانفجار")
+    elif 4.0 <= chg < 9.0:
+        score += 18; reasons.append("نشاط قوي مبكر")
+    elif 9.0 <= chg < 18.0:
+        score += 11; reasons.append("حركة قوية عالية المخاطر")
+    elif 18.0 <= chg < 35.0:
+        score += 2; reasons.append("تحرك كبير — مراجعة خطفة فقط")
+    elif chg >= 35.0:
+        score -= 18; reasons.append("تحرك كبير جدًا — غالبًا متأخر")
+    elif -4.0 <= chg < 0.5:
         score += 5; reasons.append("هادئ/تجميع محتمل قبل الحركة")
 
-    if 0.035 <= range_pct <= 0.22:
-        score += 10; reasons.append("نطاق يومي مناسب لبدء حركة")
-    elif 0.22 < range_pct <= 0.40:
-        score += 3; reasons.append("نطاق واسع — يحتاج إدارة خطر")
-    if close_strength >= 0.72:
+    # Polygon grouped has range/close position. FMP movers often do not.
+    if range_pct > 0:
+        if 0.025 <= range_pct <= 0.18:
+            score += 12; reasons.append("نطاق يومي مناسب لبدء حركة")
+        elif 0.18 < range_pct <= 0.35:
+            score += 5; reasons.append("نطاق واسع — خطر أعلى لكنه قابل للمراقبة")
+    if close_strength >= 0.70:
         score += 9; reasons.append("إغلاق قوي داخل النطاق")
-    elif close_strength >= 0.55:
+    elif close_strength >= 0.52:
         score += 5; reasons.append("إغلاق مقبول/بناء")
     if near_high:
         score += 4; reasons.append("قريب من قمة اليوم/منطقة اختراق")
 
-    # Final guard: require at least one real action clue besides price.
-    action_clue = abs(chg) >= 0.5 or range_pct >= 0.035 or dollar_volume >= 100_000 or close_strength >= 0.55
-    eligible = bool(action_clue and score >= 23)
-    flags.update({"low_float_fast_lane_score": safe_round(score, 3), "low_float_fast_lane_eligible": eligible})
+    if source_kind in {"fmp_mover", "fmp_live", "fmp_small_mover"}:
+        score += 8; reasons.append("مصدر مستقل من FMP وليس من Watch/Early فقط")
+
+    # Stronger eligibility than V2O: require an independent clue, but do not require grouped_map.
+    independent_activity = (
+        abs(chg) >= 0.5 or (range_pct >= 0.025) or (dollar_volume >= 50_000 and dollar_volume <= LOW_FLOAT_FAST_LANE_MAX_DOLLAR_VOLUME)
+    )
+    not_too_known = bool(dollar_volume <= LOW_FLOAT_FAST_LANE_MAX_DOLLAR_VOLUME or dollar_volume <= 0)
+    not_already_exploded = bool(chg < 35.0)
+    eligible = bool(independent_activity and not_too_known and not_already_exploded and score >= 28)
+    flags.update({
+        "low_float_fast_lane_score": safe_round(score, 3),
+        "low_float_fast_lane_eligible": eligible,
+        "low_float_fast_lane_v2p": True,
+    })
     return eligible, score, reasons[:8], flags
+
+
+def _low_float_metrics_from_price_change_volume(price: float, change_pct: float, volume: float, source_kind: str = "fmp_mover") -> dict:
+    price = to_float(price)
+    change_pct = to_float(change_pct)
+    volume = to_float(volume)
+    return {
+        "price": price,
+        "day_change_pct": change_pct,
+        "change_pct": change_pct,
+        "volume": volume,
+        "dollar_volume": price * volume if price > 0 and volume > 0 else 0.0,
+        "range_pct": 0.0,
+        "close_strength": 0.0,
+        "near_high": False,
+        "low_float_fast_lane_source_kind": source_kind,
+    }
 
 
 def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
     debug = {
-        "version": "low_float_fast_lane_source_v1_2026_06_20",
+        "version": "low_float_fast_lane_source_v2p_true_fast_lane_2026_06_20",
         "enabled": bool(LOW_FLOAT_FAST_LANE_ENABLED),
         "scan_cap": int(LOW_FLOAT_FAST_LANE_SCAN_CAP),
         "inject_limit": int(LOW_FLOAT_FAST_LANE_INJECT_LIMIT),
@@ -419,7 +464,7 @@ def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str
         "eligible_count": 0,
         "rejected_price_or_known_count": 0,
         "top_symbols": [],
-        "rule_ar": "مصدر مستقل لا يعتمد على Watch/Early: يبحث في السوق الواسع عن أسهم صغيرة/غامضة قابلة للاشتعال، ويستبعد الأسماء المعروفة أو الأكثر سيولة مثل NOK إذا لم يوجد نشاط fast-lane حقيقي.",
+        "rule_ar": "V2P: مصدر مستقل حقيقي. يستخدم Polygon grouped إن توفر، ويستخدم FMP movers/live عندما يكون السوق مغلقًا ولا توجد grouped data. لا يعتمد على Watch/Early فقط.",
     }
     if not LOW_FLOAT_FAST_LANE_ENABLED or not grouped_map:
         return [], debug
@@ -432,13 +477,13 @@ def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str
         if not sym or not daily:
             continue
         debug["scanned"] += 1
-        try:
-            if not _scanner.base_filters(daily):
-                continue
-        except Exception:
-            continue
+        # Do NOT use the normal scanner.base_filters here. They require high
+        # volume/dollar-volume and erase exactly the obscure small-stock names
+        # this lane is supposed to find. Use minimal price/volume sanity only.
         metrics = _source_metrics_from_grouped(daily) or {}
-        eligible, score, reasons, flags = _low_float_fast_lane_score(sym, metrics, phase_detail=phase_detail)
+        if to_float(metrics.get("price")) <= 0 or to_float(metrics.get("volume")) <= 0:
+            continue
+        eligible, score, reasons, flags = _low_float_fast_lane_score(sym, metrics, phase_detail=phase_detail, source_kind="polygon_grouped")
         if not eligible:
             if reasons and ("فوق نطاق" in reasons[0] or "12–20" in reasons[0] or "سيولة كبيرة" in " ".join(reasons)):
                 debug["rejected_price_or_known_count"] += 1
@@ -479,6 +524,10 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     intraday_early_radar_high_risk_count = 0
     low_float_fast_lane_status = {}
     low_float_fast_lane_count = 0
+    fmp_low_float_fast_lane_count = 0
+    fmp_low_float_fast_lane_symbols: list[str] = []
+    live_low_float_fast_lane_count = 0
+    live_low_float_fast_lane_symbols: list[str] = []
 
     # Source / Promotion V2a: explicitly inject the curated Early Movement
     # watchlist into the dynamic discovery source.  Previously it usually arrived
@@ -771,6 +820,22 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         mover_reason = "قائمة رابحين/نشطين من FMP" if change_pct < 10 else "متحرك متأخر من FMP — استمرار/لا تطارد"
         _add_candidate(candidates, sym, score + pref_score, mover_source, mover_reason, {"fmp_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume, "source_move_stage": source_move_stage})
         try:
+            lf_metrics = _low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_mover")
+            lf_ok, lf_score, lf_reasons, lf_flags = _low_float_fast_lane_score(sym, lf_metrics, phase_detail=str(phase_info.get("detail", "") or ""), source_kind="fmp_mover")
+            if lf_ok:
+                _add_candidate(
+                    candidates,
+                    sym,
+                    58 + lf_score * 0.42,
+                    "low_float_fast_lane_v1",
+                    "Low-Float Fast Lane V2P من FMP: " + "، ".join(lf_reasons[:3]),
+                    {**lf_metrics, **lf_flags, "low_float_fast_lane": True, "low_float_fast_lane_reasons": lf_reasons},
+                )
+                fmp_low_float_fast_lane_count += 1
+                fmp_low_float_fast_lane_symbols.append(sym)
+        except Exception:
+            pass
+        try:
             ignition = classify_live_ignition(sym, {"price": price, "change_pct": change_pct, "volume": volume, "dollar_volume": dollar_volume}) if live_ignition_enabled() else {}
             if ignition.get("hot_lane_eligible"):
                 _add_candidate(candidates, sym, 42 + float(ignition.get("ignition_score", 0) or 0) * 0.25, "live_ignition_hot_lane", "Hot Lane: بداية حركة مبكرة بسيولة", {"live_ignition_score": ignition.get("ignition_score"), "live_ignition_stage": ignition.get("stage_hint"), "fmp_change_pct": change_pct, "fmp_price": price, "fmp_volume": volume})
@@ -830,6 +895,22 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             if flags.get(key):
                 price_flags[key] += 1
         _add_candidate(candidates, sym, live_score + pref_score, "fmp_live_confirmed", "تأكيد سعر حي من FMP", {"live_price": price, "live_change_pct": change_pct, "live_volume": volume})
+        try:
+            lf_metrics = _low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_live")
+            lf_ok, lf_score, lf_reasons, lf_flags = _low_float_fast_lane_score(sym, lf_metrics, phase_detail=str(phase_info.get("detail", "") or ""), source_kind="fmp_live")
+            if lf_ok:
+                _add_candidate(
+                    candidates,
+                    sym,
+                    48 + lf_score * 0.32,
+                    "low_float_fast_lane_v1",
+                    "Low-Float Fast Lane V2P من FMP live: " + "، ".join(lf_reasons[:3]),
+                    {**lf_metrics, **lf_flags, "low_float_fast_lane": True, "low_float_fast_lane_reasons": lf_reasons},
+                )
+                live_low_float_fast_lane_count += 1
+                live_low_float_fast_lane_symbols.append(sym)
+        except Exception:
+            pass
         if change_pct >= 4.0:
             _add_candidate(candidates, sym, 14, "live_mover", "الحركة الحية مستمرة")
         try:
@@ -895,10 +976,24 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         for src in row.get("sources") or []:
             source_bucket_counts[src] = int(source_bucket_counts.get(src, 0) or 0) + 1
 
+    try:
+        low_float_fast_lane_status = dict(low_float_fast_lane_status or {})
+        low_float_fast_lane_status.update({
+            "v2p_fmp_fallback_enabled": True,
+            "fmp_fast_lane_count": int(fmp_low_float_fast_lane_count or 0),
+            "fmp_fast_lane_symbols": _scanner.unique_keep_order(fmp_low_float_fast_lane_symbols)[:50],
+            "live_fast_lane_count": int(live_low_float_fast_lane_count or 0),
+            "live_fast_lane_symbols": _scanner.unique_keep_order(live_low_float_fast_lane_symbols)[:50],
+            "total_fast_lane_source_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0) or 0),
+            "diagnostic_ar": "إذا كان broad_market_count=0 وقت الإغلاق، يستخدم V2P FMP movers/live كمنبع مستقل بدل ترك Fast Lane صفر.",
+        })
+    except Exception:
+        pass
+
     diag = {
-        "engine_version": "dynamic_discovery_v3b_low_float_fast_lane_source_2026_06_20",
+        "engine_version": "dynamic_discovery_v3c_true_low_float_fast_lane_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_pre_move_plus_live_ignition_hot_lane_plus_low_float_fast_lane",
+        "dynamic_discovery_mode": "candidate_pool_plus_true_low_float_fast_lane_fmp_fallback",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -968,7 +1063,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 "reasons": list(r.get("reasons") or [])[:8],
                 "metrics": {
                     k: v for k, v in (r.get("metrics") or {}).items()
-                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct"}
+                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p"}
                 },
             }
             for r in ranked[:max_symbols]

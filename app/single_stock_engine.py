@@ -78,6 +78,8 @@ def scan_all(debug: bool = False):
         "dynamic_fmp_confirmed": int((source_diag or {}).get("fmp_confirmed", 0) or 0),
         "dynamic_fmp_extended_confirmed": int((source_diag or {}).get("fmp_extended_confirmed", 0) or 0),
         "dynamic_fmp_movers_count": int((source_diag or {}).get("fmp_movers_count", 0) or 0),
+        "dynamic_low_float_fast_lane_count": int((source_diag or {}).get("low_float_fast_lane_count", 0) or 0),
+        "dynamic_low_float_fast_lane": (source_diag or {}).get("low_float_fast_lane", {}),
         "dynamic_live_ignition_hot_lane_count": int((source_diag or {}).get("live_ignition_hot_lane_count", 0) or 0),
         "dynamic_pre_move_engine_v2_count": int((source_diag or {}).get("pre_move_engine_v2_count", 0) or 0),
         "dynamic_late_mover_review_count": int((source_diag or {}).get("late_mover_review_count", 0) or 0),
