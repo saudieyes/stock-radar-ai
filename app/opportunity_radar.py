@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2q_fast_lane_funnel_display_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2r_micro_explosion_capture_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -1716,10 +1716,12 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     # known liquid names like NOK are not put in Low-Float just because they are
     # low-ish price and in a watch bucket.
     low_float_profile = _low_float_proxy_metrics(row)
+    micro_capture_profile = _micro_explosion_capture_profile(row)
     low_float_pm = bool(
         low_float_profile.get("confirmed_float")
         or low_float_profile.get("small_cap_proxy")
-        or low_float_profile.get("proxy_candidate")
+        or low_float_profile.get("strong_proxy")
+        or bool(micro_capture_profile.get("matched"))
         or (low_price and (_num(row.get("pre_market_volume"), 0.0) > 100_000 or _num(row.get("pre_market_change_pct"), 0.0) >= 2.0))
     )
     if extended_after_move and low_price:
@@ -1801,6 +1803,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "high_risk_day": high_risk_day,
         "low_float_pm": low_float_pm,
         "low_float_fast_lane": bool(low_float_profile.get("fast_lane_source")),
+        "micro_explosion_capture": bool(micro_capture_profile.get("matched")),
+        "micro_explosion_profile_v2r": micro_capture_profile,
         "low_float_profile_v2o": low_float_profile,
         "classic_small_stock": classic_small,
         "classic_small_candidate": classic_candidate,
@@ -1834,6 +1838,11 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
             return "cautious_reclaim", "🟠 دخول بحذر — Reclaim", "cautious_entries", flags.get("reclaim_reasons", [])
         return "cautious", "🟠 دخول بحذر", "cautious_entries", ["خطة جيدة لكنها تحتاج انضباطًا وحجمًا أصغر من Strong."]
     classic = flags.get("classic_small_stock") or {}
+    if flags.get("micro_explosion_capture") and not flags.get("extended_after_move"):
+        profile = flags.get("micro_explosion_profile_v2r") if isinstance(flags.get("micro_explosion_profile_v2r"), dict) else {}
+        reasons = ["V2R التقط السهم بسبب تجميع/شمعة قوية/احتمال انفجار — مراقبة وتفعيل فقط."]
+        reasons.extend(list(profile.get("reasons") or [])[:6])
+        return "low_float_premarket", "🚀 التقاط انفجار مبكر V2R", "low_float_premarket", _dedupe(reasons, 8)
     if flags.get("classic_small_chase_risk") and flags.get("classic_small_candidate"):
         return "high_risk_day_trade", "⚡ مضاربة عالية المخاطرة", "high_risk_day_trade", classic.get("reasons", []) or ["سهم صغير سبق أن تحرك؛ انتظر Pullback إلى Fib/VWAP/قمة أمس ولا تطارد."]
     if flags.get("extended_after_move") and (flags.get("high_risk_day") or classic.get("candidate")):
@@ -2126,6 +2135,58 @@ def _first_positive_number(row: dict, keys: list[str]) -> float:
     return 0.0
 
 
+def _source_text_for_capture(row: dict) -> str:
+    tags = row.get("source_reason_tags") if isinstance(row.get("source_reason_tags"), list) else []
+    pieces = [
+        _s(row.get("source_reason")),
+        _s(row.get("first_source_layer")),
+        _s(row.get("source_priority_lane")),
+        _s(row.get("first_source_reason")),
+        " ".join([_s(x) for x in tags]),
+    ]
+    return " ".join(pieces).lower()
+
+
+def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
+    source_text = _source_text_for_capture(row)
+    matched = bool(
+        row.get("micro_explosion_capture_v2r")
+        or "micro_explosion_capture_v2r" in source_text
+        or "micro explosion capture" in source_text
+        or "accumulation_strong_candle_source" in source_text
+    )
+    price = _price(row)
+    change = _change_pct(row)
+    move_risk = _move_risk_pct(row)
+    vol_ratio = _num(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", row.get("relative_volume", 0)))), 0.0)
+    dollar_vol = _num(row.get("dollar_volume", row.get("current_dollar_volume", row.get("live_dollar_volume", row.get("premarket_dollar_volume", 0)))), 0.0)
+    reasons = []
+    if matched:
+        reasons.append("التقاط V2R: تجميع/شمعة قوية/احتمال انفجار من منبع مستقل")
+    if 0 < price <= 10:
+        reasons.append(f"سعر صغير {round(price, 3)}$")
+    if abs(change) >= 0.8:
+        reasons.append(f"حركة أولية {round(change, 2)}%")
+    if vol_ratio >= 1.25:
+        reasons.append(f"RVOL {round(vol_ratio, 2)}x")
+    if dollar_vol > 0:
+        reasons.append(f"دولار فوليوم {round(dollar_vol/1000, 1)}K")
+    if move_risk >= 18:
+        reasons.append("الحركة الحالية مرتفعة؛ مراقبة/خطفة فقط لا مطاردة")
+    return {
+        "version": "micro_explosion_capture_profile_v2r_2026_06_20",
+        "matched": matched,
+        "price": price,
+        "change_pct": change,
+        "move_risk_pct": move_risk,
+        "volume_ratio": vol_ratio,
+        "dollar_volume": dollar_vol,
+        "too_extended_for_fresh_entry": bool(move_risk >= 18 or change >= 15),
+        "reasons": _dedupe(reasons, 8),
+        "rule_ar": "وسم التقاط فقط: يعني أن المنبع رأى تجميعًا/شمعة قوية/احتمال انفجار. لا يغير Strong/Cautious ولا يعني شراء مباشر.",
+    }
+
+
 def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
     """Return a transparent low-float / small-stock proxy used only for prep visibility.
 
@@ -2151,8 +2212,8 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
     watch_context = _row_is_early_or_watch_context(row)
     learning = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
     learning_positive = _s(learning.get("entry_bias")) in {"positive_watch", "watch_needs_volume", "speculative_watch"}
-    tags = row.get("source_reason_tags") if isinstance(row.get("source_reason_tags"), list) else []
-    source_text = " ".join([_s(row.get("source_reason")), _s(row.get("first_source_layer")), _s(row.get("source_priority_lane")), " ".join([_s(x) for x in tags])]).lower()
+    source_text = _source_text_for_capture(row)
+    micro_capture = _micro_explosion_capture_profile(row)
     fast_lane = bool(
         row.get("low_float_fast_lane")
         or row.get("low_float_fast_lane_v1")
@@ -2161,6 +2222,7 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
         or "fast lane low-float" in source_text
         or "low-float fast lane v2p" in source_text
         or "small_stock_explosive_source" in source_text
+        or bool(micro_capture.get("matched"))
     )
     confirmed_float = bool(float_shares > 0 and float_shares <= 25_000_000)
     small_cap_proxy = bool(market_cap > 0 and market_cap <= 350_000_000)
@@ -2174,16 +2236,20 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
         or abs(change) >= 1.0 or move_risk >= 3.0 or has_prev or learning_positive or fast_lane
     )
     # For 12–20$ names, require a dedicated fast-lane/small-cap/confirmed float signal.
+    # V2R: keep the broad proxy for debug, but visible prep favors strong_proxy
+    # so cheap/quiet or already-known names do not crowd out true capture candidates.
     proxy_candidate = bool(
         confirmed_float
         or small_cap_proxy
-        or (core_micro_price and explosive_activity)
+        or (core_micro_price and (fast_lane or bool(micro_capture.get("matched"))))
+        or (0.35 <= price <= 8.0 and explosive_activity and (vol_ratio >= 1.8 or abs(change) >= 2.0 or move_risk >= 6.0))
         or (extended_small_price and fast_lane)
     )
     strong_proxy = bool(
         confirmed_float
         or small_cap_proxy
-        or (0.35 <= price <= 8.0 and (explosive_activity or has_prev or fast_lane))
+        or (bool(micro_capture.get("matched")) and price <= 15.0)
+        or (0.35 <= price <= 6.0 and (fast_lane or (explosive_activity and (vol_ratio >= 1.8 or abs(change) >= 2.0))))
         or (core_micro_price and fast_lane)
     )
     label = "confirmed_float" if confirmed_float else ("small_cap_proxy" if small_cap_proxy else ("fast_lane_proxy" if fast_lane and proxy_candidate else ("proxy_low_price_activity" if proxy_candidate else "not_low_float_candidate")))
@@ -2192,10 +2258,12 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
         reasons.append(f"Float معروف تقريبًا {round(float_shares/1_000_000, 2)}M")
     elif small_cap_proxy:
         reasons.append(f"قيمة سوقية صغيرة تقريبًا {round(market_cap/1_000_000, 1)}M — بديل عند غياب float")
+    elif bool(micro_capture.get("matched")) and proxy_candidate:
+        reasons.append("مرشح V2R: تجميع/شمعة قوية/احتمال انفجار — Float غير مؤكد")
     elif fast_lane and proxy_candidate:
         reasons.append("مرشح من Low-Float Fast Lane: صغير/غامض أو سريع وليس مجرد Watch عادي")
     elif proxy_candidate:
-        reasons.append("Float غير مؤكد؛ مرشح Proxy بسبب السعر المنخفض/النشاط/الذاكرة")
+        reasons.append("Float غير مؤكد؛ مرشح Proxy بسبب نشاط حقيقي وليس السعر وحده")
     if price > 0:
         reasons.append(f"السعر {round(price, 3)}$ ضمن نطاق الأسهم الصغيرة")
     if has_prev:
@@ -2228,6 +2296,8 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
         }.get(label, label),
         "activity": explosive_activity,
         "fast_lane_source": fast_lane,
+        "micro_explosion_capture": bool(micro_capture.get("matched")),
+        "micro_explosion_profile": micro_capture,
         "has_previous_session_memory": has_prev,
         "watch_context": watch_context,
         "learning_positive": learning_positive,
@@ -2490,6 +2560,11 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     was_watch_or_early = _row_is_early_or_watch_context(row)
     low_price = 1.0 <= price <= 20.0
     very_low = 1.0 <= price <= 8.0
+    micro_capture = _micro_explosion_capture_profile(row)
+    if micro_capture.get("matched"):
+        reasons = ["التقاط V2R: تجميع/شموع قوية/احتمال انفجار — مراقبة قبل التفعيل فقط."]
+        reasons.extend(list(micro_capture.get("reasons") or [])[:6])
+        add("low_float_premarket_radar", 38.0 if not micro_capture.get("too_extended_for_fresh_entry") else 24.0, reasons)
 
     # Small-stock classic prep: show low-price candidates before the open even
     # when live liquidity/readiness is not enough to classify them as execution.
@@ -2546,8 +2621,8 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     # Low-float/small-stock pre-open prep.  V2M separates confirmed float from
     # proxy low-float candidates so the user can audit candidates before open.
     lf = _low_float_proxy_metrics(row)
-    if lf.get("confirmed_float") or lf.get("small_cap_proxy") or lf.get("proxy_candidate") or (very_low and (was_watch_or_early or learning_positive)):
-        reasons = ["Low-Float / سهم صغير للتحضير قبل الافتتاح — ليس شراء مباشر."]
+    if lf.get("confirmed_float") or lf.get("small_cap_proxy") or lf.get("strong_proxy") or lf.get("micro_explosion_capture") or (very_low and (was_watch_or_early or learning_positive) and _num(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", 0))), 0.0) >= 1.8):
+        reasons = ["سهم صغير/انفجاري للتحضير قبل الافتتاح — ليس شراء مباشر."]
         reasons.append(_s(lf.get("label_ar")))
         reasons.extend(lf.get("reasons", [])[:6])
         add("low_float_premarket_radar", 32.0 if lf.get("fast_lane_source") else (27.0 if lf.get("confirmed_float") else 22.0), reasons)
