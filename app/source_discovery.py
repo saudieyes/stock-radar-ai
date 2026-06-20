@@ -1210,7 +1210,7 @@ def _big_explosion_live_lane_score(ticker: str, metrics: dict, phase_detail: str
 
 def _collect_big_explosion_live_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
     debug = {
-        "version": "big_explosion_live_lane_v2t2_prior_session_ready_2026_06_20",
+        "version": "big_explosion_live_lane_v2t2b_prior_session_safe_2026_06_20",
         "enabled": bool(BIG_EXPLOSION_LIVE_LANE_ENABLED),
         "scan_cap": int(BIG_EXPLOSION_LIVE_SCAN_CAP),
         "scanned": 0,
@@ -2089,7 +2089,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3h2_big_explosion_prior_session_v2t2_2026_06_20",
+        "engine_version": "dynamic_discovery_v3h2b_big_explosion_prior_session_safe_v2t2b_2026_06_20",
         "dynamic_discovery_enabled": True,
         "dynamic_discovery_mode": "candidate_pool_plus_big_explosion_prior_session_v2t2_and_micro_low_float",
         "requested_target": int(max_symbols),

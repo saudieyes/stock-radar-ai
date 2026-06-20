@@ -23,6 +23,7 @@ from __future__ import annotations
 import csv
 import gzip
 import math
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2_prior_session_opening_scan_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2b_safe_prior_scan_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -286,9 +287,10 @@ def _agg_to_grouped_row(sym: str, agg: dict, *, base_open: float | None = None, 
 def _read_prior_full_session_minute_scan(
     *,
     trade_date: str,
-    max_minute_rows: int = 2_600_000,
+    max_minute_rows: int = 400_000,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
+    max_seconds: float = 8.0,
 ) -> tuple[dict[str, Any], dict[str, dict], dict[str, dict]]:
     """Scan the full prior session after all sessions close.
 
@@ -299,10 +301,12 @@ def _read_prior_full_session_minute_scan(
     """
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug: dict[str, Any] = {
-        "version": "prior_full_session_scan_v2t2_2026_06_20",
+        "version": "prior_full_session_scan_v2t2b_safe_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "max_minute_rows": int(max_minute_rows or 0),
+        "max_seconds": float(max_seconds or 0),
+        "safe_mode_ar": "V2T2b يضع حد وقت/صفوف لمسح اليوم السابق داخل الطلب حتى لا يسقط Railway upstream؛ المسح الكامل الحقيقي لاحقًا يجب تشغيله كوظيفة بعد الإغلاق وتخزين compact فقط.",
         "storage_rule_ar": "يمسح ملف دقيقة اليوم السابق من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw في SQLite/GitHub/Railway.",
         "rule_ar": "V2T2: بعد اكتمال كل جلسات يوم الاختيار، يمسح اليوم السابق كاملًا بدقة دقيقة لتحضير قائمة الغد قبل البري ماركت.",
     }
@@ -311,6 +315,11 @@ def _read_prior_full_session_minute_scan(
         return debug, {}, {}
     path = str(pull.get("path") or "")
     rows_seen = 0
+    stopped_by_time = False
+    stopped_by_row_cap = False
+    started_at = time.perf_counter()
+    safe_row_cap = max(50_000, min(900_000, int(max_minute_rows or 400_000)))
+    safe_seconds = max(3.0, min(20.0, float(max_seconds or 8.0)))
     per: dict[str, dict] = {}
     try:
         fp = Path(path)
@@ -319,7 +328,11 @@ def _read_prior_full_session_minute_scan(
             reader = csv.DictReader(f)
             for raw in reader:
                 rows_seen += 1
-                if rows_seen > max(50_000, min(4_000_000, int(max_minute_rows or 2_600_000))):
+                if rows_seen > safe_row_cap:
+                    stopped_by_row_cap = True
+                    break
+                if rows_seen % 50000 == 0 and (time.perf_counter() - started_at) > safe_seconds:
+                    stopped_by_time = True
                     break
                 sym = _minute_symbol(raw)
                 if not sym:
@@ -359,6 +372,10 @@ def _read_prior_full_session_minute_scan(
         debug.update({
             "ok": True,
             "rows_seen": rows_seen,
+            "stopped_by_time": bool(stopped_by_time),
+            "stopped_by_row_cap": bool(stopped_by_row_cap),
+            "elapsed_sec": round(time.perf_counter() - started_at, 3),
+            "safe_row_cap": int(safe_row_cap),
             "symbols_seen": len(per),
             "full_session_symbols": len(full_map),
             "after_hours_symbols": len(after_map),
@@ -374,15 +391,17 @@ def _read_prior_full_session_minute_scan(
 def _build_prior_session_source_rows(
     *,
     selection_date: str,
-    max_minute_rows: int = 2_600_000,
+    max_minute_rows: int = 400_000,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
+    max_seconds: float = 8.0,
 ) -> tuple[list[dict], dict[str, Any], dict[str, dict], dict[str, dict]]:
     debug, full_map, after_map = _read_prior_full_session_minute_scan(
         trade_date=selection_date,
         max_minute_rows=max_minute_rows,
         force_minute_pull=force_minute_pull,
         redownload_processed=redownload_processed,
+        max_seconds=max_seconds,
     )
     if not debug.get("ok"):
         return [], debug, full_map, after_map
@@ -1129,11 +1148,13 @@ def _read_minute_file_for_replay(
     target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug = {
-        "version": "minute_replay_loader_v2t2_opening_1min_prior_scan_2026_06_20",
+        "version": "minute_replay_loader_v2t2b_safe_prior_scan_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "target_symbols_count": len(target_symbols),
         "max_minute_rows": int(max_minute_rows or 0),
+        "max_seconds": float(max_seconds or 0),
+        "safe_mode_ar": "V2T2b يضع حد وقت/صفوف لمسح اليوم السابق داخل الطلب حتى لا يسقط Railway upstream؛ المسح الكامل الحقيقي لاحقًا يجب تشغيله كوظيفة بعد الإغلاق وتخزين compact فقط.",
         "storage_rule_ar": "يتم تنزيل ملف الدقيقة إلى /tmp فقط، ثم يقرأ Streaming ويرجع ملخصات مدمجة؛ لا يتم حفظ raw في SQLite/GitHub/Railway.",
     }
     if not pull.get("ok") or not pull.get("path"):
@@ -1453,6 +1474,8 @@ def _build_big_explosion_timing_report(
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     prior_full_session_scan: bool = True,
+    prior_scan_max_rows: int = 400_000,
+    prior_scan_timeout_sec: float = 8.0,
 ) -> dict[str, Any]:
     missed = payload.get("missed_winners_audit") or {}
     winners = list(missed.get("top_outcome_winners") or [])
@@ -1484,7 +1507,7 @@ def _build_big_explosion_timing_report(
     if not loader_debug.get("ok"):
         return {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
             "outcome_date": outcome_date,
             "target_symbols": sorted(target_symbols),
             "minute_loader": loader_debug,
@@ -1543,7 +1566,7 @@ def _build_big_explosion_timing_report(
     early_count = sum(1 for r in reports if r.get("detected_by_minute_replay") and _num(r.get("first_detected_gain_pct"), 9999) <= 20 and (_num(r.get("minutes_from_detection_to_peak"), 0) >= 0))
     return {
         "ok": True,
-        "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
+        "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
         "outcome_date": outcome_date,
         "target_count": len(reports),
         "detected_by_minute_replay_count": detected_count,
@@ -1579,6 +1602,8 @@ def run_historical_replay(
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     prior_full_session_scan: bool = True,
+    prior_scan_max_rows: int = 400_000,
+    prior_scan_timeout_sec: float = 8.0,
 ) -> dict[str, Any]:
     selection_date, selection_map, selection_debug = _resolve_selection_grouped(date_value, recovery_days=recovery_days)
     if not selection_map:
@@ -1595,15 +1620,16 @@ def run_historical_replay(
     context_by_symbol = _build_symbol_context(context_items)
     micro_rows, fast_rows, context_source_debug = _build_context_source_rows(context_items)
     prior_rows: list[dict] = []
-    prior_full_session_debug: dict[str, Any] = {"enabled": bool(prior_full_session_scan), "version": "prior_full_session_scan_v2t2_2026_06_20"}
+    prior_full_session_debug: dict[str, Any] = {"enabled": bool(prior_full_session_scan), "version": "prior_full_session_scan_v2t2b_safe_2026_06_20"}
     prior_full_map: dict[str, dict] = {}
     prior_after_map: dict[str, dict] = {}
     if bool(prior_full_session_scan):
         prior_rows, prior_full_session_debug, prior_full_map, prior_after_map = _build_prior_session_source_rows(
             selection_date=selection_date,
-            max_minute_rows=max_minute_rows,
+            max_minute_rows=min(max(50_000, int(prior_scan_max_rows or 400_000)), int(max_minute_rows or 400_000)),
             force_minute_pull=force_minute_pull,
             redownload_processed=redownload_processed,
+            max_seconds=float(prior_scan_timeout_sec or 8.0),
         )
     all_source_rows_for_trace = (micro_rows or []) + (fast_rows or []) + (prior_rows or [])
     trace_by_symbol = _source_trace_from_rows(all_source_rows_for_trace)
@@ -1677,7 +1703,7 @@ def run_historical_replay(
         "prior_full_session_scan": prior_full_session_debug,
         "sharia_debug": combine_debug,
         "after_close_tomorrow_prep": {
-            "version": "after_close_tomorrow_prep_v2t2_prior_full_session_scan_2026_06_20",
+            "version": "after_close_tomorrow_prep_v2t2b_safe_prior_scan_2026_06_20",
             "selection_date": selection_date,
             "for_outcome_date": outcome_date,
             "prepared_count": len(tomorrow_prep_list),
@@ -1714,7 +1740,7 @@ def run_historical_replay(
         except Exception as exc:
             timing_report = {
                 "ok": False,
-                "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
+                "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
                 "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
             }
@@ -1722,7 +1748,7 @@ def run_historical_replay(
     else:
         payload["big_explosion_timing_report"] = {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t2_opening_1min_split_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
             "disabled": not bool(minute_timing),
             "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
         }
