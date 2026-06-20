@@ -23,12 +23,12 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u4b_prepared_watch_ui_bridge_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u4c_root_ui_bridge_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
-PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u4b_2026_06_20"
+PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u4c_top_level_2026_06_20"
 
 PERSONAL_PRICE_COMFORT = 50.0
 PERSONAL_PRICE_MAX_NORMAL = 150.0
@@ -1972,7 +1972,7 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
                 "rule_ar": "مراقبة/مراجعة فقط؛ لا شراء مباشر ولا تجاوز للشرعية.",
             },
             "critical_pre_explosion_label_ar": label,
-            "critical_pre_explosion_rule_ar": "V2U4b: يعرض Prepared Watch مباشرة في الواجهة كمراقبة حرجة قبل السوق فقط.",
+            "critical_pre_explosion_rule_ar": "V2U4c: يعرض Prepared Watch في root payload والواجهة كمراقبة حرجة قبل السوق فقط.",
             "big_explosion_prepared_watch_v2u": True,
             "critical_promotion_gate_v2u3": True,
             "critical_promotion_reason_ar": head_reason,
