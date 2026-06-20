@@ -713,8 +713,8 @@ def historical_replay_simulator_endpoint(
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     prior_full_session_scan: bool = True,
-    prior_scan_max_rows: int = 400000,
-    prior_scan_timeout_sec: float = 8.0,
+    prior_scan_max_rows: int = 2500000,
+    prior_scan_timeout_sec: float = 45.0,
     persist_prepared_watch: bool = False,
     format: str = "json",
 ):
@@ -758,7 +758,7 @@ def prepared_explosion_watch_endpoint(format: str = "json"):
     items, debug = load_prepared_big_explosion_watch()
     payload = {
         "ok": True,
-        "version": "prepared_explosion_watch_status_v2u_2026_06_20",
+        "version": "prepared_explosion_watch_status_v2u1_true_mining_2026_06_20",
         "count": len(items or []),
         "symbols": [x.get("symbol") for x in (items or [])[:120]],
         "items": items[:120],
@@ -766,7 +766,7 @@ def prepared_explosion_watch_endpoint(format: str = "json"):
         "rule_ar": "هذه قائمة ما بعد الإغلاق الجاهزة للأداة الحية قبل البري ماركت؛ مراقبة/مراجعة شرعية فقط وليست شراء مباشر.",
     }
     if str(format or "json").lower() in {"brief", "text", "txt"}:
-        lines = ["Prepared Explosion Watch V2U", f"count: {payload['count']}", "symbols: " + ", ".join(payload["symbols"][:80]), str(debug)]
+        lines = ["Prepared Explosion Watch V2U1", f"count: {payload['count']}", "symbols: " + ", ".join(payload["symbols"][:80]), str(debug)]
         return PlainTextResponse("\n".join(lines), media_type="text/plain; charset=utf-8")
     return payload
 
@@ -775,8 +775,8 @@ def prepared_explosion_watch_endpoint(format: str = "json"):
 @app.get("/diagnostics/prior-session-explosion-scan")
 def prior_session_explosion_scan_endpoint(
     date: str = "",
-    max_minute_rows: int = 400000,
-    max_seconds: float = 8.0,
+    max_minute_rows: int = 2500000,
+    max_seconds: float = 45.0,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     persist: bool = True,
@@ -799,13 +799,15 @@ def prior_session_explosion_scan_endpoint(
     if str(format or "json").lower() in {"brief", "text", "txt"}:
         scan = payload.get("scan_debug") or {}
         lines = [
-            "Prior Session Explosion Scan V2U",
+            "Prior Session Explosion Scan V2U1",
             f"date: {trade_date}",
             f"ok: {payload.get('ok')}",
             f"prepared_watch_count: {payload.get('prepared_watch_count')}",
             f"compact_count: {payload.get('compact_count')}",
             "top: " + ", ".join(payload.get("top_symbols", [])[:80]),
             f"rows_seen: {scan.get('rows_seen')} | symbols: {scan.get('symbols_seen')} | source_rows: {scan.get('source_rows_total')}",
+            "target_probe: " + str(((scan.get('prior_pre_explosion_watch_debug') or {}).get('target_probe') or {})),
+            "bucket_counts: " + str(((scan.get('prior_pre_explosion_watch_debug') or {}).get('bucket_counts') or {})),
             "مهم: هذه قائمة تحضير ومراجعة شرعية قبل السوق، لا شراء مباشر.",
         ]
         return PlainTextResponse("\n".join(lines), media_type="text/plain; charset=utf-8")
