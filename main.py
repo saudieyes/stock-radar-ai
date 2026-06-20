@@ -1479,6 +1479,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     promotion_bridge_candidates = opportunity_radar_payload.get("promotion_bridge_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    critical_pre_explosion_watch = opportunity_radar_payload.get("critical_pre_explosion_watch", []) if isinstance(opportunity_radar_payload, dict) else []
 
     try:
         plan_ledger_live_stats = record_active_strong_plans(strong, source="radar_live_refresh")
@@ -1560,6 +1561,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
         "promotion_bridge_candidates": promotion_bridge_candidates[:limit] if 'limit' in locals() else promotion_bridge_candidates[:25],
+        "critical_pre_explosion_watch_debug": opportunity_radar_payload.get("prepared_watch_ui_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "critical_pre_explosion_watch_rule_ar": opportunity_radar_payload.get("prepared_watch_ui_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "critical_pre_explosion_watch_count": len(critical_pre_explosion_watch),
+        "critical_pre_explosion_watch": critical_pre_explosion_watch[:limit] if 'limit' in locals() else critical_pre_explosion_watch[:25],
         "learning_overlay_summary": opportunity_radar_payload.get("learning_overlay_summary", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates": opportunity_radar_payload.get("learning_overlay_candidates", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates_count": int(opportunity_radar_payload.get("learning_overlay_candidates_count", 0) or 0) if isinstance(opportunity_radar_payload, dict) else 0,
@@ -2950,6 +2955,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     promotion_bridge_candidates = opportunity_radar_payload.get("promotion_bridge_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    critical_pre_explosion_watch = opportunity_radar_payload.get("critical_pre_explosion_watch", []) if isinstance(opportunity_radar_payload, dict) else []
 
     out = {
         "market_phase": phase,
@@ -2996,6 +3002,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
         "promotion_bridge_candidates": promotion_bridge_candidates[:limit] if 'limit' in locals() else promotion_bridge_candidates[:25],
+        "critical_pre_explosion_watch_debug": opportunity_radar_payload.get("prepared_watch_ui_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "critical_pre_explosion_watch_rule_ar": opportunity_radar_payload.get("prepared_watch_ui_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "critical_pre_explosion_watch_count": len(critical_pre_explosion_watch),
+        "critical_pre_explosion_watch": critical_pre_explosion_watch[:limit] if 'limit' in locals() else critical_pre_explosion_watch[:25],
         "learning_overlay_summary": opportunity_radar_payload.get("learning_overlay_summary", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates": opportunity_radar_payload.get("learning_overlay_candidates", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "learning_overlay_candidates_count": int(opportunity_radar_payload.get("learning_overlay_candidates_count", 0) or 0) if isinstance(opportunity_radar_payload, dict) else 0,
