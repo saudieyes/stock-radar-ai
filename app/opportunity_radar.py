@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2r_micro_explosion_capture_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2r1_micro_explosion_close_watch_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2058,6 +2058,7 @@ def _sort_bucket(rows: list[dict]) -> list[dict]:
 CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
 LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2q_funnel_display_2026_06_20"
+MICRO_EXPLOSION_CLOSE_WATCH_VERSION = "micro_explosion_close_watch_v2r1_2026_06_20"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -2151,7 +2152,12 @@ def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
     source_text = _source_text_for_capture(row)
     matched = bool(
         row.get("micro_explosion_capture_v2r")
+        or row.get("micro_explosion_capture_v2r1")
+        or row.get("micro_explosion_close_watch_v2r1")
         or "micro_explosion_capture_v2r" in source_text
+        or "micro_explosion_capture_v2r1" in source_text
+        or "micro_explosion_close_watch_v2r1" in source_text
+        or "sticky_close_watch" in source_text
         or "micro explosion capture" in source_text
         or "accumulation_strong_candle_source" in source_text
     )
@@ -2162,7 +2168,7 @@ def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
     dollar_vol = _num(row.get("dollar_volume", row.get("current_dollar_volume", row.get("live_dollar_volume", row.get("premarket_dollar_volume", 0)))), 0.0)
     reasons = []
     if matched:
-        reasons.append("التقاط V2R: تجميع/شمعة قوية/احتمال انفجار من منبع مستقل")
+        reasons.append("التقاط V2R1: رادار السوق الكامل لاحظ تجميع/شمعة قوية/احتمال انفجار وبدأ مراقبة لصيقة")
     if 0 < price <= 10:
         reasons.append(f"سعر صغير {round(price, 3)}$")
     if abs(change) >= 0.8:
@@ -2174,7 +2180,7 @@ def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
     if move_risk >= 18:
         reasons.append("الحركة الحالية مرتفعة؛ مراقبة/خطفة فقط لا مطاردة")
     return {
-        "version": "micro_explosion_capture_profile_v2r_2026_06_20",
+        "version": "micro_explosion_capture_profile_v2r1_2026_06_20",
         "matched": matched,
         "price": price,
         "change_pct": change,
@@ -2183,7 +2189,7 @@ def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
         "dollar_volume": dollar_vol,
         "too_extended_for_fresh_entry": bool(move_risk >= 18 or change >= 15),
         "reasons": _dedupe(reasons, 8),
-        "rule_ar": "وسم التقاط فقط: يعني أن المنبع رأى تجميعًا/شمعة قوية/احتمال انفجار. لا يغير Strong/Cautious ولا يعني شراء مباشر.",
+        "rule_ar": "وسم التقاط/مراقبة لصيقة فقط: يعني أن رادار V2R1 رأى بوادر انفجار من السوق الكامل أو ذاكرة المتابعة. لا يغير Strong/Cautious ولا يعني شراء مباشر.",
     }
 
 
@@ -2259,7 +2265,7 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
     elif small_cap_proxy:
         reasons.append(f"قيمة سوقية صغيرة تقريبًا {round(market_cap/1_000_000, 1)}M — بديل عند غياب float")
     elif bool(micro_capture.get("matched")) and proxy_candidate:
-        reasons.append("مرشح V2R: تجميع/شمعة قوية/احتمال انفجار — Float غير مؤكد")
+        reasons.append("مرشح V2R1: مراقبة لصيقة لتجميع/شمعة قوية/احتمال انفجار — Float غير مؤكد")
     elif fast_lane and proxy_candidate:
         reasons.append("مرشح من Low-Float Fast Lane: صغير/غامض أو سريع وليس مجرد Watch عادي")
     elif proxy_candidate:
@@ -2562,7 +2568,7 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     very_low = 1.0 <= price <= 8.0
     micro_capture = _micro_explosion_capture_profile(row)
     if micro_capture.get("matched"):
-        reasons = ["التقاط V2R: تجميع/شموع قوية/احتمال انفجار — مراقبة قبل التفعيل فقط."]
+        reasons = ["التقاط V2R1: مراقبة لصيقة لبوادر تجميع/شموع قوية/احتمال انفجار — ليس شراء مباشر."]
         reasons.extend(list(micro_capture.get("reasons") or [])[:6])
         add("low_float_premarket_radar", 38.0 if not micro_capture.get("too_extended_for_fresh_entry") else 24.0, reasons)
 

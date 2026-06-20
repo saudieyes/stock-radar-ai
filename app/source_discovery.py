@@ -31,6 +31,14 @@ try:
 except Exception:  # keep source layer resilient if SQLite is unavailable during import
     record_detection = None
 
+try:
+    from app.sqlite_store import get_json as _sqlite_get_json, set_json as _sqlite_set_json
+except Exception:  # compact watch memory is optional and must never break scanning
+    def _sqlite_get_json(key, default=None):
+        return default
+    def _sqlite_set_json(key, value):
+        return False
+
 NY_TZ = ZoneInfo("America/New_York")
 
 
@@ -76,8 +84,24 @@ MICRO_EXPLOSION_CAPTURE_MIN_PRICE = float(os.getenv("MICRO_EXPLOSION_CAPTURE_MIN
 MICRO_EXPLOSION_CAPTURE_MAX_PRICE = float(os.getenv("MICRO_EXPLOSION_CAPTURE_MAX_PRICE", "10") or 10)
 MICRO_EXPLOSION_CAPTURE_EXTENDED_MAX_PRICE = float(os.getenv("MICRO_EXPLOSION_CAPTURE_EXTENDED_MAX_PRICE", "15") or 15)
 MICRO_EXPLOSION_CAPTURE_MAX_CHANGE_PCT = float(os.getenv("MICRO_EXPLOSION_CAPTURE_MAX_CHANGE_PCT", "24") or 24)
-MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME = float(os.getenv("MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME", "35000000") or 35_000_000)
-MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT = _env_int("MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT", 180, 30, 260)
+MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME = float(os.getenv("MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME", "60000000") or 60_000_000)
+MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT = _env_int("MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT", 220, 30, 320)
+# V2R1: do not wait for an old source/watch bucket.  Scan the whole available
+# grouped market after close / premarket / regular / after-hours, then keep a
+# compact sticky watch memory so candidates remain visible before they fly.
+MICRO_EXPLOSION_FULL_MARKET_SCAN_CAP = _env_int("MICRO_EXPLOSION_FULL_MARKET_SCAN_CAP", 9000, 500, 12000)
+MICRO_EXPLOSION_CLOSE_WATCH_LIMIT = _env_int("MICRO_EXPLOSION_CLOSE_WATCH_LIMIT", 120, 20, 220)
+MICRO_EXPLOSION_WATCH_TTL_HOURS = _env_int("MICRO_EXPLOSION_WATCH_TTL_HOURS", 54, 12, 96)
+MICRO_EXPLOSION_SEED_CONFIRM_LIMIT = _env_int("MICRO_EXPLOSION_SEED_CONFIRM_LIMIT", 180, 30, 300)
+MICRO_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:micro_explosion_close_watch_v2r1"
+
+MICRO_EXPLOSION_SEED_SYMBOLS = {
+    # User-provided low-float / China-momentum seed universe.  These names are not
+    # buy calls and are not injected as opportunities by themselves.  They are only
+    # extra symbols to confirm with live data and to score if activity appears.
+    "ADTX","ADVB","ADXN","AKA","AKAN","ATHE","ATPC","ATXG","BBGI","BDL","BJDX","BNRG","CHNR","CHSN","CISS","CLIK","CLRO","CUPR","CVR","DAIC","DCOY","DIT","DKI","DRCT","EEIQ","ELOX","ERNA","EZRA","FCHL","FGI","FGL","FOXX","FRGT","GNLN","GURE","GWAV","HAO","HCAI","HKIT","HTCR","ILAG","INTG","IOR","IOTR","IPST","IPW","JAGX","KUST","LIVE","LVLU","MASK","MAYS","MDRR","MI","MLEC","MTEN","MTEX","NCEW","NCI","NCSM","NCT","NDRA","NTRP","NVNO","NXTS","NYC","OLOX","ONCO","PAVS","PBM","PMAX","PNRG","PRFX","PW","RAND","RAYA","RDGT","RNAZ","RTB","SDOT","SEB","SHPH","SLXN","SMX","SNSE","SPRC","SUGP","SXTC","TLIH","UK","UONE","UPC","VALU","VEEE","VSA","WCT","WGRX","WOK","WTO","YHG","YYAI",
+    "POM","ITP","PASW","CHOW","YHNA","IZM","GSUN","CCTG","RITR","DXF","RCON","TDIC","CBAT","ELPW","EHGO","YIBO","CLPS","CNEY","ONEG","MAO","EDTK","SEED","ZYBT","YRD","EH","WDH","SORA","MSC","SY","LANV","AGMH","IFBD","BQ","LZMH","MEGL","ZCMD","HUDI","DTSS","WIMI","DUO","HLP","CAAS","AZI","AIHS","JZXN","CPHI","ZNB","LXEH","CNET","ORIS","JEM","EZGO","HUIZ","ELOG","LSE","EDHL","RETO","SNTG","KRKR","GLXG","DCX","FTFT","JWEL","JYD","AIXI","GMM","HXHX","BYAH","YJ","RAY","LOBO","TAOP","WYHG","DOGZ","FAMI","EPSM","AEHL","MGIH","MOGU","ABLV","CNF","WAFU","MSGY","DSY","XHG","MIMI","GCDT","BON","MFI","YMT","HOLO","CREG","OCG","ABTS","UBXG","LBGJ","CHR","BAOS","GIBO","WXM","WAI","YOUL","FOFO","YQ","UTSI","STG","NCTY","IH","NBRG","WNW",
+}
 
 _FMP_MOVERS_CACHE: dict = {"ts": 0.0, "rows": [], "error": ""}
 _LAST_DYNAMIC_DISCOVERY_STATUS: dict = {}
@@ -709,8 +733,11 @@ def _micro_explosion_capture_score(ticker: str, metrics: dict, phase_detail: str
 
     # FMP sources often lack candle range/close position, so require clean ignition.
     fmp_source = source_kind in {"fmp_mover", "fmp_live", "fmp_small_mover"}
+    full_market_source = source_kind in {"polygon_full_market_v2r1"}
     if fmp_source:
         score += 8; reasons.append("مصدر حي/متحرك من FMP وليس Watch قديم")
+    if full_market_source:
+        score += 6; reasons.append("مسح كامل للسوق بعد/قبل/أثناء الجلسة وليس Watch قديم")
 
     activity_clue = bool(abs(chg) >= 0.8 or range_pct >= 0.025 or (50_000 <= dollar_volume <= MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME))
     first_ignition = bool(0.8 <= chg < 15.0 and 50_000 <= dollar_volume <= MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME)
@@ -724,8 +751,8 @@ def _micro_explosion_capture_score(ticker: str, metrics: dict, phase_detail: str
         MICRO_EXPLOSION_CAPTURE_ENABLED
         and not blockers
         and activity_clue
-        and (first_ignition or strong_candle or quiet_accumulation or (fmp_source and 1.0 <= chg < 15.0))
-        and score >= 58
+        and (first_ignition or strong_candle or quiet_accumulation or (fmp_source and 0.6 <= chg < 15.0) or (full_market_source and score >= 54 and -4.0 <= chg < 16.0))
+        and score >= 54
     )
     flags.update({
         "micro_explosion_capture_score": safe_round(score, 3),
@@ -767,14 +794,201 @@ def _micro_explosion_debug_payload(ranked: list[dict], final: list[str], max_sym
         })
     rows.sort(key=lambda x: float(x.get("source_score") or x.get("score") or 0), reverse=True)
     return {
-        "version": "micro_explosion_capture_v2r_2026_06_20",
+        "version": "micro_explosion_capture_v2r1_2026_06_20",
         "enabled": bool(MICRO_EXPLOSION_CAPTURE_ENABLED),
         "source_count": len(rows),
         "entered_final_universe_count": len([x for x in rows if x.get("entered_final_universe_before_sharia")]),
         "candidate_symbols": [x.get("symbol") for x in rows[:80]],
         "top_candidates": rows[:80],
-        "rule_ar": "V2R يلتقط أسهم تجميع/شموع قوية/احتمال انفجار قبل التفكير في مكان عرضها. لا يغير Strong/Cautious ولا يعطي شراء مباشر.",
+        "rule_ar": "V2R1 يلتقط أسهم تجميع/شموع قوية/احتمال انفجار من السوق كاملًا ويعيد مراقبتها لاصطيادها قبل أن تطير. لا يغير Strong/Cautious ولا يعطي شراء مباشر.",
     }
+
+
+def _micro_explosion_phase_mode(phase_detail: str = "") -> str:
+    txt = str(phase_detail or "").lower()
+    if "pre_market" in txt:
+        return "pre_market"
+    if "after_hours" in txt:
+        return "after_hours"
+    if "open" in txt:
+        return "regular"
+    return "after_close_review"
+
+
+def _is_micro_explosion_seed_symbol(symbol: str) -> bool:
+    return _clean_symbol(symbol) in MICRO_EXPLOSION_SEED_SYMBOLS
+
+
+def _micro_candidate_memory_item(symbol: str, metrics: dict, reasons: list, score: float, phase_detail: str = "", source: str = "") -> dict:
+    now_iso = datetime.now(NY_TZ).isoformat(timespec="seconds")
+    sym = _clean_symbol(symbol)
+    return {
+        "symbol": sym,
+        "first_seen_at": now_iso,
+        "last_seen_at": now_iso,
+        "last_phase": _micro_explosion_phase_mode(phase_detail),
+        "source": str(source or "micro_explosion_capture_v2r1"),
+        "score": safe_round(score, 3),
+        "price": safe_round((metrics or {}).get("price") or (metrics or {}).get("fmp_price") or (metrics or {}).get("live_price"), 4),
+        "change_pct": safe_round((metrics or {}).get("change_pct") or (metrics or {}).get("day_change_pct") or (metrics or {}).get("fmp_change_pct") or (metrics or {}).get("live_change_pct"), 3),
+        "volume": safe_round((metrics or {}).get("volume") or (metrics or {}).get("fmp_volume") or (metrics or {}).get("live_volume"), 3),
+        "dollar_volume": safe_round((metrics or {}).get("dollar_volume") or (metrics or {}).get("live_dollar_volume"), 3),
+        "range_pct": safe_round((metrics or {}).get("range_pct"), 5),
+        "close_strength": safe_round((metrics or {}).get("close_strength"), 3),
+        "reasons_ar": list(reasons or [])[:8],
+        "observation_count": 1,
+        "micro_explosion_capture_v2r1": True,
+        "micro_explosion_capture_v2r": True,
+    }
+
+
+def _load_micro_explosion_watch_memory() -> tuple[list[dict], dict]:
+    now_ts = time.time()
+    ttl_sec = int(MICRO_EXPLOSION_WATCH_TTL_HOURS) * 3600
+    raw = _sqlite_get_json(MICRO_EXPLOSION_WATCH_MEMORY_KEY, {}) or {}
+    if isinstance(raw, list):
+        raw = {str((x or {}).get("symbol") or "").upper(): x for x in raw if isinstance(x, dict)}
+    if not isinstance(raw, dict):
+        raw = {}
+    active = []
+    kept = {}
+    expired = 0
+    for sym, item in (raw or {}).items():
+        if not isinstance(item, dict):
+            continue
+        sym = _clean_symbol(sym or item.get("symbol"))
+        if not sym:
+            continue
+        last_seen = str(item.get("last_seen_at") or item.get("first_seen_at") or "")
+        age_ok = True
+        try:
+            dt = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=NY_TZ)
+            age_ok = (now_ts - dt.timestamp()) <= ttl_sec
+        except Exception:
+            age_ok = True
+        if not age_ok:
+            expired += 1
+            continue
+        item = dict(item)
+        item["symbol"] = sym
+        kept[sym] = item
+        active.append(item)
+    active.sort(key=lambda x: float(x.get("score", 0) or 0), reverse=True)
+    return active[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT], {
+        "version": "micro_explosion_close_watch_memory_v2r1_2026_06_20",
+        "active_count": len(active[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT]),
+        "expired_count": expired,
+        "ttl_hours": int(MICRO_EXPLOSION_WATCH_TTL_HOURS),
+        "symbols": [x.get("symbol") for x in active[:60]],
+    }
+
+
+def _update_micro_explosion_watch_memory(items: list[dict], phase_detail: str = "") -> dict:
+    if not items:
+        active, debug = _load_micro_explosion_watch_memory()
+        return {**debug, "updated_count": 0, "stored_count": len(active)}
+    active, _ = _load_micro_explosion_watch_memory()
+    existing = {str((x or {}).get("symbol") or "").upper(): dict(x or {}) for x in active if isinstance(x, dict)}
+    now_iso = datetime.now(NY_TZ).isoformat(timespec="seconds")
+    updated = 0
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        sym = _clean_symbol(item.get("symbol"))
+        if not sym:
+            continue
+        prev = existing.get(sym, {})
+        merged = dict(prev)
+        merged.update(item)
+        merged["symbol"] = sym
+        merged["first_seen_at"] = prev.get("first_seen_at") or item.get("first_seen_at") or now_iso
+        merged["last_seen_at"] = now_iso
+        merged["last_phase"] = _micro_explosion_phase_mode(phase_detail)
+        merged["observation_count"] = int(prev.get("observation_count", 0) or 0) + 1
+        existing[sym] = merged
+        updated += 1
+    kept = list(existing.values())
+    kept.sort(key=lambda x: float(x.get("score", 0) or 0), reverse=True)
+    kept = kept[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT]
+    try:
+        _sqlite_set_json(MICRO_EXPLOSION_WATCH_MEMORY_KEY, {x.get("symbol"): x for x in kept if x.get("symbol")})
+    except Exception:
+        pass
+    return {
+        "version": "micro_explosion_close_watch_memory_v2r1_2026_06_20",
+        "updated_count": updated,
+        "stored_count": len(kept),
+        "symbols": [x.get("symbol") for x in kept[:60]],
+        "rule_ar": "ذاكرة Compact فقط للرموز التي ظهرت عليها بوادر انفجار؛ تُعاد للمصدر قبل الافتتاح/أثناءه/بعده ولا تخزن raw files.",
+    }
+
+
+def _collect_micro_explosion_full_market_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
+    debug = {
+        "version": "micro_explosion_full_market_scan_v2r1_2026_06_20",
+        "enabled": bool(MICRO_EXPLOSION_CAPTURE_ENABLED),
+        "scan_cap": int(MICRO_EXPLOSION_FULL_MARKET_SCAN_CAP),
+        "scanned": 0,
+        "eligible_count": 0,
+        "seed_match_count": 0,
+        "blocked_count": 0,
+        "top_symbols": [],
+        "rule_ar": "يمسح السوق المتاح كاملًا بدون base_filters الثقيلة لالتقاط التجميع/الشموع القوية قبل أن يدخل السهم Watch قديمًا أو يطير.",
+    }
+    if not MICRO_EXPLOSION_CAPTURE_ENABLED or not grouped_map:
+        return [], debug
+    out: list[dict] = []
+    for idx, (ticker, daily) in enumerate((grouped_map or {}).items()):
+        if idx >= MICRO_EXPLOSION_FULL_MARKET_SCAN_CAP:
+            break
+        sym = _clean_symbol(ticker)
+        if not sym or not daily:
+            continue
+        debug["scanned"] += 1
+        metrics = _source_metrics_from_grouped(daily) or {}
+        price = to_float(metrics.get("price"))
+        volume = to_float(metrics.get("volume"))
+        if price <= 0 or volume <= 0:
+            continue
+        chg = to_float(metrics.get("day_change_pct")) * 100.0
+        metrics = {**metrics, "change_pct": chg, "day_change_pct": chg}
+        seed = _is_micro_explosion_seed_symbol(sym)
+        if seed:
+            debug["seed_match_count"] += 1
+        eligible, score, reasons, flags = _micro_explosion_capture_score(sym, metrics, phase_detail=phase_detail, source_kind="polygon_full_market_v2r1")
+        # V2R1: seed symbols from the simulator-style universe can be watched a bit
+        # earlier if they have constructive candle evidence, but still no BUY.
+        if not eligible and seed:
+            range_pct = to_float(metrics.get("range_pct"))
+            close_strength = to_float(metrics.get("close_strength"))
+            dollar_volume = to_float(metrics.get("dollar_volume")) or price * volume
+            constructive = bool(0 < price <= MICRO_EXPLOSION_CAPTURE_EXTENDED_MAX_PRICE and 20_000 <= dollar_volume <= MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME and -4.0 <= chg < 18.0 and range_pct >= 0.012 and close_strength >= 0.46)
+            if constructive:
+                eligible = True
+                score = max(float(score or 0), 48.0 + min(max(close_strength, 0), 1) * 18.0 + min(max(range_pct, 0) * 100, 14.0))
+                reasons = ["Seed Micro/China + شمعة/تجميع بنّاء مبكر"] + list(reasons or [])[:5]
+                flags.update({
+                    "micro_explosion_capture_score": safe_round(score, 3),
+                    "micro_explosion_capture_eligible": True,
+                    "micro_explosion_reasons_ar": reasons[:8],
+                    "micro_explosion_capture_v2r1": True,
+                    "micro_explosion_seed_match": True,
+                })
+        if not eligible:
+            debug["blocked_count"] += 1
+            continue
+        if seed:
+            score += 8.0
+            reasons = ["رمز ضمن Seed Micro/China/Low-Float للمراقبة اللصيقة"] + list(reasons or [])[:7]
+        flags.update({"micro_explosion_capture_v2r1": True, "micro_explosion_seed_match": seed})
+        out.append({"symbol": sym, "score": safe_round(score, 3), "reasons": reasons[:8], "metrics": {**metrics, **flags}})
+    out.sort(key=lambda r: float(r.get("score", 0) or 0), reverse=True)
+    out = out[:MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT]
+    debug["eligible_count"] = len(out)
+    debug["top_symbols"] = [r.get("symbol") for r in out[:50]]
+    return out, debug
 
 
 def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
@@ -854,6 +1068,29 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     low_float_fast_lane_trace: dict[str, dict] = {}
     micro_explosion_capture_count = 0
     micro_explosion_capture_symbols: list[str] = []
+    micro_explosion_memory_items: list[dict] = []
+    micro_explosion_full_market_status: dict = {}
+    micro_explosion_watch_memory_debug: dict = {}
+    micro_watch_rows: list[dict] = []
+
+    # V2R1 sticky close watch: candidates detected after close / premarket /
+    # regular session are put back into the source before FMP confirmation.
+    try:
+        micro_watch_rows, micro_explosion_watch_memory_debug = _load_micro_explosion_watch_memory()
+        for item in micro_watch_rows or []:
+            sym = _clean_symbol((item or {}).get("symbol"))
+            if not sym:
+                continue
+            _add_candidate(
+                candidates,
+                sym,
+                58 + min(float((item or {}).get("score", 0) or 0), 90) * 0.18,
+                "micro_explosion_close_watch_v2r1",
+                "مراقبة لصيقة مستمرة من رادار الانفجار — لا تنتظر منبعًا قديمًا",
+                {**item, "micro_explosion_capture_v2r": True, "micro_explosion_capture_v2r1": True},
+            )
+    except Exception as exc:
+        micro_explosion_watch_memory_debug = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
     # Source / Promotion V2a: explicitly inject the curated Early Movement
     # watchlist into the dynamic discovery source.  Previously it usually arrived
@@ -1003,7 +1240,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                         ticker,
                         70 + me_score * 0.38,
                         "micro_explosion_capture_v2r",
-                        "Micro Explosion Capture V2R: " + "، ".join(me_reasons[:3]),
+                        "Micro Explosion Capture V2R1: " + "، ".join(me_reasons[:3]),
                         {**m, **me_flags, "micro_explosion_capture_reasons": me_reasons},
                     )
                     if record_detection is not None:
@@ -1012,8 +1249,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                                 ticker,
                                 price=float(m.get("price", 0) or 0),
                                 change_pct=float(chg or 0),
-                                source_reason="Micro Explosion Capture V2R: " + "، ".join(me_reasons[:3]),
-                                source_layer="micro_explosion_capture_v2r",
+                                source_reason="Micro Explosion Capture V2R1: " + "، ".join(me_reasons[:3]),
+                                source_layer="micro_explosion_capture_v2r1",
                                 source_tags=["micro_explosion_capture_v2r", "accumulation_strong_candle_source"],
                                 move_stage="High-Risk Early Explosion Watch",
                                 early_or_late_detection="early",
@@ -1022,6 +1259,59 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                             pass
             except Exception:
                 pass
+
+
+    # V2R1: Whole-market micro explosion scan.  This deliberately bypasses the
+    # old base_filters because simulator-style micro/China/low-float names are
+    # often erased by normal liquidity filters before they ever reach Watch.
+    try:
+        micro_full_rows, micro_explosion_full_market_status = _collect_micro_explosion_full_market_candidates(
+            grouped_map or {},
+            phase_detail=str(phase_info.get("detail", "") or ""),
+        )
+        for item in micro_full_rows or []:
+            sym = _clean_symbol((item or {}).get("symbol"))
+            if not sym:
+                continue
+            score = float((item or {}).get("score", 0) or 0)
+            reasons = list((item or {}).get("reasons") or [])
+            metrics = dict((item or {}).get("metrics") or {})
+            micro_explosion_capture_count += 1
+            micro_explosion_capture_symbols.append(sym)
+            micro_explosion_memory_items.append(_micro_candidate_memory_item(sym, metrics, reasons, score, str(phase_info.get("detail", "") or ""), "polygon_full_market_v2r1"))
+            _add_candidate(
+                candidates,
+                sym,
+                82 + score * 0.44,
+                "micro_explosion_capture_v2r",
+                "Micro Explosion Capture V2R1 — مسح السوق كاملًا: " + "، ".join(reasons[:3]),
+                {**metrics, "micro_explosion_capture_reasons": reasons, "micro_explosion_capture_v2r": True, "micro_explosion_capture_v2r1": True},
+            )
+            _add_candidate(
+                candidates,
+                sym,
+                18,
+                "micro_explosion_close_watch_v2r1",
+                "بدأت مراقبة لصيقة لمرشح انفجار قبل أن يطير",
+                {**metrics, "micro_explosion_capture_v2r": True, "micro_explosion_capture_v2r1": True},
+            )
+            if record_detection is not None:
+                try:
+                    record_detection(
+                        sym,
+                        price=float(metrics.get("price", 0) or 0),
+                        change_pct=float(metrics.get("change_pct", metrics.get("day_change_pct", 0)) or 0),
+                        source_reason="Micro Explosion Capture V2R1 full-market: " + "، ".join(reasons[:3]),
+                        source_layer="micro_explosion_capture_v2r1",
+                        source_tags=["micro_explosion_capture_v2r1", "full_market_scan", "sticky_close_watch"],
+                        move_stage="Sticky Micro Explosion Watch",
+                        early_or_late_detection="early",
+                    )
+                except Exception:
+                    pass
+    except Exception as exc:
+        micro_explosion_full_market_status = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:140]}"}
+
 
 
     # Low-Float Fast Lane V1: independent from Watch/Early/baseline.  This is
@@ -1170,8 +1460,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         volume = to_float(row.get("volume") or row.get("dayVolume"))
         dollar_volume = price * volume if price > 0 and volume > 0 else 0.0
         if price and price < 1.5:
-            _fast_lane_trace_update(low_float_fast_lane_trace, sym, source_kind="fmp_mover", metrics=_low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_mover"), eligible=False, rejected_reason_code="price_below_source_min", rejected_reason_ar="السعر أقل من 1.5$ في مصدر FMP movers؛ لم يدخل مصدر Fast Lane الحالي.")
-            continue
+            _fast_lane_trace_update(low_float_fast_lane_trace, sym, source_kind="fmp_mover", metrics=_low_float_metrics_from_price_change_volume(price, change_pct, volume, source_kind="fmp_mover"), eligible=False, rejected_reason_code="price_below_source_min", rejected_reason_ar="السعر أقل من 1.5$ في مصدر Low-Float Fast Lane؛ لكنه يبقى مؤهلاً لرادار Micro Explosion V2R1 إذا ظهرت عليه بوادر انفجار.")
         fmp_mover_count += 1
         score, source_move_stage = _score_fmp_mover_source(change_pct, dollar_volume)
         pref_score, pref_reasons, flags = _score_price_preference(price, change_pct, dollar_volume)
@@ -1204,17 +1493,18 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             if me_ok:
                 micro_explosion_capture_count += 1
                 micro_explosion_capture_symbols.append(sym)
+                micro_explosion_memory_items.append(_micro_candidate_memory_item(sym, {**me_metrics, **me_flags}, me_reasons, me_score, str(phase_info.get("detail", "") or ""), "fmp_mover"))
                 _add_candidate(
                     candidates,
                     sym,
                     74 + me_score * 0.36,
                     "micro_explosion_capture_v2r",
-                    "Micro Explosion Capture V2R من FMP: " + "، ".join(me_reasons[:3]),
+                    "Micro Explosion Capture V2R1 من FMP: " + "، ".join(me_reasons[:3]),
                     {**me_metrics, **me_flags, "micro_explosion_capture_reasons": me_reasons},
                 )
                 if record_detection is not None:
                     try:
-                        record_detection(sym, price=price, change_pct=change_pct, source_reason="Micro Explosion Capture V2R من FMP movers", source_layer="micro_explosion_capture_v2r", source_tags=["fmp_movers", "micro_explosion_capture_v2r"], move_stage="High-Risk Early Explosion Watch", early_or_late_detection="early")
+                        record_detection(sym, price=price, change_pct=change_pct, source_reason="Micro Explosion Capture V2R1 من FMP movers", source_layer="micro_explosion_capture_v2r1", source_tags=["fmp_movers", "micro_explosion_capture_v2r1", "sticky_close_watch"], move_stage="High-Risk Early Explosion Watch", early_or_late_detection="early")
                     except Exception:
                         pass
         except Exception:
@@ -1237,7 +1527,16 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
 
     # Confirm only the best candidates with FMP live/extended quotes. No price cache is used here.
     rows_before_confirm = _normalize_candidate_rows(candidates)
-    fmp_confirm_symbols = [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
+    # V2R1: live-confirm sticky micro watch + user-provided micro/China seeds even
+    # when they did not rank high enough in old source buckets.  This is the key
+    # change: do not wait for them to enter Watch first.
+    seed_confirm_symbols = [s for s in sorted(MICRO_EXPLOSION_SEED_SYMBOLS)[:MICRO_EXPLOSION_SEED_CONFIRM_LIMIT]]
+    memory_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (micro_watch_rows or [])[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT]]
+    fmp_confirm_symbols = _scanner.unique_keep_order(
+        [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
+        + memory_confirm_symbols
+        + seed_confirm_symbols
+    )[: max(DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT, min(420, DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT + MICRO_EXPLOSION_SEED_CONFIRM_LIMIT))]
     fmp_quotes = {}
     fmp_diag = {}
     if DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION and FMP_API_KEY and fmp_confirm_symbols:
@@ -1302,17 +1601,18 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             if me_ok:
                 micro_explosion_capture_count += 1
                 micro_explosion_capture_symbols.append(sym)
+                micro_explosion_memory_items.append(_micro_candidate_memory_item(sym, {**me_metrics, **me_flags}, me_reasons, me_score, str(phase_info.get("detail", "") or ""), "fmp_live"))
                 _add_candidate(
                     candidates,
                     sym,
                     66 + me_score * 0.32,
                     "micro_explosion_capture_v2r",
-                    "Micro Explosion Capture V2R من FMP live: " + "، ".join(me_reasons[:3]),
+                    "Micro Explosion Capture V2R1 من FMP live: " + "، ".join(me_reasons[:3]),
                     {**me_metrics, **me_flags, "micro_explosion_capture_reasons": me_reasons},
                 )
                 if record_detection is not None:
                     try:
-                        record_detection(sym, price=price, change_pct=change_pct, source_reason="Micro Explosion Capture V2R من FMP live", source_layer="micro_explosion_capture_v2r", source_tags=["fmp_live_confirmed", "micro_explosion_capture_v2r"], move_stage="High-Risk Early Explosion Watch", early_or_late_detection="early")
+                        record_detection(sym, price=price, change_pct=change_pct, source_reason="Micro Explosion Capture V2R1 من FMP live", source_layer="micro_explosion_capture_v2r1", source_tags=["fmp_live_confirmed", "micro_explosion_capture_v2r1", "sticky_close_watch"], move_stage="High-Risk Early Explosion Watch", early_or_late_detection="early")
                     except Exception:
                         pass
         except Exception:
@@ -1332,6 +1632,15 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         for reason in pref_reasons:
             _add_candidate(candidates, sym, 0, "price_preference", reason)
 
+    try:
+        memory_update_debug = _update_micro_explosion_watch_memory(micro_explosion_memory_items, str(phase_info.get("detail", "") or ""))
+        if isinstance(micro_explosion_watch_memory_debug, dict):
+            micro_explosion_watch_memory_debug.update({"update": memory_update_debug})
+        else:
+            micro_explosion_watch_memory_debug = {"update": memory_update_debug}
+    except Exception as exc:
+        micro_explosion_watch_memory_debug = {"ok": False, "update_error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
     ranked = _normalize_candidate_rows(candidates)
 
     def from_source(source: str, limit: int) -> list[str]:
@@ -1350,6 +1659,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # then constructive liquidity.  Late movers stay visible for review, but they
     # must never crowd out early builders or weekly-priority names.
     selected_order += from_source("micro_explosion_capture_v2r", min(MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT, max_symbols))
+    selected_order += from_source("micro_explosion_close_watch_v2r1", min(MICRO_EXPLOSION_CLOSE_WATCH_LIMIT, max_symbols))
     selected_order += from_source("low_float_fast_lane_v1", min(160, max_symbols))
     selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
     selected_order += from_source("polygon_weekly_builder", min(90, max_symbols))
@@ -1405,9 +1715,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3e_micro_explosion_capture_v2r_2026_06_20",
+        "engine_version": "dynamic_discovery_v3f_micro_explosion_close_watch_v2r1_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_micro_explosion_capture_and_fast_lane_funnel_debug",
+        "dynamic_discovery_mode": "candidate_pool_plus_whole_market_micro_explosion_close_watch_and_fast_lane_funnel_debug",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -1435,8 +1745,12 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "low_float_fast_lane": low_float_fast_lane_status,
         "low_float_fast_lane_funnel_debug": low_float_fast_lane_funnel_debug,
         "micro_explosion_capture_count": int(source_bucket_counts.get("micro_explosion_capture_v2r", 0)) if 'source_bucket_counts' in locals() else int(micro_explosion_capture_count or 0),
-        "micro_explosion_capture_symbols": _scanner.unique_keep_order(micro_explosion_capture_symbols)[:80],
+        "micro_explosion_capture_symbols": _scanner.unique_keep_order(micro_explosion_capture_symbols)[:120],
         "micro_explosion_capture_debug": micro_explosion_capture_debug,
+        "micro_explosion_full_market_scan": micro_explosion_full_market_status,
+        "micro_explosion_close_watch_count": int(source_bucket_counts.get("micro_explosion_close_watch_v2r1", 0)) if 'source_bucket_counts' in locals() else 0,
+        "micro_explosion_close_watch_memory": micro_explosion_watch_memory_debug,
+        "micro_explosion_seed_confirm_count": len(seed_confirm_symbols) if 'seed_confirm_symbols' in locals() else 0,
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,
@@ -1481,7 +1795,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 "reasons": list(r.get("reasons") or [])[:8],
                 "metrics": {
                     k: v for k, v in (r.get("metrics") or {}).items()
-                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p", "micro_explosion_capture_v2r", "micro_explosion_capture_score", "micro_explosion_source_kind", "micro_explosion_reasons_ar", "micro_explosion_blockers_ar", "micro_explosion_first_ignition", "micro_explosion_strong_candle", "micro_explosion_quiet_accumulation"}
+                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p", "micro_explosion_capture_v2r", "micro_explosion_capture_score", "micro_explosion_source_kind", "micro_explosion_reasons_ar", "micro_explosion_blockers_ar", "micro_explosion_first_ignition", "micro_explosion_strong_candle", "micro_explosion_quiet_accumulation", "micro_explosion_capture_v2r1", "micro_explosion_seed_match"}
                 },
             }
             for r in ranked[:max_symbols]
