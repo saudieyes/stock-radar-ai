@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2n1_promotion_bridge_ui_polish_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2o_low_float_fast_lane_source_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -1711,8 +1711,20 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     very_low = 1.0 <= price <= 5.0
     high_activity = bool(change >= 4.0 or from_open >= 3.0 or liquidity_points >= 30)
     high_risk_day = bool(low_price and high_activity and not no_chase)
-    low_float_pm = bool(low_price and (high_activity or _num(row.get("pre_market_volume"), 0.0) > 100_000 or _num(row.get("pre_market_change_pct"), 0.0) >= 2.0))
+    # V2O: Low-Float classification must not rely only on Watch/Early context.
+    # It now uses the stricter fast-lane/float/small-price proxy profile, so
+    # known liquid names like NOK are not put in Low-Float just because they are
+    # low-ish price and in a watch bucket.
+    low_float_profile = _low_float_proxy_metrics(row)
+    low_float_pm = bool(
+        low_float_profile.get("confirmed_float")
+        or low_float_profile.get("small_cap_proxy")
+        or low_float_profile.get("proxy_candidate")
+        or (low_price and (_num(row.get("pre_market_volume"), 0.0) > 100_000 or _num(row.get("pre_market_change_pct"), 0.0) >= 2.0))
+    )
     if extended_after_move and low_price:
+        high_risk_day = True
+    if low_float_profile.get("fast_lane_source") and low_float_pm:
         high_risk_day = True
 
     gap_up = _num(row.get("open_gap_pct", row.get("gap_from_prev_close_pct", 0)), 0.0)
@@ -1788,6 +1800,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "pre_trigger_reasons": _dedupe(pre_reasons, 8),
         "high_risk_day": high_risk_day,
         "low_float_pm": low_float_pm,
+        "low_float_fast_lane": bool(low_float_profile.get("fast_lane_source")),
+        "low_float_profile_v2o": low_float_profile,
         "classic_small_stock": classic_small,
         "classic_small_candidate": classic_candidate,
         "classic_small_chase_risk": classic_chase_risk,
@@ -1833,13 +1847,22 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
         return "reclaim", label, "reclaim", flags.get("reclaim_reasons", [])
     if flags.get("near_support"):
         return "support_bounce", "↩️ بدأ ارتداد / قريب من دعم", "support_bounce", flags.get("support_reasons", [])
+    if flags.get("low_float_fast_lane") and flags.get("low_float_pm"):
+        profile = flags.get("low_float_profile_v2o") if isinstance(flags.get("low_float_profile_v2o"), dict) else {}
+        reasons = ["مصدر Low-Float Fast Lane مستقل — عالي المخاطر ومراقبة فقط."]
+        reasons.extend(list(profile.get("reasons") or [])[:5])
+        return "low_float_premarket", "🚀 Low-Float Fast Lane / بري ماركت", "low_float_premarket", _dedupe(reasons, 7)
+    if flags.get("low_float_pm") and not flags.get("extended_after_move"):
+        profile = flags.get("low_float_profile_v2o") if isinstance(flags.get("low_float_profile_v2o"), dict) else {}
+        reasons = ["سهم صغير/نشط يحتاج مراقبة مبكرة وليس Strong عادي."]
+        if profile.get("label_ar"):
+            reasons.append(_s(profile.get("label_ar")))
+        return "low_float_premarket", "🚀 مرشح Low-Float / بري ماركت", "low_float_premarket", _dedupe(reasons, 7)
     if flags.get("high_risk_day"):
         base = "سهم صغير متحرك؛ يعامل كحجم صغير عالي المخاطرة لا كدخول قوي عادي."
         if flags.get("extended_after_move"):
             base = "تحرك قوي وقريب من مقاومة/منطقة قرار؛ لا يصنف Support Bounce ولا يُطارد."
         return "high_risk_day_trade", "⚡ مضاربة عالية المخاطرة", "high_risk_day_trade", [base]
-    if flags.get("low_float_pm"):
-        return "low_float_premarket", "🚀 مرشح Low-Float / بري ماركت", "low_float_premarket", ["سهم صغير/نشط يحتاج مراقبة مبكرة وليس Strong عادي."]
     if flags.get("continuation_pullback"):
         return "continuation_pullback", "📈 Continuation Pullback Candidate", "continuation_pullback", ["استمرار مشروط؛ لا تطارد القمة وانتظر Pullback صحي."]
     if flags.get("gap_watch"):
@@ -2024,6 +2047,7 @@ def _sort_bucket(rows: list[dict]) -> list[dict]:
 # final decision engine.
 CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
+LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v1_2026_06_20"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -2126,22 +2150,47 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
     watch_context = _row_is_early_or_watch_context(row)
     learning = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
     learning_positive = _s(learning.get("entry_bias")) in {"positive_watch", "watch_needs_volume", "speculative_watch"}
+    tags = row.get("source_reason_tags") if isinstance(row.get("source_reason_tags"), list) else []
+    source_text = " ".join([_s(row.get("source_reason")), _s(row.get("first_source_layer")), _s(row.get("source_priority_lane")), " ".join([_s(x) for x in tags])]).lower()
+    fast_lane = bool(
+        row.get("low_float_fast_lane")
+        or row.get("low_float_fast_lane_v1")
+        or "low_float_fast_lane" in source_text
+        or "low-float fast lane" in source_text
+        or "fast lane low-float" in source_text
+    )
     confirmed_float = bool(float_shares > 0 and float_shares <= 25_000_000)
     small_cap_proxy = bool(market_cap > 0 and market_cap <= 350_000_000)
-    low_price_core = bool(0.35 <= price <= 20.0)
-    micro_price_core = bool(0.35 <= price <= 12.0)
-    activity = bool(
-        vol_ratio >= 1.05 or dollar_vol >= 75_000 or pm_vol >= 30_000 or abs(pm_change) >= 1.0
-        or abs(change) >= 1.0 or move_risk >= 3.0 or has_prev or watch_context or learning_positive
+    # V2O: Do not call every known, liquid, low-priced stock a Low-Float candidate.
+    # The old proxy used Watch/Early context too broadly, so names like NOK could
+    # enter Low-Float even with no float proof and no explosive source lane.
+    core_micro_price = bool(0.35 <= price <= 12.0)
+    extended_small_price = bool(12.0 < price <= 20.0)
+    explosive_activity = bool(
+        vol_ratio >= 1.35 or dollar_vol >= 75_000 or pm_vol >= 30_000 or abs(pm_change) >= 1.0
+        or abs(change) >= 1.0 or move_risk >= 3.0 or has_prev or learning_positive or fast_lane
     )
-    proxy_candidate = bool(low_price_core and activity)
-    strong_proxy = bool(micro_price_core and (activity or has_prev or watch_context))
-    label = "confirmed_float" if confirmed_float else ("small_cap_proxy" if small_cap_proxy else ("proxy_low_price_activity" if proxy_candidate else "not_low_float_candidate"))
+    # For 12–20$ names, require a dedicated fast-lane/small-cap/confirmed float signal.
+    proxy_candidate = bool(
+        confirmed_float
+        or small_cap_proxy
+        or (core_micro_price and explosive_activity)
+        or (extended_small_price and fast_lane)
+    )
+    strong_proxy = bool(
+        confirmed_float
+        or small_cap_proxy
+        or (0.35 <= price <= 8.0 and (explosive_activity or has_prev or fast_lane))
+        or (core_micro_price and fast_lane)
+    )
+    label = "confirmed_float" if confirmed_float else ("small_cap_proxy" if small_cap_proxy else ("fast_lane_proxy" if fast_lane and proxy_candidate else ("proxy_low_price_activity" if proxy_candidate else "not_low_float_candidate")))
     reasons = []
     if confirmed_float:
         reasons.append(f"Float معروف تقريبًا {round(float_shares/1_000_000, 2)}M")
     elif small_cap_proxy:
         reasons.append(f"قيمة سوقية صغيرة تقريبًا {round(market_cap/1_000_000, 1)}M — بديل عند غياب float")
+    elif fast_lane and proxy_candidate:
+        reasons.append("مرشح من Low-Float Fast Lane: صغير/غامض أو سريع وليس مجرد Watch عادي")
     elif proxy_candidate:
         reasons.append("Float غير مؤكد؛ مرشح Proxy بسبب السعر المنخفض/النشاط/الذاكرة")
     if price > 0:
@@ -2170,13 +2219,16 @@ def _low_float_proxy_metrics(row: dict) -> dict[str, Any]:
         "label_ar": {
             "confirmed_float": "Low-Float مؤكد من بيانات float",
             "small_cap_proxy": "سهم صغير/قيمة سوقية صغيرة — بديل عند غياب float",
+            "fast_lane_proxy": "Low-Float Fast Lane — مرشح انفجار مبكر غير مؤكد بالـ float",
             "proxy_low_price_activity": "مرشح Low-Float بالوكالة — السعر/النشاط/الذاكرة",
             "not_low_float_candidate": "ليس مرشح Low-Float حاليًا",
         }.get(label, label),
-        "activity": activity,
+        "activity": explosive_activity,
+        "fast_lane_source": fast_lane,
         "has_previous_session_memory": has_prev,
         "watch_context": watch_context,
         "learning_positive": learning_positive,
+        "known_watch_only_excluded": bool(extended_small_price and watch_context and not fast_lane and not confirmed_float and not small_cap_proxy),
         "volume_ratio": vol_ratio,
         "dollar_volume": dollar_vol,
         "premarket_volume": pm_vol,
@@ -2197,11 +2249,14 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
         "confirmed_float_count": 0,
         "small_cap_proxy_count": 0,
         "proxy_candidate_count": 0,
+        "fast_lane_source_count": 0,
+        "watch_only_excluded_count": 0,
         "watch_or_early_context_count": 0,
         "previous_session_memory_count": 0,
         "existing_low_float_section_count": len(existing),
         "sample_candidates": [],
-        "rule_ar": "هذا التشخيص يثبت هل الأداة تلتقط أسهم Low-Float/Small Proxy قبل الافتتاح حتى لو لم تتحول إلى Strong/Cautious. لا يعتمد على شراء مباشر.",
+        "excluded_known_watch_only_sample": [],
+        "rule_ar": "V2O: Low-Float الحقيقي لا يأتي من Watch/Early فقط. نفضل Fast Lane مستقل أو سعر صغير جدًا مع نشاط، ونستبعد الأسماء المعروفة/الأكثر سيولة مثل NOK إذا لم يوجد float أو Fast Lane.",
     }
     samples = []
     for row in rows:
@@ -2217,6 +2272,12 @@ def _low_float_capture_debug(rows: list[dict], existing: list[dict] | None = Non
             debug["small_cap_proxy_count"] += 1
         if m.get("proxy_candidate"):
             debug["proxy_candidate_count"] += 1
+        if m.get("fast_lane_source"):
+            debug["fast_lane_source_count"] += 1
+        if m.get("known_watch_only_excluded"):
+            debug["watch_only_excluded_count"] += 1
+            if len(debug.get("excluded_known_watch_only_sample", [])) < 12:
+                debug["excluded_known_watch_only_sample"].append({"symbol": _u(row.get("symbol")), "price": m.get("price"), "reason_ar": "سعر فوق 12$ أو اسم معروف/Watch فقط بدون fast-lane أو float مؤكد"})
         if m.get("watch_context"):
             debug["watch_or_early_context_count"] += 1
         if m.get("has_previous_session_memory"):
@@ -2323,7 +2384,7 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
         reasons = ["Low-Float / سهم صغير للتحضير قبل الافتتاح — ليس شراء مباشر."]
         reasons.append(_s(lf.get("label_ar")))
         reasons.extend(lf.get("reasons", [])[:6])
-        add("low_float_premarket_radar", 27.0 if lf.get("confirmed_float") else 22.0, reasons)
+        add("low_float_premarket_radar", 32.0 if lf.get("fast_lane_source") else (27.0 if lf.get("confirmed_float") else 22.0), reasons)
 
     # Gap/Catalyst are context sections, not entry calls.
     gap = _num(row.get("open_gap_pct", row.get("gap_from_prev_close_pct", 0)), 0.0)
@@ -3134,7 +3195,7 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
         },
         "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
         "small_stock_classic_rule_ar": "للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ لا نعامل فروقات السنت كقرار منفصل. نعتمد Fib 61.8/78.6، VWAP بإغلاق شمعة 5د/15د، قمة أمس، أو اختراق واضح لمنطقة صغيرة، ولا نطارد الشمعة الخضراء.",
-        "low_float_capture_rule_ar": "V2M يضيف تشخيص low_float_capture_debug حتى نعرف هل المشكلة عدم وجود مرشحين أم سقوطهم في التوجيه/العرض. إذا غاب float الحقيقي تظهر Proxy واضحة لا تُعامل كتأكيد float.",
-        "promotion_bridge_rule_ar": "V2N يضيف جسر ترقية قبل الافتتاح: يقرأ Low-Float/Small Classic/Pre-Trigger/Support ويحدد من قد يترقى عند تحقق الحجم والسعر، بدون تغيير Strong/Cautious.",
+        "low_float_capture_rule_ar": "V2O يصلح مصدر Low-Float: لا يعتمد على Watch/Early فقط، ويستبعد الأسماء المعروفة/الأكثر سيولة من Low-Float إذا لم يوجد float أو Fast Lane مستقل.",
+        "promotion_bridge_rule_ar": "V2N/V2O يضيف جسر ترقية قبل الافتتاح: يقرأ Low-Float/Small Classic/Pre-Trigger/Support ويحدد من قد يترقى عند تحقق الحجم والسعر، بدون تغيير Strong/Cautious.",
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }

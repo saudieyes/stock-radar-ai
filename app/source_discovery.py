@@ -60,6 +60,11 @@ DYNAMIC_DISCOVERY_MIN_PREFERRED_PRICE = float(os.getenv("DYNAMIC_DISCOVERY_MIN_P
 DYNAMIC_DISCOVERY_MAX_PREFERRED_PRICE = float(os.getenv("DYNAMIC_DISCOVERY_MAX_PREFERRED_PRICE", "300") or 300)
 DYNAMIC_DISCOVERY_UNDER_2_EXCEPTION_CHANGE_PCT = float(os.getenv("DYNAMIC_DISCOVERY_UNDER_2_EXCEPTION_CHANGE_PCT", "8") or 8)
 DYNAMIC_DISCOVERY_MOVER_CACHE_TTL_SEC = _env_int("DYNAMIC_DISCOVERY_MOVER_CACHE_TTL_SEC", 120, 30, 600)
+LOW_FLOAT_FAST_LANE_ENABLED = _env_bool("LOW_FLOAT_FAST_LANE_ENABLED", True)
+LOW_FLOAT_FAST_LANE_SCAN_CAP = _env_int("LOW_FLOAT_FAST_LANE_SCAN_CAP", 2500, 300, 6000)
+LOW_FLOAT_FAST_LANE_INJECT_LIMIT = _env_int("LOW_FLOAT_FAST_LANE_INJECT_LIMIT", 180, 30, 300)
+LOW_FLOAT_FAST_LANE_MAX_PRICE = float(os.getenv("LOW_FLOAT_FAST_LANE_MAX_PRICE", "12") or 12)
+LOW_FLOAT_FAST_LANE_EXTENDED_MAX_PRICE = float(os.getenv("LOW_FLOAT_FAST_LANE_EXTENDED_MAX_PRICE", "20") or 20)
 
 _FMP_MOVERS_CACHE: dict = {"ts": 0.0, "rows": [], "error": ""}
 _LAST_DYNAMIC_DISCOVERY_STATUS: dict = {}
@@ -314,6 +319,138 @@ def _normalize_candidate_rows(candidates: dict) -> list[dict]:
     return out
 
 
+
+
+def _low_float_fast_lane_score(ticker: str, metrics: dict, phase_detail: str = "") -> tuple[bool, float, list[str], dict]:
+    """Dedicated obscure small-stock / low-float-like source lane.
+
+    This lane is intentionally independent from Watch/Early/weekly/baseline. It
+    scans the broad grouped market map and tries to surface small, potentially
+    explosive names before they become obvious movers. It is a source layer only:
+    Sharia filtering and the final decision engine still run later.
+    """
+    price = to_float((metrics or {}).get("price"))
+    chg = to_float((metrics or {}).get("day_change_pct")) * 100.0
+    dollar_volume = to_float((metrics or {}).get("dollar_volume"))
+    volume = to_float((metrics or {}).get("volume"))
+    range_pct = to_float((metrics or {}).get("range_pct"))
+    close_strength = to_float((metrics or {}).get("close_strength"))
+    near_high = bool((metrics or {}).get("near_high"))
+    reasons: list[str] = []
+    score = 0.0
+    flags = {
+        "price": price,
+        "day_change_pct": chg,
+        "dollar_volume": dollar_volume,
+        "volume": volume,
+        "range_pct": range_pct,
+        "close_strength": close_strength,
+        "near_high": near_high,
+    }
+    if price <= 0:
+        return False, 0.0, ["سعر غير متاح"], flags
+    if price < 0.35:
+        return False, 0.0, ["أقل من 0.35$ — خطر/ضجيج أعلى من الهدف"], flags
+
+    core_price = price <= LOW_FLOAT_FAST_LANE_MAX_PRICE
+    extended_price = LOW_FLOAT_FAST_LANE_MAX_PRICE < price <= LOW_FLOAT_FAST_LANE_EXTENDED_MAX_PRICE
+    if core_price:
+        score += 24 if price <= 5 else 18
+        reasons.append("سعر صغير مناسب لرادار الانفجارات")
+    elif extended_price:
+        # Do not let familiar 13–20$ names in unless they show unusual expansion.
+        if not (abs(chg) >= 4.0 and range_pct >= 0.055 and dollar_volume <= 80_000_000):
+            return False, 0.0, ["سعر 12–20$ بدون تمدد/نشاط كافٍ — لا يدخل Fast Lane"], flags
+        score += 7
+        reasons.append("سعر أعلى قليلًا لكن الحركة/النطاق غير عادي")
+    else:
+        return False, 0.0, ["فوق نطاق Low-Float Fast Lane"], flags
+
+    # Obscure/small-stock runners usually start with enough liquidity to trade,
+    # but not institutional megaliquidity.  Very high dollar-volume names are
+    # more often known/liquid stocks, not simulator-style low-float runners.
+    if 100_000 <= dollar_volume <= 3_000_000:
+        score += 18; reasons.append("دولار فوليوم صغير/قابل للاشتعال")
+    elif 3_000_000 < dollar_volume <= 20_000_000:
+        score += 13; reasons.append("دولار فوليوم متوسط مناسب للمضاربة")
+    elif 20_000_000 < dollar_volume <= 80_000_000:
+        score += 5; reasons.append("سيولة مرتفعة نسبيًا — يحتاج فلترة مطاردة")
+    elif dollar_volume > 80_000_000:
+        score -= 22; reasons.append("سيولة كبيرة جدًا — غالبًا سهم معروف لا Low-Float")
+    else:
+        score += 4; reasons.append("سيولة منخفضة جدًا — مراقبة فقط حتى يظهر حجم")
+
+    if 0.5 <= chg < 5.0:
+        score += 14; reasons.append("حركة مبكرة قبل الانفجار")
+    elif 5.0 <= chg < 12.0:
+        score += 10; reasons.append("نشاط قوي لكن ليس انفجارًا كاملًا")
+    elif 12.0 <= chg < 25.0:
+        score += 3; reasons.append("تحرك كبير — مراجعة عالية المخاطر لا مطاردة")
+    elif chg >= 25.0:
+        score -= 16; reasons.append("تحرك كبير جدًا — غالبًا متأخر")
+    elif -3.0 <= chg < 0.5:
+        score += 5; reasons.append("هادئ/تجميع محتمل قبل الحركة")
+
+    if 0.035 <= range_pct <= 0.22:
+        score += 10; reasons.append("نطاق يومي مناسب لبدء حركة")
+    elif 0.22 < range_pct <= 0.40:
+        score += 3; reasons.append("نطاق واسع — يحتاج إدارة خطر")
+    if close_strength >= 0.72:
+        score += 9; reasons.append("إغلاق قوي داخل النطاق")
+    elif close_strength >= 0.55:
+        score += 5; reasons.append("إغلاق مقبول/بناء")
+    if near_high:
+        score += 4; reasons.append("قريب من قمة اليوم/منطقة اختراق")
+
+    # Final guard: require at least one real action clue besides price.
+    action_clue = abs(chg) >= 0.5 or range_pct >= 0.035 or dollar_volume >= 100_000 or close_strength >= 0.55
+    eligible = bool(action_clue and score >= 23)
+    flags.update({"low_float_fast_lane_score": safe_round(score, 3), "low_float_fast_lane_eligible": eligible})
+    return eligible, score, reasons[:8], flags
+
+
+def _collect_low_float_fast_lane_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
+    debug = {
+        "version": "low_float_fast_lane_source_v1_2026_06_20",
+        "enabled": bool(LOW_FLOAT_FAST_LANE_ENABLED),
+        "scan_cap": int(LOW_FLOAT_FAST_LANE_SCAN_CAP),
+        "inject_limit": int(LOW_FLOAT_FAST_LANE_INJECT_LIMIT),
+        "scanned": 0,
+        "eligible_count": 0,
+        "rejected_price_or_known_count": 0,
+        "top_symbols": [],
+        "rule_ar": "مصدر مستقل لا يعتمد على Watch/Early: يبحث في السوق الواسع عن أسهم صغيرة/غامضة قابلة للاشتعال، ويستبعد الأسماء المعروفة أو الأكثر سيولة مثل NOK إذا لم يوجد نشاط fast-lane حقيقي.",
+    }
+    if not LOW_FLOAT_FAST_LANE_ENABLED or not grouped_map:
+        return [], debug
+    out: list[dict] = []
+    # Scan broadly, not only the old reference list.  Cap keeps Railway safe.
+    for idx, (ticker, daily) in enumerate((grouped_map or {}).items()):
+        if idx >= LOW_FLOAT_FAST_LANE_SCAN_CAP:
+            break
+        sym = _clean_symbol(ticker)
+        if not sym or not daily:
+            continue
+        debug["scanned"] += 1
+        try:
+            if not _scanner.base_filters(daily):
+                continue
+        except Exception:
+            continue
+        metrics = _source_metrics_from_grouped(daily) or {}
+        eligible, score, reasons, flags = _low_float_fast_lane_score(sym, metrics, phase_detail=phase_detail)
+        if not eligible:
+            if reasons and ("فوق نطاق" in reasons[0] or "12–20" in reasons[0] or "سيولة كبيرة" in " ".join(reasons)):
+                debug["rejected_price_or_known_count"] += 1
+            continue
+        row = {"symbol": sym, "score": safe_round(score, 3), "reasons": reasons, "metrics": {**metrics, **flags}}
+        out.append(row)
+    out.sort(key=lambda r: float(r.get("score", 0) or 0), reverse=True)
+    out = out[:LOW_FLOAT_FAST_LANE_INJECT_LIMIT]
+    debug["eligible_count"] = len(out)
+    debug["top_symbols"] = [r.get("symbol") for r in out[:30]]
+    return out, debug
+
 def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     """Return a broad ranked reserve for the existing Sharia/deep-analysis pipeline."""
     global _LAST_DYNAMIC_DISCOVERY_STATUS
@@ -340,6 +477,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     intraday_early_radar_status = {}
     intraday_early_radar_count = 0
     intraday_early_radar_high_risk_count = 0
+    low_float_fast_lane_status = {}
+    low_float_fast_lane_count = 0
 
     # Source / Promotion V2a: explicitly inject the curated Early Movement
     # watchlist into the dynamic discovery source.  Previously it usually arrived
@@ -474,6 +613,49 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                     _add_candidate(candidates, ticker, 20 + float(pre_meta.get("pre_move_score", 0) or 0) * 0.15, "pre_move_engine_v2", "Pre-Move Engine V2: " + "، ".join((pre_meta.get("pre_move_reasons") or [])[:2]), {**m, "pre_move_score": pre_meta.get("pre_move_score")})
             except Exception:
                 pass
+
+
+    # Low-Float Fast Lane V1: independent from Watch/Early/baseline.  This is
+    # the user's high-priority radar for obscure small-stock candidates before
+    # premarket/open.  It only adds source candidates; no BUY/Cautious changes.
+    try:
+        low_float_rows, low_float_fast_lane_status = _collect_low_float_fast_lane_candidates(
+            grouped_map or {},
+            phase_detail=str(phase_info.get("detail", "") or ""),
+        )
+        low_float_fast_lane_count = len(low_float_rows or [])
+        for item in low_float_rows or []:
+            sym = _clean_symbol((item or {}).get("symbol"))
+            if not sym:
+                continue
+            score = float((item or {}).get("score", 0) or 0)
+            reasons = list((item or {}).get("reasons") or [])
+            metrics = dict((item or {}).get("metrics") or {})
+            _add_candidate(
+                candidates,
+                sym,
+                52 + score * 0.35,
+                "low_float_fast_lane_v1",
+                "Low-Float Fast Lane: " + "، ".join(reasons[:3]),
+                {**metrics, "low_float_fast_lane": True, "low_float_fast_lane_score": score, "low_float_fast_lane_reasons": reasons},
+            )
+            if record_detection is not None:
+                try:
+                    record_detection(
+                        sym,
+                        price=float(metrics.get("price", 0) or 0),
+                        change_pct=float(metrics.get("day_change_pct", 0) or 0) * 100.0,
+                        source_reason="Low-Float Fast Lane V1: " + "، ".join(reasons[:3]),
+                        source_layer="low_float_fast_lane_v1",
+                        source_tags=["low_float_fast_lane_v1", "small_stock_explosive_source"],
+                        move_stage="High-Risk Pre-Open Watch",
+                        early_or_late_detection="high_risk_early",
+                    )
+                except Exception:
+                    pass
+    except Exception as exc:
+        low_float_fast_lane_status = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:140]}"}
+
 
 
     # Intraday Early Source Radar V1: a clean, separate source-layer radar for
@@ -680,6 +862,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Official launch source order: early/prepared lanes first, then live ignition,
     # then constructive liquidity.  Late movers stay visible for review, but they
     # must never crowd out early builders or weekly-priority names.
+    selected_order += from_source("low_float_fast_lane_v1", min(160, max_symbols))
     selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
     selected_order += from_source("polygon_weekly_builder", min(90, max_symbols))
     selected_order += from_source("intraday_early_ramp", min(140, max_symbols))
@@ -713,9 +896,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             source_bucket_counts[src] = int(source_bucket_counts.get(src, 0) or 0) + 1
 
     diag = {
-        "engine_version": "dynamic_discovery_v3_official_lane_order_cost_safe",
+        "engine_version": "dynamic_discovery_v3b_low_float_fast_lane_source_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_pre_move_plus_live_ignition_hot_lane",
+        "dynamic_discovery_mode": "candidate_pool_plus_pre_move_plus_live_ignition_hot_lane_plus_low_float_fast_lane",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -739,6 +922,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "fmp_confirm_requested": len(fmp_confirm_symbols),
         "fmp_confirmed": live_confirmed,
         "fmp_extended_confirmed": extended_confirmed,
+        "low_float_fast_lane_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0)) if 'source_bucket_counts' in locals() else int(low_float_fast_lane_count or 0),
+        "low_float_fast_lane": low_float_fast_lane_status,
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,
