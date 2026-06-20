@@ -2919,6 +2919,8 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "fmp_confirmed": int(scan_debug.get("dynamic_fmp_confirmed", 0) or 0),
             "fmp_extended_confirmed": int(scan_debug.get("dynamic_fmp_extended_confirmed", 0) or 0),
             "fmp_movers_count": int(scan_debug.get("dynamic_fmp_movers_count", 0) or 0),
+            "low_float_fast_lane_count": int(scan_debug.get("dynamic_low_float_fast_lane_count", 0) or 0),
+            "low_float_fast_lane": scan_debug.get("dynamic_low_float_fast_lane", {}),
             "live_ignition_hot_lane_count": int(scan_debug.get("dynamic_live_ignition_hot_lane_count", 0) or 0),
             "pre_move_engine_v2_count": int(scan_debug.get("dynamic_pre_move_engine_v2_count", 0) or 0),
             "late_mover_review_count": int(scan_debug.get("dynamic_late_mover_review_count", 0) or 0),
