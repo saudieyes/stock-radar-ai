@@ -3005,6 +3005,9 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "micro_explosion_close_watch_count": int(scan_debug.get("dynamic_micro_explosion_close_watch_count", 0) or 0),
             "micro_explosion_close_watch_memory": scan_debug.get("dynamic_micro_explosion_close_watch_memory", {}),
             "micro_explosion_seed_confirm_count": int(scan_debug.get("dynamic_micro_explosion_seed_confirm_count", 0) or 0),
+            "big_explosion_live_count": int(scan_debug.get("dynamic_big_explosion_live_count", 0) or 0),
+            "big_explosion_live_symbols": scan_debug.get("dynamic_big_explosion_live_symbols", []),
+            "big_explosion_live_debug": scan_debug.get("dynamic_big_explosion_live_debug", {}),
             "elapsed_sec": scan_debug.get("dynamic_discovery_elapsed_sec", None),
         },
         "full_market_scan_status": {
