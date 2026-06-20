@@ -710,6 +710,7 @@ def historical_replay_simulator_endpoint(
     max_minute_rows: int = 1800000,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
+    prior_full_session_scan: bool = True,
     format: str = "json",
 ):
     payload = run_historical_replay(
@@ -725,6 +726,7 @@ def historical_replay_simulator_endpoint(
         max_minute_rows=max_minute_rows,
         force_minute_pull=force_minute_pull,
         redownload_processed=redownload_processed,
+        prior_full_session_scan=prior_full_session_scan,
     )
     fmt = str(format or "json").strip().lower()
     if fmt in {"brief", "text", "txt", "chatgpt"}:
