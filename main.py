@@ -703,6 +703,8 @@ def historical_replay_simulator_endpoint(
     clean_only: bool = True,
     include_candidates: bool = True,
     recovery_days: int = 7,
+    context_days: int = 3,
+    missed_gain_threshold: float = 20.0,
     format: str = "json",
 ):
     payload = run_historical_replay(
@@ -711,6 +713,8 @@ def historical_replay_simulator_endpoint(
         clean_only=clean_only,
         include_candidates=include_candidates,
         recovery_days=recovery_days,
+        context_days=context_days,
+        missed_gain_threshold=missed_gain_threshold,
     )
     fmt = str(format or "json").strip().lower()
     if fmt in {"brief", "text", "txt", "chatgpt"}:
