@@ -705,6 +705,11 @@ def historical_replay_simulator_endpoint(
     recovery_days: int = 7,
     context_days: int = 3,
     missed_gain_threshold: float = 20.0,
+    minute_timing: bool = True,
+    timing_symbols_limit: int = 30,
+    max_minute_rows: int = 1800000,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
     format: str = "json",
 ):
     payload = run_historical_replay(
@@ -715,6 +720,11 @@ def historical_replay_simulator_endpoint(
         recovery_days=recovery_days,
         context_days=context_days,
         missed_gain_threshold=missed_gain_threshold,
+        minute_timing=minute_timing,
+        timing_symbols_limit=timing_symbols_limit,
+        max_minute_rows=max_minute_rows,
+        force_minute_pull=force_minute_pull,
+        redownload_processed=redownload_processed,
     )
     fmt = str(format or "json").strip().lower()
     if fmt in {"brief", "text", "txt", "chatgpt"}:
