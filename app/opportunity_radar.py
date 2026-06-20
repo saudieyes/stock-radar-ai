@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2m_low_float_capture_audit_2026_06_19"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2n1_promotion_bridge_ui_polish_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -903,6 +903,7 @@ def _next_week_action_for_row(row: dict) -> str:
 
 def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | None = None) -> dict[str, Any]:
     labels = {
+        "promotion_bridge_candidates": "جسر الترقية قبل الافتتاح",
         "learning_opportunity_candidates": "مرشحو طبقة التعلم / تحضير",
         "small_stock_classic_radar": "أسهم صغيرة كلاسيكية",
         "pre_trigger_candidates": "قريبة من التفعيل",
@@ -915,6 +916,7 @@ def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | N
         "catalyst_watch": "Catalyst / News Watch",
     }
     priority = [
+        "promotion_bridge_candidates",
         "learning_opportunity_candidates",
         "small_stock_classic_radar", "pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates",
         "continuation_pullback_candidates", "low_float_premarket_radar", "catalyst_watch",
@@ -1964,6 +1966,7 @@ def enrich_rows_opportunity_radar(rows: list[dict], market_phase: str = "") -> l
 
 
 OPPORTUNITY_BUCKET_KEYS = [
+    "promotion_bridge_candidates",
     "learning_opportunity_candidates",
     "small_stock_classic_radar",
     "support_bounce_candidates",
@@ -2020,6 +2023,7 @@ def _sort_bucket(rows: list[dict]) -> list[dict]:
 # with explicit labels.  It never promotes to BUY_NOW and never changes the
 # final decision engine.
 CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
+PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -2369,6 +2373,273 @@ def _make_closed_market_prep_row(row: dict, section: str, score: float, reasons:
     return out
 
 
+
+def _sharia_audit_for_row(row: dict) -> dict[str, Any]:
+    status = _s(row.get("sharia_status"))
+    label = _s(row.get("sharia_label"))
+    reason = _s(row.get("sharia_reason"))
+    manual_approved = _bool(row.get("sharia_manual_approved"))
+    manual_excluded = _bool(row.get("sharia_manual_excluded"))
+    is_gray = _bool(row.get("sharia_is_gray")) or status.lower() in {"gray", "needs_review", "review", "unknown"}
+    if manual_excluded or status.lower() in {"non_compliant", "haram", "excluded"}:
+        state = "blocked"
+        label_ar = "مستبعد شرعيًا"
+    elif manual_approved or status.lower() in {"manual_approved", "compliant", "clean", "approved"}:
+        state = "clean"
+        label_ar = label or ("متوافق يدويًا" if manual_approved else "متوافق مبدئيًا")
+    elif is_gray:
+        state = "needs_review"
+        label_ar = label or "يحتاج مراجعة شرعية"
+    else:
+        state = "unknown"
+        label_ar = label or "شرعية غير مؤكدة"
+    return {
+        "status": status,
+        "state": state,
+        "label_ar": label_ar,
+        "reason_ar": reason,
+        "manual_approved": manual_approved,
+        "manual_excluded": manual_excluded,
+        "is_gray": is_gray,
+        "rule_ar": "تظهر هنا للمراجعة قبل الافتتاح؛ لا يسمح التحديث بتحويل سهم مستبعد شرعيًا إلى فرصة تنفيذية.",
+    }
+
+
+def _preopen_audit_for_row(row: dict) -> dict[str, Any]:
+    price = _price(row)
+    levels = _prep_level_distances(row)
+    flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
+    trigger = _num(flags.get("trigger_price"), 0.0) or levels.get("trigger", 0.0) or _entry(row)
+    support = levels.get("support", 0.0) or _stop(row)
+    resistance = levels.get("resistance", 0.0)
+    failure = support if support and support > 0 else _stop(row)
+    trigger_dist = ((trigger - price) / price * 100.0) if price > 0 and trigger > 0 else 999.0
+    failure_dist = ((price - failure) / price * 100.0) if price > 0 and failure > 0 else 999.0
+    resistance_dist = ((resistance - price) / price * 100.0) if price > 0 and resistance > 0 else 999.0
+    support_dist = _pct_distance(price, support) if price > 0 and support > 0 else 999.0
+    sharia = _sharia_audit_for_row(row)
+    return {
+        "version": "pre_open_audit_v1_2026_06_20",
+        "price": _round(price, 4),
+        "sharia": sharia,
+        "sharia_label_ar": sharia.get("label_ar"),
+        "trigger_price": _round(trigger, 4),
+        "trigger_distance_pct": _round(trigger_dist, 2) if trigger_dist != 999.0 else 999.0,
+        "support_price": _round(support, 4),
+        "support_distance_pct": _round(support_dist, 2) if support_dist != 999.0 else 999.0,
+        "resistance_price": _round(resistance, 4),
+        "resistance_distance_pct": _round(resistance_dist, 2) if resistance_dist != 999.0 else 999.0,
+        "failure_price": _round(failure, 4),
+        "failure_distance_pct": _round(failure_dist, 2) if failure_dist != 999.0 else 999.0,
+        "rule_ar": "هذه بطاقة مراجعة قبل الافتتاح: شرعية + تفعيل + دعم/فشل + مقاومة. لا تعني شراء مباشر.",
+    }
+
+
+def _promotion_bridge_enabled(market_phase: str = "") -> tuple[bool, str]:
+    phase = _s(market_phase).lower()
+    if phase in {"open", "regular", "market_open"}:
+        # Keep bridge available during the open too, but as monitoring/promotion context;
+        # actual Strong/Cautious still come from the execution engine.
+        return True, "regular_session_watch"
+    if phase in {"pre_market", "premarket", "after_hours", "afterhours", "closed", "overnight", "weekend", "holiday", ""}:
+        return True, phase or "unknown_closed_like"
+    return True, f"unknown_phase:{phase}"
+
+
+def _promotion_bridge_score(row: dict, source_section: str = "") -> tuple[float, str, str, list[str]]:
+    price = _price(row)
+    if price <= 0:
+        return 0.0, "skip", "لا توجد ترقية", []
+    if _is_blocked(row) or not _is_personal_section_eligible(row):
+        return 0.0, "skip", "لا توجد ترقية", []
+    flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
+    audit = _preopen_audit_for_row(row)
+    sharia_state = _s((audit.get("sharia") or {}).get("state"))
+    if sharia_state == "blocked":
+        return 0.0, "blocked_sharia", "مستبعد شرعيًا", ["مستبعد شرعيًا؛ لا يدخل جسر الترقية."]
+    quality = _num(row.get("quality_score"), 0.0)
+    readiness = _num(row.get("execution_readiness_score"), 0.0)
+    rank = _num(row.get("opportunity_rank_score", row.get("display_rank_score", 0.0)), 0.0)
+    change = _change_pct(row)
+    move_risk = _move_risk_pct(row)
+    liquidity_points = _num(flags.get("liquidity_score"), 0.0)
+    if liquidity_points <= 0:
+        liquidity_points, _ = _liquidity_score(row)
+    rv = _num(row.get("effective_volume_ratio", row.get("volume_pace_ratio", row.get("volume_ratio", row.get("relative_volume", 0)))), 0.0)
+    learning = row.get("learning_overlay_v1") if isinstance(row.get("learning_overlay_v1"), dict) else {}
+    low_float = row.get("low_float_capture_v2m") if isinstance(row.get("low_float_capture_v2m"), dict) else _low_float_proxy_metrics(row)
+    trigger_dist = _num(audit.get("trigger_distance_pct"), 999.0)
+    resistance_dist = _num(audit.get("resistance_distance_pct"), 999.0)
+    support_dist = _num(audit.get("support_distance_pct"), 999.0)
+    failure_dist = _num(audit.get("failure_distance_pct"), 999.0)
+    score = 0.0
+    reasons: list[str] = []
+    bucket = _s(row.get("opportunity_bucket"))
+    if source_section:
+        reasons.append(f"مصدر المرشح: {source_section}")
+    if sharia_state == "clean":
+        score += 8; reasons.append(_s(audit.get("sharia_label_ar")) or "شرعيًا: مقبول مبدئيًا")
+    elif sharia_state in {"needs_review", "unknown"}:
+        score -= 12; reasons.append(_s(audit.get("sharia_label_ar")) or "يحتاج مراجعة شرعية قبل التفعيل")
+    if bucket in {"pre_trigger", "reclaim"} or source_section in {"pre_trigger_candidates", "reclaim_candidates"}:
+        score += 22; reasons.append("قريب من مرحلة قابلة للترقية إذا أكد السعر والحجم")
+    if bucket in {"low_float_premarket", "small_stock_classic"} or source_section in {"low_float_premarket_radar", "small_stock_classic_radar"}:
+        score += 16; reasons.append("مرشح سهم صغير/Low-Float يحتاج مراقبة بري ماركت")
+    if _s(learning.get("entry_bias")) in {"positive_watch", "watch_needs_volume", "speculative_watch"}:
+        score += 10; reasons.append(_s(learning.get("label_ar")) or "نمط تعلم إيجابي/قابل للمتابعة")
+    if low_float.get("confirmed_float") or low_float.get("small_cap_proxy"):
+        score += 9; reasons.append(_s(low_float.get("label_ar")))
+    elif low_float.get("proxy_candidate"):
+        score += 5; reasons.append(_s(low_float.get("label_ar")))
+    if 0 <= trigger_dist <= 1.25:
+        score += 20; reasons.append(f"قريب جدًا من التفعيل {round(trigger_dist, 2)}%")
+    elif 0 <= trigger_dist <= 3.0:
+        score += 12; reasons.append(f"ضمن نطاق متابعة للتفعيل {round(trigger_dist, 2)}%")
+    elif trigger_dist != 999.0 and trigger_dist > 5.0:
+        score -= 4; reasons.append(f"بعيد عن التفعيل الآن {round(trigger_dist, 2)}%")
+    if liquidity_points >= 30 or rv >= 2.0:
+        score += 16; reasons.append(f"حجم/سيولة قوية نسبيًا RVOL {round(rv, 2)}x")
+    elif liquidity_points >= 18 or rv >= 1.2:
+        score += 9; reasons.append(f"الحجم مقبول للمتابعة RVOL {round(rv, 2)}x")
+    else:
+        reasons.append("يحتاج حجم بري ماركت/افتتاح أوضح قبل الترقية")
+    if quality >= 70:
+        score += 8; reasons.append(f"جودة فنية جيدة {round(quality, 1)}/100")
+    elif quality >= 55:
+        score += 4; reasons.append(f"جودة فنية مقبولة {round(quality, 1)}/100")
+    if readiness >= 60:
+        score += 7; reasons.append(f"جاهزية تنفيذ أولية {round(readiness, 1)}/100")
+    if flags.get("no_chase") or (move_risk >= 10.0 and resistance_dist <= 2.0):
+        score -= 22; reasons.append("مخاطرة مطاردة/قرب مقاومة؛ لا يترقى إلا بعد Pullback أو Reclaim")
+    elif move_risk >= 7.0:
+        score -= 8; reasons.append("تحرك مسبق؛ إدارة سريعة لا Runner افتراضي")
+    if failure_dist != 999.0 and failure_dist <= 0.7:
+        score -= 6; reasons.append("قريب من حد الفشل؛ يحتاج ثبات قبل الترقية")
+    if support_dist != 999.0 and support_dist <= 2.0:
+        score += 5; reasons.append(f"قريب من دعم مرجعي {round(support_dist, 2)}%")
+
+    # State/action are labels only; they do not change execution decisions.
+    if score >= 58 and (0 <= trigger_dist <= 2.0) and (liquidity_points >= 18 or rv >= 1.2) and not flags.get("no_chase"):
+        state = "ready_for_cautious_if_live_confirms"
+        action = "قابل للترقية إلى دخول بحذر إذا أكد البري ماركت/الافتتاح الحجم والإغلاق فوق التفعيل."
+    elif score >= 46:
+        state = "watch_for_trigger"
+        action = "مرشح متابعة نشط: راقب التفعيل والحجم؛ ليس شراء مباشر الآن."
+    elif flags.get("no_chase") or move_risk >= 10.0:
+        state = "pullback_required"
+        action = "لا تطارد؛ انتظر Pullback/Reclaim جديد قبل أي ترقية."
+    else:
+        state = "needs_volume_or_reclaim"
+        action = "يبقى مراقبة: يحتاج حجم أو Reclaim أو اقتراب أوضح من التفعيل."
+    return round(max(0.0, score), 2), state, action, _dedupe(reasons, 10)
+
+
+def _make_promotion_bridge_row(row: dict, source_section: str = "") -> dict:
+    score, state, action, reasons = _promotion_bridge_score(row, source_section=source_section)
+    out = dict(row or {})
+    audit = _preopen_audit_for_row(out)
+    original_bucket = _s(out.get("opportunity_bucket"))
+    source_label_map = {
+        "pre_trigger_candidates": "قريب من التفعيل",
+        "reclaim_candidates": "Reclaim",
+        "low_float_premarket_radar": "Low-Float",
+        "small_stock_classic_radar": "Small Classic",
+        "support_bounce_candidates": "قرب دعم",
+        "continuation_pullback_candidates": "Continuation/Pullback",
+        "learning_opportunity_candidates": "طبقة التعلم",
+    }
+    label = "🧭 جسر الترقية قبل الافتتاح"
+    if state == "ready_for_cautious_if_live_confirms":
+        label = "🟠 جاهز للمراقبة — قد يصبح دخول بحذر"
+    elif state == "watch_for_trigger":
+        label = "🧭 راقب التفعيل والحجم"
+    elif state == "pullback_required":
+        label = "↩️ يحتاج Pullback قبل الترقية"
+    elif state == "needs_volume_or_reclaim":
+        label = "👀 يحتاج حجم/Reclaim"
+    out["original_opportunity_bucket"] = original_bucket
+    out["opportunity_bucket"] = "promotion_bridge"
+    out["opportunity_stage"] = f"promotion_bridge_{state}"
+    out["opportunity_stage_label"] = label
+    out["display_plan_family_label"] = label
+    out["decision"] = "جسر ترقية — ليس شراء مباشر"
+    out["pre_open_audit_v2n"] = audit
+    out["promotion_bridge_v2n"] = {
+        "version": PREMARKET_PROMOTION_BRIDGE_VERSION,
+        "source_section": source_section,
+        "source_section_label_ar": source_label_map.get(source_section, source_section),
+        "source_bucket": original_bucket,
+        "state": state,
+        "score": score,
+        "action_ar": action,
+        "reasons_ar": reasons,
+        "applies_to_execution": False,
+        "rule_ar": "يراقب المرشحين قبل الافتتاح ويحدد من قد يترقى لاحقًا؛ لا يغير Strong/Cautious بذاته.",
+    }
+    out["promotion_state"] = state
+    out["promotion_status_ar"] = label
+    out["promotion_action_ar"] = action
+    out["promotion_trigger_price"] = audit.get("trigger_price")
+    out["promotion_failure_price"] = audit.get("failure_price")
+    out["sharia_preopen_label_ar"] = audit.get("sharia_label_ar")
+    merged = _dedupe(reasons + [_s(action)] + (out.get("opportunity_reasons") if isinstance(out.get("opportunity_reasons"), list) else []), 12)
+    out["opportunity_reasons"] = merged
+    out["technical_explainer_reasons"] = merged
+    out["why_appeared_ar"] = "، ".join(merged[:5])
+    out["special_bucket_reason"] = out["why_appeared_ar"]
+    out["opportunity_rank_score"] = round(max(_num(out.get("opportunity_rank_score"), 0.0), score), 2)
+    out["non_actionable_prep"] = True
+    return out
+
+
+def _build_promotion_bridge_candidates(final_map: dict[str, list[dict]], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+    enabled, reason = _promotion_bridge_enabled(market_phase)
+    priority_sources = [
+        "pre_trigger_candidates",
+        "reclaim_candidates",
+        "low_float_premarket_radar",
+        "small_stock_classic_radar",
+        "support_bounce_candidates",
+        "continuation_pullback_candidates",
+        "learning_opportunity_candidates",
+    ]
+    debug: dict[str, Any] = {
+        "version": PREMARKET_PROMOTION_BRIDGE_VERSION,
+        "enabled": enabled,
+        "reason": reason,
+        "sources_seen": {},
+        "candidate_count_before_limit": 0,
+        "state_counts": {},
+        "rule_ar": "يجمع أفضل مرشحي الأقسام التحضيرية ويضع لهم حالة ترقية قبل الافتتاح بدون تغيير Strong/Cautious.",
+    }
+    if not enabled:
+        return [], debug
+    candidates: list[dict] = []
+    best_by_symbol: dict[str, dict] = {}
+    for source in priority_sources:
+        rows = final_map.get(source, []) or []
+        debug["sources_seen"][source] = len(rows)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = _u(row.get("symbol"))
+            if not sym or _is_blocked(row) or not _is_personal_section_eligible(row):
+                continue
+            score, state, action, reasons = _promotion_bridge_score(row, source_section=source)
+            if state in {"skip", "blocked_sharia"} or score < 24:
+                continue
+            item = _make_promotion_bridge_row(row, source_section=source)
+            prev = best_by_symbol.get(sym)
+            if not prev or _num(item.get("opportunity_rank_score"), 0.0) > _num(prev.get("opportunity_rank_score"), 0.0):
+                best_by_symbol[sym] = item
+    candidates = _sort_bucket(list(best_by_symbol.values()))
+    debug["candidate_count_before_limit"] = len(candidates)
+    for item in candidates:
+        state = _s(item.get("promotion_state"))
+        debug["state_counts"][state] = debug["state_counts"].get(state, 0) + 1
+    debug["candidate_symbols"] = [_u(x.get("symbol")) for x in candidates[:12] if _u(x.get("symbol"))]
+    return candidates[:max(1, int(limit or DEFAULT_SECTION_LIMIT))], debug
+
 def _fill_closed_market_prep_sections(final_map: dict[str, list[dict]], rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
     enabled, reason = _closed_market_prep_enabled(market_phase)
     debug = {
@@ -2478,6 +2749,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
     ordered_keys = [
+        "promotion_bridge_candidates",
         "learning_opportunity_candidates",
         "small_stock_classic_radar",
         "pre_trigger_candidates",
@@ -2517,6 +2789,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     final_map["learning_opportunity_candidates"] = learning_bridge_rows
 
     closed_market_planning_debug = _fill_closed_market_prep_sections(final_map, rows or [], market_phase=market_phase, limit=limit)
+    promotion_bridge_rows, promotion_bridge_debug = _build_promotion_bridge_candidates(final_map, market_phase=market_phase, limit=limit)
+    final_map["promotion_bridge_candidates"] = promotion_bridge_rows
     low_float_capture = _low_float_capture_debug(rows or [], final_map.get("low_float_premarket_radar", []))
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
@@ -2543,6 +2817,10 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "closed_market_prep_rule_ar": closed_market_planning_debug.get("rule_ar"),
         "low_float_capture_debug": low_float_capture,
         "low_float_capture_rule_ar": low_float_capture.get("rule_ar"),
+        "promotion_bridge_debug": promotion_bridge_debug,
+        "promotion_bridge_rule_ar": promotion_bridge_debug.get("rule_ar"),
+        "promotion_bridge_candidates_count": len(promotion_bridge_rows),
+        "promotion_bridge_candidates": promotion_bridge_rows,
         "next_week_analysis": next_week_analysis,
         "next_week_watchlist": next_week_analysis.get("top_candidates", []),
         "next_week_analysis_count": len(next_week_analysis.get("top_candidates", [])),
@@ -2857,5 +3135,6 @@ def opportunity_radar_status_payload(rows: list[dict] | None = None) -> dict:
         "display_limit_per_section_default": DEFAULT_SECTION_LIMIT,
         "small_stock_classic_rule_ar": "للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ لا نعامل فروقات السنت كقرار منفصل. نعتمد Fib 61.8/78.6، VWAP بإغلاق شمعة 5د/15د، قمة أمس، أو اختراق واضح لمنطقة صغيرة، ولا نطارد الشمعة الخضراء.",
         "low_float_capture_rule_ar": "V2M يضيف تشخيص low_float_capture_debug حتى نعرف هل المشكلة عدم وجود مرشحين أم سقوطهم في التوجيه/العرض. إذا غاب float الحقيقي تظهر Proxy واضحة لا تُعامل كتأكيد float.",
+        "promotion_bridge_rule_ar": "V2N يضيف جسر ترقية قبل الافتتاح: يقرأ Low-Float/Small Classic/Pre-Trigger/Support ويحدد من قد يترقى عند تحقق الحجم والسعر، بدون تغيير Strong/Cautious.",
         "storage_rule_ar": "لا يخزن هذا الإصدار raw Polygon/FMP؛ فقط ذاكرة خطط مختصرة في SQLite KV.",
     }
