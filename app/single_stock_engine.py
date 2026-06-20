@@ -89,6 +89,16 @@ def scan_all(debug: bool = False):
         "dynamic_price_under_2_deprioritized": int((source_diag or {}).get("price_under_2_deprioritized", 0) or 0),
         "dynamic_price_under_2_exception": int((source_diag or {}).get("price_under_2_exception", 0) or 0),
         "dynamic_price_over_300_deprioritized": int((source_diag or {}).get("price_over_300_deprioritized", 0) or 0),
+        # V2R1b: surface the real micro-explosion / close-watch diagnostics from
+        # source_discovery.  V2R1 collected these fields but trade-scan did not
+        # expose them, which made it look like the close-watch radar was not running.
+        "dynamic_micro_explosion_capture_count": int((source_diag or {}).get("micro_explosion_capture_count", 0) or 0),
+        "dynamic_micro_explosion_capture_symbols": (source_diag or {}).get("micro_explosion_capture_symbols", []),
+        "dynamic_micro_explosion_capture_debug": (source_diag or {}).get("micro_explosion_capture_debug", {}),
+        "dynamic_micro_explosion_full_market_scan": (source_diag or {}).get("micro_explosion_full_market_scan", {}),
+        "dynamic_micro_explosion_close_watch_count": int((source_diag or {}).get("micro_explosion_close_watch_count", 0) or 0),
+        "dynamic_micro_explosion_close_watch_memory": (source_diag or {}).get("micro_explosion_close_watch_memory", {}),
+        "dynamic_micro_explosion_seed_confirm_count": int((source_diag or {}).get("micro_explosion_seed_confirm_count", 0) or 0),
         "dynamic_discovery_elapsed_sec": (source_diag or {}).get("elapsed_sec", None),
         "scan_requested_universe": int(requested_universe),
         "manual_priority_count": int((source_diag or {}).get("manual_priority_count", 0) or 0),

@@ -1658,6 +1658,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Official launch source order: early/prepared lanes first, then live ignition,
     # then constructive liquidity.  Late movers stay visible for review, but they
     # must never crowd out early builders or weekly-priority names.
+    selected_order += from_source("micro_explosion_capture_v2r1", min(MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT, max_symbols))
     selected_order += from_source("micro_explosion_capture_v2r", min(MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT, max_symbols))
     selected_order += from_source("micro_explosion_close_watch_v2r1", min(MICRO_EXPLOSION_CLOSE_WATCH_LIMIT, max_symbols))
     selected_order += from_source("low_float_fast_lane_v1", min(160, max_symbols))
@@ -1715,7 +1716,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3f_micro_explosion_close_watch_v2r1_2026_06_20",
+        "engine_version": "dynamic_discovery_v3f1_micro_explosion_close_watch_debug_v2r1b_2026_06_20",
         "dynamic_discovery_enabled": True,
         "dynamic_discovery_mode": "candidate_pool_plus_whole_market_micro_explosion_close_watch_and_fast_lane_funnel_debug",
         "requested_target": int(max_symbols),
@@ -1744,7 +1745,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "low_float_fast_lane_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0)) if 'source_bucket_counts' in locals() else int(low_float_fast_lane_count or 0),
         "low_float_fast_lane": low_float_fast_lane_status,
         "low_float_fast_lane_funnel_debug": low_float_fast_lane_funnel_debug,
-        "micro_explosion_capture_count": int(source_bucket_counts.get("micro_explosion_capture_v2r", 0)) if 'source_bucket_counts' in locals() else int(micro_explosion_capture_count or 0),
+        "micro_explosion_capture_count": int((source_bucket_counts.get("micro_explosion_capture_v2r1", 0) or 0) + (source_bucket_counts.get("micro_explosion_capture_v2r", 0) or 0)) if 'source_bucket_counts' in locals() else int(micro_explosion_capture_count or 0),
+        "micro_explosion_capture_v2r1_count": int(source_bucket_counts.get("micro_explosion_capture_v2r1", 0) or 0) if 'source_bucket_counts' in locals() else 0,
         "micro_explosion_capture_symbols": _scanner.unique_keep_order(micro_explosion_capture_symbols)[:120],
         "micro_explosion_capture_debug": micro_explosion_capture_debug,
         "micro_explosion_full_market_scan": micro_explosion_full_market_status,
