@@ -20,8 +20,11 @@ Safety rules
 """
 from __future__ import annotations
 
+import csv
+import gzip
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import scanner as _scanner
@@ -31,7 +34,7 @@ from app.source_discovery import (
     _collect_micro_explosion_full_market_candidates,
 )
 try:
-    from app.polygon_flatfile_fetcher import is_us_market_trading_day
+    from app.polygon_flatfile_fetcher import is_us_market_trading_day, fetch_flatfile_to_tmp, cleanup_tmp_path
 except Exception:
     def is_us_market_trading_day(value):
         try:
@@ -39,8 +42,12 @@ except Exception:
             return bool(d and d.weekday() < 5)
         except Exception:
             return False
+    def fetch_flatfile_to_tmp(*args, **kwargs):
+        return {"ok": False, "status": "fetcher_unavailable", "error": "polygon_flatfile_fetcher_unavailable"}
+    def cleanup_tmp_path(path):
+        return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2s1_after_close_context_missed_winners_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2s2_big_explosion_minute_timing_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -745,6 +752,540 @@ def _assessment_ar(rows: list[dict], with_outcome: list[dict]) -> str:
     return "النتيجة ضعيفة أو هادئة؛ كرر الاختبار على أيام أكثر قبل الحكم."
 
 
+
+
+# ---------------------------------------------------------------------------
+# V2S2: Big Explosion Minute Timing Replay
+# ---------------------------------------------------------------------------
+
+def _minute_time_from_row(row: dict) -> tuple[str, str, int]:
+    raw = row.get("window_start") or row.get("timestamp") or row.get("t") or row.get("sip_timestamp") or ""
+    try:
+        n = int(float(raw))
+        if n > 10**17:       # ns
+            sec = n / 1_000_000_000
+        elif n > 10**14:     # us
+            sec = n / 1_000_000
+        elif n > 10**11:     # ms
+            sec = n / 1000
+        else:
+            sec = n
+        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+        hhmm = dt.strftime("%H:%M")
+        return dt.strftime("%Y-%m-%d"), hhmm, int(dt.hour * 60 + dt.minute)
+    except Exception:
+        txt = _s(raw)
+        if len(txt) >= 16 and txt[:4].isdigit():
+            hhmm = txt[11:16]
+            try:
+                h, m = hhmm.split(":", 1)
+                return txt[:10], hhmm, int(h) * 60 + int(m)
+            except Exception:
+                return txt[:10], hhmm, -1
+    return "", "", -1
+
+
+def _minute_symbol(row: dict) -> str:
+    return _u(row.get("ticker") or row.get("symbol") or row.get("T") or row.get("sym"))
+
+
+def _minute_price(row: dict, *keys: str) -> float:
+    for k in keys:
+        n = _num(row.get(k), 0.0)
+        if n > 0:
+            return n
+    return 0.0
+
+
+def _utc_phase_from_minute(minute_of_day: int) -> str:
+    # US market in summer/EDT: 04:00 NY = 08:00 UTC, 09:30 = 13:30, 16:00 = 20:00.
+    if minute_of_day < 0:
+        return "unknown"
+    if minute_of_day < 8 * 60:
+        return "overnight"
+    if minute_of_day < 13 * 60 + 30:
+        return "premarket"
+    if minute_of_day < 20 * 60:
+        return "regular"
+    return "after_hours"
+
+
+def _phase_ar(phase: str) -> str:
+    return {
+        "overnight": "ليلي/قبل البري ماركت",
+        "premarket": "قبل الافتتاح",
+        "regular": "أثناء الجلسة الرسمية",
+        "after_hours": "بعد الإغلاق",
+        "unknown": "غير معروف",
+    }.get(str(phase or ""), "غير معروف")
+
+
+def _minute_label(minute_of_day: int) -> str:
+    if minute_of_day < 0:
+        return ""
+    return f"{int(minute_of_day)//60:02d}:{int(minute_of_day)%60:02d}"
+
+
+def _minute_between(start_hhmm: str, end_hhmm: str) -> int | None:
+    try:
+        sh, sm = str(start_hhmm or "").split(":", 1)
+        eh, em = str(end_hhmm or "").split(":", 1)
+        return max(0, int(eh) * 60 + int(em) - (int(sh) * 60 + int(sm)))
+    except Exception:
+        return None
+
+
+def _safe_gain(price: float, base: float) -> float:
+    return ((price - base) / base * 100.0) if price > 0 and base > 0 else 0.0
+
+
+def _update_slice_agg(agg: dict, *, t_min: int, o: float, h: float, l: float, c: float, v: float) -> None:
+    if not agg or agg.get("first_minute") is None:
+        agg["first_minute"] = t_min
+        agg["last_minute"] = t_min
+        agg["open"] = o or c
+        agg["high"] = h
+        agg["low"] = l
+        agg["price"] = c
+        agg["close"] = c
+        agg["volume"] = v
+        agg["vwap_num"] = ((h + l + c) / 3.0) * v
+        return
+    if t_min < int(agg.get("first_minute") or t_min):
+        agg["first_minute"] = t_min
+        agg["open"] = o or c
+    if t_min >= int(agg.get("last_minute") or t_min):
+        agg["last_minute"] = t_min
+        agg["price"] = c
+        agg["close"] = c
+    agg["high"] = max(_num(agg.get("high"), h), h)
+    old_low = _num(agg.get("low"), l)
+    agg["low"] = min(old_low if old_low > 0 else l, l)
+    agg["volume"] = _num(agg.get("volume"), 0.0) + v
+    agg["vwap_num"] = _num(agg.get("vwap_num"), 0.0) + ((h + l + c) / 3.0) * v
+
+
+def _finalize_slice_map(raw_map: dict[str, dict]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for sym, a in (raw_map or {}).items():
+        price = _num(a.get("price"), 0.0) or _num(a.get("close"), 0.0)
+        opn = _num(a.get("open"), price)
+        high = _num(a.get("high"), price)
+        low = _num(a.get("low"), price)
+        vol = _num(a.get("volume"), 0.0)
+        if not sym or price <= 0 or high <= 0 or low <= 0 or vol <= 0:
+            continue
+        out[sym] = {
+            "symbol": sym,
+            "ticker": sym,
+            "open": opn,
+            "high": high,
+            "low": low,
+            "price": price,
+            "close": price,
+            "volume": vol,
+            "dollar_volume": price * vol,
+            "vwap_proxy": (_num(a.get("vwap_num"), 0.0) / vol) if vol > 0 else 0.0,
+            "change_pct": _safe_gain(price, opn),
+            "first_minute": a.get("first_minute"),
+            "last_minute": a.get("last_minute"),
+        }
+    return out
+
+
+def _default_replay_slices() -> list[dict[str, Any]]:
+    return [
+        {"key": "premarket_0800", "time_utc": "08:00", "minute": 8 * 60, "label_ar": "بداية البري ماركت"},
+        {"key": "premarket_1000", "time_utc": "10:00", "minute": 10 * 60, "label_ar": "منتصف البري ماركت"},
+        {"key": "premarket_1230", "time_utc": "12:30", "minute": 12 * 60 + 30, "label_ar": "قبل الافتتاح بساعة تقريبًا"},
+        {"key": "open_1330", "time_utc": "13:30", "minute": 13 * 60 + 30, "label_ar": "الافتتاح"},
+        {"key": "open_1345", "time_utc": "13:45", "minute": 13 * 60 + 45, "label_ar": "أول 15 دقيقة"},
+        {"key": "open_1400", "time_utc": "14:00", "minute": 14 * 60, "label_ar": "أول 30 دقيقة"},
+        {"key": "regular_1500", "time_utc": "15:00", "minute": 15 * 60, "label_ar": "بعد ساعة ونصف من الافتتاح"},
+        {"key": "regular_1700", "time_utc": "17:00", "minute": 17 * 60, "label_ar": "منتصف الجلسة"},
+        {"key": "regular_1930", "time_utc": "19:30", "minute": 19 * 60 + 30, "label_ar": "قبل الإغلاق"},
+        {"key": "after_2200", "time_utc": "22:00", "minute": 22 * 60, "label_ar": "بعد الإغلاق"},
+    ]
+
+
+def _read_minute_file_for_replay(
+    *,
+    trade_date: str,
+    target_symbols: set[str],
+    max_minute_rows: int = 1_800_000,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+) -> tuple[dict[str, Any], dict[str, list[dict]], dict[str, dict[str, dict]]]:
+    """Fetch outcome minute flat file to /tmp, stream it, and return compact maps only."""
+    slices = _default_replay_slices()
+    target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
+    pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
+    debug = {
+        "version": "minute_replay_loader_v2s2_2026_06_20",
+        "trade_date": trade_date,
+        "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
+        "target_symbols_count": len(target_symbols),
+        "max_minute_rows": int(max_minute_rows or 0),
+        "storage_rule_ar": "يتم تنزيل ملف الدقيقة إلى /tmp فقط، ثم يقرأ Streaming ويرجع ملخصات مدمجة؛ لا يتم حفظ raw في SQLite/GitHub/Railway.",
+    }
+    if not pull.get("ok") or not pull.get("path"):
+        debug.update({"ok": False, "reason": pull.get("status") or pull.get("error") or "minute_file_unavailable"})
+        return debug, {}, {}
+    path = str(pull.get("path") or "")
+    rows_seen = 0
+    target_rows: dict[str, list[dict]] = {sym: [] for sym in target_symbols}
+    slice_aggs: dict[str, dict[str, dict]] = {str(sl["key"]): {} for sl in slices}
+    slice_by_key = {str(sl["key"]): sl for sl in slices}
+    try:
+        fp = Path(path)
+        opener = gzip.open if fp.name.lower().endswith(".gz") else open
+        with opener(fp, "rt", encoding="utf-8", errors="ignore", newline="") as f:
+            reader = csv.DictReader(f)
+            for raw in reader:
+                rows_seen += 1
+                if rows_seen > max(50_000, min(3_500_000, int(max_minute_rows or 1_800_000))):
+                    break
+                sym = _minute_symbol(raw)
+                if not sym:
+                    continue
+                dt, hhmm, t_min = _minute_time_from_row(raw)
+                if dt and trade_date and str(dt)[:10] != str(trade_date)[:10]:
+                    continue
+                if t_min < 0:
+                    continue
+                o = _minute_price(raw, "open", "o")
+                h = _minute_price(raw, "high", "h")
+                l = _minute_price(raw, "low", "l")
+                c = _minute_price(raw, "close", "c")
+                v = _minute_price(raw, "volume", "v")
+                if c <= 0 or h <= 0 or l <= 0 or v <= 0:
+                    continue
+                if sym in target_symbols:
+                    target_rows.setdefault(sym, []).append({
+                        "time_utc": hhmm,
+                        "minute": t_min,
+                        "phase": _utc_phase_from_minute(t_min),
+                        "open": _round(o or c, 4),
+                        "high": _round(h, 4),
+                        "low": _round(l, 4),
+                        "close": _round(c, 4),
+                        "volume": _round(v, 0),
+                        "dollar_volume": _round(c * v, 2),
+                    })
+                for sl in slices:
+                    if t_min <= int(sl["minute"]):
+                        bucket = slice_aggs[str(sl["key"])].setdefault(sym, {})
+                        _update_slice_agg(bucket, t_min=t_min, o=o or c, h=h, l=l, c=c, v=v)
+        compact_slices = {k: _finalize_slice_map(v) for k, v in slice_aggs.items()}
+        debug.update({
+            "ok": True,
+            "rows_seen": rows_seen,
+            "target_rows_loaded": sum(len(v) for v in target_rows.values()),
+            "target_symbols_with_rows": len([1 for v in target_rows.values() if v]),
+            "slice_rows": {k: len(v or {}) for k, v in compact_slices.items()},
+            "slices": [{"key": k, **slice_by_key[k]} for k in slice_by_key],
+        })
+        return debug, target_rows, compact_slices
+    except Exception as exc:
+        debug.update({"ok": False, "reason": f"minute_parse_error:{type(exc).__name__}:{str(exc)[:160]}", "rows_seen": rows_seen})
+        return debug, target_rows, {}
+    finally:
+        cleanup_tmp_path(Path(path).parent if path else None)
+
+
+def _timeline_from_target_bars(sym: str, bars: list[dict], selection_price: float) -> dict[str, Any]:
+    sym = _u(sym)
+    bars = sorted([dict(x) for x in (bars or [])], key=lambda x: int(x.get("minute") or 0))
+    out: dict[str, Any] = {
+        "symbol": sym,
+        "bars_loaded": len(bars),
+        "selection_price": _round(selection_price, 4),
+        "has_minute_timeline": bool(bars and selection_price > 0),
+    }
+    if not bars or selection_price <= 0:
+        out.update({"timeline_note_ar": "لا توجد بيانات دقيقة كافية لهذا السهم أو سعر اختيار غير متاح."})
+        return out
+    first = bars[0]
+    peak = max(bars, key=lambda x: _num(x.get("high"), 0.0))
+    low = min(bars, key=lambda x: _num(x.get("low"), 999999.0))
+    last = bars[-1]
+    thresholds = [5, 10, 20, 50, 100, 200]
+    th_hits: dict[str, dict] = {}
+    for th in thresholds:
+        hit = None
+        for b in bars:
+            if _safe_gain(_num(b.get("high"), 0.0), selection_price) >= th:
+                hit = b
+                break
+        if hit:
+            th_hits[f"first_{th}pct"] = {
+                "time_utc": hit.get("time_utc"),
+                "phase": hit.get("phase"),
+                "phase_ar": _phase_ar(hit.get("phase")),
+                "price_high": _round(hit.get("high"), 4),
+                "gain_pct": _round(_safe_gain(_num(hit.get("high"), 0.0), selection_price), 2),
+            }
+    # First real acceleration is the earliest 5% threshold or a strong 3%+ volume bar.
+    first_accel = None
+    for b in bars:
+        gain = _safe_gain(_num(b.get("high"), 0.0), selection_price)
+        if gain >= 5:
+            first_accel = b
+            break
+    open_bar = next((b for b in bars if int(b.get("minute") or 0) >= 13 * 60 + 30), first)
+    premarket_high = max([_num(b.get("high"), 0.0) for b in bars if str(b.get("phase")) == "premarket"] or [0.0])
+    regular_high = max([_num(b.get("high"), 0.0) for b in bars if str(b.get("phase")) == "regular"] or [0.0])
+    after_high = max([_num(b.get("high"), 0.0) for b in bars if str(b.get("phase")) == "after_hours"] or [0.0])
+    peak_time = str(peak.get("time_utc") or "")
+    accel_time = str((first_accel or {}).get("time_utc") or "")
+    if first_accel and str(first_accel.get("phase")) == "premarket":
+        path_label = "بدأ قبل الافتتاح"
+    elif first_accel and int(first_accel.get("minute") or 0) <= 14 * 60:
+        path_label = "انفجار مع الافتتاح/أول 30 دقيقة"
+    elif first_accel:
+        path_label = "تسارع أثناء الجلسة"
+    else:
+        path_label = "لم يصل +5% في بيانات الدقيقة"
+    out.update({
+        "first_minute_time_utc": first.get("time_utc"),
+        "first_minute_phase_ar": _phase_ar(first.get("phase")),
+        "open_time_utc": open_bar.get("time_utc"),
+        "open_price": _round(open_bar.get("open") or open_bar.get("close"), 4),
+        "peak_time_utc": peak_time,
+        "peak_phase": peak.get("phase"),
+        "peak_phase_ar": _phase_ar(peak.get("phase")),
+        "peak_price": _round(peak.get("high"), 4),
+        "peak_gain_from_selection_pct": _round(_safe_gain(_num(peak.get("high"), 0.0), selection_price), 2),
+        "low_time_utc": low.get("time_utc"),
+        "low_price": _round(low.get("low"), 4),
+        "worst_drawdown_from_selection_pct": _round(_safe_gain(_num(low.get("low"), 0.0), selection_price), 2),
+        "close_time_utc": last.get("time_utc"),
+        "close_price": _round(last.get("close"), 4),
+        "close_gain_from_selection_pct": _round(_safe_gain(_num(last.get("close"), 0.0), selection_price), 2),
+        "premarket_high_gain_pct": _round(_safe_gain(premarket_high, selection_price), 2) if premarket_high > 0 else 0.0,
+        "regular_high_gain_pct": _round(_safe_gain(regular_high, selection_price), 2) if regular_high > 0 else 0.0,
+        "after_hours_high_gain_pct": _round(_safe_gain(after_high, selection_price), 2) if after_high > 0 else 0.0,
+        "first_acceleration_time_utc": accel_time,
+        "first_acceleration_phase_ar": _phase_ar((first_accel or {}).get("phase")),
+        "minutes_from_acceleration_to_peak": _minute_between(accel_time, peak_time) if accel_time and peak_time else None,
+        "rise_path_label_ar": path_label,
+        "threshold_hits": th_hits,
+        "how_it_moved_ar": f"{path_label}. القمة عند {peak_time or 'غير متاح'} بربح {_round(_safe_gain(_num(peak.get('high'), 0.0), selection_price), 2)}% من سعر التحضير.",
+    })
+    return out
+
+
+def _stage_for_slice(row: dict, current_gain: float, layer: str, sharia: dict) -> tuple[str, str]:
+    score = _candidate_score(row)
+    metrics = _candidate_metrics(row)
+    dollar = _num(metrics.get("dollar_volume"), 0.0)
+    near_high = bool(metrics.get("near_high"))
+    if sharia.get("should_block"):
+        return "sharia_blocked", "مرفوض شرعيًا"
+    if sharia.get("is_gray"):
+        return "sharia_gray_watch", "مرشح رمادي — يحتاج مراجعة شرعية"
+    if current_gain >= 50:
+        return "big_explosion_active", "انفجار كبير نشط"
+    if current_gain >= 20:
+        return "explosion_active", "انفجار نشط"
+    if current_gain >= 10 and near_high:
+        return "late_momentum_watch", "زخم قوي لكن قد يكون متأخرًا"
+    if current_gain >= 5 and score >= 85:
+        return "early_confirmation", "تأكيد مبكر"
+    if (score >= 100 or dollar >= 500_000) and layer in {"micro_explosion_full_market_v2r2", "low_float_fast_lane_v2q"}:
+        return "close_watch", "مراقبة لصيقة"
+    return "source_detected", "دخل المصدر"
+
+
+def _run_source_on_minute_slices(
+    *,
+    outcome_date: str,
+    slice_maps: dict[str, dict[str, dict]],
+    target_symbols: set[str],
+    selection_prices: dict[str, float],
+    clean_only: bool = True,
+) -> dict[str, Any]:
+    slices = _default_replay_slices()
+    by_symbol: dict[str, dict] = {sym: {"symbol": sym, "detected_by_minute_replay": False, "stage_history": []} for sym in target_symbols}
+    slice_debug: list[dict] = []
+    for sl in slices:
+        key = str(sl["key"])
+        m = dict(slice_maps.get(key) or {})
+        if not m:
+            slice_debug.append({"key": key, "time_utc": sl.get("time_utc"), "rows": 0, "micro": 0, "fast": 0})
+            continue
+        micro_rows, micro_debug = _collect_micro_explosion_full_market_candidates(m, phase_detail=f"historical_minute_slice_v2s2:{outcome_date}:{sl.get('time_utc')}")
+        fast_rows, fast_debug = _collect_low_float_fast_lane_candidates(m, phase_detail=f"historical_minute_slice_v2s2:{outcome_date}:{sl.get('time_utc')}")
+        source_rows: list[tuple[dict, str]] = [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
+        slice_debug.append({
+            "key": key,
+            "time_utc": sl.get("time_utc"),
+            "label_ar": sl.get("label_ar"),
+            "rows": len(m),
+            "micro": len(micro_rows or []),
+            "fast": len(fast_rows or []),
+            "micro_top": (micro_debug or {}).get("top_symbols", [])[:10],
+            "fast_top": (fast_debug or {}).get("top_symbols", [])[:10],
+        })
+        for row, layer in source_rows:
+            sym = _extract_symbol(row)
+            if not sym or sym not in target_symbols:
+                continue
+            price = _num((m.get(sym) or {}).get("price"), 0.0) or _num((_candidate_metrics(row) or {}).get("price"), 0.0)
+            base = _num(selection_prices.get(sym), 0.0)
+            gain = _safe_gain(price, base)
+            sharia = assess_sharia_source_fast(sym)
+            stage, stage_ar = _stage_for_slice(row, gain, layer, sharia)
+            rec = by_symbol.setdefault(sym, {"symbol": sym, "detected_by_minute_replay": False, "stage_history": []})
+            rec["detected_by_minute_replay"] = True
+            if not rec.get("first_detected_time_utc"):
+                rec["first_detected_time_utc"] = sl.get("time_utc")
+                rec["first_detected_phase_ar"] = _phase_ar(_utc_phase_from_minute(int(sl.get("minute") or 0)))
+                rec["first_detected_price"] = _round(price, 4)
+                rec["first_detected_gain_pct"] = _round(gain, 2)
+                rec["first_detected_layer"] = layer
+                rec["first_detected_stage"] = stage
+                rec["first_detected_stage_ar"] = stage_ar
+            seen_stages = {x.get("stage") for x in rec.get("stage_history") or []}
+            if stage not in seen_stages:
+                rec.setdefault("stage_history", []).append({
+                    "time_utc": sl.get("time_utc"),
+                    "phase_ar": _phase_ar(_utc_phase_from_minute(int(sl.get("minute") or 0))),
+                    "slice_label_ar": sl.get("label_ar"),
+                    "stage": stage,
+                    "stage_ar": stage_ar,
+                    "source_layer": layer,
+                    "price": _round(price, 4),
+                    "gain_pct_at_stage": _round(gain, 2),
+                    "source_score": _round(_candidate_score(row), 2),
+                    "sharia_status": sharia.get("status"),
+                    "sharia_label": sharia.get("label"),
+                })
+    for sym, rec in by_symbol.items():
+        hist = rec.get("stage_history") or []
+        rec["promotion_count"] = len(hist)
+        rec["promotion_summary_ar"] = " → ".join([f"{x.get('time_utc')} {x.get('stage_ar')} ({x.get('gain_pct_at_stage')}%)" for x in hist[:8]]) if hist else "لم يظهر في شرائح المصدر الدقيقة"
+    return {
+        "version": "minute_source_slice_replay_v2s2_2026_06_20",
+        "outcome_date": outcome_date,
+        "target_symbols": sorted(target_symbols),
+        "slice_debug": slice_debug,
+        "symbols": by_symbol,
+        "rule_ar": "كل شريحة دقيقة تبني grouped تراكمي حتى تلك اللحظة فقط ثم تشغل دوال المصدر الحقيقية Micro/Fast Lane؛ لا تستخدم بيانات لاحقة داخل الشريحة.",
+    }
+
+
+def _build_big_explosion_timing_report(
+    *,
+    payload: dict[str, Any],
+    selection_grouped: dict,
+    outcome_grouped: dict,
+    outcome_date: str,
+    selected_symbols: set[str],
+    max_symbols: int = 30,
+    max_minute_rows: int = 1_800_000,
+    clean_only: bool = True,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+) -> dict[str, Any]:
+    missed = payload.get("missed_winners_audit") or {}
+    winners = list(missed.get("top_outcome_winners") or [])
+    # Ensure selected winners and very large misses are included, not only missed top list.
+    winners = sorted(winners, key=lambda x: _num(x.get("next_session_max_gain_pct"), 0.0), reverse=True)
+    limit = max(5, min(80, int(max_symbols or 30)))
+    target = []
+    seen = set()
+    for w in winners:
+        sym = _u(w.get("symbol"))
+        if not sym or sym in seen:
+            continue
+        target.append(w)
+        seen.add(sym)
+        if len(target) >= limit:
+            break
+    target_symbols = {_u(x.get("symbol")) for x in target if _u(x.get("symbol"))}
+    selection_prices: dict[str, float] = {}
+    for sym in target_symbols:
+        sel = selection_grouped.get(sym) or {}
+        selection_prices[sym] = _num(sel.get("price"), 0.0) or _num(sel.get("close"), 0.0) or _num((next((w for w in target if _u(w.get('symbol')) == sym), {}) or {}).get("selection_price"), 0.0)
+    loader_debug, target_bars, slice_maps = _read_minute_file_for_replay(
+        trade_date=outcome_date,
+        target_symbols=target_symbols,
+        max_minute_rows=max_minute_rows,
+        force_minute_pull=force_minute_pull,
+        redownload_processed=redownload_processed,
+    )
+    if not loader_debug.get("ok"):
+        return {
+            "ok": False,
+            "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+            "outcome_date": outcome_date,
+            "target_symbols": sorted(target_symbols),
+            "minute_loader": loader_debug,
+            "note_ar": "لم تتوفر بيانات الدقيقة؛ التقرير اليومي V2S1 ما زال صالحًا، لكن توقيت الالتقاط يحتاج minute flat file.",
+        }
+    source_replay = _run_source_on_minute_slices(
+        outcome_date=outcome_date,
+        slice_maps=slice_maps,
+        target_symbols=target_symbols,
+        selection_prices=selection_prices,
+        clean_only=clean_only,
+    )
+    reports = []
+    for w in target:
+        sym = _u(w.get("symbol"))
+        base = _num(selection_prices.get(sym), 0.0)
+        timeline = _timeline_from_target_bars(sym, target_bars.get(sym) or [], base)
+        capture = (source_replay.get("symbols") or {}).get(sym) or {}
+        peak_time = timeline.get("peak_time_utc") or ""
+        det_time = capture.get("first_detected_time_utc") or ""
+        minutes_det_to_peak = _minute_between(det_time, peak_time) if det_time and peak_time else None
+        det_gain = _num(capture.get("first_detected_gain_pct"), 0.0)
+        peak_gain = _num(timeline.get("peak_gain_from_selection_pct"), _num(w.get("next_session_max_gain_pct"), 0.0))
+        if capture.get("detected_by_minute_replay"):
+            if det_gain <= 8:
+                timing_label = "التقطه مبكرًا"
+            elif det_gain <= 20:
+                timing_label = "التقطه بعد بداية الحركة"
+            else:
+                timing_label = "التقطه متأخرًا/بعد انفجار واضح"
+        else:
+            timing_label = "لم تلتقطه شرائح المصدر الدقيقة"
+        reports.append({
+            "symbol": sym,
+            "selected_by_after_close_tool": bool(w.get("selected_by_tool") or sym in selected_symbols),
+            "daily_miss_code": w.get("miss_code"),
+            "daily_miss_reason_ar": w.get("miss_reason_ar"),
+            "selection_price": _round(base, 4),
+            "outcome_gain_daily_pct": w.get("next_session_max_gain_pct"),
+            "timeline": timeline,
+            "minute_capture": capture,
+            "detected_by_minute_replay": bool(capture.get("detected_by_minute_replay")),
+            "first_detected_time_utc": det_time,
+            "first_detected_gain_pct": capture.get("first_detected_gain_pct"),
+            "first_detected_stage_ar": capture.get("first_detected_stage_ar"),
+            "minutes_from_detection_to_peak": minutes_det_to_peak,
+            "timing_label_ar": timing_label,
+            "capture_quality_ar": f"{timing_label}: الالتقاط عند {det_gain:.2f}% من سعر التحضير، والقمة {peak_gain:.2f}%.",
+            "promotion_history_ar": capture.get("promotion_summary_ar") or "لا توجد ترقية في شرائح المصدر الدقيقة",
+        })
+    detected_count = sum(1 for r in reports if r.get("detected_by_minute_replay"))
+    early_count = sum(1 for r in reports if _num(r.get("first_detected_gain_pct"), 9999) <= 8 and r.get("detected_by_minute_replay"))
+    return {
+        "ok": True,
+        "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+        "outcome_date": outcome_date,
+        "target_count": len(reports),
+        "detected_by_minute_replay_count": detected_count,
+        "early_detected_count": early_count,
+        "late_or_missed_count": len(reports) - early_count,
+        "minute_loader": loader_debug,
+        "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
+        "symbols": reports,
+        "top_problem_symbols": [r for r in reports if not r.get("detected_by_minute_replay") or _num(r.get("first_detected_gain_pct"), 0.0) > 20][:20],
+        "rule_ar": "V2S2 يسأل: متى ارتفع السهم؟ هل دخل مصدر الأداة في شرائح الوقت؟ كم كانت نسبته وقت الالتقاط؟ ومتى ترقى داخل replay stages. هذا لا يطلق شراء حي بعد.",
+    }
+
 def run_historical_replay(
     *,
     date_value: str = "",
@@ -754,6 +1295,11 @@ def run_historical_replay(
     recovery_days: int = 7,
     context_days: int = 3,
     missed_gain_threshold: float = 20.0,
+    minute_timing: bool = True,
+    timing_symbols_limit: int = 30,
+    max_minute_rows: int = 1_800_000,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
 ) -> dict[str, Any]:
     selection_date, selection_map, selection_debug = _resolve_selection_grouped(date_value, recovery_days=recovery_days)
     if not selection_map:
@@ -792,7 +1338,7 @@ def run_historical_replay(
     payload = {
         "ok": True,
         "version": HISTORICAL_REPLAY_SIMULATOR_VERSION,
-        "mode": "after_close_3day_context_no_lookahead_tomorrow_prep",
+        "mode": "after_close_3day_context_no_lookahead_tomorrow_prep_plus_minute_timing",
         "requested_date": str(date_value or "").strip(),
         "selection_date": selection_date,
         "outcome_date": outcome_date,
@@ -815,7 +1361,7 @@ def run_historical_replay(
             "source_helpers": ["_collect_micro_explosion_full_market_candidates", "_collect_low_float_fast_lane_candidates"],
             "uses_production_sharia_filter": True,
             "uses_live_buy_decision": False,
-            "why_not_full_live_decision_ar": "V2S1 هو محاكي يومي بعد الإغلاق، لذلك لا يطلق BUY_NOW ولا يغير Strong/Cautious. V2S2 سيضيف time slices لتشغيل منطق السوق الحي على دقائق تاريخية.",
+            "why_not_full_live_decision_ar": "V2S2 يضيف شرائح دقيقة تاريخية لتوقيت الالتقاط والترقية، لكنه لا يطلق BUY_NOW ولا يغير Strong/Cautious الحي.",
             "anti_lookahead_ar": "كل الاختيارات مبنية على أيام <= تاريخ الاختيار فقط. جلسة التقييم لا تدخل إلا بعد اكتمال قائمة الغد.",
         },
         "source_counts": {
@@ -854,9 +1400,39 @@ def run_historical_replay(
         "late_weak_sample": top_late_weak,
         "anti_lookahead_rule_ar": "اختيارات الأداة مبنية على سياق الأيام حتى تاريخ الاختيار فقط؛ نتائج الجلسة التالية تُستخدم للتقييم فقط بعد اكتمال قائمة الغد.",
         "storage_rule_ar": "V2S1 يستخدم Polygon grouped REST compact فقط ولا يحفظ raw files في Railway/GitHub/SQLite.",
-        "timing_limit_note_ar": "V2S1 لا يعرف دقائق البري ماركت/داخل الجلسة. إذا ظهر winner مفقود، V2S2 minute replay سيحدد أول وقت وسعر التقاطه.",
-        "next_step_ar": "شغّل V2S1 على عدة أيام. إذا winners الكبيرة ليست في قائمة الغد، نضيف V2S2 minute timing لمعرفة هل الانفجار بدأ قبل/بعد الافتتاح أو فشل منبع يومي.",
+        "timing_limit_note_ar": "V2S2 يحاول تحديد دقائق البري ماركت/داخل الجلسة عند توفر minute flat file: وقت الانفجار، وقت الالتقاط، نسبة السهم وقت الالتقاط، وتاريخ الترقيات داخل replay stages.",
+        "next_step_ar": "شغّل V2S2 على عدة أيام. إذا كان الالتقاط متأخرًا أو مفقودًا، ننقل قواعد التوقيت الناجحة لاحقًا إلى المصدر الحي بدون فتح Strong/Cautious عشوائيًا.",
     }
+    if bool(minute_timing) and outcome_date and outcome_map:
+        try:
+            timing_report = _build_big_explosion_timing_report(
+                payload=payload,
+                selection_grouped=selection_map,
+                outcome_grouped=outcome_map,
+                outcome_date=outcome_date,
+                selected_symbols=selected_symbols,
+                max_symbols=timing_symbols_limit,
+                max_minute_rows=max_minute_rows,
+                clean_only=bool(clean_only),
+                force_minute_pull=bool(force_minute_pull),
+                redownload_processed=bool(redownload_processed),
+            )
+        except Exception as exc:
+            timing_report = {
+                "ok": False,
+                "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+                "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+                "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
+            }
+        payload["big_explosion_timing_report"] = timing_report
+    else:
+        payload["big_explosion_timing_report"] = {
+            "ok": False,
+            "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+            "disabled": not bool(minute_timing),
+            "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
+        }
+
     if include_candidates:
         payload["candidates"] = evaluated
     else:
@@ -869,10 +1445,10 @@ def historical_replay_status() -> dict[str, Any]:
         "version": HISTORICAL_REPLAY_SIMULATOR_VERSION,
         "endpoint": "/simulator/historical-replay?date=YYYY-MM-DD",
         "aliases": ["/simulator/historical-replay", "/historical-replay", "/replay/historical-market"],
-        "purpose_ar": "محاكاة تاريخية بعد الإغلاق: الأداة تشاهد آخر 3 أيام يومية، تجهز قائمة الغد، ثم نقيمها على الجلسة التالية ونراجع الفائزين الذين فاتوا.",
-        "safe_mode_ar": "تقييم فقط؛ لا يغير Strong/Cautious ولا السوق الحي ولا يحفظ raw.",
-        "recommended_params_ar": "ابدأ max_candidates=40 و context_days=3 و clean_only=true و format=brief، ثم كرر 5-10 أيام.",
-        "v2s1_note_ar": "V2S1 يعيد استخدام دوال المصدر الحية مع daily historical adapter. V2S2 لاحقًا يضيف minute time slices للبري ماركت/داخل الجلسة/بعد الإغلاق.",
+        "purpose_ar": "محاكاة تاريخية بعد الإغلاق + تقرير توقيت الانفجارات الكبيرة بالدقيقة: متى بدأ الصعود، هل التقطته الأداة، نسبة السهم وقت الالتقاط، ومتى ترقى داخل Replay stages.",
+        "safe_mode_ar": "تقييم فقط؛ لا يغير Strong/Cautious ولا السوق الحي ولا يحفظ raw. ملفات الدقيقة تُقرأ من /tmp فقط عند توفر Polygon flat files.",
+        "recommended_params_ar": "ابدأ max_candidates=40 و context_days=3 و missed_gain_threshold=20 و minute_timing=true و timing_symbols_limit=30 و format=brief، ثم كرر 5-10 أيام.",
+        "v2s2_note_ar": "V2S2 يعيد استخدام دوال المصدر الحية على grouped يومي، ثم يبني شرائح دقيقة تاريخية cumulative ويشغل نفس Micro/Fast Lane عليها لقياس توقيت الالتقاط والترقية بدون lookahead.",
     }
 
 
@@ -892,7 +1468,7 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     prep = payload.get("after_close_tomorrow_prep") or {}
     missed = payload.get("missed_winners_audit") or {}
     lines = [
-        "Historical Replay Simulator V2S1",
+        "Historical Replay Simulator V2S2",
         f"تاريخ الاختيار: {payload.get('selection_date')} → جلسة التقييم: {payload.get('outcome_date')}",
         f"وضع الاختبار: {payload.get('mode')}",
         f"أيام السياق: {', '.join(context_debug.get('context_dates') or [])}",
@@ -928,6 +1504,15 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     lines += ["", "أكبر الفائزين الذين فاتوا/أو لم يدخلوا القائمة:"]
     for r in (missed.get("top_missed_winners") or [])[:10]:
         lines.append(f"- {r.get('symbol')}: max {r.get('next_session_max_gain_pct')}%, reason {r.get('miss_reason_ar')}")
+    timing = payload.get("big_explosion_timing_report") or {}
+    lines += ["", "Big Explosion Minute Timing:"]
+    if timing.get("ok"):
+        lines.append(f"- هدف التقرير: {timing.get('target_count')} سهم | التقطت شرائح الدقيقة: {timing.get('detected_by_minute_replay_count')} | التقاط مبكر: {timing.get('early_detected_count')} | متأخر/مفقود: {timing.get('late_or_missed_count')}")
+        for r in (timing.get("symbols") or [])[:10]:
+            tl = r.get("timeline") or {}
+            lines.append(f"- {r.get('symbol')}: peak {tl.get('peak_gain_from_selection_pct')}% at {tl.get('peak_time_utc')} ({tl.get('peak_phase_ar')}), detected {r.get('first_detected_time_utc') or 'لم يلتقط'} at {r.get('first_detected_gain_pct')}%, stage {r.get('first_detected_stage_ar') or '-'}, promo {r.get('promotion_history_ar')}")
+    else:
+        lines.append(f"- غير متاح: {(timing.get('minute_loader') or {}).get('reason') or timing.get('error') or timing.get('note_ar')}")
     lines += ["", "أضعف/أخطر المرشحين:"]
     for r in (payload.get("top_failures") or [])[:8]:
         lines.append(f"- {r.get('symbol')}: max {r.get('next_session_max_gain_pct')}%, worst {r.get('next_session_worst_drawdown_pct')}%, label {r.get('outcome_label_ar')}")
