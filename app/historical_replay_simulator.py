@@ -32,6 +32,7 @@ from app.sharia_filter import assess_sharia_source_fast
 from app.source_discovery import (
     _collect_low_float_fast_lane_candidates,
     _collect_micro_explosion_full_market_candidates,
+    _collect_big_explosion_live_lane_candidates,
 )
 try:
     from app.polygon_flatfile_fetcher import is_us_market_trading_day, fetch_flatfile_to_tmp, cleanup_tmp_path
@@ -47,7 +48,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2s2_big_explosion_minute_timing_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t_big_explosion_live_lane_timing_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -601,7 +602,7 @@ def _evaluate_candidate(c: dict, selection_grouped: dict, outcome_grouped: dict,
         "outcome_rating": rating,
         "outcome_label_ar": label,
         "timing_level": "daily_after_close_context",
-        "timing_note_ar": "V2S1 يعرف التحضير بعد الإغلاق وسياق الأيام فقط؛ توقيت البري ماركت/داخل الجلسة يحتاج V2S2 minute replay.",
+        "timing_note_ar": "V2S1 يعرف التحضير بعد الإغلاق وسياق الأيام فقط؛ توقيت البري ماركت/داخل الجلسة يحتاج V2T minute replay.",
     }
 
 
@@ -755,7 +756,7 @@ def _assessment_ar(rows: list[dict], with_outcome: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# V2S2: Big Explosion Minute Timing Replay
+# V2T: Big Explosion Minute Timing Replay
 # ---------------------------------------------------------------------------
 
 def _minute_time_from_row(row: dict) -> tuple[str, str, int]:
@@ -921,7 +922,7 @@ def _read_minute_file_for_replay(
     target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug = {
-        "version": "minute_replay_loader_v2s2_2026_06_20",
+        "version": "minute_replay_loader_v2t_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "target_symbols_count": len(target_symbols),
@@ -1114,9 +1115,10 @@ def _run_source_on_minute_slices(
         if not m:
             slice_debug.append({"key": key, "time_utc": sl.get("time_utc"), "rows": 0, "micro": 0, "fast": 0})
             continue
-        micro_rows, micro_debug = _collect_micro_explosion_full_market_candidates(m, phase_detail=f"historical_minute_slice_v2s2:{outcome_date}:{sl.get('time_utc')}")
-        fast_rows, fast_debug = _collect_low_float_fast_lane_candidates(m, phase_detail=f"historical_minute_slice_v2s2:{outcome_date}:{sl.get('time_utc')}")
-        source_rows: list[tuple[dict, str]] = [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
+        micro_rows, micro_debug = _collect_micro_explosion_full_market_candidates(m, phase_detail=f"historical_minute_slice_v2t:{outcome_date}:{sl.get('time_utc')}")
+        fast_rows, fast_debug = _collect_low_float_fast_lane_candidates(m, phase_detail=f"historical_minute_slice_v2t:{outcome_date}:{sl.get('time_utc')}")
+        big_rows, big_debug = _collect_big_explosion_live_lane_candidates(m, phase_detail=f"historical_minute_slice_v2t:{outcome_date}:{sl.get('time_utc')}")
+        source_rows: list[tuple[dict, str]] = [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
         slice_debug.append({
             "key": key,
             "time_utc": sl.get("time_utc"),
@@ -1124,8 +1126,10 @@ def _run_source_on_minute_slices(
             "rows": len(m),
             "micro": len(micro_rows or []),
             "fast": len(fast_rows or []),
+            "big": len(big_rows or []),
             "micro_top": (micro_debug or {}).get("top_symbols", [])[:10],
             "fast_top": (fast_debug or {}).get("top_symbols", [])[:10],
+            "big_top": (big_debug or {}).get("top_symbols", [])[:10],
         })
         for row, layer in source_rows:
             sym = _extract_symbol(row)
@@ -1166,12 +1170,12 @@ def _run_source_on_minute_slices(
         rec["promotion_count"] = len(hist)
         rec["promotion_summary_ar"] = " → ".join([f"{x.get('time_utc')} {x.get('stage_ar')} ({x.get('gain_pct_at_stage')}%)" for x in hist[:8]]) if hist else "لم يظهر في شرائح المصدر الدقيقة"
     return {
-        "version": "minute_source_slice_replay_v2s2_2026_06_20",
+        "version": "minute_source_slice_replay_v2t_2026_06_20",
         "outcome_date": outcome_date,
         "target_symbols": sorted(target_symbols),
         "slice_debug": slice_debug,
         "symbols": by_symbol,
-        "rule_ar": "كل شريحة دقيقة تبني grouped تراكمي حتى تلك اللحظة فقط ثم تشغل دوال المصدر الحقيقية Micro/Fast Lane؛ لا تستخدم بيانات لاحقة داخل الشريحة.",
+        "rule_ar": "كل شريحة دقيقة تبني grouped تراكمي حتى تلك اللحظة فقط ثم تشغل دوال المصدر الحقيقية Big Explosion/Micro/Fast Lane؛ لا تستخدم بيانات لاحقة داخل الشريحة.",
     }
 
 
@@ -1218,7 +1222,7 @@ def _build_big_explosion_timing_report(
     if not loader_debug.get("ok"):
         return {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
             "outcome_date": outcome_date,
             "target_symbols": sorted(target_symbols),
             "minute_loader": loader_debug,
@@ -1273,7 +1277,7 @@ def _build_big_explosion_timing_report(
     early_count = sum(1 for r in reports if _num(r.get("first_detected_gain_pct"), 9999) <= 8 and r.get("detected_by_minute_replay"))
     return {
         "ok": True,
-        "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+        "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
         "outcome_date": outcome_date,
         "target_count": len(reports),
         "detected_by_minute_replay_count": detected_count,
@@ -1283,7 +1287,7 @@ def _build_big_explosion_timing_report(
         "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
         "symbols": reports,
         "top_problem_symbols": [r for r in reports if not r.get("detected_by_minute_replay") or _num(r.get("first_detected_gain_pct"), 0.0) > 20][:20],
-        "rule_ar": "V2S2 يسأل: متى ارتفع السهم؟ هل دخل مصدر الأداة في شرائح الوقت؟ كم كانت نسبته وقت الالتقاط؟ ومتى ترقى داخل replay stages. هذا لا يطلق شراء حي بعد.",
+        "rule_ar": "V2T يسأل: متى ارتفع السهم؟ هل دخل مصدر الأداة في شرائح الوقت؟ كم كانت نسبته وقت الالتقاط؟ ومتى ترقى داخل replay stages. هذا لا يطلق شراء حي بعد.",
     }
 
 def run_historical_replay(
@@ -1358,10 +1362,10 @@ def run_historical_replay(
         "production_pipeline_reuse": {
             "version": "production_source_reuse_contract_v2s1_2026_06_20",
             "uses_production_source_helpers": True,
-            "source_helpers": ["_collect_micro_explosion_full_market_candidates", "_collect_low_float_fast_lane_candidates"],
+            "source_helpers": ["_collect_micro_explosion_full_market_candidates", "_collect_low_float_fast_lane_candidates", "_collect_big_explosion_live_lane_candidates"],
             "uses_production_sharia_filter": True,
             "uses_live_buy_decision": False,
-            "why_not_full_live_decision_ar": "V2S2 يضيف شرائح دقيقة تاريخية لتوقيت الالتقاط والترقية، لكنه لا يطلق BUY_NOW ولا يغير Strong/Cautious الحي.",
+            "why_not_full_live_decision_ar": "V2T يضيف مسار Big Explosion للالتقاط والتوقيت، لكنه لا يطلق BUY_NOW ولا يغير Strong/Cautious الحي.",
             "anti_lookahead_ar": "كل الاختيارات مبنية على أيام <= تاريخ الاختيار فقط. جلسة التقييم لا تدخل إلا بعد اكتمال قائمة الغد.",
         },
         "source_counts": {
@@ -1400,8 +1404,8 @@ def run_historical_replay(
         "late_weak_sample": top_late_weak,
         "anti_lookahead_rule_ar": "اختيارات الأداة مبنية على سياق الأيام حتى تاريخ الاختيار فقط؛ نتائج الجلسة التالية تُستخدم للتقييم فقط بعد اكتمال قائمة الغد.",
         "storage_rule_ar": "V2S1 يستخدم Polygon grouped REST compact فقط ولا يحفظ raw files في Railway/GitHub/SQLite.",
-        "timing_limit_note_ar": "V2S2 يحاول تحديد دقائق البري ماركت/داخل الجلسة عند توفر minute flat file: وقت الانفجار، وقت الالتقاط، نسبة السهم وقت الالتقاط، وتاريخ الترقيات داخل replay stages.",
-        "next_step_ar": "شغّل V2S2 على عدة أيام. إذا كان الالتقاط متأخرًا أو مفقودًا، ننقل قواعد التوقيت الناجحة لاحقًا إلى المصدر الحي بدون فتح Strong/Cautious عشوائيًا.",
+        "timing_limit_note_ar": "V2T يحاول تحديد دقائق البري ماركت/داخل الجلسة عند توفر minute flat file: وقت الانفجار، وقت الالتقاط، نسبة السهم وقت الالتقاط، وتاريخ الترقيات داخل replay stages.",
+        "next_step_ar": "شغّل V2T على عدة أيام. إذا كان الالتقاط متأخرًا أو مفقودًا، ننقل قواعد التوقيت الناجحة لاحقًا إلى المصدر الحي بدون فتح Strong/Cautious عشوائيًا.",
     }
     if bool(minute_timing) and outcome_date and outcome_map:
         try:
@@ -1420,7 +1424,7 @@ def run_historical_replay(
         except Exception as exc:
             timing_report = {
                 "ok": False,
-                "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+                "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
                 "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
             }
@@ -1428,7 +1432,7 @@ def run_historical_replay(
     else:
         payload["big_explosion_timing_report"] = {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2s2_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t_2026_06_20",
             "disabled": not bool(minute_timing),
             "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
         }
@@ -1448,7 +1452,7 @@ def historical_replay_status() -> dict[str, Any]:
         "purpose_ar": "محاكاة تاريخية بعد الإغلاق + تقرير توقيت الانفجارات الكبيرة بالدقيقة: متى بدأ الصعود، هل التقطته الأداة، نسبة السهم وقت الالتقاط، ومتى ترقى داخل Replay stages.",
         "safe_mode_ar": "تقييم فقط؛ لا يغير Strong/Cautious ولا السوق الحي ولا يحفظ raw. ملفات الدقيقة تُقرأ من /tmp فقط عند توفر Polygon flat files.",
         "recommended_params_ar": "ابدأ max_candidates=40 و context_days=3 و missed_gain_threshold=20 و minute_timing=true و timing_symbols_limit=30 و format=brief، ثم كرر 5-10 أيام.",
-        "v2s2_note_ar": "V2S2 يعيد استخدام دوال المصدر الحية على grouped يومي، ثم يبني شرائح دقيقة تاريخية cumulative ويشغل نفس Micro/Fast Lane عليها لقياس توقيت الالتقاط والترقية بدون lookahead.",
+        "v2t_note_ar": "V2T يعيد استخدام دوال المصدر الحية على grouped يومي، ثم يبني شرائح دقيقة تاريخية cumulative ويشغل نفس Micro/Fast Lane عليها لقياس توقيت الالتقاط والترقية بدون lookahead.",
     }
 
 
@@ -1468,7 +1472,7 @@ def format_historical_replay_brief(payload: dict[str, Any]) -> str:
     prep = payload.get("after_close_tomorrow_prep") or {}
     missed = payload.get("missed_winners_audit") or {}
     lines = [
-        "Historical Replay Simulator V2S2",
+        "Historical Replay Simulator V2T",
         f"تاريخ الاختيار: {payload.get('selection_date')} → جلسة التقييم: {payload.get('outcome_date')}",
         f"وضع الاختبار: {payload.get('mode')}",
         f"أيام السياق: {', '.join(context_debug.get('context_dates') or [])}",

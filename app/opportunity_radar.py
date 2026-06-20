@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2r2_micro_explosion_recent_grouped_fallback_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2t_big_explosion_live_lane_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -1717,6 +1717,7 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     # low-ish price and in a watch bucket.
     low_float_profile = _low_float_proxy_metrics(row)
     micro_capture_profile = _micro_explosion_capture_profile(row)
+    big_explosion_profile = _big_explosion_live_profile(row)
     low_float_pm = bool(
         low_float_profile.get("confirmed_float")
         or low_float_profile.get("small_cap_proxy")
@@ -1727,6 +1728,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     if extended_after_move and low_price:
         high_risk_day = True
     if low_float_profile.get("fast_lane_source") and low_float_pm:
+        high_risk_day = True
+    if big_explosion_profile.get("matched"):
         high_risk_day = True
 
     gap_up = _num(row.get("open_gap_pct", row.get("gap_from_prev_close_pct", 0)), 0.0)
@@ -1805,6 +1808,8 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
         "low_float_fast_lane": bool(low_float_profile.get("fast_lane_source")),
         "micro_explosion_capture": bool(micro_capture_profile.get("matched")),
         "micro_explosion_profile_v2r": micro_capture_profile,
+        "big_explosion_live": bool(big_explosion_profile.get("matched")),
+        "big_explosion_profile_v2t": big_explosion_profile,
         "low_float_profile_v2o": low_float_profile,
         "classic_small_stock": classic_small,
         "classic_small_candidate": classic_candidate,
@@ -1838,6 +1843,11 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
             return "cautious_reclaim", "🟠 دخول بحذر — Reclaim", "cautious_entries", flags.get("reclaim_reasons", [])
         return "cautious", "🟠 دخول بحذر", "cautious_entries", ["خطة جيدة لكنها تحتاج انضباطًا وحجمًا أصغر من Strong."]
     classic = flags.get("classic_small_stock") or {}
+    if flags.get("big_explosion_live"):
+        profile = flags.get("big_explosion_profile_v2t") if isinstance(flags.get("big_explosion_profile_v2t"), dict) else {}
+        reasons = ["V2T: انفجار كبير نشط التقطه الرادار — مراقبة توقيت/ترقية فقط وليس دخول مباشر."]
+        reasons.extend(list(profile.get("reasons") or [])[:6])
+        return "big_explosion_watch", "🚨 انفجار كبير تحت المراقبة V2T", "high_risk_day_trade", _dedupe(reasons, 8)
     if flags.get("micro_explosion_capture") and not flags.get("extended_after_move"):
         profile = flags.get("micro_explosion_profile_v2r") if isinstance(flags.get("micro_explosion_profile_v2r"), dict) else {}
         reasons = ["V2R التقط السهم بسبب تجميع/شمعة قوية/احتمال انفجار — مراقبة وتفعيل فقط."]
@@ -2190,6 +2200,44 @@ def _micro_explosion_capture_profile(row: dict) -> dict[str, Any]:
         "too_extended_for_fresh_entry": bool(move_risk >= 18 or change >= 15),
         "reasons": _dedupe(reasons, 8),
         "rule_ar": "وسم التقاط/مراقبة لصيقة فقط: يعني أن رادار V2R1 رأى بوادر انفجار من السوق الكامل أو ذاكرة المتابعة. لا يغير Strong/Cautious ولا يعني شراء مباشر.",
+    }
+
+
+def _big_explosion_live_profile(row: dict) -> dict[str, Any]:
+    source_text = _source_text_for_capture(row)
+    matched = bool(
+        row.get("big_explosion_live_lane_v2t")
+        or row.get("big_explosion_live_eligible")
+        or "big_explosion_live_lane_v2t" in source_text
+        or "big explosion v2t" in source_text
+        or "big explosion live" in source_text
+    )
+    price = _price(row)
+    change = _change_pct(row)
+    dollar_vol = _num(row.get("dollar_volume", row.get("current_dollar_volume", row.get("live_dollar_volume", row.get("premarket_dollar_volume", 0)))), 0.0)
+    score = _num(row.get("big_explosion_live_score", 0.0), 0.0)
+    reasons = []
+    if matched:
+        reasons.append("V2T التقط انفجارًا كبيرًا نشطًا — مراقبة توقيت/تقرير لا شراء مباشر")
+    if change >= 5:
+        reasons.append(f"الارتفاع الحالي {round(change, 2)}%")
+    if price > 0:
+        reasons.append(f"السعر {round(price, 3)}$")
+    if dollar_vol > 0:
+        reasons.append(f"دولار فوليوم {round(dollar_vol/1000, 1)}K")
+    if score > 0:
+        reasons.append(f"درجة V2T {round(score, 1)}")
+    return {
+        "version": "big_explosion_live_profile_v2t_2026_06_20",
+        "matched": matched,
+        "price": price,
+        "change_pct": change,
+        "dollar_volume": dollar_vol,
+        "score": score,
+        "already_big": bool(change >= 20),
+        "very_extended": bool(change >= 50),
+        "reasons": _dedupe(reasons + list(row.get("big_explosion_live_reasons_ar") or [])[:5], 8),
+        "rule_ar": "مسار مراقبة وتوقيت فقط للانفجارات الكبيرة؛ لا يغيّر Strong/Cautious ولا يعني دخول مباشر.",
     }
 
 
@@ -2567,6 +2615,11 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
     low_price = 1.0 <= price <= 20.0
     very_low = 1.0 <= price <= 8.0
     micro_capture = _micro_explosion_capture_profile(row)
+    big_explosion = _big_explosion_live_profile(row)
+    if big_explosion.get("matched"):
+        reasons = ["V2T: انفجار كبير/تسارع حي تحت المراقبة — تقرير توقيت وترقية وليس شراء مباشر."]
+        reasons.extend(list(big_explosion.get("reasons") or [])[:6])
+        add("high_risk_day_trade", 46.0 if not big_explosion.get("very_extended") else 32.0, reasons)
     if micro_capture.get("matched"):
         reasons = ["التقاط V2R1: مراقبة لصيقة لبوادر تجميع/شموع قوية/احتمال انفجار — ليس شراء مباشر."]
         reasons.extend(list(micro_capture.get("reasons") or [])[:6])
