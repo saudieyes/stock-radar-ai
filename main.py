@@ -246,6 +246,12 @@ from app.learning_archive_v1 import (
     learning_archive_status,
     build_learning_archive_from_polygon,
 )
+from app.historical_replay_simulator import (
+    HISTORICAL_REPLAY_SIMULATOR_VERSION,
+    historical_replay_status,
+    run_historical_replay,
+    format_historical_replay_brief,
+)
 from app.polygon_weekly_builder import (
     build_weekly_candidates_from_path,
     build_weekly_candidates_from_paths,
@@ -680,6 +686,36 @@ def replay_lab_small_stock_classic_run_endpoint(path: str = "", max_files: int =
 def replay_lab_small_stock_classic_pull_run_endpoint(end_date: str = "", minute_days: int = 5, max_rows: int = 250000, max_candidates: int = 120, daily_lookback_days: int = 14, force: bool = False, redownload_processed: bool = True):
     return run_small_stock_classic_replay_from_polygon(end_date=end_date, minute_days=minute_days, max_rows=max_rows, max_candidates=max_candidates, daily_lookback_days=daily_lookback_days, force=force, redownload_processed=redownload_processed)
 
+
+
+@app.get("/simulator/historical-replay/status")
+@app.get("/historical-replay/status")
+def historical_replay_simulator_status_endpoint():
+    return historical_replay_status()
+
+
+@app.get("/simulator/historical-replay")
+@app.get("/historical-replay")
+@app.get("/replay/historical-market")
+def historical_replay_simulator_endpoint(
+    date: str = "",
+    max_candidates: int = 40,
+    clean_only: bool = True,
+    include_candidates: bool = True,
+    recovery_days: int = 7,
+    format: str = "json",
+):
+    payload = run_historical_replay(
+        date_value=date,
+        max_candidates=max_candidates,
+        clean_only=clean_only,
+        include_candidates=include_candidates,
+        recovery_days=recovery_days,
+    )
+    fmt = str(format or "json").strip().lower()
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(format_historical_replay_brief(payload), media_type="text/plain; charset=utf-8")
+    return payload
 
 
 @app.get("/learning-archive/status")
