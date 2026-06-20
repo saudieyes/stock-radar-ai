@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 
 import scanner as _scanner
@@ -94,6 +94,12 @@ MICRO_EXPLOSION_CLOSE_WATCH_LIMIT = _env_int("MICRO_EXPLOSION_CLOSE_WATCH_LIMIT"
 MICRO_EXPLOSION_WATCH_TTL_HOURS = _env_int("MICRO_EXPLOSION_WATCH_TTL_HOURS", 54, 12, 96)
 MICRO_EXPLOSION_SEED_CONFIRM_LIMIT = _env_int("MICRO_EXPLOSION_SEED_CONFIRM_LIMIT", 180, 30, 300)
 MICRO_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:micro_explosion_close_watch_v2r1"
+# V2R2: if Polygon grouped selector lands on a closed holiday/weekend date and returns
+# zero rows, recover the most recent grouped day before running the micro scan.
+# This is still compact in-memory/cached data only; no raw flat files are stored.
+DYNAMIC_DISCOVERY_GROUPED_RECOVERY_DAYS = _env_int("DYNAMIC_DISCOVERY_GROUPED_RECOVERY_DAYS", 10, 2, 20)
+DYNAMIC_DISCOVERY_GROUPED_RECOVERY_MIN_ROWS = _env_int("DYNAMIC_DISCOVERY_GROUPED_RECOVERY_MIN_ROWS", 500, 100, 2000)
+MICRO_EXPLOSION_REFERENCE_FALLBACK_LIMIT = _env_int("MICRO_EXPLOSION_REFERENCE_FALLBACK_LIMIT", 900, 120, 1500)
 
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # User-provided low-float / China-momentum seed universe.  These names are not
@@ -732,8 +738,8 @@ def _micro_explosion_capture_score(ticker: str, metrics: dict, phase_detail: str
         score += 6; reasons.append("قريب من قمة اليوم/منطقة اختراق")
 
     # FMP sources often lack candle range/close position, so require clean ignition.
-    fmp_source = source_kind in {"fmp_mover", "fmp_live", "fmp_small_mover"}
-    full_market_source = source_kind in {"polygon_full_market_v2r1"}
+    fmp_source = source_kind in {"fmp_mover", "fmp_live", "fmp_small_mover", "fmp_reference_fallback_v2r2"}
+    full_market_source = source_kind in {"polygon_full_market_v2r2", "polygon_full_market_v2r2"}
     if fmp_source:
         score += 8; reasons.append("مصدر حي/متحرك من FMP وليس Watch قديم")
     if full_market_source:
@@ -925,9 +931,154 @@ def _update_micro_explosion_watch_memory(items: list[dict], phase_detail: str = 
     }
 
 
-def _collect_micro_explosion_full_market_candidates(grouped_map: dict, phase_detail: str = "") -> tuple[list[dict], dict]:
+
+def _recover_recent_grouped_market_map(current_date: str = "", grouped_map: dict | None = None) -> tuple[str, dict, str, dict]:
+    """V2R2: recover a real grouped map when previous_business_day is a market holiday.
+
+    Juneteenth/holiday Fridays can make scanner._select_grouped_market_map return
+    previous_grouped with 0 rows.  For micro-explosion discovery this is fatal
+    because the after-close full-market scan becomes scanned=0.  We walk backward
+    over recent weekdays until Polygon returns a usable grouped daily map.
+    """
+    initial_count = len(grouped_map or {})
     debug = {
-        "version": "micro_explosion_full_market_scan_v2r1_2026_06_20",
+        "version": "recent_grouped_recovery_v2r2_2026_06_20",
+        "enabled": True,
+        "initial_date": str(current_date or ""),
+        "initial_count": int(initial_count),
+        "min_rows": int(DYNAMIC_DISCOVERY_GROUPED_RECOVERY_MIN_ROWS),
+        "lookback_days": int(DYNAMIC_DISCOVERY_GROUPED_RECOVERY_DAYS),
+        "attempts": [],
+        "recovered": False,
+        "selected_date": str(current_date or ""),
+        "selected_count": int(initial_count),
+        "source_mode": "original_grouped",
+        "rule_ar": "V2R2: إذا صادف previous_grouped يوم عطلة/صفر بيانات، نرجع لآخر جلسة Polygon grouped صالحة حتى لا يصبح Micro Full Scan = 0.",
+    }
+    if initial_count >= int(DYNAMIC_DISCOVERY_GROUPED_RECOVERY_MIN_ROWS):
+        debug["source_mode"] = "original_grouped_ok"
+        return str(current_date or ""), dict(grouped_map or {}), "grouped_ok", debug
+
+    try:
+        if current_date:
+            anchor = datetime.fromisoformat(str(current_date)[:10]).date()
+        else:
+            anchor = datetime.now(NY_TZ).date()
+    except Exception:
+        anchor = datetime.now(NY_TZ).date()
+
+    best_date = str(current_date or "")
+    best_map = dict(grouped_map or {})
+    best_count = initial_count
+    for offset in range(0, int(DYNAMIC_DISCOVERY_GROUPED_RECOVERY_DAYS) + 1):
+        day = anchor - timedelta(days=offset)
+        if day.weekday() >= 5:
+            continue
+        dstr = day.isoformat()
+        try:
+            m = _scanner.get_grouped_daily_map(dstr) or {}
+            count = len(m or {})
+        except Exception as exc:
+            debug["attempts"].append({"date": dstr, "error": f"{type(exc).__name__}: {str(exc)[:80]}"})
+            continue
+        debug["attempts"].append({"date": dstr, "count": int(count)})
+        if count > best_count:
+            best_date, best_map, best_count = dstr, dict(m or {}), count
+        if count >= int(DYNAMIC_DISCOVERY_GROUPED_RECOVERY_MIN_ROWS):
+            debug.update({
+                "recovered": True,
+                "selected_date": dstr,
+                "selected_count": int(count),
+                "source_mode": "recent_grouped_recovered",
+            })
+            return dstr, dict(m or {}), "recent_grouped_recovered", debug
+
+    debug.update({
+        "recovered": bool(best_count > initial_count),
+        "selected_date": best_date,
+        "selected_count": int(best_count),
+        "source_mode": "recent_grouped_best_available" if best_count > initial_count else "no_grouped_recovered",
+    })
+    return best_date, best_map, debug["source_mode"], debug
+
+
+def _quote_rows_for_reference_fallback(symbols: list[str], phase_detail: str = "") -> tuple[list[dict], dict]:
+    """Last-resort V2R2 fallback when no grouped rows can be recovered.
+
+    It samples the Micro/China seed universe first, then reference tickers, using
+    FMP batch quotes in capped chunks.  It is monitoring-only and does not create
+    BUY/Cautious signals.
+    """
+    debug = {
+        "version": "micro_explosion_reference_quote_fallback_v2r2_2026_06_20",
+        "enabled": bool(MICRO_EXPLOSION_CAPTURE_ENABLED),
+        "requested_symbols": 0,
+        "quote_symbols": 0,
+        "eligible_count": 0,
+        "top_symbols": [],
+        "batches": [],
+        "rule_ar": "Fallback فقط إذا لم تتوفر Polygon grouped: نؤكد Seed/Reference عبر FMP batch بشكل محدود ونضيف مراقبة لصيقة لا شراء.",
+    }
+    if not MICRO_EXPLOSION_CAPTURE_ENABLED:
+        return [], debug
+    seed_first = sorted(MICRO_EXPLOSION_SEED_SYMBOLS)
+    ordered = _scanner.unique_keep_order(seed_first + list(symbols or []))[:MICRO_EXPLOSION_REFERENCE_FALLBACK_LIMIT]
+    debug["requested_symbols"] = len(ordered)
+    out: list[dict] = []
+    for start in range(0, len(ordered), 300):
+        batch = ordered[start:start+300]
+        if not batch:
+            continue
+        try:
+            bundle = get_live_quotes(batch, prefer_cache=False, allow_fallback=False)
+            quotes = (bundle or {}).get("quotes", {}) or {}
+            qdiag = (bundle or {}).get("diagnostics", {}) or {}
+            debug["batches"].append({"start": start, "requested": len(batch), "quotes": len(quotes), "source": qdiag.get("source")})
+        except Exception as exc:
+            debug["batches"].append({"start": start, "requested": len(batch), "error": f"{type(exc).__name__}: {str(exc)[:80]}"})
+            continue
+        debug["quote_symbols"] += len(quotes or {})
+        for sym, q in (quotes or {}).items():
+            sym = _clean_symbol(sym)
+            if not sym:
+                continue
+            price = to_float((q or {}).get("price"))
+            chg = to_float((q or {}).get("change_pct"))
+            volume = to_float((q or {}).get("volume"))
+            metrics = _micro_explosion_metrics_from_price_change_volume(price, chg, volume, source_kind="fmp_reference_fallback_v2r2")
+            seed = _is_micro_explosion_seed_symbol(sym)
+            eligible, score, reasons, flags = _micro_explosion_capture_score(sym, metrics, phase_detail=phase_detail, source_kind="fmp_reference_fallback_v2r2")
+            # Quote fallback has no candle range; allow seed names a conservative sticky watch
+            # when they are in the right price/dollar-volume band even before the full candle exists.
+            dollar_volume = to_float(metrics.get("dollar_volume"))
+            if not eligible and seed and 0 < price <= MICRO_EXPLOSION_CAPTURE_EXTENDED_MAX_PRICE and 35_000 <= dollar_volume <= MICRO_EXPLOSION_CAPTURE_MAX_DOLLAR_VOLUME and -6.0 <= chg < 18.0:
+                eligible = True
+                score = max(float(score or 0), 52.0 + min(max(chg, 0), 12.0) * 1.2)
+                reasons = ["Seed Micro/China من FMP fallback — مراقبة لصيقة حتى تظهر شمعة/حجم أوضح"] + list(reasons or [])[:5]
+                flags.update({
+                    "micro_explosion_capture_score": safe_round(score, 3),
+                    "micro_explosion_capture_eligible": True,
+                    "micro_explosion_reasons_ar": reasons[:8],
+                    "micro_explosion_capture_v2r1": True,
+                    "micro_explosion_seed_match": True,
+                    "micro_explosion_reference_fallback_v2r2": True,
+                })
+            if not eligible:
+                continue
+            if seed:
+                score += 6.0
+                reasons = ["Seed Micro/China/Low-Float تحت مراقبة V2R2"] + list(reasons or [])[:7]
+            flags.update({"micro_explosion_capture_v2r1": True, "micro_explosion_seed_match": seed, "micro_explosion_reference_fallback_v2r2": True})
+            out.append({"symbol": sym, "score": safe_round(score, 3), "reasons": reasons[:8], "metrics": {**metrics, **flags}})
+    out.sort(key=lambda r: float(r.get("score", 0) or 0), reverse=True)
+    out = out[:MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT]
+    debug["eligible_count"] = len(out)
+    debug["top_symbols"] = [r.get("symbol") for r in out[:50]]
+    return out, debug
+
+def _collect_micro_explosion_full_market_candidates(grouped_map: dict, phase_detail: str = "", reference_tickers: list[str] | None = None) -> tuple[list[dict], dict]:
+    debug = {
+        "version": "micro_explosion_full_market_scan_v2r2_recent_grouped_recovery_2026_06_20",
         "enabled": bool(MICRO_EXPLOSION_CAPTURE_ENABLED),
         "scan_cap": int(MICRO_EXPLOSION_FULL_MARKET_SCAN_CAP),
         "scanned": 0,
@@ -935,10 +1086,22 @@ def _collect_micro_explosion_full_market_candidates(grouped_map: dict, phase_det
         "seed_match_count": 0,
         "blocked_count": 0,
         "top_symbols": [],
-        "rule_ar": "يمسح السوق المتاح كاملًا بدون base_filters الثقيلة لالتقاط التجميع/الشموع القوية قبل أن يدخل السهم Watch قديمًا أو يطير.",
+        "fallback_used": False,
+        "fallback_debug": {},
+        "rule_ar": "V2R2: يمسح آخر grouped صالح بعد الإغلاق/العطلة، وإذا لم يوجد يستخدم FMP reference fallback محدود؛ الهدف ألا يصبح scanned=0.",
     }
-    if not MICRO_EXPLOSION_CAPTURE_ENABLED or not grouped_map:
+    if not MICRO_EXPLOSION_CAPTURE_ENABLED:
         return [], debug
+    if not grouped_map:
+        fallback_rows, fallback_debug = _quote_rows_for_reference_fallback(reference_tickers or [], phase_detail=phase_detail)
+        debug.update({
+            "fallback_used": True,
+            "fallback_debug": fallback_debug,
+            "scanned": int((fallback_debug or {}).get("quote_symbols", 0) or 0),
+            "eligible_count": len(fallback_rows or []),
+            "top_symbols": [r.get("symbol") for r in (fallback_rows or [])[:50]],
+        })
+        return fallback_rows, debug
     out: list[dict] = []
     for idx, (ticker, daily) in enumerate((grouped_map or {}).items()):
         if idx >= MICRO_EXPLOSION_FULL_MARKET_SCAN_CAP:
@@ -957,7 +1120,7 @@ def _collect_micro_explosion_full_market_candidates(grouped_map: dict, phase_det
         seed = _is_micro_explosion_seed_symbol(sym)
         if seed:
             debug["seed_match_count"] += 1
-        eligible, score, reasons, flags = _micro_explosion_capture_score(sym, metrics, phase_detail=phase_detail, source_kind="polygon_full_market_v2r1")
+        eligible, score, reasons, flags = _micro_explosion_capture_score(sym, metrics, phase_detail=phase_detail, source_kind="polygon_full_market_v2r2")
         # V2R1: seed symbols from the simulator-style universe can be watched a bit
         # earlier if they have constructive candle evidence, but still no BUY.
         if not eligible and seed:
@@ -1055,6 +1218,13 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         page_limit=DYNAMIC_DISCOVERY_REFERENCE_PAGE_LIMIT,
     ) or []
     market_date, grouped_map, source_mode = _scanner._select_grouped_market_map()
+    grouped_recovery_debug = {}
+    try:
+        market_date, grouped_map, recovered_mode, grouped_recovery_debug = _recover_recent_grouped_market_map(market_date, grouped_map or {})
+        if recovered_mode and recovered_mode not in {"grouped_ok", "original_grouped_ok"}:
+            source_mode = str(recovered_mode)
+    except Exception as exc:
+        grouped_recovery_debug = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
     market_activity_mode, suggested_target, activity_stats = _scanner._classify_source_market_activity(grouped_map or {})
     intraday_early_radar_status = {}
     intraday_early_radar_count = 0
@@ -1268,6 +1438,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         micro_full_rows, micro_explosion_full_market_status = _collect_micro_explosion_full_market_candidates(
             grouped_map or {},
             phase_detail=str(phase_info.get("detail", "") or ""),
+            reference_tickers=reference_tickers or [],
         )
         for item in micro_full_rows or []:
             sym = _clean_symbol((item or {}).get("symbol"))
@@ -1278,13 +1449,13 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             metrics = dict((item or {}).get("metrics") or {})
             micro_explosion_capture_count += 1
             micro_explosion_capture_symbols.append(sym)
-            micro_explosion_memory_items.append(_micro_candidate_memory_item(sym, metrics, reasons, score, str(phase_info.get("detail", "") or ""), "polygon_full_market_v2r1"))
+            micro_explosion_memory_items.append(_micro_candidate_memory_item(sym, metrics, reasons, score, str(phase_info.get("detail", "") or ""), "polygon_full_market_v2r2"))
             _add_candidate(
                 candidates,
                 sym,
                 82 + score * 0.44,
                 "micro_explosion_capture_v2r",
-                "Micro Explosion Capture V2R1 — مسح السوق كاملًا: " + "، ".join(reasons[:3]),
+                "Micro Explosion Capture V2R2 — مسح آخر grouped صالح/السوق المتاح: " + "، ".join(reasons[:3]),
                 {**metrics, "micro_explosion_capture_reasons": reasons, "micro_explosion_capture_v2r": True, "micro_explosion_capture_v2r1": True},
             )
             _add_candidate(
@@ -1301,7 +1472,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                         sym,
                         price=float(metrics.get("price", 0) or 0),
                         change_pct=float(metrics.get("change_pct", metrics.get("day_change_pct", 0)) or 0),
-                        source_reason="Micro Explosion Capture V2R1 full-market: " + "، ".join(reasons[:3]),
+                        source_reason="Micro Explosion Capture V2R2 full-market: " + "، ".join(reasons[:3]),
                         source_layer="micro_explosion_capture_v2r1",
                         source_tags=["micro_explosion_capture_v2r1", "full_market_scan", "sticky_close_watch"],
                         move_stage="Sticky Micro Explosion Watch",
@@ -1716,14 +1887,15 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3f1_micro_explosion_close_watch_debug_v2r1b_2026_06_20",
+        "engine_version": "dynamic_discovery_v3g_micro_explosion_recent_grouped_fallback_v2r2_2026_06_20",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "candidate_pool_plus_whole_market_micro_explosion_close_watch_and_fast_lane_funnel_debug",
+        "dynamic_discovery_mode": "candidate_pool_plus_recent_grouped_recovered_micro_explosion_close_watch_v2r2",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
         "market_date": market_date,
         "source_mode": source_mode,
+        "grouped_recovery_debug": grouped_recovery_debug,
         "phase_detail": phase_info.get("detail", ""),
         "phase_label": phase_info.get("label", ""),
         "recommended_deep_scan_target": get_recommended_deep_scan_target(190),
@@ -1797,7 +1969,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 "reasons": list(r.get("reasons") or [])[:8],
                 "metrics": {
                     k: v for k, v in (r.get("metrics") or {}).items()
-                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p", "micro_explosion_capture_v2r", "micro_explosion_capture_score", "micro_explosion_source_kind", "micro_explosion_reasons_ar", "micro_explosion_blockers_ar", "micro_explosion_first_ignition", "micro_explosion_strong_candle", "micro_explosion_quiet_accumulation", "micro_explosion_capture_v2r1", "micro_explosion_seed_match"}
+                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p", "micro_explosion_capture_v2r", "micro_explosion_capture_score", "micro_explosion_source_kind", "micro_explosion_reasons_ar", "micro_explosion_blockers_ar", "micro_explosion_first_ignition", "micro_explosion_strong_candle", "micro_explosion_quiet_accumulation", "micro_explosion_capture_v2r1", "micro_explosion_seed_match", "micro_explosion_reference_fallback_v2r2"}
                 },
             }
             for r in ranked[:max_symbols]
