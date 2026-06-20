@@ -711,25 +711,39 @@ def historical_replay_simulator_endpoint(
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     prior_full_session_scan: bool = True,
+    prior_scan_max_rows: int = 400000,
+    prior_scan_timeout_sec: float = 8.0,
     format: str = "json",
 ):
-    payload = run_historical_replay(
-        date_value=date,
-        max_candidates=max_candidates,
-        clean_only=clean_only,
-        include_candidates=include_candidates,
-        recovery_days=recovery_days,
-        context_days=context_days,
-        missed_gain_threshold=missed_gain_threshold,
-        minute_timing=minute_timing,
-        timing_symbols_limit=timing_symbols_limit,
-        max_minute_rows=max_minute_rows,
-        force_minute_pull=force_minute_pull,
-        redownload_processed=redownload_processed,
-        prior_full_session_scan=prior_full_session_scan,
-    )
     fmt = str(format or "json").strip().lower()
+    try:
+        payload = run_historical_replay(
+            date_value=date,
+            max_candidates=max_candidates,
+            clean_only=clean_only,
+            include_candidates=include_candidates,
+            recovery_days=recovery_days,
+            context_days=context_days,
+            missed_gain_threshold=missed_gain_threshold,
+            minute_timing=minute_timing,
+            timing_symbols_limit=timing_symbols_limit,
+            max_minute_rows=max_minute_rows,
+            force_minute_pull=force_minute_pull,
+            redownload_processed=redownload_processed,
+            prior_full_session_scan=prior_full_session_scan,
+            prior_scan_max_rows=prior_scan_max_rows,
+            prior_scan_timeout_sec=prior_scan_timeout_sec,
+        )
+    except Exception as exc:
+        payload = {
+            "ok": False,
+            "version": "historical_replay_endpoint_guard_v2t2b_2026_06_20",
+            "error": f"historical_replay_exception:{type(exc).__name__}:{str(exc)[:240]}",
+            "rule_ar": "بدل سقوط upstream، يرجع هذا الحارس سبب الخطأ. جرّب تقليل prior_scan_max_rows أو إيقاف prior_full_session_scan مؤقتًا.",
+        }
     if fmt in {"brief", "text", "txt", "chatgpt"}:
+        if not payload.get("ok"):
+            return PlainTextResponse("Historical Replay error guard\n" + str(payload), media_type="text/plain; charset=utf-8")
         return PlainTextResponse(format_historical_replay_brief(payload), media_type="text/plain; charset=utf-8")
     return payload
 
