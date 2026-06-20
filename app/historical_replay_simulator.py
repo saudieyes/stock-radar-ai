@@ -50,7 +50,7 @@ except Exception:
     def cleanup_tmp_path(path):
         return None
 
-HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2b_safe_prior_scan_2026_06_20"
+HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2t2c_timing_loader_fix_2026_06_20"
 
 
 def _s(v: Any) -> str:
@@ -306,7 +306,7 @@ def _read_prior_full_session_minute_scan(
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "max_minute_rows": int(max_minute_rows or 0),
         "max_seconds": float(max_seconds or 0),
-        "safe_mode_ar": "V2T2b يضع حد وقت/صفوف لمسح اليوم السابق داخل الطلب حتى لا يسقط Railway upstream؛ المسح الكامل الحقيقي لاحقًا يجب تشغيله كوظيفة بعد الإغلاق وتخزين compact فقط.",
+        "safe_mode_ar": "V2T2c يثبت حارس الوقت أيضًا في قارئ minute timing حتى لا يفشل التقرير بخطأ max_seconds، ويبقي مسح اليوم السابق آمنًا داخل الطلب.",
         "storage_rule_ar": "يمسح ملف دقيقة اليوم السابق من /tmp فقط ويبني ملخصات مدمجة؛ لا يحفظ raw في SQLite/GitHub/Railway.",
         "rule_ar": "V2T2: بعد اكتمال كل جلسات يوم الاختيار، يمسح اليوم السابق كاملًا بدقة دقيقة لتحضير قائمة الغد قبل البري ماركت.",
     }
@@ -314,6 +314,9 @@ def _read_prior_full_session_minute_scan(
         debug.update({"ok": False, "reason": pull.get("status") or pull.get("error") or "minute_file_unavailable"})
         return debug, {}, {}
     path = str(pull.get("path") or "")
+    started_at = time.time()
+    safe_seconds = max(3.0, min(30.0, float(max_seconds or 12.0)))
+    timed_out = False
     rows_seen = 0
     stopped_by_time = False
     stopped_by_row_cap = False
@@ -1140,6 +1143,7 @@ def _read_minute_file_for_replay(
     trade_date: str,
     target_symbols: set[str],
     max_minute_rows: int = 1_800_000,
+    max_seconds: float = 12.0,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
 ) -> tuple[dict[str, Any], dict[str, list[dict]], dict[str, dict[str, dict]]]:
@@ -1148,19 +1152,22 @@ def _read_minute_file_for_replay(
     target_symbols = {_u(x) for x in (target_symbols or set()) if _u(x)}
     pull = fetch_flatfile_to_tmp("minute", trade_date, force=bool(force_minute_pull), redownload_processed=bool(redownload_processed))
     debug = {
-        "version": "minute_replay_loader_v2t2b_safe_prior_scan_2026_06_20",
+        "version": "minute_replay_loader_v2t2c_timing_loader_fix_2026_06_20",
         "trade_date": trade_date,
         "pull_status": {k: v for k, v in (pull or {}).items() if k not in {"path"}},
         "target_symbols_count": len(target_symbols),
         "max_minute_rows": int(max_minute_rows or 0),
         "max_seconds": float(max_seconds or 0),
-        "safe_mode_ar": "V2T2b يضع حد وقت/صفوف لمسح اليوم السابق داخل الطلب حتى لا يسقط Railway upstream؛ المسح الكامل الحقيقي لاحقًا يجب تشغيله كوظيفة بعد الإغلاق وتخزين compact فقط.",
+        "safe_mode_ar": "V2T2c يثبت حارس الوقت أيضًا في قارئ minute timing حتى لا يفشل التقرير بخطأ max_seconds، ويبقي مسح اليوم السابق آمنًا داخل الطلب.",
         "storage_rule_ar": "يتم تنزيل ملف الدقيقة إلى /tmp فقط، ثم يقرأ Streaming ويرجع ملخصات مدمجة؛ لا يتم حفظ raw في SQLite/GitHub/Railway.",
     }
     if not pull.get("ok") or not pull.get("path"):
         debug.update({"ok": False, "reason": pull.get("status") or pull.get("error") or "minute_file_unavailable"})
         return debug, {}, {}
     path = str(pull.get("path") or "")
+    started_at = time.time()
+    safe_seconds = max(3.0, min(30.0, float(max_seconds or 12.0)))
+    timed_out = False
     rows_seen = 0
     target_rows: dict[str, list[dict]] = {sym: [] for sym in target_symbols}
     slice_aggs: dict[str, dict[str, dict]] = {str(sl["key"]): {} for sl in slices}
@@ -1172,6 +1179,9 @@ def _read_minute_file_for_replay(
             reader = csv.DictReader(f)
             for raw in reader:
                 rows_seen += 1
+                if rows_seen % 5000 == 0 and (time.time() - started_at) > safe_seconds:
+                    timed_out = True
+                    break
                 if rows_seen > max(50_000, min(3_500_000, int(max_minute_rows or 1_800_000))):
                     break
                 sym = _minute_symbol(raw)
@@ -1210,6 +1220,8 @@ def _read_minute_file_for_replay(
         debug.update({
             "ok": True,
             "rows_seen": rows_seen,
+            "timed_out": bool(timed_out),
+            "safe_seconds": float(safe_seconds),
             "target_rows_loaded": sum(len(v) for v in target_rows.values()),
             "target_symbols_with_rows": len([1 for v in target_rows.values() if v]),
             "slice_rows": {k: len(v or {}) for k, v in compact_slices.items()},
@@ -1501,13 +1513,14 @@ def _build_big_explosion_timing_report(
         trade_date=outcome_date,
         target_symbols=target_symbols,
         max_minute_rows=max_minute_rows,
+        max_seconds=max(8.0, float(prior_scan_timeout_sec or 8.0)),
         force_minute_pull=force_minute_pull,
         redownload_processed=redownload_processed,
     )
     if not loader_debug.get("ok"):
         return {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
             "outcome_date": outcome_date,
             "target_symbols": sorted(target_symbols),
             "minute_loader": loader_debug,
@@ -1566,7 +1579,7 @@ def _build_big_explosion_timing_report(
     early_count = sum(1 for r in reports if r.get("detected_by_minute_replay") and _num(r.get("first_detected_gain_pct"), 9999) <= 20 and (_num(r.get("minutes_from_detection_to_peak"), 0) >= 0))
     return {
         "ok": True,
-        "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
+        "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
         "outcome_date": outcome_date,
         "target_count": len(reports),
         "detected_by_minute_replay_count": detected_count,
@@ -1740,7 +1753,7 @@ def run_historical_replay(
         except Exception as exc:
             timing_report = {
                 "ok": False,
-                "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
+                "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
                 "error": f"{type(exc).__name__}: {str(exc)[:180]}",
                 "note_ar": "فشل تقرير الدقيقة فقط؛ تقرير V2S1 اليومي ما زال صالحًا.",
             }
@@ -1748,7 +1761,7 @@ def run_historical_replay(
     else:
         payload["big_explosion_timing_report"] = {
             "ok": False,
-            "version": "big_explosion_minute_timing_report_v2t2b_safe_prior_scan_2026_06_20",
+            "version": "big_explosion_minute_timing_report_v2t2c_timing_loader_fix_2026_06_20",
             "disabled": not bool(minute_timing),
             "note_ar": "مرر minute_timing=true لتشغيل تقرير توقيت الانفجارات بالدقيقة عند توفر Polygon minute flat file.",
         }
