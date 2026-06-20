@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u3_critical_promotion_gate_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u4_live_critical_pre_explosion_2026_06_20"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -879,6 +879,8 @@ def _next_week_action_for_row(row: dict) -> str:
     if bucket == "learning_opportunity":
         bridge = row.get("learning_bridge_v2k2") if isinstance(row.get("learning_bridge_v2k2"), dict) else {}
         return _s(bridge.get("action_ar")) or "مرشح تحضير من طبقة التعلم/المراقبة؛ ليس شراء مباشر حتى تكتمل شروط التنفيذ."
+    if bucket == "critical_pre_explosion_watch":
+        return "مرشح انفجار حرج قبل السوق: راجع الشرعية الآن، وراقب +3%/+5% مع حجم. ليس شراء مباشر ولا يتجاوز الشرعية."
     if bucket == "small_stock_classic":
         return "راقبه للأسبوع القادم كمرشح أسهم صغيرة: انتظار إغلاق 5د/15د فوق Fib/VWAP/قمة أمس، وليس شراء مباشر من القائمة."
     if bucket == "pre_trigger":
@@ -903,6 +905,7 @@ def _next_week_action_for_row(row: dict) -> str:
 
 def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | None = None) -> dict[str, Any]:
     labels = {
+        "critical_pre_explosion_watch": "مرشحو انفجار حرجة قبل السوق",
         "promotion_bridge_candidates": "جسر الترقية قبل الافتتاح",
         "learning_opportunity_candidates": "مرشحو طبقة التعلم / تحضير",
         "small_stock_classic_radar": "أسهم صغيرة كلاسيكية",
@@ -916,6 +919,7 @@ def _build_next_week_analysis(final_map: dict[str, list[dict]], counts: dict | N
         "catalyst_watch": "Catalyst / News Watch",
     }
     priority = [
+        "critical_pre_explosion_watch",
         "promotion_bridge_candidates",
         "learning_opportunity_candidates",
         "small_stock_classic_radar", "pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates",
@@ -1831,6 +1835,74 @@ def _flow_flags(row: dict, zones: dict) -> dict[str, Any]:
     }
 
 
+
+
+def _critical_pre_explosion_profile(row: dict, flags: dict | None = None) -> dict[str, Any]:
+    """V2U4: identify prepared critical explosion candidates before the move.
+
+    This section is intentionally non-actionable.  It gives the user a fast
+    premarket checklist and prevents EHGO/ICCM/TPC/SNBR-like names from being
+    buried inside general watch/high-risk buckets.  Sharia is still enforced for
+    execution; blocked names may be surfaced here only as "not buy / review" so
+    the system can learn and the user can decide quickly.
+    """
+    if not isinstance(row, dict):
+        return {"matched": False}
+    sym = _u(row.get("symbol"))
+    bucket = _s(row.get("critical_pre_explosion_bucket_v2u3") or row.get("prepared_bucket"))
+    prepared = bool(row.get("big_explosion_prepared_watch_v2u") or row.get("critical_promotion_gate_v2u3"))
+    critical = bool(
+        row.get("critical_promotion_gate_v2u3")
+        or row.get("critical_micro_probe_v2u3")
+        or row.get("critical_iccm_probe_v2u3")
+        or row.get("critical_tpc_probe_v2u3")
+        or bucket.startswith("critical_")
+        or sym in {"EHGO", "ICCM", "TPC", "SNBR"}
+    )
+    matched = bool(prepared and critical)
+    if not matched:
+        return {"matched": False}
+    sharia = _s(row.get("sharia_status")).lower()
+    manual_excluded = bool(row.get("sharia_manual_excluded"))
+    blocked = bool(manual_excluded or sharia in {"non_compliant", "haram", "excluded"})
+    gray = bool(sharia in {"needs_review", "unknown", "gray", "review"} or row.get("urgent_sharia_review_v2u"))
+    score = _num(row.get("critical_promotion_gate_score_v2u3", row.get("big_explosion_prepared_score", row.get("opportunity_rank_score", 0))), 0.0)
+    reasons = []
+    if row.get("critical_promotion_reason_ar"):
+        reasons.append(_s(row.get("critical_promotion_reason_ar")))
+    reasons.extend([_s(x) for x in list(row.get("big_explosion_prepared_reasons_ar") or [])[:5] if _s(x)])
+    if row.get("critical_tpc_probe_v2u3") or "tpc" in bucket.lower() or sym == "TPC":
+        label = "🚨 انفجار افتتاح محتمل — راقب أول دقيقة"
+        reasons.insert(0, "مسار TPC: سهم قد ينفجر عند الافتتاح؛ لا يُترك خلف الترتيب العام.")
+    elif row.get("critical_iccm_probe_v2u3") or "iccm" in bucket.lower() or sym == "ICCM":
+        label = "🚨 اشتعال مبكر قبل +20%"
+        reasons.insert(0, "مسار ICCM: مرشح بداية اشتعال؛ الهدف مراقبته قبل +20% لا بعد الانفجار.")
+    elif row.get("critical_micro_probe_v2u3") or "snbr" in bucket.lower() or "ehgo" in bucket.lower() or sym in {"EHGO", "SNBR"}:
+        label = "🚨 Micro/Ultra-Low قبل الانفجار"
+        reasons.insert(0, "مسار EHGO/SNBR: سعر صغير جدًا وقد ينفجر في بري ماركت؛ مراجعة مبكرة فقط.")
+    else:
+        label = "🚨 مرشح انفجار حرج قبل السوق"
+        reasons.insert(0, "مرشح حرج من قائمة ما قبل الانفجار؛ لا يُدفن في الأقسام العامة.")
+    if blocked:
+        label = "⛔ مرشح انفجار محجوب شرعيًا — تعلم فقط"
+        reasons.insert(0, "مرفوض/مستبعد شرعيًا: يظهر هنا للتعلم والوعي فقط، وليس فرصة شراء.")
+    elif gray:
+        label = "⚠️ مرشح انفجار — مراجعة شرعية عاجلة"
+        reasons.insert(0, "الحكم الشرعي غير محسوم: راجعه قبل البري ماركت، وليس أثناء الانفجار.")
+    else:
+        reasons.insert(0, "مرشح حرج جاهز قبل السوق: راقب +3%/+5% مع حجم قبل الانفجار.")
+    return {
+        "matched": True,
+        "symbol": sym,
+        "bucket": bucket or "critical_pre_explosion",
+        "score": score,
+        "blocked": blocked,
+        "gray": gray,
+        "label": label,
+        "reasons": _dedupe(reasons, 10),
+        "rule_ar": "V2U4: قسم مراقبة حرج قبل الانفجار فقط؛ لا يفتح Strong/Cautious ولا يتجاوز الشرعية.",
+    }
+
 def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]:
     decision = _s(row.get("decision"))
     final_code = _s(row.get("final_decision_code"))
@@ -1843,6 +1915,10 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
             return "cautious_reclaim", "🟠 دخول بحذر — Reclaim", "cautious_entries", flags.get("reclaim_reasons", [])
         return "cautious", "🟠 دخول بحذر", "cautious_entries", ["خطة جيدة لكنها تحتاج انضباطًا وحجمًا أصغر من Strong."]
     classic = flags.get("classic_small_stock") or {}
+    critical_profile = _critical_pre_explosion_profile(row, flags)
+    if critical_profile.get("matched"):
+        reasons = list(critical_profile.get("reasons") or [])
+        return "critical_pre_explosion_watch", _s(critical_profile.get("label")) or "🚨 مرشح انفجار حرج قبل السوق", "critical_pre_explosion_watch", _dedupe(reasons, 10)
     if flags.get("big_explosion_live"):
         profile = flags.get("big_explosion_profile_v2t") if isinstance(flags.get("big_explosion_profile_v2t"), dict) else {}
         reasons = ["V2T: انفجار كبير نشط التقطه الرادار — مراقبة توقيت/ترقية فقط وليس دخول مباشر."]
@@ -1934,6 +2010,9 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
         base_extra = 24.0 + _num((flags.get("classic_small_stock") or {}).get("score"), 0.0) * 0.55
     elif bucket == "low_float_premarket":
         base_extra = 20.0 + flags.get("liquidity_score", 0.0)
+    elif bucket == "critical_pre_explosion_watch":
+        cp = _critical_pre_explosion_profile(out, flags)
+        base_extra = 80.0 + _num(cp.get("score"), 0.0) * 0.35
     elif bucket == "high_risk_day_trade":
         base_extra = 14.0 + flags.get("liquidity_score", 0.0)
     elif bucket == "gap_fill_watch":
@@ -1973,6 +2052,16 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     out["learning_pattern_key"] = (learning_overlay or {}).get("pattern_key") if isinstance(learning_overlay, dict) else ""
     out["opportunity_flow_flags"] = flags
     out["small_stock_classic_setup"] = flags.get("classic_small_stock") or {}
+    critical_profile_for_card = _critical_pre_explosion_profile(out, flags)
+    if critical_profile_for_card.get("matched"):
+        out["critical_pre_explosion_watch_v2u4"] = critical_profile_for_card
+        out["critical_pre_explosion_label_ar"] = critical_profile_for_card.get("label")
+        out["critical_pre_explosion_rule_ar"] = critical_profile_for_card.get("rule_ar")
+        out["non_actionable_prep"] = True
+        # Make the warning impossible to miss on the card.
+        merged_reasons = _dedupe(list(critical_profile_for_card.get("reasons") or []) + merged_reasons, 12)
+        out["opportunity_reasons"] = merged_reasons
+        out["technical_explainer_reasons"] = merged_reasons
     out["why_appeared_ar"] = "، ".join(merged_reasons[:4])
 
     # Make cards educational without overriding stronger existing summaries.
@@ -2008,6 +2097,7 @@ def enrich_rows_opportunity_radar(rows: list[dict], market_phase: str = "") -> l
 
 
 OPPORTUNITY_BUCKET_KEYS = [
+    "critical_pre_explosion_watch",
     "promotion_bridge_candidates",
     "learning_opportunity_candidates",
     "small_stock_classic_radar",
@@ -2449,6 +2539,7 @@ def _displayed_section_map(final_map: dict[str, list[dict]]) -> dict[str, str]:
         "support_bounce_candidates": "ارتداد دعم",
         "reclaim_candidates": "Reclaim",
         "continuation_pullback_candidates": "Continuation Pullback",
+        "critical_pre_explosion_watch": "مرشحو انفجار حرجة قبل السوق",
         "low_float_premarket_radar": "Low-Float / Pre-Market Radar",
         "high_risk_day_trades": "مضاربة عالية المخاطر",
         "gap_fill_watch": "Gap Fill Watch",
@@ -3053,7 +3144,7 @@ def _fill_closed_market_prep_sections(final_map: dict[str, list[dict]], rows: li
             # V2M: allow Small Classic and Low-Float to be visible even when the
             # same symbol is also in Learning/Pre-trigger. The user must be able
             # to audit small-stock and low-float candidates before the open.
-            duplicate_allowed_sections = {"catalyst_watch", "gap_fill_watch", "small_stock_classic_radar", "low_float_premarket_radar"}
+            duplicate_allowed_sections = {"critical_pre_explosion_watch", "catalyst_watch", "gap_fill_watch", "small_stock_classic_radar", "low_float_premarket_radar"}
             if sym in global_specific_seen and section not in duplicate_allowed_sections:
                 debug["skipped_duplicate_symbols"] += 1
                 continue
@@ -3087,17 +3178,32 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     raw_counts: dict[str, int] = {}
     suppressed_high_price: list[str] = []
     for row in rows or []:
-        if not isinstance(row, dict) or _is_blocked(row):
+        if not isinstance(row, dict):
+            continue
+        critical_profile = _critical_pre_explosion_profile(row, {})
+        if _is_blocked(row) and not critical_profile.get("matched"):
             continue
         bucket = _s(row.get("opportunity_bucket"))
         if bucket:
             raw_counts[bucket] = raw_counts.get(bucket, 0) + 1
-        if not _is_personal_section_eligible(row):
+        if not _is_personal_section_eligible(row) and not critical_profile.get("matched"):
             sym = _u(row.get("symbol"))
             if sym:
                 suppressed_high_price.append(sym)
             continue
-        if bucket == "support_bounce":
+        if critical_profile.get("matched") or bucket == "critical_pre_explosion_watch":
+            row = dict(row)
+            row["opportunity_bucket"] = "critical_pre_explosion_watch"
+            row["opportunity_stage"] = "critical_pre_explosion_watch"
+            row["opportunity_stage_label"] = critical_profile.get("label") or row.get("opportunity_stage_label") or "🚨 مرشح انفجار حرج قبل السوق"
+            row["opportunity_reasons"] = _dedupe(list(critical_profile.get("reasons") or []) + list(row.get("opportunity_reasons") or []), 12)
+            row["technical_explainer_reasons"] = row["opportunity_reasons"]
+            row["non_actionable_prep"] = True
+            row["display_plan_family_label"] = row["opportunity_stage_label"]
+            row["decision"] = "مراقبة حرجة قبل الانفجار — ليست شراء مباشر"
+            row["opportunity_rank_score"] = max(_num(row.get("opportunity_rank_score"), 0.0), 1000 + _num(critical_profile.get("score"), 0.0))
+            bucket_map["critical_pre_explosion_watch"].append(row)
+        elif bucket == "support_bounce":
             bucket_map["support_bounce_candidates"].append(row)
         elif bucket == "reclaim":
             bucket_map["reclaim_candidates"].append(row)
@@ -3121,6 +3227,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
     ordered_keys = [
+        "critical_pre_explosion_watch",
         "promotion_bridge_candidates",
         "learning_opportunity_candidates",
         "small_stock_classic_radar",
