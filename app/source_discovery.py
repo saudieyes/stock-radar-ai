@@ -58,10 +58,12 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3l_v2v6b_budget_enforced_2026_06_21"
+
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
 DYNAMIC_DISCOVERY_USE_FMP_MOVERS = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_MOVERS", True)
-DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT = _env_int("DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT", 300, 40, 300)
+DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT = _env_int("DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT", 180, 40, 220)
 DYNAMIC_DISCOVERY_REFERENCE_LIMIT_PAGES = _env_int("DYNAMIC_DISCOVERY_REFERENCE_LIMIT_PAGES", 12, 4, 20)
 DYNAMIC_DISCOVERY_REFERENCE_PAGE_LIMIT = _env_int("DYNAMIC_DISCOVERY_REFERENCE_PAGE_LIMIT", 1000, 100, 1000)
 DYNAMIC_DISCOVERY_MIN_PREFERRED_PRICE = float(os.getenv("DYNAMIC_DISCOVERY_MIN_PREFERRED_PRICE", "2") or 2)
@@ -139,6 +141,19 @@ LIVE_TIGHT_MONITORING_MIN_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING_MIN_VO
 LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME", "25000") or 25_000)
 LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT", "18") or 18)
 LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT", "35") or 35)
+
+# V2V6: Railway-safe live monitoring budget. Live trading refresh is much lighter
+# than historical replay because it only checks compact candidate queues with FMP
+# live quotes; it must not read millions of Polygon minute rows or confirm hundreds
+# of raw symbols every 30 seconds. These caps keep Prepared/V2V priority alive
+# without putting continuous pressure on Railway/FMP.
+LIVE_MONITORING_BUDGET_GUARD_ENABLED = _env_bool("LIVE_MONITORING_BUDGET_GUARD_ENABLED", True)
+LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT = _env_int("LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT", 180, 60, 220)
+LIVE_MONITORING_PREPARED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_PREPARED_CONFIRM_LIMIT", 80, 20, 120)
+LIVE_MONITORING_MEMORY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MEMORY_CONFIRM_LIMIT", 50, 10, 90)
+LIVE_MONITORING_RANKED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_RANKED_CONFIRM_LIMIT", 70, 20, 120)
+LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT", 35, 5, 70)
+LIVE_MONITORING_SEED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_SEED_CONFIRM_LIMIT", 25, 5, 60)
 
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # V2U3 regression canaries from replay: these are not buy calls; they only force live quote confirmation so the scanner can detect similar/prepared movement early.
@@ -407,6 +422,114 @@ def _save_live_tight_monitoring_memory(items: list[dict] | None, *, source: str 
         ok = False
     payload["saved"] = ok
     return payload
+
+
+def _cap_unique_symbols(values, limit: int) -> list[str]:
+    """Keep symbols unique and bounded for Railway/FMP-safe live checks."""
+    try:
+        limit = max(0, int(limit or 0))
+    except Exception:
+        limit = 0
+    if limit <= 0:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        sym = _clean_symbol(value)
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        out.append(sym)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _live_monitoring_confirmation_budget(
+    *,
+    phase_info: dict,
+    prepared_symbols: list[str],
+    live_tight_symbols: list[str],
+    ranked_symbols: list[str],
+    memory_symbols: list[str],
+    seed_symbols: list[str],
+) -> tuple[list[str], dict]:
+    """V2V6 live-budget router for FMP quote confirmation.
+
+    Historical replay is heavy because it reads large Polygon minute files. Live
+    monitoring should be quote-budgeted: Prepared/V2V memory first, then ranked
+    candidates, then small seed coverage. This preserves tight monitoring while
+    preventing a full-market deep replay from running during live trading.
+    """
+    phase_detail = str((phase_info or {}).get("detail", "") or "")
+    phase_label = str((phase_info or {}).get("label", "") or "")
+    if not LIVE_MONITORING_BUDGET_GUARD_ENABLED:
+        raw = _scanner.unique_keep_order(
+            list(prepared_symbols or []) + list(live_tight_symbols or []) + list(ranked_symbols or []) + list(memory_symbols or []) + list(seed_symbols or [])
+        )
+        return raw, {
+            "version": "live_monitoring_budget_guard_v2v6b_enforced_2026_06_21",
+            "enabled": False,
+            "final_count": len(raw),
+            "phase_detail": phase_detail,
+            "phase_label": phase_label,
+            "rule_ar": "V2V6 budget guard disabled by env؛ لا يُنصح بهذا أثناء السوق الحي.",
+        }
+    # Keep caps conservative by default. During active market, Prepared/V2V memory
+    # are the highest priority; raw seeds are deliberately bounded.
+    total_cap = int(LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT or 320)
+    prepared_cap = int(LIVE_MONITORING_PREPARED_CONFIRM_LIMIT or 140)
+    memory_cap = int(LIVE_MONITORING_MEMORY_CONFIRM_LIMIT or 80)
+    ranked_cap = int(LIVE_MONITORING_RANKED_CONFIRM_LIMIT or 140)
+    micro_memory_cap = int(LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT or 50)
+    seed_cap = int(LIVE_MONITORING_SEED_CONFIRM_LIMIT or 60)
+    # If the app reports a closed/quiet phase, keep the same priority but reduce
+    # churn a little; manual force scans can still override via env limits.
+    quiet_phase = any(x in phase_detail.lower() for x in ["closed", "weekend", "holiday"])
+    if quiet_phase:
+        total_cap = min(total_cap, 220)
+        ranked_cap = min(ranked_cap, 80)
+        seed_cap = min(seed_cap, 40)
+    groups = {
+        "prepared": _cap_unique_symbols(prepared_symbols, prepared_cap),
+        "live_tight_memory": _cap_unique_symbols(live_tight_symbols, memory_cap),
+        "ranked_source_candidates": _cap_unique_symbols(ranked_symbols, ranked_cap),
+        "micro_close_watch_memory": _cap_unique_symbols(memory_symbols, micro_memory_cap),
+        "seed_symbols": _cap_unique_symbols(seed_symbols, seed_cap),
+    }
+    final = _scanner.unique_keep_order(
+        groups["prepared"]
+        + groups["live_tight_memory"]
+        + groups["ranked_source_candidates"]
+        + groups["micro_close_watch_memory"]
+        + groups["seed_symbols"]
+    )[:total_cap]
+    debug = {
+        "version": "live_monitoring_budget_guard_v2v6b_enforced_2026_06_21",
+        "enabled": True,
+        "phase_detail": phase_detail,
+        "phase_label": phase_label,
+        "caps": {
+            "total": total_cap,
+            "prepared": prepared_cap,
+            "live_tight_memory": memory_cap,
+            "ranked_source_candidates": ranked_cap,
+            "micro_close_watch_memory": micro_memory_cap,
+            "seed_symbols": seed_cap,
+        },
+        "requested_counts": {
+            "prepared": len(list(prepared_symbols or [])),
+            "live_tight_memory": len(list(live_tight_symbols or [])),
+            "ranked_source_candidates": len(list(ranked_symbols or [])),
+            "micro_close_watch_memory": len(list(memory_symbols or [])),
+            "seed_symbols": len(list(seed_symbols or [])),
+        },
+        "selected_counts": {k: len(v) for k, v in groups.items()},
+        "final_count": len(final),
+        "final_sample": final[:80],
+        "rule_ar": "V2V6: الفحص الحي لا يقرأ ملفات الدقيقة ولا يشغل replay؛ يؤكد فقط قائمة مدمجة محدودة تبدأ بـ Prepared Watch ثم ذاكرة V2V ثم أفضل المرشحين، حتى لا يضغط Railway/FMP.",
+    }
+    return final, debug
 
 
 def _live_tight_profile_from_quote(symbol: str, quote: dict, *, prepared: bool = False, from_memory: bool = False) -> dict:
@@ -2284,13 +2407,30 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     memory_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (micro_watch_rows or [])[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT]]
     prepared_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (prepared_big_explosion_watch_rows or [])[:BIG_EXPLOSION_PREPARED_WATCH_LIMIT]]
     live_tight_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (live_tight_monitoring_memory_rows or [])[:LIVE_TIGHT_MONITORING_LIMIT]]
-    fmp_confirm_symbols = _scanner.unique_keep_order(
-        prepared_confirm_symbols
-        + live_tight_confirm_symbols
-        + [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
-        + memory_confirm_symbols
-        + seed_confirm_symbols
-    )[: max(DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT, min(560, DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT + MICRO_EXPLOSION_SEED_CONFIRM_LIMIT + BIG_EXPLOSION_PREPARED_WATCH_LIMIT + LIVE_TIGHT_MONITORING_LIMIT))]
+    ranked_confirm_symbols = [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
+    fmp_confirm_symbols, live_monitoring_budget_debug = _live_monitoring_confirmation_budget(
+        phase_info=phase_info,
+        prepared_symbols=prepared_confirm_symbols,
+        live_tight_symbols=live_tight_confirm_symbols,
+        ranked_symbols=ranked_confirm_symbols,
+        memory_symbols=memory_confirm_symbols,
+        seed_symbols=seed_confirm_symbols,
+    )
+    # V2V6b: hard fail-safe cap. Even if an older env value or caller expands
+    # candidate lists, live scan should not request hundreds of FMP confirmations.
+    try:
+        hard_cap = int(LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT or 180)
+    except Exception:
+        hard_cap = 180
+    if len(fmp_confirm_symbols or []) > hard_cap:
+        original_len = len(fmp_confirm_symbols or [])
+        fmp_confirm_symbols = list(fmp_confirm_symbols or [])[:hard_cap]
+        if isinstance(live_monitoring_budget_debug, dict):
+            live_monitoring_budget_debug["hard_cap_applied_v2v6b"] = True
+            live_monitoring_budget_debug["hard_cap"] = hard_cap
+            live_monitoring_budget_debug["pre_hard_cap_count"] = original_len
+            live_monitoring_budget_debug["final_count"] = len(fmp_confirm_symbols)
+            live_monitoring_budget_debug["rule_ar"] = "V2V6b: تم تطبيق سقف حماية نهائي على FMP live confirmation حتى لو كانت البيئة أو الكاش قديمًا."
     fmp_quotes = {}
     fmp_diag = {}
     if DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION and FMP_API_KEY and fmp_confirm_symbols:
@@ -2536,9 +2676,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3j_live_tight_monitoring_v2v_2026_06_21",
+        "engine_version": "dynamic_discovery_v3l_v2v6b_budget_enforced_2026_06_21",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2v_live_tight_monitoring_fast_promotion",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2v6b_enforced_budget_fast_promotion",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -2561,6 +2701,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "fmp_movers_source": fmp_movers_source,
         "fmp_movers_count": fmp_mover_count,
         "fmp_confirm_requested": len(fmp_confirm_symbols),
+        "live_monitoring_budget_guard_v2v6": live_monitoring_budget_debug if 'live_monitoring_budget_debug' in locals() else {},
         "fmp_confirmed": live_confirmed,
         "fmp_extended_confirmed": extended_confirmed,
         "low_float_fast_lane_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0)) if 'source_bucket_counts' in locals() else int(low_float_fast_lane_count or 0),
@@ -2584,7 +2725,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "live_tight_monitoring_v2v_symbols": _scanner.unique_keep_order(live_tight_monitoring_symbols)[:120],
         "live_tight_monitoring_v2v_by_symbol": {k: v for k, v in (live_tight_monitoring_by_symbol or {}).items()},
         "live_tight_monitoring_v2v_memory": live_tight_monitoring_memory_debug,
-        "live_tight_monitoring_v2v_rule_ar": "V2V: Prepared Watch أو رمز جديد يبدأ +3%/+5% مع حجم يدخل تأكيد مبكر/مراقبة لصيقة. لا يفتح شراء مباشر ولا يتجاوز الشرعية.",
+        "live_tight_monitoring_v2v_rule_ar": "V2V6: Prepared Watch أو رمز جديد يبدأ +3%/+5% مع حجم يدخل تأكيد مبكر/مراقبة لصيقة عبر ميزانية FMP محدودة وآمنة. لا يفتح شراء مباشر ولا يتجاوز الشرعية.",
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,
