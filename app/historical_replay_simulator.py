@@ -53,7 +53,7 @@ except Exception:
         return None
 
 HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u4_live_critical_pre_explosion_2026_06_20"
-LIVE_HUNTING_REPLAY_VERSION = "v2v2_historical_live_hunting_replay_2026_06_21"
+LIVE_HUNTING_REPLAY_VERSION = "v2v3_replay_audit_prepared_link_validation_2026_06_21"
 
 
 def _s(v: Any) -> str:
@@ -2131,21 +2131,56 @@ def _daily_winners_from_map(
     return sorted(rows, key=lambda x: _num(x.get("max_gain_from_prior_close_pct"), 0.0), reverse=True)[:max(5, min(200, int(max_symbols or 80)))]
 
 
+def _prepared_row_layers(row: dict) -> list[str]:
+    layers = list(row.get("source_layers") or [])
+    for key in ["historical_source_family", "source_layer", "source", "source_engine_version"]:
+        v = _s(row.get(key))
+        if v and v not in layers:
+            layers.append(v)
+    if not layers:
+        layers.append("prepared_source")
+    return layers
+
+
+def _is_prior_pre_explosion_layer(row: dict) -> bool:
+    layers = _prepared_row_layers(row)
+    return any("prior_session_pre_explosion_watch" in str(x) or "prepared_big_explosion" in str(x) for x in layers)
+
+
 def _prepared_compact_from_sources(rows: list[dict], *, limit: int = 80) -> tuple[list[dict], dict[str, int]]:
+    """Build the before-open Prepared Watch in display/audit order.
+
+    V2V2 sorted all prior-session candidates by generic source_score. That could
+    bury the dedicated V2U/V2U5b Prepared Explosion Watch lane under other
+    fast/micro rows, which made important symbols such as EHGO/ICCM appear as
+    prepared=False in the live replay even if the prior-session lane saw them.
+
+    V2V3 keeps the dedicated prior-session pre-explosion lane first, then fills
+    the remaining seats from the general combined rows. This changes only the
+    replay/prepared audit list, not Strong/Cautious live buying logic.
+    """
     compact: list[dict] = []
     rank: dict[str, int] = {}
     seen: set[str] = set()
-    for r in rows or []:
+    safe_limit = max(5, min(240, int(limit or 80)))
+    ordered_rows = sorted(
+        list(rows or []),
+        key=lambda r: (1 if _is_prior_pre_explosion_layer(r) else 0, _candidate_score(r)),
+        reverse=True,
+    )
+    for r in ordered_rows:
         sym = _extract_symbol(r)
         if not sym or sym in seen:
             continue
         seen.add(sym)
         sharia = assess_sharia_source_fast(sym)
         metrics = _candidate_metrics(r)
+        layers = _prepared_row_layers(r)
         item = {
             "symbol": sym,
             "score": _round(_candidate_score(r), 3),
-            "source_layers": list(r.get("source_layers") or [_s(r.get("historical_source_family")) or _s(r.get("source_layer")) or "prepared_source"]),
+            "source_layers": layers,
+            "prior_pre_explosion_lane": bool(_is_prior_pre_explosion_layer(r)),
             "reasons_ar": list(r.get("reasons_ar") or r.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or [])[:8],
             "metrics": metrics,
             "sharia_status": sharia.get("status"),
@@ -2155,9 +2190,141 @@ def _prepared_compact_from_sources(rows: list[dict], *, limit: int = 80) -> tupl
         }
         rank[sym] = len(compact) + 1
         compact.append(item)
-        if len(compact) >= max(5, min(200, int(limit or 80))):
+        if len(compact) >= safe_limit:
             break
     return compact, rank
+
+
+def _source_presence_by_symbol(rows: list[dict], *, limit_layers: int = 8) -> dict[str, dict[str, Any]]:
+    presence: dict[str, dict[str, Any]] = {}
+    for idx, r in enumerate(rows or [], start=1):
+        sym = _extract_symbol(r)
+        if not sym:
+            continue
+        rec = presence.get(sym) or {
+            "symbol": sym,
+            "raw_count": 0,
+            "best_score": 0.0,
+            "first_raw_rank": idx,
+            "source_layers": [],
+            "prior_pre_explosion_lane": False,
+        }
+        rec["raw_count"] = int(rec.get("raw_count") or 0) + 1
+        rec["best_score"] = max(_num(rec.get("best_score"), 0.0), _candidate_score(r))
+        rec["first_raw_rank"] = min(int(rec.get("first_raw_rank") or idx), idx)
+        rec["prior_pre_explosion_lane"] = bool(rec.get("prior_pre_explosion_lane") or _is_prior_pre_explosion_layer(r))
+        for layer in _prepared_row_layers(r):
+            if layer and layer not in rec["source_layers"] and len(rec["source_layers"]) < int(limit_layers or 8):
+                rec["source_layers"].append(layer)
+        presence[sym] = rec
+    for rec in presence.values():
+        rec["best_score"] = _round(rec.get("best_score"), 3)
+    return presence
+
+
+def _parse_audit_symbols(value: str | list | tuple | set | None) -> list[str]:
+    if value is None:
+        value = "EHGO,ICCM,TPC,SNBR,HOUR,BFLY,NIXX,NIVF,JLHL,BIRD"
+    if isinstance(value, str):
+        raw = value.replace(";", ",").replace("|", ",").split(",")
+    else:
+        raw = list(value)
+    out: list[str] = []
+    for x in raw:
+        sym = _u(x)
+        if sym and sym not in out:
+            out.append(sym)
+    return out[:60]
+
+
+def _minute_key(t: str) -> int | None:
+    try:
+        parts = str(t or "").strip().split(":")
+        if len(parts) < 2:
+            return None
+        return int(parts[0]) * 60 + int(parts[1])
+    except Exception:
+        return None
+
+
+def _earliest_time(*values: str) -> str:
+    best = ""
+    best_min = None
+    for v in values:
+        m = _minute_key(v)
+        if m is None:
+            continue
+        if best_min is None or m < best_min:
+            best_min = m
+            best = str(v)
+    return best
+
+
+def _build_replay_audit_summary(
+    *,
+    audit_symbols: list[str],
+    prior_rows: list[dict],
+    combined_rows: list[dict],
+    prepared_list: list[dict],
+    prepared_rank: dict[str, int],
+    target_symbols: list[str],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    prior_presence = _source_presence_by_symbol(prior_rows)
+    combined_presence = _source_presence_by_symbol(combined_rows)
+    prepared_by_symbol = {_u(x.get("symbol")): x for x in prepared_list or []}
+    row_by_symbol = {_u(x.get("symbol")): x for x in rows or []}
+    target_set = {_u(x) for x in target_symbols or []}
+    audit_rows: list[dict[str, Any]] = []
+    for sym in audit_symbols:
+        prior = prior_presence.get(sym) or {}
+        combined = combined_presence.get(sym) or {}
+        prepared = prepared_by_symbol.get(sym) or {}
+        candidate = row_by_symbol.get(sym) or {}
+        reasons: list[str] = []
+        if not prior:
+            reasons.append("لم يظهر في prior_rows الناتجة من مسح جلسة التحضير")
+        elif not prior.get("prior_pre_explosion_lane"):
+            reasons.append("ظهر في مصادر مساندة لكنه ليس في lane مرشحي الانفجار الحرجة")
+        if prior and not combined:
+            reasons.append("ظهر في prior_rows لكنه ضاع أثناء combine")
+        if combined and not prepared:
+            reasons.append("ظهر في combined لكنه خارج مقاعد Prepared المعروضة")
+        if prepared and sym not in target_set:
+            reasons.append("موجود في Prepared لكن غير داخل رموز التدقيق بسبب الحد العددي")
+        if candidate.get("actual_winner_over_threshold") and not candidate.get("was_prepared_before_open") and prior.get("prior_pre_explosion_lane"):
+            reasons.append("فائز وكان في lane التحضير لكن لم يُوسم Prepared داخل الصف — يحتاج تدقيق ربط")
+        if not reasons:
+            reasons.append("الرابط سليم أو لا توجد فجوة ظاهرة لهذا الرمز")
+        audit_rows.append({
+            "symbol": sym,
+            "in_prior_rows": bool(prior),
+            "prior_raw_count": int(prior.get("raw_count") or 0),
+            "prior_best_score": prior.get("best_score"),
+            "prior_layers": prior.get("source_layers") or [],
+            "prior_pre_explosion_lane": bool(prior.get("prior_pre_explosion_lane")),
+            "in_combined_rows": bool(combined),
+            "combined_best_score": combined.get("best_score"),
+            "combined_layers": combined.get("source_layers") or [],
+            "in_prepared_watch": bool(prepared),
+            "prepared_rank": prepared_rank.get(sym),
+            "prepared_layers": prepared.get("source_layers") or [],
+            "in_target_symbols": sym in target_set,
+            "actual_winner_over_threshold": bool(candidate.get("actual_winner_over_threshold")),
+            "was_prepared_before_open_in_row": bool(candidate.get("was_prepared_before_open")),
+            "detected_by_live_replay": bool(candidate.get("detected_by_live_replay")),
+            "diagnosis_ar": "؛ ".join(reasons),
+        })
+    prepared_symbols = [_u(x.get("symbol")) for x in prepared_list or [] if _u(x.get("symbol"))]
+    target_only_miss = [s for s in prepared_symbols if s not in target_set][:40]
+    return {
+        "version": "v2v3_prepared_link_validation_audit",
+        "audit_symbols": audit_rows,
+        "prepared_first_80_symbols": prepared_symbols[:80],
+        "prepared_not_in_target_sample": target_only_miss,
+        "prepared_not_in_target_count": len([s for s in prepared_symbols if s not in target_set]),
+        "rule_ar": "V2V3 يدقق هل رمز التحضير ظهر في prior_rows ثم combined ثم Prepared ثم target ثم صف النتيجة. هذا تشخيص ربط فقط وليس إشارة شراء.",
+    }
 
 
 def _threshold_time(timeline: dict, pct: int) -> dict:
@@ -2251,6 +2418,7 @@ def run_live_hunting_replay(
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     include_candidates: bool = True,
+    audit_symbols: str | list | tuple | set | None = None,
 ) -> dict[str, Any]:
     """Replay one historical session as if the market is open now.
 
@@ -2285,6 +2453,7 @@ def run_live_hunting_replay(
     combined, combine_debug = _combine_source_candidates(micro_rows, fast_rows, extra_rows=prior_rows, clean_only=False)
     prepared_list, prepared_rank = _prepared_compact_from_sources(combined, limit=max_prepared)
     prepared_symbols = {_u(x.get("symbol")) for x in prepared_list if _u(x.get("symbol"))}
+    audit_symbol_list = _parse_audit_symbols(audit_symbols)
     actual_winners = _daily_winners_from_map(
         hunt_map=hunt_map,
         prior_map=prior_map,
@@ -2294,18 +2463,22 @@ def run_live_hunting_replay(
     winner_symbols = {_u(x.get("symbol")) for x in actual_winners}
     target_symbols: list[str] = []
     seen: set[str] = set()
-    # Audit the actual winners first, then add Prepared Watch names. Winners are
-    # used only as audit targets; detection still runs slice-by-slice without
-    # knowing future bars.
+    # V2V3: audit winners + Prepared Watch + explicit audit symbols.
+    # V2V2 capped the *total* target list at max_symbols, so if there were 80
+    # winners and max_symbols=80, prepared-only names never entered the minute
+    # audit. Here max_symbols controls winner audit size, max_prepared controls
+    # Prepared audit size, and audit_symbols are always attempted inside a safe
+    # total cap. Signals are still generated slice-by-slice without future data.
     prepared_order = [_u(x.get("symbol")) for x in prepared_list if _u(x.get("symbol"))]
     winner_order = [_u(x.get("symbol")) for x in actual_winners if _u(x.get("symbol"))]
-    for sym in winner_order + prepared_order:
+    safe_total_cap = max(20, min(260, int(max_symbols or 80) + int(max_prepared or 80) + len(audit_symbol_list)))
+    for sym in winner_order[:max(5, min(180, int(max_symbols or 80)))] + prepared_order[:max(5, min(240, int(max_prepared or 80)))] + audit_symbol_list:
         sym = _u(sym)
         if not sym or sym in seen:
             continue
         seen.add(sym)
         target_symbols.append(sym)
-        if len(target_symbols) >= max(5, min(180, int(max_symbols or 80))):
+        if len(target_symbols) >= safe_total_cap:
             break
     target_set = set(target_symbols)
     selection_prices: dict[str, float] = {}
@@ -2347,8 +2520,25 @@ def run_live_hunting_replay(
         bucket = _v2v2_replay_bucket(sym=sym, was_prepared=was_prepared, timeline=timeline, capture=capture, sharia=sharia)
         first3 = _threshold_time(timeline, 3)
         first5 = _threshold_time(timeline, 5)
+        first_trigger_time = _earliest_time(first3.get("time_utc"), first5.get("time_utc"))
         det_time = capture.get("first_detected_time_utc") or ""
         peak_time = timeline.get("peak_time_utc") or ""
+        delay_from_trigger = _minute_between(first_trigger_time, det_time) if first_trigger_time and det_time else None
+        det_to_peak = _minute_between(det_time, peak_time) if det_time and peak_time else None
+        anomaly_flags: list[str] = []
+        det_gain = _num(capture.get("first_detected_gain_pct"), 0.0) if capture.get("detected_by_minute_replay") else None
+        if det_time and first_trigger_time and delay_from_trigger is not None and delay_from_trigger < 0:
+            anomaly_flags.append("pre_move_capture_before_plus3_or_plus5")
+        if det_gain is not None and det_gain >= 50:
+            anomaly_flags.append("late_detection_after_50pct")
+        elif det_gain is not None and det_gain >= 20:
+            anomaly_flags.append("late_detection_after_20pct")
+        if det_time and peak_time and det_to_peak is not None and det_to_peak <= 0:
+            anomaly_flags.append("detected_at_or_after_peak")
+        if was_prepared and (first3 or first5) and not capture.get("detected_by_minute_replay"):
+            anomaly_flags.append("prepared_crossed_trigger_but_not_detected")
+        if (sym in audit_symbol_list) and not was_prepared and sym in winner_symbols:
+            anomaly_flags.append("audit_symbol_winner_not_prepared")
         rows.append({
             "symbol": sym,
             "was_prepared_before_open": bool(was_prepared),
@@ -2363,7 +2553,13 @@ def run_live_hunting_replay(
             "detected_by_live_replay": bool(capture.get("detected_by_minute_replay")),
             "first_detected_time_utc": det_time,
             "first_detected_gain_pct": capture.get("first_detected_gain_pct"),
-            "minutes_from_detection_to_peak": _minute_between(det_time, peak_time) if det_time and peak_time else None,
+            "first_detected_layer": capture.get("first_detected_layer"),
+            "first_detected_stage": capture.get("first_detected_stage"),
+            "first_detected_stage_ar": capture.get("first_detected_stage_ar"),
+            "first_trigger_time_utc": first_trigger_time,
+            "minutes_from_first_trigger_to_detection": delay_from_trigger,
+            "minutes_from_detection_to_peak": det_to_peak,
+            "anomaly_flags": anomaly_flags,
             "sharia_status": sharia.get("status"),
             "sharia_label": sharia.get("label"),
             "sharia_blocked": bool(sharia.get("should_block")),
@@ -2376,11 +2572,25 @@ def run_live_hunting_replay(
     early_winners = [r for r in detected_winners if _num(r.get("first_detected_gain_pct"), 9999) <= 8]
     acceptable_winners = [r for r in detected_winners if _num(r.get("first_detected_gain_pct"), 9999) <= 20]
     prepared_winners = [r for r in rows if r.get("actual_winner_over_threshold") and r.get("was_prepared_before_open")]
+    intraday_new_winners = [r for r in rows if r.get("actual_winner_over_threshold") and not r.get("was_prepared_before_open")]
+    missed_intraday_winners = [r for r in intraday_new_winners if not r.get("detected_by_live_replay")]
     prepared_crossed_but_missed = [r for r in rows if r.get("was_prepared_before_open") and (r.get("first_3pct_time_utc") or r.get("first_5pct_time_utc")) and not r.get("detected_by_live_replay")]
+    late_detected_winners = [r for r in detected_winners if _num(r.get("first_detected_gain_pct"), 0.0) >= 20]
+    pre_move_detected_winners = [r for r in detected_winners if "pre_move_capture_before_plus3_or_plus5" in (r.get("anomaly_flags") or [])]
+    anomaly_rows = [r for r in rows if r.get("anomaly_flags")]
+    audit_summary = _build_replay_audit_summary(
+        audit_symbols=audit_symbol_list,
+        prior_rows=prior_rows,
+        combined_rows=combined,
+        prepared_list=prepared_list,
+        prepared_rank=prepared_rank,
+        target_symbols=target_symbols,
+        rows=rows,
+    )
     payload = {
         "ok": True,
         "version": LIVE_HUNTING_REPLAY_VERSION,
-        "mode": "same_day_minute_live_hunting_replay_no_future_signals",
+        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_link_audit_v2v3",
         "requested_date": str(date_value or "").strip(),
         "hunt_date": hunt_date,
         "prior_session_date": prior_date,
@@ -2396,8 +2606,10 @@ def run_live_hunting_replay(
         "prepared_watch": {
             "count": len(prepared_list),
             "symbols": [x.get("symbol") for x in prepared_list[:120]],
-            "items": prepared_list[:50],
-            "rule_ar": "هذه قائمة Prepared Watch التي كانت معروفة قبل افتتاح يوم الصيد؛ ليست شراء مباشر.",
+            "first_80_symbols": [x.get("symbol") for x in prepared_list[:80]],
+            "items": prepared_list[:80],
+            "prior_pre_explosion_lane_count": len([x for x in prepared_list if x.get("prior_pre_explosion_lane")]),
+            "rule_ar": "هذه قائمة Prepared Watch التي كانت معروفة قبل افتتاح يوم الصيد؛ ليست شراء مباشر. V2V3 يعطي أولوية للـ prior_session_pre_explosion lane حتى لا تُدفن الرموز الحرجة داخل الترتيب العام.",
         },
         "target_selection": {
             "target_symbols_count": len(target_set),
@@ -2408,10 +2620,33 @@ def run_live_hunting_replay(
         },
         "minute_loader": loader_debug,
         "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
+        "prepared_link_audit": audit_summary,
+        "result_groups": {
+            "prepared_winners_count": len(prepared_winners),
+            "intraday_new_winners_count": len(intraday_new_winners),
+            "missed_prepared_movers_count": len(prepared_crossed_but_missed),
+            "missed_intraday_winners_count": len(missed_intraday_winners),
+            "late_detected_winners_count": len(late_detected_winners),
+            "pre_move_detected_winners_count": len(pre_move_detected_winners),
+            "anomaly_rows_count": len(anomaly_rows),
+            "prepared_winners": prepared_winners[:30],
+            "intraday_new_winners": intraday_new_winners[:30],
+            "missed_prepared_movers": prepared_crossed_but_missed[:30],
+            "missed_intraday_winners": missed_intraday_winners[:30],
+            "late_detected_winners": late_detected_winners[:30],
+            "pre_move_detected_winners": pre_move_detected_winners[:30],
+            "anomaly_rows": anomaly_rows[:40],
+            "rule_ar": "V2V3 يفصل نتائج التحضير عن الفائزين الجدد أثناء الجلسة، ويكشف التأخير والفوات والالتقاط قبل +3/+5.",
+        },
         "performance": {
             "prepared_watch_count": len(prepared_list),
             "actual_winners_over_threshold_count": winners_count,
             "prepared_winners_count": len(prepared_winners),
+            "intraday_new_winners_count": len(intraday_new_winners),
+            "missed_intraday_winners_count": len(missed_intraday_winners),
+            "late_detected_winners_count": len(late_detected_winners),
+            "pre_move_detected_winners_count": len(pre_move_detected_winners),
+            "anomaly_rows_count": len(anomaly_rows),
             "detected_winners_count": len(detected_winners),
             "early_detected_winners_count": len(early_winners),
             "acceptable_detected_winners_count": len(acceptable_winners),
@@ -2421,9 +2656,9 @@ def run_live_hunting_replay(
             "prepared_crossed_3_or_5_but_not_detected_count": len(prepared_crossed_but_missed),
             "bucket_counts": {},
         },
-        "rule_ar": "V2V2 يحاكي جلسة تاريخية كأن السوق مفتوح: Prepared قبل السوق + شرائح دقيقة أثناء الجلسة + تشغيل مصادر Big/Micro/Fast بدون معرفة مستقبل الشريحة.",
+        "rule_ar": "V2V3 يحاكي جلسة تاريخية كأن السوق مفتوح، ويدقق ربط Prepared Watch من prior_rows إلى النتيجة، مع فصل prepared winners عن intraday new winners بدون استخدام المستقبل للإشارات.",
         "storage_rule_ar": "يقرأ Polygon minute من /tmp فقط، ويرجع ملخصات مدمجة؛ لا يحفظ raw files في SQLite/GitHub/Railway.",
-        "next_step_ar": "شغل 3-5 أيام. إذا كثرت prepared_crossed_3_or_5_but_not_detected نحتاج ربط Prepared Watch بالترقية الحية بشكل أقوى. إذا كثرت missed_intraday_winner نحتاج مصدر اكتشاف أثناء الجلسة أسرع/أوسع.",
+        "next_step_ar": "شغل نفس اليوم ثم 3-5 أيام. إذا ظهرت رموز audit مثل EHGO/ICCM خارج Prepared رغم وجودها في prior_pre_explosion lane فالإصلاح في ربط التحضير. إذا كانت Prepared صحيحة لكن detection متأخر فالإصلاح في سرعة/مقاعد V2V أثناء الجلسة.",
     }
     bucket_counts: dict[str, int] = {}
     for r in rows:
@@ -2439,12 +2674,12 @@ def run_live_hunting_replay(
 
 def format_live_hunting_replay_brief(payload: dict[str, Any]) -> str:
     if not payload.get("ok"):
-        return "V2V2 Live Hunting Replay error\n" + str(payload)
+        return "V2V3 Live Hunting Replay Audit error\n" + str(payload)
     perf = payload.get("performance") or {}
     prep = payload.get("prepared_watch") or {}
     loader = payload.get("minute_loader") or {}
     lines = [
-        "V2V2 — Historical Live Hunting Replay",
+        "V2V3 — Replay Audit & Prepared Link Validation",
         f"يوم الصيد: {payload.get('hunt_date')} | جلسة التحضير السابقة: {payload.get('prior_session_date')}",
         f"Prepared Watch قبل الافتتاح: {prep.get('count')} رمز",
         f"رموز التدقيق: {(payload.get('target_selection') or {}).get('target_symbols_count')} | فائزون فوق {payload.get('missed_gain_threshold')}%: {perf.get('actual_winners_over_threshold_count')}",
@@ -2454,8 +2689,24 @@ def format_live_hunting_replay_brief(payload: dict[str, Any]) -> str:
         f"- التقاط مبكر <=8%: {perf.get('early_detected_winners_count')} | early capture {perf.get('early_winner_capture_rate_pct')}%",
         f"- التقاط مقبول <=20%: {perf.get('acceptable_detected_winners_count')} | acceptable capture {perf.get('acceptable_winner_capture_rate_pct')}%",
         f"- Prepared تحرك +3/+5 ولم يترقَ: {perf.get('prepared_crossed_3_or_5_but_not_detected_count')}",
+        f"- Prepared winners: {perf.get('prepared_winners_count')} | Intraday new winners: {perf.get('intraday_new_winners_count')} | missed intraday: {perf.get('missed_intraday_winners_count')}",
+        f"- التقاط قبل +3/+5: {perf.get('pre_move_detected_winners_count')} | التقاط متأخر >=20%: {perf.get('late_detected_winners_count')} | anomaly rows: {perf.get('anomaly_rows_count')}",
         f"- minute loader: ok={loader.get('ok')} rows={loader.get('rows_seen')} target_rows={loader.get('target_rows_loaded')} timed_out={loader.get('timed_out')}",
         f"- bucket counts: {perf.get('bucket_counts')}",
+        "",
+        "تدقيق Prepared Watch:",
+    ]
+    audit = payload.get("prepared_link_audit") or {}
+    prep = payload.get("prepared_watch") or {}
+    lines.append(f"- أول 80 Prepared: {', '.join((prep.get('first_80_symbols') or prep.get('symbols') or [])[:80])}")
+    lines.append(f"- prior_pre_explosion داخل Prepared: {prep.get('prior_pre_explosion_lane_count')} من {prep.get('count')}")
+    for a in (audit.get("audit_symbols") or [])[:14]:
+        lines.append(
+            f"- {a.get('symbol')}: prior={a.get('in_prior_rows')} pre_lane={a.get('prior_pre_explosion_lane')} "
+            f"combined={a.get('in_combined_rows')} prepared={a.get('in_prepared_watch')} rank={a.get('prepared_rank')} "
+            f"target={a.get('in_target_symbols')} detected={a.get('detected_by_live_replay')} | {a.get('diagnosis_ar')}"
+        )
+    lines += [
         "",
         "أفضل نتائج الصيد/الفوات:",
     ]
@@ -2466,7 +2717,8 @@ def format_live_hunting_replay_brief(payload: dict[str, Any]) -> str:
             f"peak={tl.get('peak_gain_from_selection_pct')}% at {tl.get('peak_time_utc')} | "
             f"first +3={r.get('first_3pct_time_utc') or '-'} +5={r.get('first_5pct_time_utc') or '-'} | "
             f"detected={r.get('first_detected_time_utc') or 'لم يلتقط'} @ {r.get('first_detected_gain_pct')}% | "
-            f"sharia={r.get('sharia_label') or r.get('sharia_status')}"
+            f"delay={r.get('minutes_from_first_trigger_to_detection')}m | layer={r.get('first_detected_layer') or '-'} | "
+            f"flags={','.join(r.get('anomaly_flags') or []) or '-'} | sharia={r.get('sharia_label') or r.get('sharia_status')}"
         )
     lines += ["", str(payload.get("rule_ar") or ""), str(payload.get("storage_rule_ar") or ""), str(payload.get("next_step_ar") or "")]
     return "\n".join(lines)
