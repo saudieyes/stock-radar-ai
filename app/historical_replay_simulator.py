@@ -53,6 +53,7 @@ except Exception:
         return None
 
 HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u4_live_critical_pre_explosion_2026_06_20"
+LIVE_HUNTING_REPLAY_VERSION = "v2v2_historical_live_hunting_replay_2026_06_21"
 
 
 def _s(v: Any) -> str:
@@ -1678,7 +1679,7 @@ def _timeline_from_target_bars(sym: str, bars: list[dict], selection_price: floa
     peak = max(bars, key=lambda x: _num(x.get("high"), 0.0))
     low = min(bars, key=lambda x: _num(x.get("low"), 999999.0))
     last = bars[-1]
-    thresholds = [5, 10, 20, 50, 100, 200]
+    thresholds = [3, 5, 10, 20, 50, 100, 200]
     th_hits: dict[str, dict] = {}
     for th in thresholds:
         hit = None
@@ -2079,6 +2080,397 @@ def _build_big_explosion_timing_report(
         "rule_ar": "V2T2 يسأل: متى ارتفع السهم؟ هل دخل مصدر الأداة في شرائح الوقت؟ كم كانت نسبته وقت الالتقاط؟ ومتى ترقى داخل replay stages. هذا لا يطلق شراء حي بعد.",
     }
 
+
+
+# ---------------------------------------------------------------------------
+# V2V2: Historical Live Hunting Replay
+# ---------------------------------------------------------------------------
+
+def _daily_winners_from_map(
+    *,
+    hunt_map: dict,
+    prior_map: dict,
+    min_gain_pct: float = 20.0,
+    max_symbols: int = 80,
+) -> list[dict[str, Any]]:
+    """Return top same-day movers using only prior close/open as the baseline.
+
+    This list is used only to audit whether the replay would have hunted the
+    winners.  It is not used by the replay engine as a future signal.
+    """
+    rows: list[dict[str, Any]] = []
+    threshold = float(min_gain_pct or 20.0)
+    for sym, row in (hunt_map or {}).items():
+        sym = _u(sym)
+        if not sym:
+            continue
+        r = dict(row or {})
+        p = dict((prior_map or {}).get(sym) or {})
+        base = _num(p.get("price"), 0.0) or _num(p.get("close"), 0.0) or _num(r.get("open"), 0.0) or _num(r.get("o"), 0.0)
+        high = _num(r.get("high"), 0.0) or _num(r.get("h"), 0.0)
+        close = _num(r.get("price"), 0.0) or _num(r.get("close"), 0.0) or _num(r.get("c"), 0.0)
+        low = _num(r.get("low"), 0.0) or _num(r.get("l"), 0.0)
+        vol = _num(r.get("volume"), 0.0) or _num(r.get("v"), 0.0)
+        if base <= 0 or high <= 0 or vol <= 0:
+            continue
+        max_gain = _safe_gain(high, base)
+        if max_gain < threshold:
+            continue
+        rows.append({
+            "symbol": sym,
+            "baseline_price": _round(base, 4),
+            "day_high": _round(high, 4),
+            "day_close": _round(close, 4),
+            "day_low": _round(low, 4),
+            "volume": _round(vol, 0),
+            "dollar_volume": _round(close * vol, 2) if close > 0 else 0.0,
+            "max_gain_from_prior_close_pct": _round(max_gain, 2),
+            "close_gain_from_prior_close_pct": _round(_safe_gain(close, base), 2),
+            "worst_drawdown_from_prior_close_pct": _round(_safe_gain(low, base), 2),
+        })
+    return sorted(rows, key=lambda x: _num(x.get("max_gain_from_prior_close_pct"), 0.0), reverse=True)[:max(5, min(200, int(max_symbols or 80)))]
+
+
+def _prepared_compact_from_sources(rows: list[dict], *, limit: int = 80) -> tuple[list[dict], dict[str, int]]:
+    compact: list[dict] = []
+    rank: dict[str, int] = {}
+    seen: set[str] = set()
+    for r in rows or []:
+        sym = _extract_symbol(r)
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        sharia = assess_sharia_source_fast(sym)
+        metrics = _candidate_metrics(r)
+        item = {
+            "symbol": sym,
+            "score": _round(_candidate_score(r), 3),
+            "source_layers": list(r.get("source_layers") or [_s(r.get("historical_source_family")) or _s(r.get("source_layer")) or "prepared_source"]),
+            "reasons_ar": list(r.get("reasons_ar") or r.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or [])[:8],
+            "metrics": metrics,
+            "sharia_status": sharia.get("status"),
+            "sharia_label": sharia.get("label"),
+            "sharia_blocked": bool(sharia.get("should_block")),
+            "sharia_gray": bool(sharia.get("is_gray")),
+        }
+        rank[sym] = len(compact) + 1
+        compact.append(item)
+        if len(compact) >= max(5, min(200, int(limit or 80))):
+            break
+    return compact, rank
+
+
+def _threshold_time(timeline: dict, pct: int) -> dict:
+    return dict(((timeline or {}).get("threshold_hits") or {}).get(f"first_{int(pct)}pct") or {})
+
+
+def _v2v2_replay_bucket(*, sym: str, was_prepared: bool, timeline: dict, capture: dict, sharia: dict) -> dict[str, Any]:
+    detected = bool((capture or {}).get("detected_by_minute_replay"))
+    det_gain = _num((capture or {}).get("first_detected_gain_pct"), 0.0)
+    peak_gain = _num((timeline or {}).get("peak_gain_from_selection_pct"), 0.0)
+    crossed3 = bool(_threshold_time(timeline, 3))
+    crossed5 = bool(_threshold_time(timeline, 5))
+    blocked = bool((sharia or {}).get("should_block"))
+    gray = bool((sharia or {}).get("is_gray"))
+    if blocked:
+        return {
+            "bucket": "learning_only_sharia_blocked",
+            "section_ar": "تعلم فقط — محجوب شرعيًا",
+            "actionability_ar": "لا شراء ولا Cautious/Strong حتى لو اصطاده المحاكي.",
+            "priority_score": 5,
+        }
+    if gray:
+        return {
+            "bucket": "urgent_sharia_review_watch",
+            "section_ar": "مراجعة شرعية عاجلة — مراقبة فقط",
+            "actionability_ar": "لا يتحول لشراء مباشر قبل اعتماد شرعي واضح.",
+            "priority_score": 25,
+        }
+    if detected:
+        if det_gain >= 35:
+            return {
+                "bucket": "no_chase_pullback_only",
+                "section_ar": "مرتفع جدًا — لا تطارد / Pullback فقط",
+                "actionability_ar": "ليس شراء الآن؛ يحتاج تماسك أو Pullback أو Reclaim جديد.",
+                "priority_score": 45,
+            }
+        if det_gain >= 18:
+            return {
+                "bucket": "continuation_pullback",
+                "section_ar": "Continuation Pullback / استمرار مشروط",
+                "actionability_ar": "راقب استمرارًا مشروطًا فقط؛ لا دخول على القمة.",
+                "priority_score": 60,
+            }
+        if det_gain <= 8:
+            return {
+                "bucket": "v2v_early_confirmation",
+                "section_ar": "V2V تأكيد مبكر حي",
+                "actionability_ar": "قريب من المتابعة الجادة؛ لا يصبح شراء إلا عند اكتمال الشرعية والسيولة والخطة.",
+                "priority_score": 92,
+            }
+        return {
+            "bucket": "v2v_active_watch",
+            "section_ar": "V2V مراقبة لصيقة — الحركة بدأت",
+            "actionability_ar": "متابعة لصيقة؛ إذا أصبح ممتدًا ينتقل إلى Pullback.",
+            "priority_score": 78,
+        }
+    if was_prepared and (crossed3 or crossed5):
+        return {
+            "bucket": "prepared_missed_live_promotion",
+            "section_ar": "Prepared Watch تحرك ولم يترقَ سريعًا",
+            "actionability_ar": "فجوة يجب إصلاحها: كان مرشحًا قبل السوق ثم تحرك ولم تصطده الشرائح.",
+            "priority_score": 88,
+        }
+    if peak_gain >= 20:
+        return {
+            "bucket": "missed_intraday_winner",
+            "section_ar": "فائز أثناء الجلسة لم يُصطد",
+            "actionability_ar": "فجوة اكتشاف جديدة؛ نحتاج مصدر/دورة أسرع أو مقاعد حجز.",
+            "priority_score": 72,
+        }
+    return {
+        "bucket": "watched_no_trigger",
+        "section_ar": "مراقبة — لم يكتمل الزناد",
+        "actionability_ar": "لا إجراء.",
+        "priority_score": 20,
+    }
+
+
+def run_live_hunting_replay(
+    *,
+    date_value: str = "",
+    max_prepared: int = 80,
+    max_symbols: int = 80,
+    missed_gain_threshold: float = 20.0,
+    context_days: int = 3,
+    recovery_days: int = 7,
+    prior_full_session_scan: bool = True,
+    prior_scan_max_rows: int = 2_500_000,
+    max_minute_rows: int = 1_800_000,
+    prior_scan_timeout_sec: float = 45.0,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+    include_candidates: bool = True,
+) -> dict[str, Any]:
+    """Replay one historical session as if the market is open now.
+
+    The replay builds a prior-day Prepared Watch first, then streams the hunt
+    day minute flat file through production source helpers at time slices.  The
+    outcome winners are used only as an audit target list, not as input to the
+    detection rules.
+    """
+    hunt_date, hunt_map, hunt_debug = _resolve_selection_grouped(date_value, recovery_days=recovery_days)
+    if not hunt_map or not hunt_date:
+        return {
+            "ok": False,
+            "version": LIVE_HUNTING_REPLAY_VERSION,
+            "error": "hunt_grouped_unavailable",
+            "hunt_date_debug": hunt_debug,
+            "rule_ar": "محاكي V2V2 يحتاج grouped يوم الصيد نفسه للتقييم اليومي؛ لا يستخدم المستقبل لتوليد الإشارات.",
+        }
+    prior_date = _previous_trading_day(hunt_date).isoformat()
+    prior_map = _safe_grouped(prior_date)
+    context_items, context_debug = _resolve_context_grouped(prior_date, prior_map, context_days=context_days, recovery_days=recovery_days)
+    micro_rows, fast_rows, context_source_debug = _build_context_source_rows(context_items)
+    prior_rows: list[dict] = []
+    prior_debug: dict[str, Any] = {"enabled": bool(prior_full_session_scan), "version": "prior_full_session_scan_disabled_v2v2"}
+    if bool(prior_full_session_scan):
+        prior_rows, prior_debug, _, _ = _build_prior_session_source_rows(
+            selection_date=prior_date,
+            max_minute_rows=max(50_000, min(3_500_000, int(prior_scan_max_rows or 2_500_000))),
+            force_minute_pull=force_minute_pull,
+            redownload_processed=redownload_processed,
+            max_seconds=float(prior_scan_timeout_sec or 45.0),
+        )
+    combined, combine_debug = _combine_source_candidates(micro_rows, fast_rows, extra_rows=prior_rows, clean_only=False)
+    prepared_list, prepared_rank = _prepared_compact_from_sources(combined, limit=max_prepared)
+    prepared_symbols = {_u(x.get("symbol")) for x in prepared_list if _u(x.get("symbol"))}
+    actual_winners = _daily_winners_from_map(
+        hunt_map=hunt_map,
+        prior_map=prior_map,
+        min_gain_pct=missed_gain_threshold,
+        max_symbols=max_symbols,
+    )
+    winner_symbols = {_u(x.get("symbol")) for x in actual_winners}
+    target_symbols: list[str] = []
+    seen: set[str] = set()
+    # Audit the actual winners first, then add Prepared Watch names. Winners are
+    # used only as audit targets; detection still runs slice-by-slice without
+    # knowing future bars.
+    prepared_order = [_u(x.get("symbol")) for x in prepared_list if _u(x.get("symbol"))]
+    winner_order = [_u(x.get("symbol")) for x in actual_winners if _u(x.get("symbol"))]
+    for sym in winner_order + prepared_order:
+        sym = _u(sym)
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        target_symbols.append(sym)
+        if len(target_symbols) >= max(5, min(180, int(max_symbols or 80))):
+            break
+    target_set = set(target_symbols)
+    selection_prices: dict[str, float] = {}
+    for sym in target_set:
+        p = dict((prior_map or {}).get(sym) or {})
+        h = dict((hunt_map or {}).get(sym) or {})
+        selection_prices[sym] = _num(p.get("price"), 0.0) or _num(p.get("close"), 0.0) or _num(h.get("open"), 0.0) or _num(h.get("o"), 0.0)
+    loader_debug, target_bars, slice_maps = _read_minute_file_for_replay(
+        trade_date=hunt_date,
+        target_symbols=target_set,
+        max_minute_rows=max_minute_rows,
+        max_seconds=max(20.0, float(prior_scan_timeout_sec or 45.0)),
+        force_minute_pull=force_minute_pull,
+        redownload_processed=redownload_processed,
+    )
+    if loader_debug.get("ok"):
+        source_replay = _run_source_on_minute_slices(
+            outcome_date=hunt_date,
+            slice_maps=slice_maps,
+            target_symbols=target_set,
+            selection_prices=selection_prices,
+            clean_only=False,
+        )
+    else:
+        source_replay = {
+            "version": "minute_source_slice_replay_unavailable_v2v2",
+            "symbols": {sym: {"symbol": sym, "detected_by_minute_replay": False, "stage_history": []} for sym in target_set},
+            "slice_debug": [],
+            "rule_ar": "لم تتوفر بيانات الدقيقة؛ لا يمكن محاكاة الصيد الحي بالدقيقة.",
+        }
+    winner_by_symbol = {_u(x.get("symbol")): x for x in actual_winners}
+    rows: list[dict[str, Any]] = []
+    for sym in target_symbols:
+        base = _num(selection_prices.get(sym), 0.0)
+        timeline = _timeline_from_target_bars(sym, target_bars.get(sym) or [], base)
+        capture = (source_replay.get("symbols") or {}).get(sym) or {"symbol": sym, "detected_by_minute_replay": False, "stage_history": []}
+        sharia = assess_sharia_source_fast(sym)
+        was_prepared = sym in prepared_symbols
+        bucket = _v2v2_replay_bucket(sym=sym, was_prepared=was_prepared, timeline=timeline, capture=capture, sharia=sharia)
+        first3 = _threshold_time(timeline, 3)
+        first5 = _threshold_time(timeline, 5)
+        det_time = capture.get("first_detected_time_utc") or ""
+        peak_time = timeline.get("peak_time_utc") or ""
+        rows.append({
+            "symbol": sym,
+            "was_prepared_before_open": bool(was_prepared),
+            "prepared_rank": prepared_rank.get(sym),
+            "actual_winner_over_threshold": sym in winner_symbols,
+            "baseline_price": _round(base, 4),
+            "actual_daily": winner_by_symbol.get(sym) or {},
+            "timeline": timeline,
+            "first_3pct_time_utc": first3.get("time_utc"),
+            "first_5pct_time_utc": first5.get("time_utc"),
+            "minute_capture": capture,
+            "detected_by_live_replay": bool(capture.get("detected_by_minute_replay")),
+            "first_detected_time_utc": det_time,
+            "first_detected_gain_pct": capture.get("first_detected_gain_pct"),
+            "minutes_from_detection_to_peak": _minute_between(det_time, peak_time) if det_time and peak_time else None,
+            "sharia_status": sharia.get("status"),
+            "sharia_label": sharia.get("label"),
+            "sharia_blocked": bool(sharia.get("should_block")),
+            "sharia_gray": bool(sharia.get("is_gray")),
+            **bucket,
+        })
+    rows = sorted(rows, key=lambda x: (_num(x.get("priority_score"), 0.0), _num((x.get("timeline") or {}).get("peak_gain_from_selection_pct"), 0.0)), reverse=True)
+    winners_count = len(actual_winners)
+    detected_winners = [r for r in rows if r.get("actual_winner_over_threshold") and r.get("detected_by_live_replay")]
+    early_winners = [r for r in detected_winners if _num(r.get("first_detected_gain_pct"), 9999) <= 8]
+    acceptable_winners = [r for r in detected_winners if _num(r.get("first_detected_gain_pct"), 9999) <= 20]
+    prepared_winners = [r for r in rows if r.get("actual_winner_over_threshold") and r.get("was_prepared_before_open")]
+    prepared_crossed_but_missed = [r for r in rows if r.get("was_prepared_before_open") and (r.get("first_3pct_time_utc") or r.get("first_5pct_time_utc")) and not r.get("detected_by_live_replay")]
+    payload = {
+        "ok": True,
+        "version": LIVE_HUNTING_REPLAY_VERSION,
+        "mode": "same_day_minute_live_hunting_replay_no_future_signals",
+        "requested_date": str(date_value or "").strip(),
+        "hunt_date": hunt_date,
+        "prior_session_date": prior_date,
+        "max_prepared": int(max_prepared or 80),
+        "max_symbols": int(max_symbols or 80),
+        "missed_gain_threshold": float(missed_gain_threshold or 20.0),
+        "hunt_grouped_debug": hunt_debug,
+        "prior_grouped_rows": len(prior_map or {}),
+        "context_date_debug": context_debug,
+        "context_source_scan": context_source_debug,
+        "prior_full_session_scan": prior_debug,
+        "sharia_debug": combine_debug,
+        "prepared_watch": {
+            "count": len(prepared_list),
+            "symbols": [x.get("symbol") for x in prepared_list[:120]],
+            "items": prepared_list[:50],
+            "rule_ar": "هذه قائمة Prepared Watch التي كانت معروفة قبل افتتاح يوم الصيد؛ ليست شراء مباشر.",
+        },
+        "target_selection": {
+            "target_symbols_count": len(target_set),
+            "target_symbols": target_symbols,
+            "actual_winners_over_threshold_count": winners_count,
+            "actual_winners_symbols": [x.get("symbol") for x in actual_winners[:80]],
+            "rule_ar": "الفائزون الفعليون يُستخدمون للتدقيق فقط: هل كان المحرك سيصطادهم في الوقت المناسب؟ لا يدخلون كإشارة مستقبلية داخل الشرائح.",
+        },
+        "minute_loader": loader_debug,
+        "source_replay_summary": {k: v for k, v in source_replay.items() if k not in {"symbols"}},
+        "performance": {
+            "prepared_watch_count": len(prepared_list),
+            "actual_winners_over_threshold_count": winners_count,
+            "prepared_winners_count": len(prepared_winners),
+            "detected_winners_count": len(detected_winners),
+            "early_detected_winners_count": len(early_winners),
+            "acceptable_detected_winners_count": len(acceptable_winners),
+            "winner_capture_rate_pct": _round((len(detected_winners) / winners_count * 100.0) if winners_count else 0.0, 2),
+            "early_winner_capture_rate_pct": _round((len(early_winners) / winners_count * 100.0) if winners_count else 0.0, 2),
+            "acceptable_winner_capture_rate_pct": _round((len(acceptable_winners) / winners_count * 100.0) if winners_count else 0.0, 2),
+            "prepared_crossed_3_or_5_but_not_detected_count": len(prepared_crossed_but_missed),
+            "bucket_counts": {},
+        },
+        "rule_ar": "V2V2 يحاكي جلسة تاريخية كأن السوق مفتوح: Prepared قبل السوق + شرائح دقيقة أثناء الجلسة + تشغيل مصادر Big/Micro/Fast بدون معرفة مستقبل الشريحة.",
+        "storage_rule_ar": "يقرأ Polygon minute من /tmp فقط، ويرجع ملخصات مدمجة؛ لا يحفظ raw files في SQLite/GitHub/Railway.",
+        "next_step_ar": "شغل 3-5 أيام. إذا كثرت prepared_crossed_3_or_5_but_not_detected نحتاج ربط Prepared Watch بالترقية الحية بشكل أقوى. إذا كثرت missed_intraday_winner نحتاج مصدر اكتشاف أثناء الجلسة أسرع/أوسع.",
+    }
+    bucket_counts: dict[str, int] = {}
+    for r in rows:
+        b = _s(r.get("bucket")) or "unknown"
+        bucket_counts[b] = bucket_counts.get(b, 0) + 1
+    payload["performance"]["bucket_counts"] = bucket_counts
+    if include_candidates:
+        payload["candidates"] = rows[:max(10, min(180, int(max_symbols or 80)))]
+    else:
+        payload["candidate_sample"] = rows[:30]
+    return payload
+
+
+def format_live_hunting_replay_brief(payload: dict[str, Any]) -> str:
+    if not payload.get("ok"):
+        return "V2V2 Live Hunting Replay error\n" + str(payload)
+    perf = payload.get("performance") or {}
+    prep = payload.get("prepared_watch") or {}
+    loader = payload.get("minute_loader") or {}
+    lines = [
+        "V2V2 — Historical Live Hunting Replay",
+        f"يوم الصيد: {payload.get('hunt_date')} | جلسة التحضير السابقة: {payload.get('prior_session_date')}",
+        f"Prepared Watch قبل الافتتاح: {prep.get('count')} رمز",
+        f"رموز التدقيق: {(payload.get('target_selection') or {}).get('target_symbols_count')} | فائزون فوق {payload.get('missed_gain_threshold')}%: {perf.get('actual_winners_over_threshold_count')}",
+        "",
+        "نتيجة الصيد الحي:",
+        f"- فائزون التقطهم المحاكي: {perf.get('detected_winners_count')} | capture {perf.get('winner_capture_rate_pct')}%",
+        f"- التقاط مبكر <=8%: {perf.get('early_detected_winners_count')} | early capture {perf.get('early_winner_capture_rate_pct')}%",
+        f"- التقاط مقبول <=20%: {perf.get('acceptable_detected_winners_count')} | acceptable capture {perf.get('acceptable_winner_capture_rate_pct')}%",
+        f"- Prepared تحرك +3/+5 ولم يترقَ: {perf.get('prepared_crossed_3_or_5_but_not_detected_count')}",
+        f"- minute loader: ok={loader.get('ok')} rows={loader.get('rows_seen')} target_rows={loader.get('target_rows_loaded')} timed_out={loader.get('timed_out')}",
+        f"- bucket counts: {perf.get('bucket_counts')}",
+        "",
+        "أفضل نتائج الصيد/الفوات:",
+    ]
+    for r in (payload.get("candidates") or payload.get("candidate_sample") or [])[:25]:
+        tl = r.get("timeline") or {}
+        lines.append(
+            f"- {r.get('symbol')}: {r.get('section_ar')} | prepared={r.get('was_prepared_before_open')} | "
+            f"peak={tl.get('peak_gain_from_selection_pct')}% at {tl.get('peak_time_utc')} | "
+            f"first +3={r.get('first_3pct_time_utc') or '-'} +5={r.get('first_5pct_time_utc') or '-'} | "
+            f"detected={r.get('first_detected_time_utc') or 'لم يلتقط'} @ {r.get('first_detected_gain_pct')}% | "
+            f"sharia={r.get('sharia_label') or r.get('sharia_status')}"
+        )
+    lines += ["", str(payload.get("rule_ar") or ""), str(payload.get("storage_rule_ar") or ""), str(payload.get("next_step_ar") or "")]
+    return "\n".join(lines)
+
 def run_historical_replay(
     *,
     date_value: str = "",
@@ -2258,7 +2650,8 @@ def historical_replay_status() -> dict[str, Any]:
         "version": HISTORICAL_REPLAY_SIMULATOR_VERSION,
         "endpoint": "/simulator/historical-replay?date=YYYY-MM-DD",
         "aliases": ["/simulator/historical-replay", "/historical-replay", "/replay/historical-market"],
-        "purpose_ar": "محاكاة تاريخية بعد الإغلاق + مسح دقيقة كامل لليوم السابق + تقرير توقيت الانفجارات الكبيرة بالدقيقة: متى بدأ الصعود، هل التقطته الأداة، نسبة السهم وقت الالتقاط، ومتى ترقى داخل Replay stages.",
+        "v2v2_live_hunting_endpoint": "/simulator/live-hunting-replay?date=YYYY-MM-DD&format=brief",
+        "purpose_ar": "محاكاة تاريخية بعد الإغلاق + مسح دقيقة كامل لليوم السابق + تقرير توقيت الانفجارات الكبيرة بالدقيقة. V2V2 يضيف محاكي صيد حي لنفس اليوم: Prepared قبل السوق + شرائح دقيقة أثناء الجلسة.",
         "safe_mode_ar": "تقييم فقط؛ لا يغير Strong/Cautious ولا السوق الحي ولا يحفظ raw. ملفات الدقيقة تُقرأ من /tmp فقط عند توفر Polygon flat files.",
         "recommended_params_ar": "ابدأ max_candidates=40 و context_days=3 و missed_gain_threshold=20 و minute_timing=true و timing_symbols_limit=30 و format=brief، ثم كرر 5-10 أيام.",
         "v2t_note_ar": "V2T2 يعيد استخدام دوال المصدر الحية على grouped يومي، ويمسح دقيقة اليوم السابق كاملة بعد كل الجلسات، ثم يبني شرائح افتتاح كل دقيقة لقياس توقيت الالتقاط والترقية بدون lookahead.",
