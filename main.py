@@ -1926,15 +1926,32 @@ def source_discovery_status(client_updated_at: str = ""):
 def diagnostics_live_monitoring_budget_endpoint():
     dynamic_status = get_last_dynamic_discovery_status()
     budget = (dynamic_status or {}).get("live_monitoring_budget_guard_v2v6", {}) if isinstance(dynamic_status, dict) else {}
+    # V2V6b: report the actually installed source_discovery module marker, so we
+    # can distinguish stale scan cache from a deployment that did not overwrite
+    # app/source_discovery.py.
+    try:
+        import app.source_discovery as _sd
+        installed_module_version = str(getattr(_sd, "SOURCE_DISCOVERY_MODULE_VERSION", "missing_marker_old_source_discovery"))
+        installed_module_file = str(getattr(_sd, "__file__", ""))
+    except Exception as exc:
+        installed_module_version = f"import_error:{type(exc).__name__}"
+        installed_module_file = ""
+    engine_version = (dynamic_status or {}).get("engine_version", "") if isinstance(dynamic_status, dict) else ""
+    budget_state = "active" if isinstance(budget, dict) and budget else "missing_or_stale"
     return {
         "ok": True,
-        "version": "v2v6_live_monitoring_budget_status_2026_06_21",
-        "dynamic_discovery_engine_version": (dynamic_status or {}).get("engine_version", "") if isinstance(dynamic_status, dict) else "",
+        "version": "v2v6b_live_monitoring_budget_status_2026_06_21",
+        "installed_source_discovery_module_version": installed_module_version,
+        "installed_source_discovery_module_file": installed_module_file,
+        "dynamic_discovery_engine_version": engine_version,
+        "engine_is_v2v6b_or_newer": bool("v2v6b" in str(engine_version).lower() or "v3l" in str(engine_version).lower()),
         "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
         "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
+        "budget_state": budget_state,
         "budget": budget if isinstance(budget, dict) else {},
-        "rule_ar": "V2V6: الفحص الحي أخف من المحاكي التاريخي؛ لا يقرأ ملفات minute ولا يشغل replay، بل يؤكد Quote لقائمة محدودة ذات أولوية حتى لا يضغط Railway.",
+        "diagnosis_ar": "إذا كانت installed_source_discovery_module_version مفقودة أو dynamic_discovery_engine_version بقي v3j بعد force scan، فهذا يعني أن app/source_discovery.py لم يُنشر أو لم يُعاد تشغيله فعليًا. إذا ظهرت v3l/v2v6b ومعها budget، فالحماية فعالة.",
+        "rule_ar": "V2V6b: الفحص الحي أخف من المحاكي التاريخي؛ لا يقرأ ملفات minute ولا يشغل replay، ويطبق سقف FMP نهائيًا لحماية Railway.",
     }
 
 # Fix20: compact Market Mood / Sentiment layer.
