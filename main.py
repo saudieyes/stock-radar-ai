@@ -264,6 +264,14 @@ from app.polygon_weekly_builder import (
     polygon_flatfile_status,
     POLYGON_WEEKLY_BUILDER_VERSION,
 )
+from app.polygon_next_day_builder import (
+    POLYGON_NEXT_DAY_BUILDER_VERSION,
+    polygon_next_day_status as _polygon_next_day_status,
+    build_polygon_next_day_from_polygon,
+    build_polygon_next_day_from_local,
+    load_polygon_next_day_candidates,
+    format_polygon_next_day_brief,
+)
 
 app = FastAPI()
 
@@ -1941,12 +1949,13 @@ def diagnostics_live_monitoring_budget_endpoint():
     budget_state = "active" if isinstance(budget, dict) and budget else "missing_or_stale"
     return {
         "ok": True,
-        "version": "v2v6c_dynamic_rotation_budget_status_2026_06_21",
+        "version": "v2w_polygon_next_day_budget_status_2026_06_21",
         "installed_source_discovery_module_version": installed_module_version,
         "installed_source_discovery_module_file": installed_module_file,
         "dynamic_discovery_engine_version": engine_version,
         "engine_is_v2v6b_or_newer": bool("v2v6b" in str(engine_version).lower() or "v3l" in str(engine_version).lower() or "v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower()),
-        "engine_is_v2v6c_or_newer": bool("v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower()),
+        "engine_is_v2v6c_or_newer": bool("v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower() or "v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower()),
+        "engine_is_v2w_or_newer": bool("v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower()),
         "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirm_batches": (dynamic_status or {}).get("fmp_confirm_batches", None) if isinstance(dynamic_status, dict) else None,
@@ -1955,12 +1964,16 @@ def diagnostics_live_monitoring_budget_endpoint():
         "low_float_confirm_count_v2v6c": (dynamic_status or {}).get("low_float_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
         "micro_live_confirm_count_v2v6c": (dynamic_status or {}).get("micro_live_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
         "emergency_confirm_count_v2v6c": (dynamic_status or {}).get("emergency_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
+        "polygon_next_day_confirm_count_v2w": (dynamic_status or {}).get("polygon_next_day_confirm_count_v2w", None) if isinstance(dynamic_status, dict) else None,
+        "polygon_next_day_builder_injected_count": (dynamic_status or {}).get("polygon_next_day_builder_injected_count", None) if isinstance(dynamic_status, dict) else None,
+        "polygon_next_day_low_float_count": (dynamic_status or {}).get("polygon_next_day_low_float_count", None) if isinstance(dynamic_status, dict) else None,
+        "polygon_next_day_debug": (dynamic_status or {}).get("polygon_next_day_debug", {}) if isinstance(dynamic_status, dict) else {},
         "rotating_discovery_v2v6c": (dynamic_status or {}).get("rotating_discovery_v2v6c", {}) if isinstance(dynamic_status, dict) else {},
         "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
         "budget_state": budget_state,
         "budget": budget if isinstance(budget, dict) else {},
-        "diagnosis_ar": "إذا ظهر v3m/v2v6c ومع budget وrotating_discovery فهذا يعني أن المنبع لم يعد 180 فقط: 180 للعطلة، وبعد الإغلاق/أثناء السوق توجد ميزانية ديناميكية ودفعات اكتشاف جديدة.",
-        "rule_ar": "V2V6c: لا يقرأ ملفات minute ولا يشغل replay أثناء السوق؛ يستخدم FMP على دفعات، ويسمح Polygon كدعم مؤخر بعد الإغلاق فقط، ويضيف rotating discovery حتى لا تضيع الأسهم الصغيرة خارج المنبع.",
+        "diagnosis_ar": "إذا ظهر v3n/v2w فهذا يعني أن V2V6c محفوظ، وأضيفت طبقة Polygon Next-Day بدون استبدال القوائم الحالية.",
+        "rule_ar": "V2W: يحافظ على V2V6c، ويضيف قائمة Polygon للغد كمصدر تحضير/تعلم فقط؛ لا يغير Strong/Cautious ولا يمس القوائم الحالية.",
     }
 
 # Fix20: compact Market Mood / Sentiment layer.
@@ -3630,6 +3643,85 @@ def polygon_weekly_build_from_polygon(
         )
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "trade_date": trade_date}
+
+@app.get("/polygon-next-day/status")
+def polygon_next_day_status_endpoint(format: str = "json"):
+    """Status for the additive Polygon next-day candidate list.
+
+    This list does not replace Weekly Priority/Prepared/V2V. It is a compact
+    prep source for tomorrow and learning only.
+    """
+    try:
+        data = _polygon_next_day_status()
+        if str(format or "").lower() == "brief":
+            saved = (data or {}).get("saved", {}) if isinstance(data, dict) else {}
+            return {"ok": True, "brief": format_polygon_next_day_brief(saved), "status": data}
+        return data
+    except Exception as exc:
+        return {"ok": False, "version": POLYGON_NEXT_DAY_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+
+@app.get("/polygon-next-day/build-from-polygon")
+def polygon_next_day_build_from_polygon(
+    trade_date: str = "",
+    top_n: int = 160,
+    execute: bool = False,
+    force: bool = False,
+    format: str = "json",
+):
+    """Build tomorrow's compact prep list from Polygon grouped data.
+
+    Safe by design: saves only compact JSON when execute=true and never stores
+    Polygon raw files. It is watch/prep only, not a buy list.
+    """
+    try:
+        result = build_polygon_next_day_from_polygon(
+            trade_date=trade_date or None,
+            top_n=int(top_n or 160),
+            execute=bool(execute),
+            force=bool(force),
+        )
+        if str(format or "").lower() == "brief":
+            return {"ok": bool((result or {}).get("ok")), "brief": format_polygon_next_day_brief(result), "result": result}
+        return result
+    except Exception as exc:
+        return {"ok": False, "version": POLYGON_NEXT_DAY_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "trade_date": trade_date}
+
+
+@app.get("/polygon-next-day/build-from-local")
+def polygon_next_day_build_from_local(path: str = "", top_n: int = 160, execute: bool = False, format: str = "json"):
+    """Build tomorrow's compact prep list from a temporary local daily CSV/ZIP.
+
+    Use for uploaded/manual files. It stores only compact candidates when
+    execute=true; no raw file is copied into app_data.
+    """
+    try:
+        result = build_polygon_next_day_from_local(path=path or "app_data/polygon_next_day_input.zip", top_n=int(top_n or 160), execute=bool(execute))
+        if str(format or "").lower() == "brief":
+            return {"ok": bool((result or {}).get("ok")), "brief": format_polygon_next_day_brief(result), "result": result}
+        return result
+    except Exception as exc:
+        return {"ok": False, "version": POLYGON_NEXT_DAY_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}", "path": path}
+
+
+@app.get("/polygon-next-day/brief")
+def polygon_next_day_brief():
+    data = load_polygon_next_day_candidates()
+    return {"ok": bool((data or {}).get("ok")), "version": POLYGON_NEXT_DAY_BUILDER_VERSION, "brief": format_polygon_next_day_brief(data), "data": data}
+
+
+@app.get("/polygon/next-day-candidates")
+def polygon_next_day_alias(format: str = "json"):
+    data = load_polygon_next_day_candidates()
+    if str(format or "").lower() == "brief":
+        return {"ok": bool((data or {}).get("ok")), "version": POLYGON_NEXT_DAY_BUILDER_VERSION, "brief": format_polygon_next_day_brief(data), "data": data}
+    return data
+
+
+@app.get("/polygon/next-day/build")
+def polygon_next_day_build_alias(trade_date: str = "", top_n: int = 160, execute: bool = False, force: bool = False, format: str = "json"):
+    return polygon_next_day_build_from_polygon(trade_date=trade_date, top_n=top_n, execute=execute, force=force, format=format)
+
 
 @app.get("/debug-scan")
 def debug_scan():
