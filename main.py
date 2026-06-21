@@ -702,6 +702,8 @@ def historical_replay_simulator_status_endpoint():
 @app.get("/simulator/v2v3-live-hunting-audit")
 @app.get("/simulator/v2v4-prepared-anchor-audit")
 @app.get("/simulator/v2v5-early-capture-replay")
+@app.get("/simulator/v2v5-early-capture-replay-safe")
+@app.get("/simulator/v2v5-safe")
 @app.get("/simulator/early-capture-boost")
 @app.get("/simulator/prepared-anchor-audit")
 @app.get("/simulator/replay-audit-prepared-link")
@@ -719,34 +721,77 @@ def live_hunting_replay_endpoint(
     prior_scan_timeout_sec: float = 45.0,
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
-    include_candidates: bool = True,
+    include_candidates: bool = False,
     audit_symbols: str = "EHGO,ICCM,TPC,SNBR,HOUR,BFLY,NIXX,NIVF,JLHL,BIRD",
+    safe_runtime_mode: bool = True,
     format: str = "json",
 ):
     fmt = str(format or "json").strip().lower()
+    # V2V5b: Railway upstream-error guard. The full replay can exceed proxy time
+    # when it redownloads Polygon minute files and scans the prior session.  Keep
+    # the default endpoint safe; pass safe_runtime_mode=false only for an offline
+    #/patient full run. This does not affect live trading decisions.
+    runtime_note = {}
+    eff_max_prepared = int(max_prepared or 80)
+    eff_max_symbols = int(max_symbols or 80)
+    eff_prior_scan_max_rows = int(prior_scan_max_rows or 2500000)
+    eff_max_minute_rows = int(max_minute_rows or 1800000)
+    eff_prior_scan_timeout_sec = float(prior_scan_timeout_sec or 45.0)
+    eff_include_candidates = bool(include_candidates)
+    if bool(safe_runtime_mode):
+        before = {
+            "max_prepared": eff_max_prepared,
+            "max_symbols": eff_max_symbols,
+            "prior_scan_max_rows": eff_prior_scan_max_rows,
+            "max_minute_rows": eff_max_minute_rows,
+            "prior_scan_timeout_sec": eff_prior_scan_timeout_sec,
+            "include_candidates": eff_include_candidates,
+        }
+        eff_max_prepared = max(30, min(eff_max_prepared, 70))
+        eff_max_symbols = max(30, min(eff_max_symbols, 60))
+        eff_prior_scan_max_rows = max(500000, min(eff_prior_scan_max_rows, 1800000))
+        eff_max_minute_rows = max(500000, min(eff_max_minute_rows, 1400000))
+        eff_prior_scan_timeout_sec = max(12.0, min(eff_prior_scan_timeout_sec, 28.0))
+        eff_include_candidates = False
+        runtime_note = {
+            "v2v5b_safe_runtime_mode": True,
+            "before": before,
+            "effective": {
+                "max_prepared": eff_max_prepared,
+                "max_symbols": eff_max_symbols,
+                "prior_scan_max_rows": eff_prior_scan_max_rows,
+                "max_minute_rows": eff_max_minute_rows,
+                "prior_scan_timeout_sec": eff_prior_scan_timeout_sec,
+                "include_candidates": eff_include_candidates,
+            },
+            "rule_ar": "V2V5b: تم تخفيف المحاكي افتراضيًا لتجنب upstream error في Railway. للقياس الكامل استخدم safe_runtime_mode=false بعد نجاح الفحص السريع.",
+        }
     try:
         payload = run_live_hunting_replay(
             date_value=date,
-            max_prepared=max_prepared,
-            max_symbols=max_symbols,
+            max_prepared=eff_max_prepared,
+            max_symbols=eff_max_symbols,
             missed_gain_threshold=missed_gain_threshold,
             context_days=context_days,
             recovery_days=recovery_days,
             prior_full_session_scan=prior_full_session_scan,
-            prior_scan_max_rows=prior_scan_max_rows,
-            max_minute_rows=max_minute_rows,
-            prior_scan_timeout_sec=prior_scan_timeout_sec,
+            prior_scan_max_rows=eff_prior_scan_max_rows,
+            max_minute_rows=eff_max_minute_rows,
+            prior_scan_timeout_sec=eff_prior_scan_timeout_sec,
             force_minute_pull=force_minute_pull,
             redownload_processed=redownload_processed,
-            include_candidates=include_candidates,
+            include_candidates=eff_include_candidates,
             audit_symbols=audit_symbols,
         )
+        if isinstance(payload, dict) and runtime_note:
+            payload["runtime_guard_v2v5b"] = runtime_note
+            payload["version"] = str(payload.get("version") or "") + "+v2v5b_runtime_guard"
     except Exception as exc:
         payload = {
             "ok": False,
-            "version": "v2v5_early_capture_boost_endpoint_guard_2026_06_21",
+            "version": "v2v5b_runtime_safe_endpoint_guard_2026_06_21",
             "error": f"live_hunting_replay_exception:{type(exc).__name__}:{str(exc)[:240]}",
-            "rule_ar": "حارس endpoint يمنع سقوط الخدمة؛ خفّض max_symbols أو max_minute_rows إذا كان ملف الدقيقة كبيرًا.",
+            "rule_ar": "V2V5b: إذا ظهر upstream error فالمشكلة غالبًا timeout/تحميل Polygon. استخدم safe_runtime_mode=true أو خفّض max_symbols/max_prepared/max_minute_rows.",
         }
     if fmt in {"brief", "text", "txt", "chatgpt"}:
         return PlainTextResponse(format_live_hunting_replay_brief(payload), media_type="text/plain; charset=utf-8")
