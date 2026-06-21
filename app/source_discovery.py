@@ -17,6 +17,7 @@ import scanner as _scanner
 from app.live_quotes import get_live_quotes
 from app.early_movement import get_weekly_priority_items
 from app.polygon_weekly_builder import load_weekly_watchlist
+from app.polygon_next_day_builder import load_polygon_next_day_candidates, POLYGON_NEXT_DAY_BUILDER_VERSION
 from app.settings import FMP_API_KEY, HTTP_SESSION, POLYGON_API_KEY
 from app.utils import safe_round, to_float
 from app.live_ignition_engine import classify_live_ignition, live_ignition_enabled
@@ -58,7 +59,7 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3m_v2v6c_dynamic_rotation_discovery_2026_06_21"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3n_v2w_polygon_next_day_additive_2026_06_21"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
@@ -584,26 +585,27 @@ def _budget_caps_for_phase(phase_info: dict) -> dict:
         "low_float_fast_lane": int(LIVE_MONITORING_LOW_FLOAT_CONFIRM_LIMIT or 160),
         "micro_live_candidates": int(LIVE_MONITORING_MICRO_LIVE_CONFIRM_LIMIT or 120),
         "rotating_discovery": int(LIVE_MONITORING_ROTATION_CONFIRM_LIMIT or 300),
+        "polygon_next_day_candidates": 110,
         "ranked_source_candidates": int(LIVE_MONITORING_RANKED_CONFIRM_LIMIT or 120),
         "micro_close_watch_memory": int(LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT or 80),
         "seed_symbols": int(LIVE_MONITORING_SEED_CONFIRM_LIMIT or 60),
     }
     if "weekend" in detail:
-        caps.update({"total": 180, "prepared": 80, "live_tight_memory": 50, "emergency_ignition": 20, "low_float_fast_lane": 50, "micro_live_candidates": 40, "rotating_discovery": 0, "ranked_source_candidates": 50, "micro_close_watch_memory": 35, "seed_symbols": 25})
+        caps.update({"total": 180, "prepared": 80, "live_tight_memory": 50, "emergency_ignition": 20, "low_float_fast_lane": 50, "micro_live_candidates": 40, "rotating_discovery": 0, "polygon_next_day_candidates": 30, "ranked_source_candidates": 50, "micro_close_watch_memory": 35, "seed_symbols": 25})
     elif "overnight_closed" in detail:
-        caps.update({"total": 300, "prepared": 100, "live_tight_memory": 70, "emergency_ignition": 35, "low_float_fast_lane": 80, "micro_live_candidates": 70, "rotating_discovery": 180, "ranked_source_candidates": 70, "micro_close_watch_memory": 50, "seed_symbols": 35})
+        caps.update({"total": 300, "prepared": 100, "live_tight_memory": 70, "emergency_ignition": 35, "low_float_fast_lane": 80, "micro_live_candidates": 70, "rotating_discovery": 180, "polygon_next_day_candidates": 80, "ranked_source_candidates": 70, "micro_close_watch_memory": 50, "seed_symbols": 35})
     elif phase == "after_hours":
-        caps.update({"total": 560 if "early" in detail else 500, "prepared": 120, "live_tight_memory": 100, "emergency_ignition": 70, "low_float_fast_lane": 160, "micro_live_candidates": 120, "rotating_discovery": 300, "ranked_source_candidates": 110, "micro_close_watch_memory": 80, "seed_symbols": 50})
+        caps.update({"total": 560 if "early" in detail else 500, "prepared": 120, "live_tight_memory": 100, "emergency_ignition": 70, "low_float_fast_lane": 160, "micro_live_candidates": 120, "rotating_discovery": 300, "polygon_next_day_candidates": 130, "ranked_source_candidates": 110, "micro_close_watch_memory": 80, "seed_symbols": 50})
     elif "pre_market_early" in detail:
-        caps.update({"total": 420, "prepared": 120, "live_tight_memory": 90, "emergency_ignition": 60, "low_float_fast_lane": 130, "micro_live_candidates": 100, "rotating_discovery": 220, "ranked_source_candidates": 100, "micro_close_watch_memory": 70, "seed_symbols": 45})
+        caps.update({"total": 420, "prepared": 120, "live_tight_memory": 90, "emergency_ignition": 60, "low_float_fast_lane": 130, "micro_live_candidates": 100, "rotating_discovery": 220, "polygon_next_day_candidates": 100, "ranked_source_candidates": 100, "micro_close_watch_memory": 70, "seed_symbols": 45})
     elif "pre_market_active" in detail:
-        caps.update({"total": 560, "prepared": 140, "live_tight_memory": 110, "emergency_ignition": 80, "low_float_fast_lane": 170, "micro_live_candidates": 130, "rotating_discovery": 220, "ranked_source_candidates": 120, "micro_close_watch_memory": 80, "seed_symbols": 50})
+        caps.update({"total": 560, "prepared": 140, "live_tight_memory": 110, "emergency_ignition": 80, "low_float_fast_lane": 170, "micro_live_candidates": 130, "rotating_discovery": 220, "polygon_next_day_candidates": 120, "ranked_source_candidates": 120, "micro_close_watch_memory": 80, "seed_symbols": 50})
     elif "open_first_hour" in detail:
-        caps.update({"total": 560, "prepared": 140, "live_tight_memory": 120, "emergency_ignition": 100, "low_float_fast_lane": 180, "micro_live_candidates": 140, "rotating_discovery": 180, "ranked_source_candidates": 130, "micro_close_watch_memory": 80, "seed_symbols": 45})
+        caps.update({"total": 560, "prepared": 140, "live_tight_memory": 120, "emergency_ignition": 100, "low_float_fast_lane": 180, "micro_live_candidates": 140, "rotating_discovery": 180, "polygon_next_day_candidates": 90, "ranked_source_candidates": 130, "micro_close_watch_memory": 80, "seed_symbols": 45})
     elif "open_mid_session" in detail:
-        caps.update({"total": 480, "prepared": 120, "live_tight_memory": 100, "emergency_ignition": 80, "low_float_fast_lane": 150, "micro_live_candidates": 120, "rotating_discovery": 120, "ranked_source_candidates": 120, "micro_close_watch_memory": 70, "seed_symbols": 40})
+        caps.update({"total": 480, "prepared": 120, "live_tight_memory": 100, "emergency_ignition": 80, "low_float_fast_lane": 150, "micro_live_candidates": 120, "rotating_discovery": 120, "polygon_next_day_candidates": 80, "ranked_source_candidates": 120, "micro_close_watch_memory": 70, "seed_symbols": 40})
     elif "open_last_hour" in detail:
-        caps.update({"total": 520, "prepared": 130, "live_tight_memory": 110, "emergency_ignition": 90, "low_float_fast_lane": 160, "micro_live_candidates": 130, "rotating_discovery": 160, "ranked_source_candidates": 120, "micro_close_watch_memory": 80, "seed_symbols": 45})
+        caps.update({"total": 520, "prepared": 130, "live_tight_memory": 110, "emergency_ignition": 90, "low_float_fast_lane": 160, "micro_live_candidates": 130, "rotating_discovery": 160, "polygon_next_day_candidates": 90, "ranked_source_candidates": 120, "micro_close_watch_memory": 80, "seed_symbols": 45})
     return {k: max(0, int(v or 0)) for k, v in caps.items()}
 
 
@@ -619,6 +621,7 @@ def _live_monitoring_confirmation_budget(
     micro_live_symbols: list[str] | None = None,
     emergency_symbols: list[str] | None = None,
     rotation_symbols: list[str] | None = None,
+    polygon_next_day_symbols: list[str] | None = None,
     rotation_debug: dict | None = None,
 ) -> tuple[list[str], dict]:
     """V2V6c dynamic router for FMP live confirmation.
@@ -631,7 +634,7 @@ def _live_monitoring_confirmation_budget(
     phase_label = str((phase_info or {}).get("label", "") or "")
     if not LIVE_MONITORING_BUDGET_GUARD_ENABLED:
         raw = _scanner.unique_keep_order(
-            list(prepared_symbols or []) + list(live_tight_symbols or []) + list(emergency_symbols or []) + list(low_float_symbols or []) + list(micro_live_symbols or []) + list(rotation_symbols or []) + list(ranked_symbols or []) + list(memory_symbols or []) + list(seed_symbols or [])
+            list(prepared_symbols or []) + list(live_tight_symbols or []) + list(emergency_symbols or []) + list(low_float_symbols or []) + list(micro_live_symbols or []) + list(rotation_symbols or []) + list(polygon_next_day_symbols or []) + list(ranked_symbols or []) + list(memory_symbols or []) + list(seed_symbols or [])
         )
         return raw, {
             "version": "live_monitoring_dynamic_budget_v2v6c_2026_06_21",
@@ -651,6 +654,7 @@ def _live_monitoring_confirmation_budget(
         "low_float_fast_lane": _cap_unique_symbols(low_float_symbols or [], caps.get("low_float_fast_lane", 0)),
         "micro_live_candidates": _cap_unique_symbols(micro_live_symbols or [], caps.get("micro_live_candidates", 0)),
         "rotating_discovery": _cap_unique_symbols(rotation_symbols or [], caps.get("rotating_discovery", 0)),
+        "polygon_next_day_candidates": _cap_unique_symbols(polygon_next_day_symbols or [], caps.get("polygon_next_day_candidates", 0)),
         "ranked_source_candidates": _cap_unique_symbols(ranked_symbols, caps.get("ranked_source_candidates", 0)),
         "micro_close_watch_memory": _cap_unique_symbols(memory_symbols, caps.get("micro_close_watch_memory", 0)),
         "seed_symbols": _cap_unique_symbols(seed_symbols, caps.get("seed_symbols", 0)),
@@ -662,6 +666,7 @@ def _live_monitoring_confirmation_budget(
         + groups["low_float_fast_lane"]
         + groups["micro_live_candidates"]
         + groups["rotating_discovery"]
+        + groups["polygon_next_day_candidates"]
         + groups["ranked_source_candidates"]
         + groups["micro_close_watch_memory"]
         + groups["seed_symbols"]
@@ -679,6 +684,7 @@ def _live_monitoring_confirmation_budget(
             "low_float_fast_lane": len(list(low_float_symbols or [])),
             "micro_live_candidates": len(list(micro_live_symbols or [])),
             "rotating_discovery": len(list(rotation_symbols or [])),
+            "polygon_next_day_candidates": len(list(polygon_next_day_symbols or [])),
             "ranked_source_candidates": len(list(ranked_symbols or [])),
             "micro_close_watch_memory": len(list(memory_symbols or [])),
             "seed_symbols": len(list(seed_symbols or [])),
@@ -687,7 +693,7 @@ def _live_monitoring_confirmation_budget(
         "final_count": len(final),
         "final_sample": final[:80],
         "rotation_discovery": rotation_debug or {},
-        "rule_ar": "V2V6c: 180 ليس منبع السوق؛ هو حد عطلة فقط. بعد الإغلاق والبري ماركت وأثناء التداول تستخدم الأداة ميزانية ديناميكية + دفعات اكتشاف دوّارة، مع مقاعد مخصصة للأسهم الصغيرة/Low-Float/Fast Lane.",
+        "rule_ar": "V2V6c: 180 ليس منبع السوق؛ هو حد عطلة فقط. بعد الإغلاق والبري ماركت وأثناء التداول تستخدم الأداة ميزانية ديناميكية + دفعات اكتشاف دوّارة، مع مقاعد مخصصة للأسهم الصغيرة/Low-Float/Fast Lane وقائمة Polygon للغد.",
     }
     return final, debug
 
@@ -2158,6 +2164,62 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     except Exception:
         polygon_weekly_builder_count = 0
 
+    # V2W Polygon Next-Day Candidate Builder: additive, separate from Weekly Priority.
+    # It widens tomorrow's source universe after close/weekend learning without
+    # replacing any existing list and without making buy/cautious decisions.
+    polygon_next_day_builder_count = 0
+    polygon_next_day_low_float_count = 0
+    polygon_next_day_debug = {}
+    try:
+        next_day_payload = load_polygon_next_day_candidates() or {}
+        polygon_next_day_debug = {
+            "ok": bool(next_day_payload.get("ok")),
+            "version": str(next_day_payload.get("version") or POLYGON_NEXT_DAY_BUILDER_VERSION),
+            "trade_date": str(next_day_payload.get("trade_date") or ""),
+            "candidate_count": len(next_day_payload.get("candidates") or []),
+            "rule_ar": "V2W: مصدر Polygon للغد مضاف فقط ولا يستبدل Weekly/Prepared/V2V.",
+        }
+        for item in (next_day_payload.get("candidates") or [])[:260]:
+            sym = str((item or {}).get("symbol") or "").upper().strip()
+            if not sym:
+                continue
+            sharia_status = str((item or {}).get("sharia_status") or "needs_review")
+            if sharia_status == "blocked" or bool((item or {}).get("blocked_learning_only")):
+                # Keep blocked names visible only in the V2W endpoint/learning log, not
+                # in actionable source confirmation.
+                continue
+            lane = str((item or {}).get("lane") or "next_day_watch")
+            score = to_float((item or {}).get("score"))
+            tags = list((item or {}).get("tags") or [])
+            reasons = list((item or {}).get("reasons_ar") or [])
+            base_score = 42 + min(score, 58) * 0.55
+            if "low_float_proxy" in tags or lane == "small_stock_next_day_watch":
+                base_score += 12
+                polygon_next_day_low_float_count += 1
+            if lane == "quiet_accumulation_next_day":
+                base_score += 8
+            if lane == "continuation_pullback_only":
+                base_score -= 8
+            if sharia_status == "approved":
+                base_score += 5
+            reason = "Polygon Next-Day V2W: " + "، ".join(reasons[:3])
+            _add_candidate(candidates, sym, base_score, "polygon_next_day_builder", reason, {
+                "polygon_next_day_builder_score": score,
+                "polygon_next_day_lane": lane,
+                "polygon_next_day_price": (item or {}).get("price"),
+                "polygon_next_day_change_pct": (item or {}).get("change_pct"),
+                "polygon_next_day_dollar_volume": (item or {}).get("dollar_volume"),
+                "polygon_next_day_tags": tags[:10],
+                "polygon_next_day_sharia_status": sharia_status,
+                "polygon_next_day_trade_date": (item or {}).get("trade_date"),
+                "watch_only_polygon_next_day_v2w": True,
+            })
+            polygon_next_day_builder_count += 1
+    except Exception as exc:
+        polygon_next_day_builder_count = 0
+        polygon_next_day_low_float_count = 0
+        polygon_next_day_debug = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
     # Keep the old engine as one bucket only. It no longer owns the entire source list.
     old_baseline_limit = min(260, max(120, int(max_symbols * 0.38)))
     old_baseline = []
@@ -2571,7 +2633,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     low_float_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"low_float_fast_lane_v1"}, limit=500)
     micro_live_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"micro_explosion_capture_v2r", "micro_explosion_capture_v2r1", "big_explosion_live_lane_v2t", "big_explosion_live_lane_v2u", "intraday_early_ramp", "high_risk_live_mover", "dip_reclaim_radar", "quiet_accumulation_radar"}, limit=500)
     emergency_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"live_ignition_hot_lane", "big_explosion_live_lane_v2t", "micro_explosion_capture_v2r", "micro_explosion_capture_v2r1"}, limit=300)
-    existing_confirm_pool = prepared_confirm_symbols + live_tight_confirm_symbols + ranked_confirm_symbols + memory_confirm_symbols + seed_confirm_symbols + low_float_confirm_symbols + micro_live_confirm_symbols + emergency_confirm_symbols
+    polygon_next_day_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"polygon_next_day_builder"}, limit=240)
+    existing_confirm_pool = prepared_confirm_symbols + live_tight_confirm_symbols + ranked_confirm_symbols + memory_confirm_symbols + seed_confirm_symbols + low_float_confirm_symbols + micro_live_confirm_symbols + emergency_confirm_symbols + polygon_next_day_confirm_symbols
     rotation_confirm_symbols, rotation_discovery_debug = _rotating_discovery_symbols(reference_tickers, phase_info=phase_info, existing_symbols=existing_confirm_pool)
     fmp_confirm_symbols, live_monitoring_budget_debug = _live_monitoring_confirmation_budget(
         phase_info=phase_info,
@@ -2584,6 +2647,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         micro_live_symbols=micro_live_confirm_symbols,
         emergency_symbols=emergency_confirm_symbols,
         rotation_symbols=rotation_confirm_symbols,
+        polygon_next_day_symbols=polygon_next_day_confirm_symbols,
         rotation_debug=rotation_discovery_debug,
     )
     # V2V6c: final phase-aware cap.  It protects Railway/FMP, but does not force
@@ -2836,6 +2900,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     selected_order += from_source("low_float_fast_lane_v1", min(160, max_symbols))
     selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
     selected_order += from_source("polygon_weekly_builder", min(90, max_symbols))
+    selected_order += from_source("polygon_next_day_builder", min(140, max_symbols))
     selected_order += from_source("intraday_early_ramp", min(140, max_symbols))
     selected_order += from_source("dip_reclaim_radar", min(120, max_symbols))
     selected_order += from_source("quiet_accumulation_radar", min(90, max_symbols))
@@ -2888,9 +2953,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3m_v2v6c_dynamic_rotation_discovery_2026_06_21",
+        "engine_version": "dynamic_discovery_v3n_v2w_polygon_next_day_additive_2026_06_21",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2v6c_dynamic_rotation_discovery_fast_promotion",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w_polygon_next_day_additive_fast_promotion",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -2923,6 +2988,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "micro_live_confirm_count_v2v6c": len(micro_live_confirm_symbols) if 'micro_live_confirm_symbols' in locals() else 0,
         "emergency_confirm_count_v2v6c": len(emergency_confirm_symbols) if 'emergency_confirm_symbols' in locals() else 0,
         "rotation_confirm_count_v2v6c": len(rotation_confirm_symbols) if 'rotation_confirm_symbols' in locals() else 0,
+        "polygon_next_day_confirm_count_v2w": len(polygon_next_day_confirm_symbols) if 'polygon_next_day_confirm_symbols' in locals() else 0,
         "low_float_fast_lane_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0)) if 'source_bucket_counts' in locals() else int(low_float_fast_lane_count or 0),
         "low_float_fast_lane": low_float_fast_lane_status,
         "low_float_fast_lane_funnel_debug": low_float_fast_lane_funnel_debug,
@@ -2965,6 +3031,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "weekly_priority_injected_count": int(weekly_priority_count),
         "weekly_high_risk_injected_count": int(weekly_high_risk_count),
         "polygon_weekly_builder_injected_count": int(polygon_weekly_builder_count),
+        "polygon_next_day_builder_injected_count": int(polygon_next_day_builder_count) if 'polygon_next_day_builder_count' in locals() else 0,
+        "polygon_next_day_low_float_count": int(polygon_next_day_low_float_count) if 'polygon_next_day_low_float_count' in locals() else 0,
+        "polygon_next_day_debug": polygon_next_day_debug if 'polygon_next_day_debug' in locals() else {},
         "baseline_old_engine_count": len(old_baseline),
         "baseline_error": baseline_error,
         "elapsed_sec": elapsed,
@@ -2989,7 +3058,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
                 "reasons": list(r.get("reasons") or [])[:8],
                 "metrics": {
                     k: v for k, v in (r.get("metrics") or {}).items()
-                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p", "micro_explosion_capture_v2r", "micro_explosion_capture_score", "micro_explosion_source_kind", "micro_explosion_reasons_ar", "micro_explosion_blockers_ar", "micro_explosion_first_ignition", "micro_explosion_strong_candle", "micro_explosion_quiet_accumulation", "micro_explosion_capture_v2r1", "micro_explosion_seed_match", "micro_explosion_reference_fallback_v2r2", "big_explosion_live_lane_v2t", "big_explosion_live_score", "big_explosion_live_eligible", "big_explosion_live_source_kind", "big_explosion_live_reasons_ar", "big_explosion_live_blockers_ar", "big_explosion_gain_pct"}
+                    if k in {"price", "day_change_pct", "dollar_volume", "volume", "live_price", "live_change_pct", "live_volume", "fmp_price", "fmp_change_pct", "fmp_volume", "near_high", "close_strength", "range_pct", "intraday_early_source_lane", "intraday_early_source_score", "change_pct", "dollar_volume_pace", "reclaimed_open", "dip_depth_pct", "reclaim_from_low_pct", "low_float_fast_lane", "low_float_fast_lane_score", "low_float_fast_lane_source_kind", "low_float_fast_lane_v2p", "micro_explosion_capture_v2r", "micro_explosion_capture_score", "micro_explosion_source_kind", "micro_explosion_reasons_ar", "micro_explosion_blockers_ar", "micro_explosion_first_ignition", "micro_explosion_strong_candle", "micro_explosion_quiet_accumulation", "micro_explosion_capture_v2r1", "micro_explosion_seed_match", "micro_explosion_reference_fallback_v2r2", "big_explosion_live_lane_v2t", "big_explosion_live_score", "big_explosion_live_eligible", "big_explosion_live_source_kind", "big_explosion_live_reasons_ar", "big_explosion_live_blockers_ar", "big_explosion_gain_pct", "polygon_next_day_builder_score", "polygon_next_day_lane", "polygon_next_day_price", "polygon_next_day_change_pct", "polygon_next_day_dollar_volume", "polygon_next_day_sharia_status"}
                 },
             }
             for r in ranked[:max_symbols]
