@@ -3515,6 +3515,20 @@
       const d = supportResistanceDistanceView(stock, price);
       const lowPrice = price >= 1 && price <= 12;
       const nearDecisionTop = zone && price > 0 && numericValue(zone.high) > 0 && ((numericValue(zone.high) - price) / price * 100) <= 1.2;
+      const v2vExtended = bucket === 'live_tight_monitoring' && (
+        stock?.extended_for_pullback_v2v1 === true ||
+        String(stock?.target_bucket_v2v1 || '') === 'continuation_pullback' ||
+        change >= 18
+      );
+      if (v2vExtended) {
+        bucket = 'continuation_pullback';
+        label = change >= 35 ? '🚫 مرتفع جدًا — لا تطارد / Pullback فقط' : '📈 امتداد قوي — استمرار مشروط / Pullback';
+        reasons = [
+          `V2V1b: السهم في ذاكرة V2V لكنه أصبح ممتدًا ${formatNumber(change)}%، لذلك عرضه العملي Continuation/Pullback وليس تأكيدًا حيًا قريبًا من الشراء.`,
+          'لا دخول الآن إلا بعد تماسك أو Pullback أو إعادة اختبار واضحة.',
+          ...(reasons || [])
+        ];
+      }
       const shouldNotBeBounce = bucket === 'support_bounce' && (
         (change >= 3.5 && (nearDecisionTop || d.resistanceCloser || d.supportDist > 2.2)) ||
         (d.resistanceCloser && d.resistanceDist <= 1.25) ||
@@ -4780,26 +4794,27 @@
         ${renderLearningOverlayPanel(data, learningOverlay)}
         ${renderNextWeekAnalysisPanel(data)}
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
-        ${renderSection('⚡ تأكيد حي سريع / مراقبة لصيقة V2V', liveTightMonitoring.length, 'live-tight-monitoring-section-content', 'live-tight-monitoring-section', liveTightMonitoring, { tone: 'cautious', defaultOpen: liveTightMonitoring.length > 0, orderedText: 'مرشح من Prepared Watch أو مرشح جديد بدأ +3%/+5% مع حجم. V2V هنا وسْم مراقبة وليس شراء؛ إذا أصبح السهم ممتدًا (+18% أو أكثر) يُنقل عمليًا إلى Continuation/Pullback بدل أن يبدو قريب شراء.' })}
-        ${renderSection('🚨 مرشحو انفجار حرجة قبل السوق', criticalPreExplosion.length, 'critical-pre-explosion-section-content', 'critical-pre-explosion-section', criticalPreExplosion, { tone: 'cautious', defaultOpen: criticalPreExplosion.length > 0, orderedText: 'هذه قائمة مراقبة حرجة قبل الانفجار: راجع الشرعية الآن، وراقب +3%/+5% مع حجم في البري ماركت/الافتتاح. ليست شراء مباشر ولا تتجاوز فلتر الشرعية.' })}
-        ${renderSection('🧭 جسر الترقية قبل الافتتاح', promotionBridge.length, 'promotion-bridge-section-content', 'promotion-bridge-section', promotionBridge, { tone: 'open', defaultOpen: promotionBridge.length > 0, orderedText: 'يجمع أفضل المرشحين قبل الافتتاح ويحدد من يحتاج مراقبة لصيقة عند تحقق السعر والحجم. هذا ليس شراء مباشر؛ هو جسر إلى Pre-Trigger/V2V/Continuation وليس إلى Strong إلا بعد اكتمال الشروط.' })}
-        ${renderSection('🧠 مرشحو طبقة التعلم / تحضير مبكر', learningOpportunity.length, 'learning-opportunity-section-content', 'learning-opportunity-section', learningOpportunity, { tone: 'open', defaultOpen: learningOpportunity.length > 0, orderedText: 'هذا القسم يجسر البيانات الموجودة في المراقبة/الحركة المبكرة إلى طبقة تعلم مرئية. ليس Strong ولا Cautious، لكنه يمنع اختفاء الفرص التحضيرية عندما لا تكتمل شروط الأقسام المتخصصة.' })}
-        ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0 })}
-        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0 })}
-        ${renderSection('⏳ قريب من التفعيل / Pre-Trigger', preTrigger.length, 'pre-trigger-section-content', 'pre-trigger-section', preTrigger, { tone: 'open', orderedText: 'أسهم قريبة من التفعيل قبل أن تفوت الحركة؛ ليست BUY_NOW حتى تظهر شروط التنفيذ.' })}
-        ${renderSection('↩️ ارتداد من دعم / Support Bounce', supportBounce.length, 'support-bounce-section-content', 'support-bounce-section', supportBounce, { tone: 'open', orderedText: 'فرص مبكرة قرب دعم حقيقي فقط؛ إذا تحرك السهم بقوة أو اقترب من مقاومة ينتقل إلى مضاربة/استمرار ولا يبقى ارتداد دعم.' })}
-        ${renderSection('🔁 Reclaim / استعادة مستوى', reclaim.length, 'reclaim-section-content', 'reclaim-section', reclaim, { tone: 'open', orderedText: 'أسهم كسرت أو اختبرت مستوى مهمًا ثم بدأت استعادته؛ تحتاج ثبات وحجم.' })}
-        ${renderSection('📈 Continuation Pullback', continuationPullback.length, 'continuation-pullback-section-content', 'continuation-pullback-section', continuationPullback, { tone: 'cautious', orderedText: 'استمرار مشروط: لا نطارد القمة. الأسهم القادمة من V2V وهي ممتدة تظهر هنا كمتابعة بعد Pullback/تماسك/Reclaim فقط، وليست دخولًا الآن.' })}
-        ${renderSection('🎯 الأسهم الصغيرة الكلاسيكية', smallStockClassic.length, 'small-stock-classic-section-content', 'small-stock-classic-section', smallStockClassic, { tone: 'cautious', orderedText: 'فلتر مضاربة للأسهم الصغيرة: قرب الدعم والمقاومة طبيعي؛ نعاملها كمنطقة قرار صغيرة وننتظر Fib/VWAP/قمة أمس أو إغلاق فوق حد التفعيل، ولا نطارد الشمعة الخضراء.' })}
-        ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', orderedText: 'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط.' })}
-        ${renderSection('🚀 Low-Float / Pre-Market Radar', lowFloatPM.length, 'low-float-premarket-section-content', 'low-float-premarket-section', lowFloatPM, { tone: 'cautious', orderedText: 'أسهم صغيرة أو نشطة مبكرًا؛ تحتاج متابعة لصيقة عند الحركة، لكنها ليست Strong عادي. إذا بدأت +3%/+5% مع حجم تنتقل لوسم V2V أو Pullback إذا أصبحت ممتدة.' })}
-        ${renderSection('🧪 مرشحو Fast Lane الخام — مراقبة عالية المخاطر', lowFloatRawWatch.length, 'low-float-fast-lane-raw-section-content', 'low-float-fast-lane-raw-section', lowFloatRawWatch, { tone: 'watch', defaultOpen: lowFloatRawWatch.length > 0, orderedText: 'هذا القسم يوضح مرشحي Fast Lane الخام الذين لم يكتمل فرزهم النهائي أو ظهروا في قسم آخر/خرجوا بسبب Limit. مراقبة عالية المخاطر فقط؛ عند بدء حركة مؤكدة يدخلون أولوية V2V أو استمرار مشروط حسب الامتداد.' })}
-        ${renderSection('⚡ مضاربة عالية المخاطرة', highRiskDay.length, 'high-risk-day-trades-section-content', 'high-risk-day-trades-section', highRiskDay, { tone: 'cautious', orderedText: 'فرص سريعة وصغيرة الحجم؛ تظهر منفصلة حتى لا تختلط مع Strong/Cautious العادي.' })}
-        ${renderSection('🕳️ Gap Fill Watch', gapFill.length, 'gap-fill-section-content', 'gap-fill-section', gapFill, { tone: 'watch', orderedText: 'ليست كل فجوة تُغلق؛ هذا القسم يراقب دخول السعر داخل الفجوة أو احترامها.' })}
-        ${renderSection('📰 Catalyst / News Watch', catalystWatch.length, 'catalyst-watch-section-content', 'catalyst-watch-section', catalystWatch, { tone: 'watch', orderedText: 'الأخبار والمحفزات سياق مساعد وليست قرار شراء مباشر.' })}
-        ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section', grayStrong, { tone: 'gray', orderedText: 'أسهم قوية فنيًا لكنها تحتاج حسمًا شرعيًا قبل التنفيذ.' })}
-        ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section', watch, { tone: 'watch' })}
-        ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section', premarket, { tone: 'open', orderedText: 'فرص تهيئة مبكرة تظهر قبل الافتتاح وأول الجلسة.' })}
+        <!-- V2V1c: ترتيب الأقسام حسب أولوية المتداول: تنفيذ الآن، قريب من التنفيذ، حركة حية، استمرار مشروط، ثم قوائم التحضير والمصادر الخام. -->
+        ${renderSection('دخول قوي', strong.length, 'strong-section-content', 'strong-section', strong, { tone: 'strong', defaultOpen: strong.length > 0, orderedText: 'الأولوية رقم 1: BUY_NOW فقط إذا كان السعر داخل الخطة والشرعية والسيولة والمقاومة سليمة.' })}
+        ${renderSection('دخول بحذر', cautious.length, 'cautious-section-content', 'cautious-section', cautious, { tone: 'cautious', defaultOpen: cautious.length > 0, orderedText: 'الأولوية رقم 2: قريب من التنفيذ لكنه ليس شراء مباشر؛ يحتاج شرطًا أو تنفيذًا أدق.' })}
+        ${renderSection('⏳ قريب من التفعيل / Pre-Trigger', preTrigger.length, 'pre-trigger-section-content', 'pre-trigger-section', preTrigger, { tone: 'open', defaultOpen: preTrigger.length > 0, orderedText: 'الأولوية رقم 3: أسهم قريبة من شرط التفعيل قبل أن تفوت الحركة؛ لا تتحول إلى شراء إلا بعد تحقق الشرط المكتوب.' })}
+        ${renderSection('↩️ ارتداد من دعم / Support Bounce', supportBounce.length, 'support-bounce-section-content', 'support-bounce-section', supportBounce, { tone: 'open', defaultOpen: false, orderedText: 'إعداد قريب من القرار قرب دعم حقيقي؛ ننتظر ثباتًا وحجمًا ولا نطارد الشمعة الخضراء.' })}
+        ${renderSection('🔁 Reclaim / استعادة مستوى', reclaim.length, 'reclaim-section-content', 'reclaim-section', reclaim, { tone: 'open', defaultOpen: false, orderedText: 'إعداد قريب من القرار عند استعادة مستوى مهم؛ يحتاج ثباتًا وحجمًا قبل الترقية.' })}
+        ${renderSection('⚡ تأكيد حي سريع / مراقبة لصيقة V2V', liveTightMonitoring.length, 'live-tight-monitoring-section-content', 'live-tight-monitoring-section', liveTightMonitoring, { tone: 'cautious', defaultOpen: liveTightMonitoring.length > 0, orderedText: 'الأولوية رقم 4 أثناء السوق: السهم بدأ يتحرك الآن من Prepared Watch أو كمرشح جديد. هذا وسْم مراقبة وليس شراء؛ إذا أصبح ممتدًا (+18% أو أكثر) ينتقل إلى Continuation/Pullback.' })}
+        ${renderSection('📈 Continuation Pullback / استمرار مشروط', continuationPullback.length, 'continuation-pullback-section-content', 'continuation-pullback-section', continuationPullback, { tone: 'cautious', defaultOpen: continuationPullback.length > 0, orderedText: 'سهم تحرك كثيرًا أو أصبح ممتدًا: لا دخول الآن إلا بعد Pullback/تماسك/Reclaim واضح وخطة جديدة.' })}
+        ${renderSection('🚨 مرشحو انفجار حرجة قبل السوق', criticalPreExplosion.length, 'critical-pre-explosion-section-content', 'critical-pre-explosion-section', criticalPreExplosion, { tone: 'cautious', defaultOpen: criticalPreExplosion.length > 0, orderedText: 'قائمة استعداد قبل السوق مبنية من جلسة سابقة/تحضير مبكر. ليست شراء مباشر؛ فائدتها معرفة من يستحق مراقبة لصيقة عند الافتتاح.' })}
+        ${renderSection('🧭 جسر الترقية قبل الافتتاح', promotionBridge.length, 'promotion-bridge-section-content', 'promotion-bridge-section', promotionBridge, { tone: 'open', defaultOpen: false, orderedText: 'جسر تنظيمي ينقل المرشحين قبل الافتتاح إلى Pre-Trigger/V2V/Continuation عند تحقق السعر والحجم؛ ليس قسم شراء.' })}
+        ${renderSection('🚀 Low-Float / Pre-Market Radar', lowFloatPM.length, 'low-float-premarket-section-content', 'low-float-premarket-section', lowFloatPM, { tone: 'cautious', defaultOpen: false, orderedText: 'رادار أسهم صغيرة/بري ماركت عالية الحساسية. مراقبة لصيقة عند الحركة، لكن لا شراء إلا بعد فلترة الشرعية والسيولة والسبريد والخطة.' })}
+        ${renderSection('🧪 مرشحو Fast Lane الخام — مراقبة عالية المخاطر', lowFloatRawWatch.length, 'low-float-fast-lane-raw-section-content', 'low-float-fast-lane-raw-section', lowFloatRawWatch, { tone: 'watch', defaultOpen: false, orderedText: 'أوسع طبقة خام وأعلى ضجيجًا. تظهر للتأكد وعدم ضياع المرشح، ثم ينتقل السهم للأقسام الأعلى إذا تحققت الحركة والتصفية.' })}
+        ${renderSection('🎯 الأسهم الصغيرة الكلاسيكية', smallStockClassic.length, 'small-stock-classic-section-content', 'small-stock-classic-section', smallStockClassic, { tone: 'cautious', defaultOpen: false, orderedText: 'فلتر مضاربة للأسهم الصغيرة: نعاملها كمنطقة قرار صغيرة وننتظر Fib/VWAP/قمة أمس أو إغلاق فوق حد التفعيل.' })}
+        ${renderSection('⚡ مضاربة عالية المخاطرة', highRiskDay.length, 'high-risk-day-trades-section-content', 'high-risk-day-trades-section', highRiskDay, { tone: 'cautious', defaultOpen: false, orderedText: 'فرص سريعة وصغيرة الحجم؛ منفصلة حتى لا تختلط مع Strong/Cautious العادي.' })}
+        ${renderSection('🟣 مراقبة الحركة المبكرة', earlyMovement.length, 'early-movement-section-content', 'early-movement-section', earlyMovement, { tone: 'open', defaultOpen: false, orderedText: 'قائمة مبكرة للأسهم التي لم تكتمل بعد. لا تعني شراء، لكنها قد تغذي Pre-Trigger أو V2V لاحقًا.' })}
+        ${renderSection('🧠 مرشحو طبقة التعلم / تحضير مبكر', learningOpportunity.length, 'learning-opportunity-section-content', 'learning-opportunity-section', learningOpportunity, { tone: 'open', defaultOpen: false, orderedText: 'طبقة تعلم وتحضير فقط؛ تمنع اختفاء الفرص التحضيرية ولا تغيّر Strong/Cautious.' })}
+        ${renderSection('فرص قوية غير محسومة شرعيًا', grayStrong.length, 'gray-strong-section-content', 'gray-strong-section', grayStrong, { tone: 'gray', defaultOpen: false, orderedText: 'قوية فنيًا لكنها غير قابلة للتنفيذ حتى يكتمل الحكم الشرعي اليدوي أو الموثوق.' })}
+        ${renderSection('تهيئة قوية قبل الافتتاح', premarket.length, 'premarket-section-content', 'premarket-section', premarket, { tone: 'open', defaultOpen: false, orderedText: 'تهيئة عامة قبل الافتتاح؛ أقل أولوية من قائمة الانفجار الحرجة وجسر الترقية.' })}
+        ${renderSection('🕳️ Gap Fill Watch', gapFill.length, 'gap-fill-section-content', 'gap-fill-section', gapFill, { tone: 'watch', defaultOpen: false, orderedText: 'مراقبة فجوات فقط؛ ليست كل فجوة تُغلق ولا تعتبر شراء مباشر.' })}
+        ${renderSection('📰 Catalyst / News Watch', catalystWatch.length, 'catalyst-watch-section-content', 'catalyst-watch-section', catalystWatch, { tone: 'watch', defaultOpen: false, orderedText: 'الأخبار والمحفزات سياق مساعد وليست قرار شراء مباشر.' })}
+        ${renderSection('المراقبة', watch.length, 'watch-section-content', 'watch-section', watch, { tone: 'watch', defaultOpen: false, orderedText: 'القائمة العامة الأقل أولوية: متابعة فقط إلى أن ينتقل السهم لقسم أعلى.' })}
       `;
     }
 
