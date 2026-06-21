@@ -23,14 +23,17 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2v_live_tight_monitoring_fast_promotion_2026_06_21"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2v1_priority_router_section_clarity_2026_06_21"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
 PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u5_sharia_replacement_visible_blocked_2026_06_20"
 LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
-LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2v_2026_06_21"
+LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2v1_priority_router_2026_06_21"
+V2V1_PRIORITY_ROUTER_VERSION = "v2v1_live_priority_monitoring_router_2026_06_21"
+V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT = 18.0
+V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT = 35.0
 LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT = 3.0
 LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT = 5.0
 LIVE_TIGHT_MONITORING_MIN_VOLUME = 20_000.0
@@ -2294,6 +2297,89 @@ def _row_sharia_v2v(row: dict) -> dict[str, Any]:
     return sh
 
 
+def _v2v1_market_closed_like(market_phase: str = "") -> bool:
+    phase = _s(market_phase).lower()
+    return phase in {"", "closed", "overnight", "weekend", "holiday", "after_hours", "afterhours"}
+
+
+def _v2v1_live_tight_context(change: float, *, blocked: bool = False, gray: bool = False, market_phase: str = "") -> dict[str, Any]:
+    """V2V1 display router: V2V is a movement-memory tag, not a buy section.
+
+    A large already-risen move should be shown as continuation/pullback, while
+    still carrying the V2V tag for monitoring.  This prevents +35%/+55% names
+    from looking like fresh early-confirmation entries.
+    """
+    change = _num(change, 0.0)
+    closed_like = _v2v1_market_closed_like(market_phase)
+    extended = bool(change >= V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT)
+    extreme = bool(change >= V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT)
+    if blocked:
+        target_bucket = "live_tight_monitoring"
+        label = "⛔ بدأ يتحرك لكنه محجوب شرعيًا — تعلم فقط"
+        action = "محجوب شرعيًا — تعلم فقط"
+    elif gray:
+        target_bucket = "live_tight_monitoring"
+        label = "⚠️ بدأ يتحرك — مراجعة شرعية عاجلة"
+        action = "تأكيد/حركة للمراجعة فقط"
+    elif extended:
+        target_bucket = "continuation_pullback"
+        label = "📈 امتداد قوي — استمرار مشروط / Pullback" if not extreme else "🚫 مرتفع جدًا — لا تطارد / Pullback فقط"
+        action = "استمرار مشروط: لا دخول الآن إلا بعد تماسك أو Pullback أو إعادة اختبار واضحة."
+    else:
+        target_bucket = "live_tight_monitoring"
+        label = "⚡ تأكيد مبكر حي — مراقبة لصيقة"
+        action = "تأكيد مبكر حي — مراقبة لصيقة فقط"
+    if closed_like and not (blocked or gray):
+        label = "🕒 السوق مغلق — " + label
+        action = "السوق مغلق: هذه ذاكرة من آخر جلسة وليست دخولًا الآن. " + action
+    return {
+        "target_bucket": target_bucket,
+        "extended": extended,
+        "extreme": extreme,
+        "closed_like": closed_like,
+        "label": label,
+        "action_ar": action,
+        "rule_ar": "V2V1: V2V وسْم حركة ومراقبة؛ إذا أصبح السهم ممتدًا يتحول عرضه إلى استمرار مشروط/Pullback بدل أن يبدو قريب شراء.",
+    }
+
+
+def _v2v1_tight_monitoring_priority(row: dict, section_key: str = "") -> dict[str, Any]:
+    """Small non-invasive tag used by UI/debug to explain monitoring priority."""
+    sym = _u((row or {}).get("symbol"))
+    bucket = _s((row or {}).get("opportunity_bucket") or section_key)
+    change = _change_pct(row or {})
+    prepared = _row_looks_prepared_watch(row or {})
+    live = _row_looks_live_ignition(row or {}) or bool((row or {}).get("live_tight_monitoring_v2v"))
+    pre_trigger = bucket in {"pre_trigger", "pre_trigger_candidates", "promotion_bridge", "promotion_bridge_candidates"}
+    raw_fast = bucket in {"low_float_fast_lane_raw_watch", "low_float_premarket", "low_float_premarket_radar"}
+    critical = prepared or bucket in {"critical_pre_explosion_watch"}
+    priority = 0
+    reasons: list[str] = []
+    if live:
+        priority += 90; reasons.append("بدأت حركة حية أو V2V")
+    if pre_trigger:
+        priority += 75; reasons.append("قريب من التفعيل")
+    if critical:
+        priority += 65; reasons.append("مرشح قبل السوق/حرج")
+    if raw_fast:
+        priority += 45; reasons.append("Fast Lane/Low-Float خام عالي المخاطر")
+    if change >= 3:
+        priority += 20; reasons.append(f"حركة حالية {round(change,2)}%")
+    if change >= V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT:
+        reasons.append("ممتد: يحتاج Pullback/تماسك وليس مطاردة")
+    if not reasons:
+        reasons.append("مراقبة عادية")
+    return {
+        "version": V2V1_PRIORITY_ROUTER_VERSION,
+        "symbol": sym,
+        "priority_score": round(priority, 2),
+        "tight_monitoring_recommended": bool(priority >= 65),
+        "source_section": section_key or bucket,
+        "reasons_ar": _dedupe(reasons, 8),
+        "rule_ar": "V2V1: القوائم المهمة تُوسَم بأولوية مراقبة، لكن قرار الشراء يبقى Strong/Cautious فقط.",
+    }
+
+
 def _live_tight_monitoring_profile(row: dict, flags: dict | None = None) -> dict[str, Any]:
     """Identify V2V live-tight monitoring candidates without changing execution decisions."""
     if not isinstance(row, dict):
@@ -2338,14 +2424,16 @@ def _live_tight_monitoring_profile(row: dict, flags: dict | None = None) -> dict
         score += 36.0
     if new_intraday:
         score += 26.0
+    market_phase = _s((flags or {}).get("market_phase")) if isinstance(flags, dict) else ""
+    v2v1_context = _v2v1_live_tight_context(change, blocked=blocked, gray=gray, market_phase=market_phase)
+    label = _s(v2v1_context.get("label")) or "⚡ تأكيد مبكر حي — مراقبة لصيقة"
     if blocked:
-        label = "⛔ بدأ يتحرك لكنه محجوب شرعيًا — تعلم فقط"
         sharia_reason = "محجوب شرعيًا: يبقى ظاهرًا للمراجعة/التعلم ولا يدخل Strong أو Cautious."
     elif gray:
-        label = "⚠️ بدأ يتحرك — مراجعة شرعية عاجلة"
         sharia_reason = "الحكم الشرعي غير محسوم: تأكيد مبكر للمراقبة فقط حتى الاعتماد اليدوي."
+    elif v2v1_context.get("extended"):
+        sharia_reason = "شرعي/نظيف مبدئيًا، لكن السهم ممتد؛ V2V يثبته للمراقبة فقط وينقله إلى استمرار مشروط/Pullback."
     else:
-        label = "⚡ تأكيد مبكر حي — مراقبة لصيقة"
         sharia_reason = "مرشح شرعي/نظيف مبدئيًا؛ لا يتحول لشراء إلا إذا اكتملت الخطة والسيولة والسعر."
     if prepared:
         head = f"V2V: كان في Prepared Watch وبدأ يتحرك {round(change, 2)}% مع حجم؛ لا ننتظر +20%/+50%."
@@ -2374,6 +2462,12 @@ def _live_tight_monitoring_profile(row: dict, flags: dict | None = None) -> dict
         "score": _round(score, 2),
         "blocked": blocked,
         "gray": gray,
+        "target_bucket_v2v1": v2v1_context.get("target_bucket"),
+        "extended_for_pullback_v2v1": bool(v2v1_context.get("extended")),
+        "extreme_extension_v2v1": bool(v2v1_context.get("extreme")),
+        "market_closed_like_v2v1": bool(v2v1_context.get("closed_like")),
+        "action_ar_v2v1": v2v1_context.get("action_ar"),
+        "router_rule_ar_v2v1": v2v1_context.get("rule_ar"),
         "sharia_status": sh.get("status"),
         "sharia_label": sh.get("label"),
         "reasons": reasons,
@@ -2381,7 +2475,7 @@ def _live_tight_monitoring_profile(row: dict, flags: dict | None = None) -> dict
     }
 
 
-def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
+def _live_tight_row_from_item(item: dict, idx: int = 0, market_phase: str = "") -> dict[str, Any]:
     sym = _u((item or {}).get("symbol"))
     profile = item.get("profile") if isinstance(item.get("profile"), dict) else dict(item or {})
     change = _num(profile.get("change_pct", item.get("change_pct", 0)), 0.0)
@@ -2392,20 +2486,16 @@ def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
     sh = _fast_sharia_for_prepared_symbol(sym)
     blocked = bool(sh.get("blocked"))
     gray = bool(sh.get("gray"))
-    if blocked:
-        label = "⛔ بدأ يتحرك لكنه محجوب شرعيًا — تعلم فقط"
-        decision = "محجوب شرعيًا — تعلم فقط"
-    elif gray:
-        label = "⚠️ بدأ يتحرك — مراجعة شرعية عاجلة"
-        decision = "تأكيد مبكر حي — مراجعة شرعية فقط"
-    else:
-        label = "⚡ تأكيد مبكر حي — مراقبة لصيقة"
-        decision = "تأكيد مبكر حي — مراقبة لصيقة فقط"
+    v2v1_context = _v2v1_live_tight_context(change, blocked=blocked, gray=gray, market_phase=market_phase)
+    label = _s(v2v1_context.get("label")) or "⚡ تأكيد مبكر حي — مراقبة لصيقة"
+    decision = _s(v2v1_context.get("action_ar")) or "تأكيد مبكر حي — مراقبة لصيقة فقط"
     reasons = _dedupe([
         f"V2V ذاكرة حية: السهم بدأ يتحرك {round(change, 2)}% مع حجم وتم حفظه حتى لا يختفي في دورة بطيئة.",
         "لا شراء مباشر: Strong/Cautious لا يتغيران إلا إذا اكتملت الشرعية والخطة والسعر والسيولة.",
+        _s(v2v1_context.get("rule_ar")),
         _s(sh.get("reason")),
     ] + [_s(x) for x in list(profile.get("reasons") or item.get("reasons") or []) if _s(x)], 12)
+    target_bucket = _s(v2v1_context.get("target_bucket")) or "live_tight_monitoring"
     row = {
         "symbol": sym,
         "company": sym,
@@ -2418,8 +2508,8 @@ def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
         "live_dollar_volume": dollar,
         "decision": decision,
         "effective_decision": "مراقبة",
-        "opportunity_bucket": "live_tight_monitoring",
-        "opportunity_stage": "live_tight_monitoring",
+        "opportunity_bucket": target_bucket,
+        "opportunity_stage": target_bucket,
         "opportunity_stage_label": label,
         "display_plan_family_label": label,
         "trade_type_label_ar": "Live Tight Monitoring V2V",
@@ -2441,6 +2531,12 @@ def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
             "new_intraday_symbol": bool(profile.get("new_intraday_symbol") or item.get("new_intraday_symbol")),
             "blocked": blocked,
             "gray": gray,
+            "target_bucket_v2v1": target_bucket,
+            "extended_for_pullback_v2v1": bool(v2v1_context.get("extended")),
+            "extreme_extension_v2v1": bool(v2v1_context.get("extreme")),
+            "market_closed_like_v2v1": bool(v2v1_context.get("closed_like")),
+            "action_ar_v2v1": v2v1_context.get("action_ar"),
+            "router_rule_ar_v2v1": v2v1_context.get("rule_ar"),
             "stage_ar": label,
             "reasons": reasons,
             "rule_ar": "V2V: ذاكرة مراقبة لصيقة للعرض فقط، لا شراء مباشر.",
@@ -2448,6 +2544,12 @@ def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
         "live_tight_stage_ar_v2v": label,
         "live_tight_prepared_symbol_v2v": prepared,
         "live_tight_new_intraday_symbol_v2v": bool(profile.get("new_intraday_symbol") or item.get("new_intraday_symbol")),
+        "target_bucket_v2v1": target_bucket,
+        "extended_for_pullback_v2v1": bool(v2v1_context.get("extended")),
+        "extreme_extension_v2v1": bool(v2v1_context.get("extreme")),
+        "market_closed_like_v2v1": bool(v2v1_context.get("closed_like")),
+        "action_ar_v2v1": v2v1_context.get("action_ar"),
+        "router_rule_ar_v2v1": v2v1_context.get("rule_ar"),
         "sharia_status": sh.get("status"),
         "sharia_label": sh.get("label"),
         "sharia_reason": sh.get("reason"),
@@ -2457,8 +2559,7 @@ def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
     }
     return row
 
-
-def _live_tight_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+def _live_tight_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT, market_phase: str = "") -> tuple[list[dict], dict[str, Any]]:
     lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
     items, debug = _load_live_tight_monitoring_memory_items()
     rows: list[dict] = []
@@ -2468,7 +2569,7 @@ def _live_tight_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list
         if not sym or sym in seen:
             continue
         seen.add(sym)
-        row = _live_tight_row_from_item(item, idx=idx)
+        row = _live_tight_row_from_item(item, idx=idx, market_phase=market_phase)
         if row.get("symbol"):
             rows.append(row)
         if len(rows) >= lim:
@@ -3842,8 +3943,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     for row in rows or []:
         if not isinstance(row, dict):
             continue
-        critical_profile = _critical_pre_explosion_profile(row, {})
-        live_tight_profile = _live_tight_monitoring_profile(row, {})
+        critical_profile = _critical_pre_explosion_profile(row, {"market_phase": market_phase})
+        live_tight_profile = _live_tight_monitoring_profile(row, {"market_phase": market_phase})
         if _is_blocked(row) and not (critical_profile.get("matched") or live_tight_profile.get("matched")):
             continue
         bucket = _s(row.get("opportunity_bucket"))
@@ -3856,21 +3957,27 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             continue
         if live_tight_profile.get("matched") or bucket == "live_tight_monitoring":
             row = dict(row)
-            row["opportunity_bucket"] = "live_tight_monitoring"
-            row["opportunity_stage"] = "live_tight_monitoring"
+            target_bucket = _s(live_tight_profile.get("target_bucket_v2v1")) or "live_tight_monitoring"
+            target_section = "continuation_pullback_candidates" if target_bucket == "continuation_pullback" else "live_tight_monitoring_candidates"
+            row["opportunity_bucket"] = target_bucket
+            row["opportunity_stage"] = target_bucket
             row["opportunity_stage_label"] = live_tight_profile.get("label") or row.get("opportunity_stage_label") or "⚡ تأكيد مبكر حي"
             row["trade_type_label_ar"] = "Live Tight Monitoring V2V"
-            row["decision"] = "تأكيد مبكر حي — مراقبة لصيقة فقط"
+            row["decision"] = _s(live_tight_profile.get("action_ar_v2v1")) or "تأكيد مبكر حي — مراقبة لصيقة فقط"
             row["effective_decision"] = "مراقبة"
             row["non_actionable_prep"] = True
             row["display_plan_family_label"] = row["opportunity_stage_label"]
             row["live_tight_monitoring_v2v"] = True
             row["live_tight_monitoring_profile_v2v"] = live_tight_profile
             row["live_tight_stage_ar_v2v"] = live_tight_profile.get("label")
-            row["opportunity_reasons"] = _dedupe(list(live_tight_profile.get("reasons") or []) + list(row.get("opportunity_reasons") or []), 12)
+            row["target_bucket_v2v1"] = target_bucket
+            row["extended_for_pullback_v2v1"] = bool(live_tight_profile.get("extended_for_pullback_v2v1"))
+            row["v2v1_priority_router"] = _v2v1_tight_monitoring_priority(row, target_section)
+            row["opportunity_reasons"] = _dedupe(list(live_tight_profile.get("reasons") or []) + [_s(live_tight_profile.get("router_rule_ar_v2v1"))] + list(row.get("opportunity_reasons") or []), 12)
             row["technical_explainer_reasons"] = row["opportunity_reasons"]
-            row["opportunity_rank_score"] = max(_num(row.get("opportunity_rank_score"), 0.0), 2000 + _num(live_tight_profile.get("score"), 0.0))
-            bucket_map["live_tight_monitoring_candidates"].append(row)
+            score_floor = 1800 if target_section == "continuation_pullback_candidates" else 2000
+            row["opportunity_rank_score"] = max(_num(row.get("opportunity_rank_score"), 0.0), score_floor + _num(live_tight_profile.get("score"), 0.0))
+            bucket_map[target_section].append(row)
         elif critical_profile.get("matched") or bucket == "critical_pre_explosion_watch":
             row = dict(row)
             row["opportunity_bucket"] = "critical_pre_explosion_watch"
@@ -3939,22 +4046,42 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # V2V bridge: surface sticky live-tight candidates directly.  This keeps
     # intraday +3%/+5% candidates visible even if broad ranking/caching would
     # otherwise bury them.  Still non-actionable and Sharia-safe.
-    live_tight_ui_bridge_rows, live_tight_ui_bridge_debug = _live_tight_ui_bridge_rows(limit=limit)
+    live_tight_ui_bridge_rows, live_tight_ui_bridge_debug = _live_tight_ui_bridge_rows(limit=limit, market_phase=market_phase)
     if live_tight_ui_bridge_rows:
-        existing = final_map.get("live_tight_monitoring_candidates", []) or []
-        merged = []
-        seen_live_bridge: set[str] = set()
-        for item in list(live_tight_ui_bridge_rows) + list(existing):
-            if not isinstance(item, dict):
-                continue
-            sym = _u(item.get("symbol"))
-            if not sym or sym in seen_live_bridge:
-                continue
-            seen_live_bridge.add(sym)
-            merged.append(item)
-            if len(merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
-                break
-        final_map["live_tight_monitoring_candidates"] = merged
+        bridge_live = [x for x in live_tight_ui_bridge_rows if _s((x or {}).get("opportunity_bucket")) != "continuation_pullback"]
+        bridge_cont = [x for x in live_tight_ui_bridge_rows if _s((x or {}).get("opportunity_bucket")) == "continuation_pullback"]
+        if bridge_live:
+            existing = final_map.get("live_tight_monitoring_candidates", []) or []
+            merged = []
+            seen_live_bridge: set[str] = set()
+            for item in list(bridge_live) + list(existing):
+                if not isinstance(item, dict):
+                    continue
+                sym = _u(item.get("symbol"))
+                if not sym or sym in seen_live_bridge:
+                    continue
+                seen_live_bridge.add(sym)
+                item["v2v1_priority_router"] = _v2v1_tight_monitoring_priority(item, "live_tight_monitoring_candidates")
+                merged.append(item)
+                if len(merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                    break
+            final_map["live_tight_monitoring_candidates"] = merged
+        if bridge_cont:
+            existing = final_map.get("continuation_pullback_candidates", []) or []
+            merged = []
+            seen_cont_bridge: set[str] = set()
+            for item in list(bridge_cont) + list(existing):
+                if not isinstance(item, dict):
+                    continue
+                sym = _u(item.get("symbol"))
+                if not sym or sym in seen_cont_bridge:
+                    continue
+                seen_cont_bridge.add(sym)
+                item["v2v1_priority_router"] = _v2v1_tight_monitoring_priority(item, "continuation_pullback_candidates")
+                merged.append(item)
+                if len(merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                    break
+            final_map["continuation_pullback_candidates"] = merged
 
     # V2U4b bridge: the Prepared Watch memory may contain gray/non-compliant
     # critical candidates that were intentionally removed from the clean-only
@@ -3996,6 +4123,34 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     fast_lane_raw_watch_rows, fast_lane_funnel_display_debug = _build_low_float_fast_lane_raw_watch(rows or [], final_map, limit=limit)
     final_map["low_float_fast_lane_raw_watch"] = fast_lane_raw_watch_rows
 
+    # V2V1: lightweight monitoring-priority tags across all visible prep/radar sections.
+    # This does not make every section a buy list; it explains which names deserve
+    # faster refresh/closer eyes and keeps V2V as a tag rather than a final decision.
+    v2v1_priority_router_debug = {
+        "version": V2V1_PRIORITY_ROUTER_VERSION,
+        "enabled": True,
+        "rule_ar": "كل الأقسام الحرجة تُوسَم بأولوية مراقبة؛ Strong/Cautious فقط تبقى أقسام شراء. السهم الممتد ينتقل إلى استمرار مشروط/Pullback.",
+        "tight_monitoring_recommended_symbols": [],
+        "section_counts": {},
+    }
+    for section_key, vals in list(final_map.items()):
+        if not isinstance(vals, list):
+            continue
+        v2v1_priority_router_debug["section_counts"][section_key] = len(vals)
+        tagged_vals = []
+        for item in vals:
+            if isinstance(item, dict):
+                item = dict(item)
+                tag = _v2v1_tight_monitoring_priority(item, section_key)
+                item["v2v1_priority_router"] = tag
+                if tag.get("tight_monitoring_recommended"):
+                    sym = _u(item.get("symbol"))
+                    if sym:
+                        v2v1_priority_router_debug["tight_monitoring_recommended_symbols"].append(sym)
+            tagged_vals.append(item)
+        final_map[section_key] = tagged_vals
+    v2v1_priority_router_debug["tight_monitoring_recommended_symbols"] = _dedupe(v2v1_priority_router_debug.get("tight_monitoring_recommended_symbols", []), 80)
+
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
     learning_overlay_candidates = _build_visible_learning_overlay_candidates(rows or [], limit=16)
@@ -4026,6 +4181,9 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "live_tight_monitoring_rule_ar": live_tight_ui_bridge_debug.get("rule_ar"),
         "live_tight_monitoring_candidates_count": len(final_map.get("live_tight_monitoring_candidates", [])),
         "live_tight_monitoring_candidates": final_map.get("live_tight_monitoring_candidates", []),
+        "v2v1_priority_router_debug": v2v1_priority_router_debug,
+        "v2v1_priority_router_rule_ar": v2v1_priority_router_debug.get("rule_ar"),
+        "v2v1_tight_monitoring_recommended_symbols": v2v1_priority_router_debug.get("tight_monitoring_recommended_symbols", []),
         "low_float_fast_lane_raw_watch_count": len(fast_lane_raw_watch_rows),
         "low_float_fast_lane_raw_watch": fast_lane_raw_watch_rows,
         "prepared_watch_ui_bridge_debug": prepared_watch_ui_bridge_debug,

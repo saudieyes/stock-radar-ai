@@ -137,6 +137,8 @@ LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONI
 LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT", "5") or 5)
 LIVE_TIGHT_MONITORING_MIN_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING_MIN_VOLUME", "20000") or 20_000)
 LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME", "25000") or 25_000)
+LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT", "18") or 18)
+LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT", "35") or 35)
 
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # V2U3 regression canaries from replay: these are not buy calls; they only force live quote confirmation so the scanner can detect similar/prepared movement early.
@@ -434,14 +436,22 @@ def _live_tight_profile_from_quote(symbol: str, quote: dict, *, prepared: bool =
     if not volume_ok:
         debug["reasons"].append("الحركة موجودة لكن الحجم/الدولار فوليوم لم يتأكد بعد")
         return debug
-    stage = "live_early_confirmation_5pct" if change_pct >= 5.0 else "live_early_confirmation_3pct"
-    stage_ar = "⚡ تأكيد مبكر حي +5%" if change_pct >= 5.0 else "⚡ تأكيد مبكر حي +3%"
+    extended_for_pullback = bool(change_pct >= LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT)
+    extreme_extension = bool(change_pct >= LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT)
+    if extended_for_pullback:
+        stage = "live_continuation_pullback_watch"
+        stage_ar = "🚫 مرتفع جدًا — لا تطارد / Pullback فقط" if extreme_extension else "📈 امتداد قوي — استمرار مشروط / Pullback"
+    else:
+        stage = "live_early_confirmation_5pct" if change_pct >= 5.0 else "live_early_confirmation_3pct"
+        stage_ar = "⚡ تأكيد مبكر حي +5%" if change_pct >= 5.0 else "⚡ تأكيد مبكر حي +3%"
     if prepared:
         head = "مرشح Prepared Watch بدأ يتحرك الآن؛ لا ينتظر +20%/+50%."
     elif from_memory:
         head = "مرشح حي سابق ما زال تحت مراقبة لصيقة بذاكرة قصيرة."
     else:
         head = "مرشح جديد أثناء التداول بدأ حركة حية مع حجم؛ يدخل مراقبة لصيقة فورًا."
+    if extended_for_pullback:
+        head += " الحركة أصبحت ممتدة؛ تحفظ كمراقبة V2V لكن العرض العملي يكون استمرار مشروط/Pullback وليس دخولًا مباشرًا."
     reasons = [head, f"الحركة الحالية {safe_round(change_pct, 2)}% مع حجم {int(volume or 0):,} ودولار فوليوم تقريبي {int(dollar_volume or 0):,}."]
     return {
         **debug,
@@ -451,6 +461,10 @@ def _live_tight_profile_from_quote(symbol: str, quote: dict, *, prepared: bool =
         "stage_ar": stage_ar,
         "label_ar": stage_ar,
         "reasons": reasons,
+        "extended_for_pullback_v2v1": extended_for_pullback,
+        "extreme_extension_v2v1": extreme_extension,
+        "target_bucket_v2v1": "continuation_pullback" if extended_for_pullback else "live_tight_monitoring",
+        "action_ar_v2v1": "استمرار مشروط: لا دخول الآن إلا بعد تماسك أو Pullback أو إعادة اختبار واضحة." if extended_for_pullback else "تأكيد مبكر حي — مراقبة لصيقة فقط.",
         "prepared_watch_symbol": bool(prepared),
         "new_intraday_symbol": not bool(prepared),
         "extended_hours": bool((quote or {}).get("extended_hours")),
