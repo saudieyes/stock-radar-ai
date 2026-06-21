@@ -53,7 +53,7 @@ except Exception:
         return None
 
 HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u4_live_critical_pre_explosion_2026_06_20"
-LIVE_HUNTING_REPLAY_VERSION = "v2v4_prepared_anchor_link_fix_2026_06_21"
+LIVE_HUNTING_REPLAY_VERSION = "v2v5_early_capture_boost_2026_06_21"
 
 
 def _s(v: Any) -> str:
@@ -1528,9 +1528,10 @@ def _default_replay_slices() -> list[dict[str, Any]]:
         if minute < 0:
             return
         points.append((int(minute), label))
-    # Early premarket: every 15 minutes to catch AH/PM build before the rush.
-    for m in range(8 * 60, 9 * 60, 15):
-        add(m, "بري ماركت مبكر — كل 15 دقيقة")
+    # V2V5: early premarket is also dense for Prepared/ignition runners.
+    # Target-only loading keeps this cheap while reducing 08:06 -> 08:15 delays.
+    for m in range(8 * 60, 9 * 60, 5):
+        add(m, "بري ماركت مبكر — كل 5 دقائق V2V5")
     # Active premarket: every 5 minutes.
     for m in range(9 * 60, 13 * 60 + 30, 5):
         add(m, "بري ماركت كثيف V2T2")
@@ -1807,6 +1808,96 @@ def _apply_selection_baseline_to_slice_map(m: dict[str, dict], selection_prices:
     return out
 
 
+
+V2V5_PREPARED_TIGHT_MIN_CHANGE_PCT = 3.0
+V2V5_NEW_INTRADAY_MIN_CHANGE_PCT = 5.0
+V2V5_MIN_VOLUME = 20_000.0
+V2V5_MIN_DOLLAR_VOLUME = 25_000.0
+
+
+def _v2v5_tight_loop_probe_rows(
+    *,
+    m: dict[str, dict],
+    target_symbols: set[str],
+    selection_prices: dict[str, float],
+    prepared_symbols: set[str] | None = None,
+    prepared_rank: dict[str, int] | None = None,
+    phase_tag: str = "",
+) -> tuple[list[tuple[dict, str]], dict[str, Any]]:
+    """V2V5 early capture boost for replay.
+
+    This is not a BUY signal. It simulates the live tight monitoring router:
+    - Prepared Watch names get a reserved +3%/+5% trigger with volume.
+    - New intraday target names get a +5% ignition trigger with volume.
+
+    The row uses only the cumulative minute slice available at that time.
+    """
+    prepared_symbols = {_u(x) for x in (prepared_symbols or set()) if _u(x)}
+    prepared_rank = dict(prepared_rank or {})
+    out: list[tuple[dict, str]] = []
+    stats = {
+        "prepared_tight_loop": 0,
+        "new_intraday_ignition": 0,
+        "prepared_tight_loop_symbols": [],
+        "new_intraday_ignition_symbols": [],
+        "rule_ar": "V2V5: مرشحو Prepared يدخلون Probe مراقبة لصيقة عند +3% مع حجم؛ المرشح الجديد عند +5% مع حجم. هذا لا يفتح شراء مباشر ولا يستخدم بيانات مستقبلية.",
+    }
+    for sym in sorted({_u(x) for x in (target_symbols or set()) if _u(x)}):
+        row = dict((m or {}).get(sym) or {})
+        if not row:
+            continue
+        base = _num((selection_prices or {}).get(sym), 0.0)
+        price = _num(row.get("price") or row.get("close"), 0.0)
+        high = _num(row.get("high"), price)
+        volume = _num(row.get("volume"), 0.0)
+        dollar_volume = _num(row.get("dollar_volume"), 0.0) or (price * volume if price > 0 and volume > 0 else 0.0)
+        if base <= 0 or price <= 0:
+            continue
+        gain = _num(row.get("change_pct"), _safe_gain(price, base))
+        high_gain = _safe_gain(high, base)
+        effective_gain = max(gain, high_gain if high_gain < 18 else gain)
+        volume_ok = bool(volume >= V2V5_MIN_VOLUME or dollar_volume >= V2V5_MIN_DOLLAR_VOLUME)
+        if not volume_ok:
+            continue
+        is_prepared = sym in prepared_symbols
+        layer = ""
+        min_change = V2V5_PREPARED_TIGHT_MIN_CHANGE_PCT if is_prepared else V2V5_NEW_INTRADAY_MIN_CHANGE_PCT
+        if is_prepared and effective_gain >= min_change:
+            layer = "v2v5_prepared_tight_loop"
+            stats["prepared_tight_loop"] += 1
+            stats["prepared_tight_loop_symbols"].append(sym)
+        elif (not is_prepared) and effective_gain >= min_change:
+            layer = "v2v5_intraday_ignition_probe"
+            stats["new_intraday_ignition"] += 1
+            stats["new_intraday_ignition_symbols"].append(sym)
+        if not layer:
+            continue
+        score = (112 if is_prepared else 96) + min(max(effective_gain, 0), 20) * 1.8 + min(dollar_volume / 250000.0, 18)
+        if is_prepared:
+            score += max(0, 16 - min(int(prepared_rank.get(sym) or 99), 16)) * 0.9
+        reasons = [
+            "V2V5 Prepared Tight Loop: مرشح قبل السوق بدأ +3%/+5% بحجم، فلا ينتظر Big/Micro العام." if is_prepared else "V2V5 Intraday Ignition: رمز جديد وصل +5% بحجم داخل الشريحة الحالية.",
+            f"gain={_round(effective_gain,2)}% volume={int(volume or 0):,} dollar≈{int(dollar_volume or 0):,}",
+        ]
+        metrics = {
+            **row,
+            "price": price,
+            "change_pct": _round(effective_gain, 3),
+            "day_change_pct": _round(effective_gain, 3),
+            "volume": volume,
+            "dollar_volume": dollar_volume,
+            "near_high": bool(price >= high * 0.985 if high > 0 else False),
+            "v2v5_prepared_tight_loop": bool(is_prepared),
+            "v2v5_intraday_ignition_probe": bool(not is_prepared),
+            "prepared_rank": prepared_rank.get(sym),
+            "phase_tag": phase_tag,
+        }
+        out.append(({"symbol": sym, "score": _round(score, 3), "source_score": _round(score, 3), "reasons_ar": reasons, "metrics": metrics}, layer))
+    stats["prepared_tight_loop_symbols"] = _scanner.unique_keep_order(stats["prepared_tight_loop_symbols"])[:80]
+    stats["new_intraday_ignition_symbols"] = _scanner.unique_keep_order(stats["new_intraday_ignition_symbols"])[:80]
+    return out, stats
+
+
 def _run_source_on_minute_slices(
     *,
     outcome_date: str,
@@ -1814,6 +1905,8 @@ def _run_source_on_minute_slices(
     target_symbols: set[str],
     selection_prices: dict[str, float],
     clean_only: bool = True,
+    prepared_symbols: set[str] | None = None,
+    prepared_rank: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     slices = _default_replay_slices()
     by_symbol: dict[str, dict] = {sym: {"symbol": sym, "detected_by_minute_replay": False, "stage_history": []} for sym in target_symbols}
@@ -1839,7 +1932,15 @@ def _run_source_on_minute_slices(
             _ok, _score, _reasons, _flags = _big_explosion_live_lane_score(_sym, _row, phase_detail=phase_tag, source_kind="historical_minute_slice_v2t2")
             if _ok:
                 target_probe_rows.append({"symbol": _sym, "score": _round(_score, 3), "reasons": _reasons, "metrics": {**_row, **_flags}})
-        source_rows: list[tuple[dict, str]] = [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "big_explosion_live_lane_v2t2_target_probe") for r in target_probe_rows] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
+        v2v5_probe_rows, v2v5_probe_debug = _v2v5_tight_loop_probe_rows(
+            m=m,
+            target_symbols=target_symbols,
+            selection_prices=selection_prices,
+            prepared_symbols=prepared_symbols or set(),
+            prepared_rank=prepared_rank or {},
+            phase_tag=phase_tag,
+        )
+        source_rows: list[tuple[dict, str]] = list(v2v5_probe_rows or []) + [(r, "big_explosion_live_lane_v2t") for r in (big_rows or [])] + [(r, "big_explosion_live_lane_v2t2_target_probe") for r in target_probe_rows] + [(r, "micro_explosion_full_market_v2r2") for r in (micro_rows or [])] + [(r, "low_float_fast_lane_v2q") for r in (fast_rows or [])]
         slice_debug.append({
             "key": key,
             "time_utc": sl.get("time_utc"),
@@ -1849,6 +1950,10 @@ def _run_source_on_minute_slices(
             "fast": len(fast_rows or []),
             "big": len(big_rows or []),
             "target_probe_big": len(target_probe_rows or []),
+            "v2v5_prepared_tight_loop": (v2v5_probe_debug or {}).get("prepared_tight_loop", 0),
+            "v2v5_new_intraday_ignition": (v2v5_probe_debug or {}).get("new_intraday_ignition", 0),
+            "v2v5_prepared_symbols": (v2v5_probe_debug or {}).get("prepared_tight_loop_symbols", [])[:10],
+            "v2v5_new_symbols": (v2v5_probe_debug or {}).get("new_intraday_ignition_symbols", [])[:10],
             "micro_top": (micro_debug or {}).get("top_symbols", [])[:10],
             "fast_top": (fast_debug or {}).get("top_symbols", [])[:10],
             "big_top": (big_debug or {}).get("top_symbols", [])[:10],
@@ -1892,7 +1997,7 @@ def _run_source_on_minute_slices(
         rec["promotion_count"] = len(hist)
         rec["promotion_summary_ar"] = " → ".join([f"{x.get('time_utc')} {x.get('stage_ar')} ({x.get('gain_pct_at_stage')}%)" for x in hist[:8]]) if hist else "لم يظهر في شرائح المصدر الدقيقة"
     return {
-        "version": "minute_source_slice_replay_v2t2_opening_1min_proxy_2026_06_20",
+        "version": "minute_source_slice_replay_v2v5_early_capture_boost_2026_06_21",
         "outcome_date": outcome_date,
         "target_symbols": sorted(target_symbols),
         "slice_debug": slice_debug,
@@ -2567,6 +2672,8 @@ def run_live_hunting_replay(
             target_symbols=target_set,
             selection_prices=selection_prices,
             clean_only=False,
+            prepared_symbols=prepared_symbols,
+            prepared_rank=prepared_rank,
         )
     else:
         source_replay = {
@@ -2656,7 +2763,7 @@ def run_live_hunting_replay(
     payload = {
         "ok": True,
         "version": LIVE_HUNTING_REPLAY_VERSION,
-        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_anchor_fix_v2v4",
+        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_anchor_plus_early_capture_boost_v2v5",
         "requested_date": str(date_value or "").strip(),
         "hunt_date": hunt_date,
         "prior_session_date": prior_date,
@@ -2722,9 +2829,9 @@ def run_live_hunting_replay(
             "prepared_crossed_3_or_5_but_not_detected_count": len(prepared_crossed_but_missed),
             "bucket_counts": {},
         },
-        "rule_ar": "V2V4 يحاكي جلسة تاريخية كأن السوق مفتوح، ويثبت ربط Prepared Watch عبر Prepared Anchor priority، مع فصل prepared winners عن intraday new winners بدون استخدام المستقبل للإشارات.",
+        "rule_ar": "V2V5 يحاكي جلسة تاريخية كأن السوق مفتوح، مع Prepared Anchor + Early Capture Boost: مرشحو Prepared عند +3% بحجم يدخلون V2V probe بسرعة، والرموز الجديدة عند +5% بحجم تدخل ignition probe. لا يفتح شراء مباشر.",
         "storage_rule_ar": "يقرأ Polygon minute من /tmp فقط، ويرجع ملخصات مدمجة؛ لا يحفظ raw files في SQLite/GitHub/Railway.",
-        "next_step_ar": "شغل نفس اليوم ثم 3-5 أيام. بعد V2V4 يجب أن تظهر رموز audit الموجودة في prior_pre_explosion lane كـ Prepared. إذا بقي detection متأخرًا فالإصلاح التالي في سرعة/مقاعد V2V أثناء الجلسة، لا في ربط التحضير.",
+        "next_step_ar": "قارن نفس اليوم قبل/بعد V2V5: نريد early <=8% وacceptable <=20% أعلى، وlate >=20% أقل. بعدها شغّل 3-5 أيام قبل أي تغيير على Strong/Cautious.",
     }
     bucket_counts: dict[str, int] = {}
     for r in rows:
@@ -2745,7 +2852,7 @@ def format_live_hunting_replay_brief(payload: dict[str, Any]) -> str:
     prep = payload.get("prepared_watch") or {}
     loader = payload.get("minute_loader") or {}
     lines = [
-        "V2V4 — Prepared Anchor Link Fix",
+        "V2V5 — Early Capture Boost",
         f"يوم الصيد: {payload.get('hunt_date')} | جلسة التحضير السابقة: {payload.get('prior_session_date')}",
         f"Prepared Watch قبل الافتتاح: {prep.get('count')} رمز",
         f"رموز التدقيق: {(payload.get('target_selection') or {}).get('target_symbols_count')} | فائزون فوق {payload.get('missed_gain_threshold')}%: {perf.get('actual_winners_over_threshold_count')}",
