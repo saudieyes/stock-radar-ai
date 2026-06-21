@@ -59,7 +59,7 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3o_v2w2_polygon_distribution_router_2026_06_21"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3p_v2w3_polygon_distribution_catalyst_guard_2026_06_21"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
@@ -2954,9 +2954,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3o_v2w2_polygon_distribution_router_2026_06_21",
+        "engine_version": "dynamic_discovery_v3p_v2w3_polygon_distribution_catalyst_guard_2026_06_21",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w2_polygon_distribution_router_fast_promotion",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w3_polygon_distribution_catalyst_guard_fast_promotion",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -3011,7 +3011,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "live_tight_monitoring_v2v_symbols": _scanner.unique_keep_order(live_tight_monitoring_symbols)[:120],
         "live_tight_monitoring_v2v_by_symbol": {k: v for k, v in (live_tight_monitoring_by_symbol or {}).items()},
         "live_tight_monitoring_v2v_memory": live_tight_monitoring_memory_debug,
-        "live_tight_monitoring_v2v_rule_ar": "V2W2: Prepared/V2V/Low-Float/Fast Lane محمية، وPolygon يعمل كمصدر خلفي يوزع على القوائم الحالية ثم يؤكده FMP/V2V. لا يفتح شراء مباشر ولا يتجاوز الشرعية.",
+        "live_tight_monitoring_v2v_rule_ar": "V2W3: Prepared/V2V/Low-Float/Fast Lane محمية، وPolygon يعمل كمصدر خلفي يوزع على القوائم الحالية. Catalyst لا يظهر إلا بوجود خبر/محفز حقيقي.",
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,

@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w2_polygon_distribution_router_2026_06_21"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w3_polygon_distribution_catalyst_guard_2026_06_21"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -484,6 +484,70 @@ def _catalyst_reasons(details: dict) -> list[str]:
     if details.get("actionability_ar"):
         out.append(f"قابلية الاعتماد: {details.get('actionability_ar')}")
     return _dedupe(out, 4)
+
+
+def _has_valid_catalyst_context(row: dict) -> bool:
+    """V2W3 display guard: only show Catalyst/News when there is real news.
+
+    Many prep candidates are valuable because of price/RVOL/low-float/Polygon,
+    but showing them as Catalyst while the card says "no news" confuses the UI.
+    This guard keeps Catalyst as a true news-context section only.
+    """
+    if not isinstance(row, dict):
+        return False
+    details = row.get("catalyst_details") if isinstance(row.get("catalyst_details"), dict) else _build_catalyst_details(row)
+    if not isinstance(details, dict) or not details.get("has_news"):
+        return False
+    type_code = _s(details.get("type_code")).lower()
+    title = _s(details.get("title") or row.get("news_title") or row.get("news_public_summary") or row.get("news_note"))
+    # Sector/market context can be useful, but it should not own a Catalyst card
+    # unless it is an explicit company/analyst/regulatory/earnings style event.
+    if type_code in {"no_clear_catalyst", ""} and not bool(details.get("is_catalyst")):
+        return False
+    return bool(title or details.get("is_catalyst") or details.get("published_utc") or details.get("published_ksa"))
+
+
+def _non_catalyst_fallback_section(row: dict) -> str:
+    """Where to put a candidate that was labeled Catalyst without a real catalyst."""
+    price = _price(row)
+    change = _change_pct(row)
+    flags = row.get("opportunity_flow_flags") if isinstance(row.get("opportunity_flow_flags"), dict) else {}
+    if flags.get("pre_trigger"):
+        return "pre_trigger_candidates"
+    if flags.get("reclaim"):
+        return "reclaim_candidates"
+    if flags.get("near_support"):
+        return "support_bounce_candidates"
+    if flags.get("continuation_pullback") or flags.get("extended_after_move") or change >= 8.0:
+        return "continuation_pullback_candidates"
+    if flags.get("low_float_pm") or flags.get("micro_explosion_capture") or flags.get("low_float_fast_lane"):
+        return "low_float_premarket_radar"
+    if 0.75 <= price <= 20.0:
+        return "small_stock_classic_radar"
+    return "high_risk_day_trades"
+
+
+def _retag_non_catalyst_row(row: dict, target_section: str) -> dict:
+    """Convert a misleading Catalyst row into a technical watch row."""
+    out = dict(row or {})
+    bucket = PREP_SECTION_TO_BUCKET.get(target_section, "high_risk_day_trade")
+    label = PREP_SECTION_LABELS_AR.get(target_section, "مراقبة فنية — بدون محفز واضح")
+    out["original_opportunity_bucket"] = _s(out.get("opportunity_bucket")) or "catalyst_watch"
+    out["opportunity_bucket"] = bucket
+    out["opportunity_stage"] = f"v2w3_non_catalyst_reclassified_{bucket}"
+    out["opportunity_stage_label"] = label
+    out["display_plan_family_label"] = label
+    out["trade_type_label_ar"] = "Technical Watch — no catalyst"
+    out["non_catalyst_reclassified_v2w3"] = True
+    out["catalyst_watch_suppressed_v2w3"] = True
+    out["decision"] = _s(out.get("decision")) or "مراقبة فنية — ليس شراء مباشر"
+    prefix = "V2W3: لا يوجد خبر/محفز واضح؛ نُقل من Catalyst إلى قائمة فنية مناسبة حتى لا يكون العرض مضللًا."
+    reasons = out.get("opportunity_reasons") if isinstance(out.get("opportunity_reasons"), list) else []
+    out["opportunity_reasons"] = _dedupe([prefix] + list(reasons), 12)
+    out["technical_explainer_reasons"] = out["opportunity_reasons"]
+    out["why_appeared_ar"] = "، ".join(out["opportunity_reasons"][:4])
+    out["special_bucket_reason"] = out["why_appeared_ar"]
+    return out
 
 
 
@@ -2932,7 +2996,7 @@ CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
 LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2q_funnel_display_2026_06_20"
 MICRO_EXPLOSION_CLOSE_WATCH_VERSION = "micro_explosion_close_watch_v2r1_2026_06_20"
-POLYGON_DISTRIBUTION_ROUTER_VERSION = "polygon_distribution_router_v2w2_2026_06_21"
+POLYGON_DISTRIBUTION_ROUTER_VERSION = "polygon_distribution_router_v2w3_catalyst_guard_2026_06_21"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -3569,7 +3633,7 @@ def _prep_candidate_sections(row: dict) -> list[tuple[str, float, list[str]]]:
         add("gap_fill_watch", 12.0, reasons)
 
     details = row.get("catalyst_details") if isinstance(row.get("catalyst_details"), dict) else _build_catalyst_details(row)
-    if details.get("has_news"):
+    if _has_valid_catalyst_context(row):
         reasons = _catalyst_reasons(details) or ["يوجد خبر/سياق؛ تحقق من قوة المحفز وتاريخه قبل اعتباره سببًا للتداول."]
         add("catalyst_watch", 10.0, reasons)
 
@@ -3665,8 +3729,8 @@ def _polygon_next_day_target_section(row: dict) -> tuple[str, list[str]]:
     if 0.75 <= price <= 20.0:
         reasons.append("Polygon: سهم منخفض السعر يستحق مراقبة تحضيرية فقط.")
         return "small_stock_classic_radar", reasons
-    reasons.append("Polygon: مرشح للغد يحتاج تصنيفًا حيًا لاحقًا.")
-    return "catalyst_watch", reasons
+    reasons.append("Polygon: مرشح للغد يحتاج تصنيفًا حيًا لاحقًا؛ لا يعرض كـ Catalyst بدون خبر.")
+    return "small_stock_classic_radar", reasons
 
 
 def _make_polygon_distributed_row(row: dict, section: str, market_phase: str = "") -> dict:
@@ -4215,7 +4279,11 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         elif bucket == "gap_fill_watch":
             bucket_map["gap_fill_watch"].append(row)
         elif bucket == "catalyst_watch":
-            bucket_map["catalyst_watch"].append(row)
+            if _has_valid_catalyst_context(row):
+                bucket_map["catalyst_watch"].append(row)
+            else:
+                target_section = _non_catalyst_fallback_section(row)
+                bucket_map[target_section].append(_retag_non_catalyst_row(row, target_section))
 
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
