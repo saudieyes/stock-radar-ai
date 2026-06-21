@@ -699,6 +699,8 @@ def historical_replay_simulator_status_endpoint():
 
 @app.get("/simulator/live-hunting-replay")
 @app.get("/simulator/v2v2-live-hunting-replay")
+@app.get("/simulator/v2v3-live-hunting-audit")
+@app.get("/simulator/replay-audit-prepared-link")
 @app.get("/replay/live-hunting")
 def live_hunting_replay_endpoint(
     date: str = "",
@@ -714,6 +716,7 @@ def live_hunting_replay_endpoint(
     force_minute_pull: bool = False,
     redownload_processed: bool = True,
     include_candidates: bool = True,
+    audit_symbols: str = "EHGO,ICCM,TPC,SNBR,HOUR,BFLY,NIXX,NIVF,JLHL,BIRD",
     format: str = "json",
 ):
     fmt = str(format or "json").strip().lower()
@@ -732,11 +735,12 @@ def live_hunting_replay_endpoint(
             force_minute_pull=force_minute_pull,
             redownload_processed=redownload_processed,
             include_candidates=include_candidates,
+            audit_symbols=audit_symbols,
         )
     except Exception as exc:
         payload = {
             "ok": False,
-            "version": "v2v2_live_hunting_replay_endpoint_guard_2026_06_21",
+            "version": "v2v3_replay_audit_endpoint_guard_2026_06_21",
             "error": f"live_hunting_replay_exception:{type(exc).__name__}:{str(exc)[:240]}",
             "rule_ar": "حارس endpoint يمنع سقوط الخدمة؛ خفّض max_symbols أو max_minute_rows إذا كان ملف الدقيقة كبيرًا.",
         }
