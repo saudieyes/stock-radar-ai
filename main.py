@@ -700,6 +700,8 @@ def historical_replay_simulator_status_endpoint():
 @app.get("/simulator/live-hunting-replay")
 @app.get("/simulator/v2v2-live-hunting-replay")
 @app.get("/simulator/v2v3-live-hunting-audit")
+@app.get("/simulator/v2v4-prepared-anchor-audit")
+@app.get("/simulator/prepared-anchor-audit")
 @app.get("/simulator/replay-audit-prepared-link")
 @app.get("/replay/live-hunting")
 def live_hunting_replay_endpoint(
