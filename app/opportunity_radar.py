@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2v1b_extended_v2v_display_fix_2026_06_21"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w2_polygon_distribution_router_2026_06_21"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2888,7 +2888,7 @@ OPPORTUNITY_BUCKET_KEYS = [
 
 def _is_blocked(row: dict) -> bool:
     sharia = _s(row.get("sharia_status")).lower()
-    if row.get("sharia_manual_excluded") or sharia in {"non_compliant", "haram", "excluded"}:
+    if row.get("sharia_manual_excluded") or sharia in {"non_compliant", "haram", "excluded", "blocked", "learning_only"}:
         return True
     if _s(row.get("final_decision_code")) in {"PLAN_BROKEN", "DATA_INCOMPLETE"}:
         return True
@@ -2932,6 +2932,7 @@ CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
 LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2q_funnel_display_2026_06_20"
 MICRO_EXPLOSION_CLOSE_WATCH_VERSION = "micro_explosion_close_watch_v2r1_2026_06_20"
+POLYGON_DISTRIBUTION_ROUTER_VERSION = "polygon_distribution_router_v2w2_2026_06_21"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -3608,6 +3609,201 @@ def _make_closed_market_prep_row(row: dict, section: str, score: float, reasons:
 
 
 
+def _is_polygon_next_day_source_row(row: dict) -> bool:
+    """True when a row came from the V2W Polygon next-day source.
+
+    V2W2 treats Polygon as a background feeder, not as a standalone UI list.
+    The row is later routed to the existing radar sections when appropriate.
+    """
+    if not isinstance(row, dict):
+        return False
+    sources = row.get("sources") if isinstance(row.get("sources"), list) else []
+    return bool(
+        "polygon_next_day_builder" in {str(x) for x in sources}
+        or row.get("watch_only_polygon_next_day_v2w")
+        or row.get("polygon_next_day_builder_score") is not None
+        or row.get("polygon_next_day_lane")
+    )
+
+
+def _polygon_next_day_tags(row: dict) -> set[str]:
+    tags = row.get("polygon_next_day_tags") if isinstance(row.get("polygon_next_day_tags"), list) else row.get("tags")
+    if not isinstance(tags, list):
+        tags = []
+    return {str(x or "").strip().lower() for x in tags if str(x or "").strip()}
+
+
+def _polygon_next_day_target_section(row: dict) -> tuple[str, list[str]]:
+    """Map a Polygon next-day candidate into an existing opportunity section.
+
+    This is intentionally conservative: Polygon is used for preparation and
+    classification. Live price/actionability still comes from FMP + the final
+    decision engine.
+    """
+    lane = _s(row.get("polygon_next_day_lane") or row.get("lane")).lower()
+    tags = _polygon_next_day_tags(row)
+    change = _num(row.get("polygon_next_day_change_pct", row.get("change_pct", row.get("day_change_pct", 0))), 0.0)
+    price = _num(row.get("polygon_next_day_price", row.get("price", row.get("display_price", 0))), 0.0)
+    dollar_volume = _num(row.get("polygon_next_day_dollar_volume", row.get("dollar_volume", 0)), 0.0)
+    reasons: list[str] = []
+
+    if "reclaim" in lane or "reclaim_from_weakness" in tags:
+        reasons.append("Polygon: محاولة استعادة/إغلاق قوي بعد ضعف — يحتاج ثبات حي.")
+        return "reclaim_candidates", reasons
+    if "continuation" in lane or "pullback" in lane or "extended_watch_only" in tags or change >= 14.0:
+        reasons.append("Polygon: السهم تحرك مسبقًا؛ متابعة Continuation/Pullback فقط ولا مطاردة.")
+        return "continuation_pullback_candidates", reasons
+    if "low_float_proxy" in tags or "small_stock" in lane or (0.75 <= price <= 15.0 and dollar_volume >= 120000):
+        reasons.append("Polygon: مرشح سهم صغير/Low-Float proxy من السعر والمدى والسيولة.")
+        return "low_float_premarket_radar", reasons
+    if "quiet_accumulation" in tags or "quiet" in lane:
+        reasons.append("Polygon: تجميع هادئ/إغلاق مقبول — تحضير كسهم صغير/كلاسيكي للغد.")
+        return "small_stock_classic_radar", reasons
+    if "close_near_high" in tags or "controlled_green_day" in tags or (1.5 <= change <= 12.0):
+        reasons.append("Polygon: إغلاق قوي/قرب تفعيل محتمل — يحتاج FMP/V2V قبل أي ترقية.")
+        return "pre_trigger_candidates", reasons
+    if 0.75 <= price <= 20.0:
+        reasons.append("Polygon: سهم منخفض السعر يستحق مراقبة تحضيرية فقط.")
+        return "small_stock_classic_radar", reasons
+    reasons.append("Polygon: مرشح للغد يحتاج تصنيفًا حيًا لاحقًا.")
+    return "catalyst_watch", reasons
+
+
+def _make_polygon_distributed_row(row: dict, section: str, market_phase: str = "") -> dict:
+    out = dict(row or {})
+    bucket = PREP_SECTION_TO_BUCKET.get(section, "watchlist")
+    label = PREP_SECTION_LABELS_AR.get(section, "تحضير قبل الافتتاح")
+    lane = _s(out.get("polygon_next_day_lane") or out.get("lane"))
+    tags = list(_polygon_next_day_tags(out))[:8]
+    score = _num(out.get("polygon_next_day_builder_score", out.get("score", 0.0)), 0.0)
+    price = _num(out.get("polygon_next_day_price", out.get("price", 0.0)), 0.0)
+    change = _num(out.get("polygon_next_day_change_pct", out.get("change_pct", 0.0)), 0.0)
+    dollar_volume = _num(out.get("polygon_next_day_dollar_volume", out.get("dollar_volume", 0.0)), 0.0)
+    out["original_opportunity_bucket"] = _s(out.get("opportunity_bucket"))
+    out["opportunity_bucket"] = bucket
+    out["opportunity_stage"] = f"polygon_next_day_distributed_{bucket}"
+    out["opportunity_stage_label"] = label
+    out["display_plan_family_label"] = label
+    out["trade_type_label_ar"] = "Polygon Next-Day → Existing Radar"
+    out["decision"] = "مرشح من Polygon للغد — مراقبة فقط حتى يؤكد FMP/V2V"
+    out["effective_decision"] = "مراقبة"
+    out["non_actionable_prep"] = True
+    out["watch_only_polygon_distributed_v2w2"] = True
+    out["polygon_source_hidden_v2w2"] = True
+    out["polygon_distribution_router_v2w2"] = {
+        "version": POLYGON_DISTRIBUTION_ROUTER_VERSION,
+        "target_section": section,
+        "target_bucket": bucket,
+        "lane": lane,
+        "score": round(score, 2),
+        "price": round(price, 4) if price else None,
+        "change_pct": round(change, 2),
+        "dollar_volume": round(dollar_volume, 2) if dollar_volume else None,
+        "market_phase": _s(market_phase),
+        "rule_ar": "V2W2: Polygon مصدر خلفي للغد؛ يوزع على القوائم الحالية، والسعر/التفعيل الحقيقي من FMP/V2V فقط.",
+    }
+    base_reasons = [
+        "V2W2: أضيف من Polygon كمنبع خلفي، وليس كقائمة مستقلة أو شراء مباشر.",
+        "السعر الحالي والتفعيل يجب أن يؤكده FMP/V2V قبل أي ترقية.",
+    ]
+    target_reason = _polygon_next_day_target_section(out)[1]
+    polygon_reasons = out.get("polygon_next_day_reasons_ar") or out.get("reasons_ar") or []
+    if not isinstance(polygon_reasons, list):
+        polygon_reasons = []
+    if tags:
+        base_reasons.append("وسوم Polygon: " + ", ".join(tags[:5]))
+    merged = _dedupe(base_reasons + target_reason + list(polygon_reasons) + list(out.get("opportunity_reasons") or []), 12)
+    out["opportunity_reasons"] = merged
+    out["technical_explainer_reasons"] = merged
+    out["why_appeared_ar"] = "، ".join(merged[:4])
+    out["special_bucket_reason"] = out["why_appeared_ar"]
+    # Keep Polygon candidates visible inside prep sections without outranking true
+    # live-confirmed candidates. Existing live rows generally have much larger scores.
+    out["opportunity_rank_score"] = round(max(_num(out.get("opportunity_rank_score"), 0.0), 700.0 + score), 2)
+    if section == "low_float_premarket_radar":
+        out["low_float_capture_v2m"] = _low_float_proxy_metrics(out)
+        out["low_float_label_ar"] = (out.get("low_float_capture_v2m") or {}).get("label_ar") or "Polygon Low-Float proxy"
+    return out
+
+
+def _distribute_polygon_next_day_to_existing_sections(final_map: dict[str, list[dict]], rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
+    """Route Polygon next-day candidates into existing sections.
+
+    This keeps the 180 Polygon candidates in the background/source universe and
+    shows only the best relevant names inside the current operational sections.
+    """
+    debug: dict[str, Any] = {
+        "version": POLYGON_DISTRIBUTION_ROUTER_VERSION,
+        "enabled": True,
+        "rows_seen": len(rows or []),
+        "polygon_rows_seen": 0,
+        "routed_by_section": {},
+        "added_by_section": {},
+        "skipped_duplicate_symbols": 0,
+        "skipped_blocked_or_invalid": 0,
+        "hidden_source_mode": True,
+        "rule_ar": "V2W2: قائمة Polygon لا تظهر كقائمة ضخمة؛ توزع على القوائم الحالية مع منع التكرار وحد أقصى لكل قسم.",
+    }
+    section_candidates: dict[str, list[dict]] = {k: [] for k in PREP_SECTION_TO_BUCKET}
+    global_seen: set[str] = set()
+    for key, vals in (final_map or {}).items():
+        if key == "learning_opportunity_candidates":
+            continue
+        for item in vals or []:
+            sym = _u(item.get("symbol")) if isinstance(item, dict) else ""
+            if sym:
+                global_seen.add(sym)
+
+    for row in rows or []:
+        if not isinstance(row, dict) or not _is_polygon_next_day_source_row(row):
+            continue
+        debug["polygon_rows_seen"] += 1
+        sym = _u(row.get("symbol"))
+        if not sym:
+            debug["skipped_blocked_or_invalid"] += 1
+            continue
+        if _is_blocked(row):
+            debug["skipped_blocked_or_invalid"] += 1
+            continue
+        if not _is_personal_section_eligible(row):
+            debug["skipped_blocked_or_invalid"] += 1
+            continue
+        if sym in global_seen:
+            debug["skipped_duplicate_symbols"] += 1
+            continue
+        section, _reasons = _polygon_next_day_target_section(row)
+        if section not in section_candidates:
+            section = "small_stock_classic_radar"
+        debug["routed_by_section"][section] = int(debug["routed_by_section"].get(section, 0) or 0) + 1
+        section_candidates[section].append(_make_polygon_distributed_row(row, section, market_phase=market_phase))
+        global_seen.add(sym)
+
+    lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
+    for section, candidates in section_candidates.items():
+        existing = list(final_map.get(section, []) or [])
+        merged: list[dict] = []
+        seen_section: set[str] = set()
+        # Existing rows first if their rank is similar; then sort and cap.  This
+        # prevents Polygon from becoming a separate list while still allowing a
+        # good Polygon candidate to fill empty slots.
+        for item in _sort_bucket(existing + candidates):
+            if not isinstance(item, dict):
+                continue
+            sym = _u(item.get("symbol"))
+            if not sym or sym in seen_section:
+                continue
+            seen_section.add(sym)
+            merged.append(item)
+            if len(merged) >= lim:
+                break
+        final_map[section] = merged
+        added = max(0, len([x for x in merged if isinstance(x, dict) and x.get("watch_only_polygon_distributed_v2w2")]))
+        debug["added_by_section"][section] = added
+    debug["total_added"] = sum(int(v or 0) for v in debug.get("added_by_section", {}).values())
+    return debug
+
+
+
 def _sharia_audit_for_row(row: dict) -> dict[str, Any]:
     status = _s(row.get("sharia_status"))
     label = _s(row.get("sharia_label"))
@@ -4166,6 +4362,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     final_map["learning_opportunity_candidates"] = learning_bridge_rows
 
     closed_market_planning_debug = _fill_closed_market_prep_sections(final_map, rows or [], market_phase=market_phase, limit=limit)
+    polygon_distribution_router_debug = _distribute_polygon_next_day_to_existing_sections(final_map, rows or [], market_phase=market_phase, limit=limit)
     promotion_bridge_rows, promotion_bridge_debug = _build_promotion_bridge_candidates(final_map, market_phase=market_phase, limit=limit)
     final_map["promotion_bridge_candidates"] = promotion_bridge_rows
     low_float_capture = _low_float_capture_debug(rows or [], final_map.get("low_float_premarket_radar", []))
@@ -4222,6 +4419,10 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "closed_market_prep_enabled": bool(closed_market_planning_debug.get("enabled")),
         "closed_market_prep_added_count": int(closed_market_planning_debug.get("total_added", 0) or 0),
         "closed_market_prep_rule_ar": closed_market_planning_debug.get("rule_ar"),
+        "polygon_distribution_router_debug": polygon_distribution_router_debug,
+        "polygon_distribution_router_rule_ar": polygon_distribution_router_debug.get("rule_ar"),
+        "polygon_distribution_total_added": int(polygon_distribution_router_debug.get("total_added", 0) or 0),
+        "polygon_distribution_added_by_section": polygon_distribution_router_debug.get("added_by_section", {}),
         "low_float_capture_debug": low_float_capture,
         "low_float_capture_rule_ar": low_float_capture.get("rule_ar"),
         "fast_lane_funnel_debug": fast_lane_funnel_display_debug,
