@@ -47,6 +47,8 @@ def scan_all(debug: bool = False):
     except Exception as exc:
         print(f"MISSED_SOURCE_RECORD_ERROR: {type(exc).__name__}: {str(exc)[:160]}", flush=True)
     source_reasons = (source_diag or {}).get("reasons", {}) if isinstance(source_diag, dict) else {}
+    source_tags_map = (source_diag or {}).get("source_tags", {}) if isinstance(source_diag, dict) else {}
+    live_tight_map = (source_diag or {}).get("live_tight_monitoring_v2v_by_symbol", {}) if isinstance(source_diag, dict) else {}
     symbols = [s for s in raw_symbols if normalize_symbol_text(s) not in manual_sharia_exclusions]
     rows = []
     diag = {
@@ -102,6 +104,10 @@ def scan_all(debug: bool = False):
         "dynamic_big_explosion_live_count": int((source_diag or {}).get("big_explosion_live_count", 0) or 0),
         "dynamic_big_explosion_live_symbols": (source_diag or {}).get("big_explosion_live_symbols", []),
         "dynamic_big_explosion_live_debug": (source_diag or {}).get("big_explosion_live_debug", {}),
+        "dynamic_live_tight_monitoring_v2v_count": int((source_diag or {}).get("live_tight_monitoring_v2v_count", 0) or 0),
+        "dynamic_live_tight_monitoring_v2v_symbols": (source_diag or {}).get("live_tight_monitoring_v2v_symbols", []),
+        "dynamic_live_tight_monitoring_v2v_memory": (source_diag or {}).get("live_tight_monitoring_v2v_memory", {}),
+        "dynamic_live_tight_monitoring_v2v_rule_ar": str((source_diag or {}).get("live_tight_monitoring_v2v_rule_ar", "") or ""),
         "dynamic_discovery_elapsed_sec": (source_diag or {}).get("elapsed_sec", None),
         "scan_requested_universe": int(requested_universe),
         "manual_priority_count": int((source_diag or {}).get("manual_priority_count", 0) or 0),
@@ -151,10 +157,22 @@ def scan_all(debug: bool = False):
                 p["ai_summary"] += "السعر اللحظي غير موثوق"
 
             try:
-                src_reason = source_reasons.get(str(s).upper().strip(), [])
+                sym_key = str(s).upper().strip()
+                src_reason = source_reasons.get(sym_key, [])
                 if src_reason:
                     p["source_reason_tags"] = src_reason
                     p["source_reason"] = " + ".join(src_reason[:5])
+                src_tags = source_tags_map.get(sym_key, []) if isinstance(source_tags_map, dict) else []
+                if src_tags:
+                    p["source_tags"] = src_tags
+                live_tight = live_tight_map.get(sym_key, {}) if isinstance(live_tight_map, dict) else {}
+                if isinstance(live_tight, dict) and live_tight.get("eligible"):
+                    p["live_tight_monitoring_v2v"] = True
+                    p["live_tight_monitoring_profile_v2v"] = live_tight
+                    p["live_tight_stage_ar_v2v"] = live_tight.get("stage_ar")
+                    p["live_tight_reasons_ar_v2v"] = list(live_tight.get("reasons") or [])[:8]
+                    p["live_tight_prepared_symbol_v2v"] = bool(live_tight.get("prepared_watch_symbol") or live_tight.get("prepared"))
+                    p["live_tight_new_intraday_symbol_v2v"] = bool(live_tight.get("new_intraday_symbol"))
             except Exception:
                 pass
 

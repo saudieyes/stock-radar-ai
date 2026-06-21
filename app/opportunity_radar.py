@@ -23,12 +23,18 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2u5_sharia_replacement_visible_blocked_2026_06_20"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2v_live_tight_monitoring_fast_promotion_2026_06_21"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
 PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u5_sharia_replacement_visible_blocked_2026_06_20"
+LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
+LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2v_2026_06_21"
+LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT = 3.0
+LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT = 5.0
+LIVE_TIGHT_MONITORING_MIN_VOLUME = 20_000.0
+LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME = 25_000.0
 
 PERSONAL_PRICE_COMFORT = 50.0
 PERSONAL_PRICE_MAX_NORMAL = 150.0
@@ -2178,6 +2184,301 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
     return rows, debug
 
 
+
+def _load_live_tight_monitoring_memory_items() -> tuple[list[dict], dict[str, Any]]:
+    """V2V: read short-lived live-tight monitoring memory for direct UI surfacing.
+
+    This is a display/monitoring bridge only. It keeps candidates that started
+    moving intraday visible across refresh cycles without changing BUY_NOW or
+    Cautious gates.
+    """
+    debug: dict[str, Any] = {
+        "version": LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION,
+        "enabled": True,
+        "memory_key": LIVE_TIGHT_MONITORING_MEMORY_KEY,
+        "stored_count": 0,
+        "bridge_count": 0,
+        "symbols": [],
+        "rule_ar": "V2V: يعرض مرشحي المراقبة اللصيقة الذين بدأوا +3%/+5% مع حجم. مراقبة/تأكيد مبكر فقط ولا يفتح شراء مباشر.",
+    }
+    try:
+        payload = get_json(LIVE_TIGHT_MONITORING_MEMORY_KEY, {}) or {}
+    except Exception as exc:
+        debug["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+        return [], debug
+    if not isinstance(payload, dict):
+        debug["error"] = "payload_not_dict"
+        return [], debug
+    items = [x for x in list(payload.get("items") or []) if isinstance(x, dict)]
+    debug["stored_count"] = int(payload.get("count", len(items)) or 0)
+    debug["updated_at_utc"] = payload.get("updated_at_utc", "")
+    debug["source"] = payload.get("source", "")
+    debug["symbols"] = [_u((x or {}).get("symbol")) for x in items if _u((x or {}).get("symbol"))]
+    return items, debug
+
+
+def _row_volume(row: dict) -> float:
+    return _first_nested(row, ["live_volume", "volume", "day_volume", "volume_live", "regularMarketVolume", "pre_market_volume", "premarket_volume"], 0.0)
+
+
+def _row_dollar_volume(row: dict) -> float:
+    dollar = _first_nested(row, ["live_dollar_volume", "dollar_volume", "current_dollar_volume", "day_dollar_volume", "pre_market_dollar_volume", "premarket_dollar_volume"], 0.0)
+    if dollar <= 0:
+        price = _price(row)
+        volume = _row_volume(row)
+        if price > 0 and volume > 0:
+            dollar = price * volume
+    return dollar
+
+
+def _row_source_text(row: dict) -> str:
+    pieces: list[str] = []
+    for key in [
+        "source_reason", "source_layer", "source", "move_stage", "opportunity_bucket",
+        "critical_promotion_reason_ar", "trade_type_label_ar", "display_plan_family_label",
+    ]:
+        pieces.append(_s(row.get(key)))
+    for key in ["source_reason_tags", "source_tags", "opportunity_reasons", "technical_explainer_reasons", "big_explosion_prepared_reasons_ar"]:
+        val = row.get(key)
+        if isinstance(val, list):
+            pieces.extend(_s(x) for x in val[:12])
+        else:
+            pieces.append(_s(val))
+    return " ".join([x for x in pieces if x]).lower()
+
+
+def _row_looks_prepared_watch(row: dict) -> bool:
+    if not isinstance(row, dict):
+        return False
+    sym = _u(row.get("symbol"))
+    bucket = _s(row.get("critical_pre_explosion_bucket_v2u3") or row.get("prepared_bucket") or row.get("opportunity_bucket")).lower()
+    text = _row_source_text(row)
+    return bool(
+        row.get("big_explosion_prepared_watch_v2u")
+        or row.get("critical_promotion_gate_v2u3")
+        or row.get("critical_pre_explosion_watch_v2u4")
+        or bucket.startswith("critical_")
+        or "prepared_watch" in text
+        or "prepared watch" in text
+        or "big_explosion_prepared" in text
+        or sym in {"EHGO", "ICCM", "TPC", "SNBR", "HOUR", "NIXX"}
+    )
+
+
+def _row_looks_live_ignition(row: dict) -> bool:
+    text = _row_source_text(row)
+    return bool(
+        row.get("live_tight_monitoring_v2v")
+        or row.get("big_explosion_live_v2t")
+        or row.get("micro_explosion_capture_v2r")
+        or row.get("low_float_fast_lane_source_v2o")
+        or row.get("low_float_fast_lane")
+        or "live_tight_monitoring_v2v" in text
+        or "live ignition" in text
+        or "big_explosion_live" in text
+        or "micro_explosion" in text
+        or "fast lane" in text
+        or "low-float" in text
+    )
+
+
+def _row_sharia_v2v(row: dict) -> dict[str, Any]:
+    sym = _u(row.get("symbol"))
+    sh = _fast_sharia_for_prepared_symbol(sym) if sym else {"status": "needs_review", "gray": True, "blocked": False}
+    row_status = _s(row.get("sharia_status") or row.get("sharia_compliance") or row.get("sharia_label")).lower()
+    manual_excluded = bool(row.get("sharia_manual_excluded") or row.get("manual_sharia_excluded") or row.get("sharia_blocked_from_buy_v2u5"))
+    if manual_excluded or row_status in {"non_compliant", "haram", "excluded", "blocked"}:
+        sh = {**sh, "status": "non_compliant", "label": "محجوب شرعيًا", "blocked": True, "gray": False, "manual_excluded": True}
+    elif row_status in {"needs_review", "unknown", "gray", "review"}:
+        sh = {**sh, "status": "needs_review", "label": _s(row.get("sharia_label")) or sh.get("label") or "يحتاج مراجعة شرعية", "gray": True}
+    return sh
+
+
+def _live_tight_monitoring_profile(row: dict, flags: dict | None = None) -> dict[str, Any]:
+    """Identify V2V live-tight monitoring candidates without changing execution decisions."""
+    if not isinstance(row, dict):
+        return {"matched": False}
+    sym = _u(row.get("symbol"))
+    if not sym:
+        return {"matched": False}
+    existing = row.get("live_tight_monitoring_profile_v2v")
+    if isinstance(existing, dict) and (existing.get("eligible") or existing.get("matched")):
+        change = _num(existing.get("change_pct", _change_pct(row)), 0.0)
+        volume = _num(existing.get("volume", _row_volume(row)), 0.0)
+        dollar = _num(existing.get("dollar_volume", _row_dollar_volume(row)), 0.0)
+        prepared = bool(existing.get("prepared_watch_symbol") or existing.get("prepared") or _row_looks_prepared_watch(row))
+        new_intraday = bool(existing.get("new_intraday_symbol") or (not prepared and _row_looks_live_ignition(row)))
+        base_score = _num(existing.get("score"), 0.0)
+        source_reasons = [_s(x) for x in list(existing.get("reasons") or []) if _s(x)]
+    else:
+        change = _change_pct(row)
+        volume = _row_volume(row)
+        dollar = _row_dollar_volume(row)
+        prepared = _row_looks_prepared_watch(row)
+        new_intraday = bool(not prepared and _row_looks_live_ignition(row))
+        base_score = 0.0
+        source_reasons = []
+    if dollar <= 0 and _price(row) > 0 and volume > 0:
+        dollar = _price(row) * volume
+    volume_ok = bool(volume >= LIVE_TIGHT_MONITORING_MIN_VOLUME or dollar >= LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME)
+    threshold = LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT if prepared else LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT
+    matched = bool(row.get("live_tight_monitoring_v2v") or (volume_ok and (prepared or new_intraday) and change >= threshold))
+    if not matched:
+        return {"matched": False}
+    sh = _row_sharia_v2v(row)
+    blocked = bool(sh.get("blocked"))
+    gray = bool(sh.get("gray"))
+    score = base_score
+    score += max(0.0, min(change, 35.0)) * 3.0
+    if volume >= LIVE_TIGHT_MONITORING_MIN_VOLUME:
+        score += 18.0
+    if dollar >= LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME:
+        score += 22.0
+    if prepared:
+        score += 36.0
+    if new_intraday:
+        score += 26.0
+    if blocked:
+        label = "⛔ بدأ يتحرك لكنه محجوب شرعيًا — تعلم فقط"
+        sharia_reason = "محجوب شرعيًا: يبقى ظاهرًا للمراجعة/التعلم ولا يدخل Strong أو Cautious."
+    elif gray:
+        label = "⚠️ بدأ يتحرك — مراجعة شرعية عاجلة"
+        sharia_reason = "الحكم الشرعي غير محسوم: تأكيد مبكر للمراقبة فقط حتى الاعتماد اليدوي."
+    else:
+        label = "⚡ تأكيد مبكر حي — مراقبة لصيقة"
+        sharia_reason = "مرشح شرعي/نظيف مبدئيًا؛ لا يتحول لشراء إلا إذا اكتملت الخطة والسيولة والسعر."
+    if prepared:
+        head = f"V2V: كان في Prepared Watch وبدأ يتحرك {round(change, 2)}% مع حجم؛ لا ننتظر +20%/+50%."
+    else:
+        head = f"V2V: مرشح جديد ظهر أثناء التداول وبدأ {round(change, 2)}% مع حجم؛ يدخل مراقبة لصيقة فورًا."
+    liq = []
+    if volume > 0:
+        liq.append(f"الحجم {int(volume):,}")
+    if dollar > 0:
+        liq.append(f"دولار فوليوم تقريبًا {int(dollar):,}")
+    reasons = _dedupe([head, "هذه طبقة مراقبة/ترقية سريعة فقط؛ لا تغير Strong/Cautious ولا تتجاوز الشرعية.", sharia_reason] + liq + source_reasons, 12)
+    return {
+        "matched": True,
+        "eligible": True,
+        "symbol": sym,
+        "label": label,
+        "stage": "live_tight_monitoring",
+        "stage_ar": label,
+        "prepared_watch_symbol": bool(prepared),
+        "new_intraday_symbol": bool(new_intraday),
+        "change_pct": _round(change, 3),
+        "volume": _round(volume, 0),
+        "dollar_volume": _round(dollar, 0),
+        "volume_ok": bool(volume_ok),
+        "threshold_pct": threshold,
+        "score": _round(score, 2),
+        "blocked": blocked,
+        "gray": gray,
+        "sharia_status": sh.get("status"),
+        "sharia_label": sh.get("label"),
+        "reasons": reasons,
+        "rule_ar": "V2V: تأكيد مبكر/مراقبة لصيقة فقط؛ لا يفتح شراء مباشر ولا يتجاوز فلتر الشرعية.",
+    }
+
+
+def _live_tight_row_from_item(item: dict, idx: int = 0) -> dict[str, Any]:
+    sym = _u((item or {}).get("symbol"))
+    profile = item.get("profile") if isinstance(item.get("profile"), dict) else dict(item or {})
+    change = _num(profile.get("change_pct", item.get("change_pct", 0)), 0.0)
+    price = _num(profile.get("price", item.get("price", 0)), 0.0)
+    volume = _num(profile.get("volume", item.get("volume", 0)), 0.0)
+    dollar = _num(profile.get("dollar_volume", item.get("dollar_volume", 0)), 0.0)
+    prepared = bool(profile.get("prepared_watch_symbol") or profile.get("prepared") or item.get("prepared_watch_symbol"))
+    sh = _fast_sharia_for_prepared_symbol(sym)
+    blocked = bool(sh.get("blocked"))
+    gray = bool(sh.get("gray"))
+    if blocked:
+        label = "⛔ بدأ يتحرك لكنه محجوب شرعيًا — تعلم فقط"
+        decision = "محجوب شرعيًا — تعلم فقط"
+    elif gray:
+        label = "⚠️ بدأ يتحرك — مراجعة شرعية عاجلة"
+        decision = "تأكيد مبكر حي — مراجعة شرعية فقط"
+    else:
+        label = "⚡ تأكيد مبكر حي — مراقبة لصيقة"
+        decision = "تأكيد مبكر حي — مراقبة لصيقة فقط"
+    reasons = _dedupe([
+        f"V2V ذاكرة حية: السهم بدأ يتحرك {round(change, 2)}% مع حجم وتم حفظه حتى لا يختفي في دورة بطيئة.",
+        "لا شراء مباشر: Strong/Cautious لا يتغيران إلا إذا اكتملت الشرعية والخطة والسعر والسيولة.",
+        _s(sh.get("reason")),
+    ] + [_s(x) for x in list(profile.get("reasons") or item.get("reasons") or []) if _s(x)], 12)
+    row = {
+        "symbol": sym,
+        "company": sym,
+        "current_price_live": price,
+        "display_price": price,
+        "price": price,
+        "display_change_pct": change,
+        "change_vs_prev_close_pct": change,
+        "live_volume": volume,
+        "live_dollar_volume": dollar,
+        "decision": decision,
+        "effective_decision": "مراقبة",
+        "opportunity_bucket": "live_tight_monitoring",
+        "opportunity_stage": "live_tight_monitoring",
+        "opportunity_stage_label": label,
+        "display_plan_family_label": label,
+        "trade_type_label_ar": "Live Tight Monitoring V2V",
+        "opportunity_rank_score": 99000.0 - idx + _num(profile.get("score", item.get("score", 0)), 0.0),
+        "opportunity_reasons": reasons,
+        "technical_explainer_reasons": reasons,
+        "why_appeared_ar": "، ".join(reasons[:5]),
+        "non_actionable_prep": True,
+        "live_tight_monitoring_v2v": True,
+        "live_tight_monitoring_profile_v2v": {
+            "matched": True,
+            "eligible": True,
+            "source": item.get("source", "live_tight_memory_direct_bridge"),
+            "score": _num(profile.get("score", item.get("score", 0)), 0.0),
+            "change_pct": change,
+            "volume": volume,
+            "dollar_volume": dollar,
+            "prepared_watch_symbol": prepared,
+            "new_intraday_symbol": bool(profile.get("new_intraday_symbol") or item.get("new_intraday_symbol")),
+            "blocked": blocked,
+            "gray": gray,
+            "stage_ar": label,
+            "reasons": reasons,
+            "rule_ar": "V2V: ذاكرة مراقبة لصيقة للعرض فقط، لا شراء مباشر.",
+        },
+        "live_tight_stage_ar_v2v": label,
+        "live_tight_prepared_symbol_v2v": prepared,
+        "live_tight_new_intraday_symbol_v2v": bool(profile.get("new_intraday_symbol") or item.get("new_intraday_symbol")),
+        "sharia_status": sh.get("status"),
+        "sharia_label": sh.get("label"),
+        "sharia_reason": sh.get("reason"),
+        "sharia_is_gray": gray,
+        "sharia_manual_excluded": bool(sh.get("manual_excluded")),
+        "sharia_blocked_from_buy_v2u5": blocked,
+    }
+    return row
+
+
+def _live_tight_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+    lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
+    items, debug = _load_live_tight_monitoring_memory_items()
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(items or []):
+        sym = _u((item or {}).get("symbol"))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        row = _live_tight_row_from_item(item, idx=idx)
+        if row.get("symbol"):
+            rows.append(row)
+        if len(rows) >= lim:
+            break
+    debug["bridge_count"] = len(rows)
+    debug["symbols"] = [r.get("symbol") for r in rows]
+    if not rows:
+        debug["empty_reason_ar"] = "لا توجد ذاكرة V2V نشطة؛ ستظهر عندما يبدأ مرشح Prepared Watch أو مرشح جديد +3%/+5% مع حجم."
+    return rows, debug
+
 def _critical_pre_explosion_profile(row: dict, flags: dict | None = None) -> dict[str, Any]:
     """V2U4: identify prepared critical explosion candidates before the move.
 
@@ -2256,6 +2557,10 @@ def _stage_from_flags(row: dict, flags: dict) -> tuple[str, str, str, list[str]]
             return "cautious_reclaim", "🟠 دخول بحذر — Reclaim", "cautious_entries", flags.get("reclaim_reasons", [])
         return "cautious", "🟠 دخول بحذر", "cautious_entries", ["خطة جيدة لكنها تحتاج انضباطًا وحجمًا أصغر من Strong."]
     classic = flags.get("classic_small_stock") or {}
+    live_tight_profile = _live_tight_monitoring_profile(row, flags)
+    if live_tight_profile.get("matched"):
+        reasons = list(live_tight_profile.get("reasons") or [])
+        return "live_tight_monitoring", _s(live_tight_profile.get("label")) or "⚡ تأكيد مبكر حي", "live_tight_monitoring", _dedupe(reasons, 10)
     critical_profile = _critical_pre_explosion_profile(row, flags)
     if critical_profile.get("matched"):
         reasons = list(critical_profile.get("reasons") or [])
@@ -2351,6 +2656,9 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
         base_extra = 24.0 + _num((flags.get("classic_small_stock") or {}).get("score"), 0.0) * 0.55
     elif bucket == "low_float_premarket":
         base_extra = 20.0 + flags.get("liquidity_score", 0.0)
+    elif bucket == "live_tight_monitoring":
+        lp = _live_tight_monitoring_profile(out, flags)
+        base_extra = 95.0 + _num(lp.get("score"), 0.0) * 0.35
     elif bucket == "critical_pre_explosion_watch":
         cp = _critical_pre_explosion_profile(out, flags)
         base_extra = 80.0 + _num(cp.get("score"), 0.0) * 0.35
@@ -2393,6 +2701,18 @@ def enrich_row_opportunity_radar(row: dict, market_phase: str = "") -> dict:
     out["learning_pattern_key"] = (learning_overlay or {}).get("pattern_key") if isinstance(learning_overlay, dict) else ""
     out["opportunity_flow_flags"] = flags
     out["small_stock_classic_setup"] = flags.get("classic_small_stock") or {}
+    live_tight_profile_for_card = _live_tight_monitoring_profile(out, flags)
+    if live_tight_profile_for_card.get("matched"):
+        out["live_tight_monitoring_v2v"] = True
+        out["live_tight_monitoring_profile_v2v"] = live_tight_profile_for_card
+        out["live_tight_stage_ar_v2v"] = live_tight_profile_for_card.get("label")
+        out["live_tight_reasons_ar_v2v"] = list(live_tight_profile_for_card.get("reasons") or [])[:8]
+        out["live_tight_prepared_symbol_v2v"] = bool(live_tight_profile_for_card.get("prepared_watch_symbol"))
+        out["live_tight_new_intraday_symbol_v2v"] = bool(live_tight_profile_for_card.get("new_intraday_symbol"))
+        out["non_actionable_prep"] = True
+        merged_reasons = _dedupe(list(live_tight_profile_for_card.get("reasons") or []) + merged_reasons, 12)
+        out["opportunity_reasons"] = merged_reasons
+        out["technical_explainer_reasons"] = merged_reasons
     critical_profile_for_card = _critical_pre_explosion_profile(out, flags)
     if critical_profile_for_card.get("matched"):
         out["critical_pre_explosion_watch_v2u4"] = critical_profile_for_card
@@ -2438,6 +2758,7 @@ def enrich_rows_opportunity_radar(rows: list[dict], market_phase: str = "") -> l
 
 
 OPPORTUNITY_BUCKET_KEYS = [
+    "live_tight_monitoring_candidates",
     "critical_pre_explosion_watch",
     "promotion_bridge_candidates",
     "learning_opportunity_candidates",
@@ -3522,17 +3843,35 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         if not isinstance(row, dict):
             continue
         critical_profile = _critical_pre_explosion_profile(row, {})
-        if _is_blocked(row) and not critical_profile.get("matched"):
+        live_tight_profile = _live_tight_monitoring_profile(row, {})
+        if _is_blocked(row) and not (critical_profile.get("matched") or live_tight_profile.get("matched")):
             continue
         bucket = _s(row.get("opportunity_bucket"))
         if bucket:
             raw_counts[bucket] = raw_counts.get(bucket, 0) + 1
-        if not _is_personal_section_eligible(row) and not critical_profile.get("matched"):
+        if not _is_personal_section_eligible(row) and not (critical_profile.get("matched") or live_tight_profile.get("matched")):
             sym = _u(row.get("symbol"))
             if sym:
                 suppressed_high_price.append(sym)
             continue
-        if critical_profile.get("matched") or bucket == "critical_pre_explosion_watch":
+        if live_tight_profile.get("matched") or bucket == "live_tight_monitoring":
+            row = dict(row)
+            row["opportunity_bucket"] = "live_tight_monitoring"
+            row["opportunity_stage"] = "live_tight_monitoring"
+            row["opportunity_stage_label"] = live_tight_profile.get("label") or row.get("opportunity_stage_label") or "⚡ تأكيد مبكر حي"
+            row["trade_type_label_ar"] = "Live Tight Monitoring V2V"
+            row["decision"] = "تأكيد مبكر حي — مراقبة لصيقة فقط"
+            row["effective_decision"] = "مراقبة"
+            row["non_actionable_prep"] = True
+            row["display_plan_family_label"] = row["opportunity_stage_label"]
+            row["live_tight_monitoring_v2v"] = True
+            row["live_tight_monitoring_profile_v2v"] = live_tight_profile
+            row["live_tight_stage_ar_v2v"] = live_tight_profile.get("label")
+            row["opportunity_reasons"] = _dedupe(list(live_tight_profile.get("reasons") or []) + list(row.get("opportunity_reasons") or []), 12)
+            row["technical_explainer_reasons"] = row["opportunity_reasons"]
+            row["opportunity_rank_score"] = max(_num(row.get("opportunity_rank_score"), 0.0), 2000 + _num(live_tight_profile.get("score"), 0.0))
+            bucket_map["live_tight_monitoring_candidates"].append(row)
+        elif critical_profile.get("matched") or bucket == "critical_pre_explosion_watch":
             row = dict(row)
             row["opportunity_bucket"] = "critical_pre_explosion_watch"
             row["opportunity_stage"] = "critical_pre_explosion_watch"
@@ -3568,6 +3907,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # Keep sections distinct: if a symbol is in a more specific high-priority stage,
     # do not repeat it in lower-information sections.
     ordered_keys = [
+        "live_tight_monitoring_candidates",
         "critical_pre_explosion_watch",
         "promotion_bridge_candidates",
         "learning_opportunity_candidates",
@@ -3595,6 +3935,26 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             if len(items) >= max(1, int(limit or 25)):
                 break
         final_map[key] = items
+
+    # V2V bridge: surface sticky live-tight candidates directly.  This keeps
+    # intraday +3%/+5% candidates visible even if broad ranking/caching would
+    # otherwise bury them.  Still non-actionable and Sharia-safe.
+    live_tight_ui_bridge_rows, live_tight_ui_bridge_debug = _live_tight_ui_bridge_rows(limit=limit)
+    if live_tight_ui_bridge_rows:
+        existing = final_map.get("live_tight_monitoring_candidates", []) or []
+        merged = []
+        seen_live_bridge: set[str] = set()
+        for item in list(live_tight_ui_bridge_rows) + list(existing):
+            if not isinstance(item, dict):
+                continue
+            sym = _u(item.get("symbol"))
+            if not sym or sym in seen_live_bridge:
+                continue
+            seen_live_bridge.add(sym)
+            merged.append(item)
+            if len(merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                break
+        final_map["live_tight_monitoring_candidates"] = merged
 
     # V2U4b bridge: the Prepared Watch memory may contain gray/non-compliant
     # critical candidates that were intentionally removed from the clean-only
@@ -3662,6 +4022,10 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "low_float_capture_rule_ar": low_float_capture.get("rule_ar"),
         "fast_lane_funnel_debug": fast_lane_funnel_display_debug,
         "fast_lane_funnel_rule_ar": fast_lane_funnel_display_debug.get("rule_ar"),
+        "live_tight_monitoring_debug": live_tight_ui_bridge_debug,
+        "live_tight_monitoring_rule_ar": live_tight_ui_bridge_debug.get("rule_ar"),
+        "live_tight_monitoring_candidates_count": len(final_map.get("live_tight_monitoring_candidates", [])),
+        "live_tight_monitoring_candidates": final_map.get("live_tight_monitoring_candidates", []),
         "low_float_fast_lane_raw_watch_count": len(fast_lane_raw_watch_rows),
         "low_float_fast_lane_raw_watch": fast_lane_raw_watch_rows,
         "prepared_watch_ui_bridge_debug": prepared_watch_ui_bridge_debug,

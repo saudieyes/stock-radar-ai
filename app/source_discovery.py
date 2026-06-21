@@ -126,6 +126,18 @@ BIG_EXPLOSION_PREPARED_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepar
 BIG_EXPLOSION_TRUE_MINING_ENABLED = _env_bool("BIG_EXPLOSION_TRUE_MINING_ENABLED", True)
 BIG_EXPLOSION_OPENING_INSTANT_ENABLED = _env_bool("BIG_EXPLOSION_OPENING_INSTANT_ENABLED", True)
 
+# V2V: live tight monitoring and fast promotion source lane.  This does not
+# change Strong/Cautious rules.  It only keeps prepared/new ignition candidates
+# in a front-row live watch lane when +3%/+5% movement appears with real volume.
+LIVE_TIGHT_MONITORING_ENABLED = _env_bool("LIVE_TIGHT_MONITORING_ENABLED", True)
+LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
+LIVE_TIGHT_MONITORING_LIMIT = _env_int("LIVE_TIGHT_MONITORING_LIMIT", 160, 20, 300)
+LIVE_TIGHT_MONITORING_TTL_HOURS = _env_int("LIVE_TIGHT_MONITORING_TTL_HOURS", 10, 2, 24)
+LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT", "3") or 3)
+LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT", "5") or 5)
+LIVE_TIGHT_MONITORING_MIN_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING_MIN_VOLUME", "20000") or 20_000)
+LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME", "25000") or 25_000)
+
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # V2U3 regression canaries from replay: these are not buy calls; they only force live quote confirmation so the scanner can detect similar/prepared movement early.
     "EHGO", "ICCM", "TPC", "SNBR",
@@ -302,6 +314,167 @@ def load_prepared_big_explosion_watch() -> tuple[list[dict], dict]:
     debug["active_count"] = len(out)
     debug["symbols"] = [x.get("symbol") for x in out[:80]]
     return out, debug
+
+
+def _load_live_tight_monitoring_memory() -> tuple[list[dict], dict]:
+    payload = {}
+    try:
+        payload = _sqlite_get_json(LIVE_TIGHT_MONITORING_MEMORY_KEY, {}) or {}
+    except Exception:
+        payload = {}
+    debug = {
+        "version": "live_tight_monitoring_memory_v2v_2026_06_21",
+        "enabled": bool(LIVE_TIGHT_MONITORING_ENABLED),
+        "memory_key": LIVE_TIGHT_MONITORING_MEMORY_KEY,
+        "stored_count": int((payload or {}).get("count", 0) or 0),
+        "active_count": 0,
+        "expired_count": 0,
+        "rule_ar": "V2V: ذاكرة قصيرة للمرشحين الذين بدأوا يتحركون أثناء التداول؛ مراقبة/ترقية فقط ولا تفتح شراء مباشر.",
+    }
+    if not LIVE_TIGHT_MONITORING_ENABLED or not isinstance(payload, dict):
+        return [], debug
+    now_ts = time.time()
+    active: list[dict] = []
+    for item in list(payload.get("items") or [])[: int(LIVE_TIGHT_MONITORING_LIMIT or 160)]:
+        if not isinstance(item, dict):
+            continue
+        sym = _clean_symbol(item.get("symbol"))
+        if not sym:
+            continue
+        try:
+            age_h = (now_ts - float(item.get("updated_ts", item.get("created_ts", now_ts)) or now_ts)) / 3600.0
+        except Exception:
+            age_h = 0.0
+        if age_h > float(LIVE_TIGHT_MONITORING_TTL_HOURS or 10):
+            debug["expired_count"] += 1
+            continue
+        out = dict(item)
+        out["symbol"] = sym
+        out["age_hours"] = safe_round(age_h, 2)
+        active.append(out)
+    debug["active_count"] = len(active)
+    debug["symbols"] = [x.get("symbol") for x in active[:80]]
+    return active, debug
+
+
+def _save_live_tight_monitoring_memory(items: list[dict] | None, *, source: str = "") -> dict:
+    now_ts = time.time()
+    now_iso = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    old_items, old_debug = _load_live_tight_monitoring_memory()
+    merged: dict[str, dict] = {}
+    for item in old_items or []:
+        sym = _clean_symbol((item or {}).get("symbol"))
+        if sym:
+            merged[sym] = dict(item)
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        sym = _clean_symbol(item.get("symbol"))
+        if not sym:
+            continue
+        prev = merged.get(sym, {})
+        created_ts = float(prev.get("created_ts", now_ts) or now_ts)
+        reasons = []
+        for r in list(prev.get("reasons") or []) + list(item.get("reasons") or []):
+            txt = str(r or "").strip()
+            if txt and txt not in reasons:
+                reasons.append(txt[:160])
+        merged[sym] = {
+            **prev,
+            **{k: v for k, v in dict(item).items() if k != "reasons"},
+            "symbol": sym,
+            "created_ts": created_ts,
+            "updated_ts": now_ts,
+            "updated_at_utc": now_iso,
+            "reasons": reasons[:10],
+        }
+    ordered = sorted(merged.values(), key=lambda x: (float(x.get("updated_ts", 0) or 0), float(x.get("score", 0) or 0)), reverse=True)[: int(LIVE_TIGHT_MONITORING_LIMIT or 160)]
+    payload = {
+        "version": "live_tight_monitoring_v2v_2026_06_21",
+        "updated_at_utc": now_iso,
+        "source": str(source or ""),
+        "count": len(ordered),
+        "items": ordered,
+        "previous_debug": old_debug,
+        "rule_ar": "V2V: مرشح قبل السوق أو مرشح جديد بدأ +3%/+5% مع حجم حقيقي يدخل مراقبة لصيقة/تأكيد مبكر. لا يفتح Strong/Cautious ولا يتجاوز الشرعية.",
+    }
+    ok = False
+    try:
+        ok = bool(_sqlite_set_json(LIVE_TIGHT_MONITORING_MEMORY_KEY, payload))
+    except Exception:
+        ok = False
+    payload["saved"] = ok
+    return payload
+
+
+def _live_tight_profile_from_quote(symbol: str, quote: dict, *, prepared: bool = False, from_memory: bool = False) -> dict:
+    sym = _clean_symbol(symbol)
+    price = to_float((quote or {}).get("price"))
+    change_pct = to_float((quote or {}).get("change_pct"))
+    volume = to_float((quote or {}).get("volume"))
+    dollar_volume = price * volume if price > 0 and volume > 0 else 0.0
+    debug = {
+        "symbol": sym,
+        "prepared": bool(prepared),
+        "from_memory": bool(from_memory),
+        "price": safe_round(price, 4),
+        "change_pct": safe_round(change_pct, 2),
+        "volume": safe_round(volume, 0),
+        "dollar_volume": safe_round(dollar_volume, 0),
+        "eligible": False,
+        "reasons": [],
+    }
+    if not LIVE_TIGHT_MONITORING_ENABLED or not sym or price <= 0:
+        return debug
+    min_change = LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT if prepared else LIVE_TIGHT_MONITORING_NEW_MIN_CHANGE_PCT
+    volume_ok = bool(volume >= LIVE_TIGHT_MONITORING_MIN_VOLUME or dollar_volume >= LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME)
+    if change_pct < float(min_change or 3):
+        debug["reasons"].append(f"لم يصل حد الحركة الحية بعد: {safe_round(change_pct, 2)}%")
+        return debug
+    if not volume_ok:
+        debug["reasons"].append("الحركة موجودة لكن الحجم/الدولار فوليوم لم يتأكد بعد")
+        return debug
+    stage = "live_early_confirmation_5pct" if change_pct >= 5.0 else "live_early_confirmation_3pct"
+    stage_ar = "⚡ تأكيد مبكر حي +5%" if change_pct >= 5.0 else "⚡ تأكيد مبكر حي +3%"
+    if prepared:
+        head = "مرشح Prepared Watch بدأ يتحرك الآن؛ لا ينتظر +20%/+50%."
+    elif from_memory:
+        head = "مرشح حي سابق ما زال تحت مراقبة لصيقة بذاكرة قصيرة."
+    else:
+        head = "مرشح جديد أثناء التداول بدأ حركة حية مع حجم؛ يدخل مراقبة لصيقة فورًا."
+    reasons = [head, f"الحركة الحالية {safe_round(change_pct, 2)}% مع حجم {int(volume or 0):,} ودولار فوليوم تقريبي {int(dollar_volume or 0):,}."]
+    return {
+        **debug,
+        "eligible": True,
+        "score": safe_round((70 if prepared else 54) + min(max(change_pct, 0), 30) * 1.6 + min(dollar_volume / 250000, 18), 3),
+        "stage": stage,
+        "stage_ar": stage_ar,
+        "label_ar": stage_ar,
+        "reasons": reasons,
+        "prepared_watch_symbol": bool(prepared),
+        "new_intraday_symbol": not bool(prepared),
+        "extended_hours": bool((quote or {}).get("extended_hours")),
+    }
+
+
+def _live_tight_memory_item(symbol: str, profile: dict, *, source: str = "fmp_live") -> dict:
+    sym = _clean_symbol(symbol)
+    return {
+        "symbol": sym,
+        "score": safe_round(profile.get("score", 0), 3),
+        "price": safe_round(profile.get("price", 0), 4),
+        "change_pct": safe_round(profile.get("change_pct", 0), 2),
+        "volume": safe_round(profile.get("volume", 0), 0),
+        "dollar_volume": safe_round(profile.get("dollar_volume", 0), 0),
+        "stage": str(profile.get("stage") or "live_early_confirmation"),
+        "stage_ar": str(profile.get("stage_ar") or "تأكيد مبكر حي"),
+        "label_ar": str(profile.get("label_ar") or profile.get("stage_ar") or "تأكيد مبكر حي"),
+        "prepared_watch_symbol": bool(profile.get("prepared_watch_symbol")),
+        "new_intraday_symbol": bool(profile.get("new_intraday_symbol")),
+        "extended_hours": bool(profile.get("extended_hours")),
+        "source": str(source or "fmp_live"),
+        "reasons": list(profile.get("reasons") or [])[:8],
+    }
 
 
 def _clean_symbol(symbol) -> str:
@@ -1548,6 +1721,11 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     big_explosion_live_debug: dict = {}
     prepared_big_explosion_watch_rows: list[dict] = []
     prepared_big_explosion_watch_debug: dict = {}
+    live_tight_monitoring_memory_rows: list[dict] = []
+    live_tight_monitoring_memory_debug: dict = {}
+    live_tight_monitoring_items: list[dict] = []
+    live_tight_monitoring_symbols: list[str] = []
+    live_tight_monitoring_by_symbol: dict[str, dict] = {}
     micro_watch_rows: list[dict] = []
 
     # V2U prepared explosion watch: load compact prior-session scan candidates
@@ -1598,6 +1776,26 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             )
     except Exception as exc:
         micro_explosion_watch_memory_debug = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+    # V2V sticky live-tight watch: short TTL memory for candidates that started
+    # moving intraday. They are re-confirmed with FMP in the next cycle and do
+    # not depend on the slow broad-market ranking.
+    try:
+        live_tight_monitoring_memory_rows, live_tight_monitoring_memory_debug = _load_live_tight_monitoring_memory()
+        for item in live_tight_monitoring_memory_rows or []:
+            sym = _clean_symbol((item or {}).get("symbol"))
+            if not sym:
+                continue
+            _add_candidate(
+                candidates,
+                sym,
+                132 + min(float((item or {}).get("score", 0) or 0), 120) * 0.24,
+                "live_tight_monitoring_v2v",
+                "V2V ذاكرة مراقبة لصيقة: مرشح بدأ حركة حية ويحتاج تحديث سريع لا دورة بطيئة",
+                {**item, "live_tight_monitoring_v2v": True, "live_tight_memory_v2v": True},
+            )
+    except Exception as exc:
+        live_tight_monitoring_memory_debug = {"ok": False, "load_error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
     # Source / Promotion V2a: explicitly inject the curated Early Movement
     # watchlist into the dynamic discovery source.  Previously it usually arrived
@@ -2071,12 +2269,14 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     seed_confirm_symbols = [s for s in sorted(MICRO_EXPLOSION_SEED_SYMBOLS)[:MICRO_EXPLOSION_SEED_CONFIRM_LIMIT]]
     memory_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (micro_watch_rows or [])[:MICRO_EXPLOSION_CLOSE_WATCH_LIMIT]]
     prepared_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (prepared_big_explosion_watch_rows or [])[:BIG_EXPLOSION_PREPARED_WATCH_LIMIT]]
+    live_tight_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (live_tight_monitoring_memory_rows or [])[:LIVE_TIGHT_MONITORING_LIMIT]]
     fmp_confirm_symbols = _scanner.unique_keep_order(
         prepared_confirm_symbols
+        + live_tight_confirm_symbols
         + [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
         + memory_confirm_symbols
         + seed_confirm_symbols
-    )[: max(DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT, min(520, DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT + MICRO_EXPLOSION_SEED_CONFIRM_LIMIT + BIG_EXPLOSION_PREPARED_WATCH_LIMIT))]
+    )[: max(DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT, min(560, DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT + MICRO_EXPLOSION_SEED_CONFIRM_LIMIT + BIG_EXPLOSION_PREPARED_WATCH_LIMIT + LIVE_TIGHT_MONITORING_LIMIT))]
     fmp_quotes = {}
     fmp_diag = {}
     if DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION and FMP_API_KEY and fmp_confirm_symbols:
@@ -2176,6 +2376,43 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         if change_pct >= 4.0:
             _add_candidate(candidates, sym, 14, "live_mover", "الحركة الحية مستمرة")
         try:
+            prepared_flag = sym in set(prepared_confirm_symbols or [])
+        except Exception:
+            prepared_flag = False
+        try:
+            v2v_profile = _live_tight_profile_from_quote(sym, quote or {}, prepared=bool(prepared_flag), from_memory=sym in set(live_tight_confirm_symbols or []))
+            if v2v_profile.get("eligible"):
+                live_tight_monitoring_symbols.append(sym)
+                live_tight_monitoring_by_symbol[sym] = dict(v2v_profile)
+                live_tight_monitoring_items.append(_live_tight_memory_item(sym, v2v_profile, source="fmp_live_confirmation"))
+                _add_candidate(
+                    candidates,
+                    sym,
+                    180 + float(v2v_profile.get("score", 0) or 0) * 0.42,
+                    "live_tight_monitoring_v2v",
+                    "V2V مراقبة لصيقة/تأكيد سريع: " + "، ".join(list(v2v_profile.get("reasons") or [])[:2]),
+                    {
+                        "live_tight_monitoring_v2v": True,
+                        "live_tight_stage_v2v": v2v_profile.get("stage"),
+                        "live_tight_stage_ar_v2v": v2v_profile.get("stage_ar"),
+                        "live_tight_prepared_symbol_v2v": bool(v2v_profile.get("prepared_watch_symbol")),
+                        "live_tight_new_intraday_symbol_v2v": bool(v2v_profile.get("new_intraday_symbol")),
+                        "live_tight_score_v2v": v2v_profile.get("score"),
+                        "live_tight_reasons_ar_v2v": list(v2v_profile.get("reasons") or [])[:8],
+                        "live_price": price,
+                        "live_change_pct": change_pct,
+                        "live_volume": volume,
+                        "live_dollar_volume": dollar_volume,
+                    },
+                )
+                if record_detection is not None:
+                    try:
+                        record_detection(sym, price=price, change_pct=change_pct, source_reason="V2V Live Tight Monitoring fast confirmation", source_layer="live_tight_monitoring_v2v", source_tags=["fmp_live_confirmed", "live_tight_monitoring_v2v", "fast_promotion_watch"], move_stage="Live Early Confirmation", early_or_late_detection="early")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        try:
             ignition = classify_live_ignition(sym, {"price": price, "change_pct": change_pct, "volume": volume, "dollar_volume": dollar_volume}) if live_ignition_enabled() else {}
             if ignition.get("hot_lane_eligible"):
                 _add_candidate(candidates, sym, 46 + float(ignition.get("ignition_score", 0) or 0) * 0.25, "live_ignition_hot_lane", "Hot Lane: بداية حركة مؤكدة بسعر حي", {"live_ignition_score": ignition.get("ignition_score"), "live_ignition_stage": ignition.get("stage_hint"), "live_price": price, "live_change_pct": change_pct, "live_volume": volume})
@@ -2197,6 +2434,15 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     except Exception as exc:
         micro_explosion_watch_memory_debug = {"ok": False, "update_error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
+    try:
+        live_tight_update = _save_live_tight_monitoring_memory(live_tight_monitoring_items, source="dynamic_discovery_v2v_fmp_live") if live_tight_monitoring_items else {"saved": False, "new_items": 0}
+        if isinstance(live_tight_monitoring_memory_debug, dict):
+            live_tight_monitoring_memory_debug.update({"update": live_tight_update, "new_items": len(live_tight_monitoring_items or [])})
+        else:
+            live_tight_monitoring_memory_debug = {"update": live_tight_update, "new_items": len(live_tight_monitoring_items or [])}
+    except Exception as exc:
+        live_tight_monitoring_memory_debug = {"ok": False, "update_error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
     ranked = _normalize_candidate_rows(candidates)
 
     def from_source(source: str, limit: int) -> list[str]:
@@ -2211,6 +2457,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Balanced order: V2a gives known weekly-priority names a front-row seat,
     # then today's live/new movers, with the old baseline as support only.
     selected_order = []
+    selected_order += from_source("live_tight_monitoring_v2v", min(LIVE_TIGHT_MONITORING_LIMIT, max_symbols))
     selected_order += from_source("big_explosion_prepared_watch_v2u", min(BIG_EXPLOSION_PREPARED_WATCH_LIMIT, max_symbols))
     selected_order += from_source("big_explosion_live_lane_v2u", min(120, max_symbols))
     selected_order += from_source("big_explosion_live_lane_v2t", min(90, max_symbols))
@@ -2275,9 +2522,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3i4_live_critical_pre_explosion_v2u4_2026_06_20",
+        "engine_version": "dynamic_discovery_v3j_live_tight_monitoring_v2v_2026_06_21",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2u4_live_critical_pre_explosion_watch_plus_opening_instant",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2v_live_tight_monitoring_fast_promotion",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -2319,6 +2566,11 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "big_explosion_prepared_watch_debug": prepared_big_explosion_watch_debug,
         "big_explosion_live_symbols": _scanner.unique_keep_order(big_explosion_live_symbols)[:160],
         "big_explosion_live_debug": big_explosion_live_debug,
+        "live_tight_monitoring_v2v_count": int(source_bucket_counts.get("live_tight_monitoring_v2v", 0) or len(live_tight_monitoring_symbols or [])) if 'source_bucket_counts' in locals() else int(len(live_tight_monitoring_symbols or [])),
+        "live_tight_monitoring_v2v_symbols": _scanner.unique_keep_order(live_tight_monitoring_symbols)[:120],
+        "live_tight_monitoring_v2v_by_symbol": {k: v for k, v in (live_tight_monitoring_by_symbol or {}).items()},
+        "live_tight_monitoring_v2v_memory": live_tight_monitoring_memory_debug,
+        "live_tight_monitoring_v2v_rule_ar": "V2V: Prepared Watch أو رمز جديد يبدأ +3%/+5% مع حجم يدخل تأكيد مبكر/مراقبة لصيقة. لا يفتح شراء مباشر ولا يتجاوز الشرعية.",
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,
