@@ -23,15 +23,15 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2v1_priority_router_section_clarity_2026_06_21"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_rebuild_v2v1b_extended_v2v_display_fix_2026_06_21"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
 PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u5_sharia_replacement_visible_blocked_2026_06_20"
 LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
-LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2v1_priority_router_2026_06_21"
-V2V1_PRIORITY_ROUTER_VERSION = "v2v1_live_priority_monitoring_router_2026_06_21"
+LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2v1b_extended_display_fix_2026_06_21"
+V2V1_PRIORITY_ROUTER_VERSION = "v2v1b_live_priority_monitoring_router_extended_display_fix_2026_06_21"
 V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT = 18.0
 V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT = 35.0
 LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT = 3.0
@@ -2313,7 +2313,21 @@ def _v2v1_live_tight_context(change: float, *, blocked: bool = False, gray: bool
     closed_like = _v2v1_market_closed_like(market_phase)
     extended = bool(change >= V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT)
     extreme = bool(change >= V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT)
-    if blocked:
+    # V2V1b: extension decides the DISPLAY bucket first.  Sharia status still
+    # controls actionability, but an already +18%/+35% mover should not remain
+    # visually in the fresh V2V early-confirmation section.
+    if extended:
+        target_bucket = "continuation_pullback"
+        if blocked:
+            label = "⛔ مرتفع ومحجوب شرعيًا — تعلم فقط / Pullback" if not extreme else "⛔ مرتفع جدًا ومحجوب شرعيًا — تعلم فقط / لا تطارد"
+            action = "محجوب شرعيًا — تعلم فقط. الحركة ممتدة؛ لا دخول، راقب فقط للتعلم أو Pullback."
+        elif gray:
+            label = "⚠️ امتداد قوي — مراجعة شرعية + Pullback" if not extreme else "⚠️ مرتفع جدًا — مراجعة شرعية / لا تطارد"
+            action = "مراجعة شرعية عاجلة فقط. الحركة ممتدة؛ لا دخول إلا بعد اعتماد شرعي وتماسك/Pullback واضح."
+        else:
+            label = "📈 امتداد قوي — استمرار مشروط / Pullback" if not extreme else "🚫 مرتفع جدًا — لا تطارد / Pullback فقط"
+            action = "استمرار مشروط: لا دخول الآن إلا بعد تماسك أو Pullback أو إعادة اختبار واضحة."
+    elif blocked:
         target_bucket = "live_tight_monitoring"
         label = "⛔ بدأ يتحرك لكنه محجوب شرعيًا — تعلم فقط"
         action = "محجوب شرعيًا — تعلم فقط"
@@ -2321,15 +2335,11 @@ def _v2v1_live_tight_context(change: float, *, blocked: bool = False, gray: bool
         target_bucket = "live_tight_monitoring"
         label = "⚠️ بدأ يتحرك — مراجعة شرعية عاجلة"
         action = "تأكيد/حركة للمراجعة فقط"
-    elif extended:
-        target_bucket = "continuation_pullback"
-        label = "📈 امتداد قوي — استمرار مشروط / Pullback" if not extreme else "🚫 مرتفع جدًا — لا تطارد / Pullback فقط"
-        action = "استمرار مشروط: لا دخول الآن إلا بعد تماسك أو Pullback أو إعادة اختبار واضحة."
     else:
         target_bucket = "live_tight_monitoring"
         label = "⚡ تأكيد مبكر حي — مراقبة لصيقة"
         action = "تأكيد مبكر حي — مراقبة لصيقة فقط"
-    if closed_like and not (blocked or gray):
+    if closed_like:
         label = "🕒 السوق مغلق — " + label
         action = "السوق مغلق: هذه ذاكرة من آخر جلسة وليست دخولًا الآن. " + action
     return {
@@ -4082,6 +4092,45 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
                 if len(merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
                     break
             final_map["continuation_pullback_candidates"] = merged
+
+    # V2V1b final display guard: V2V is a movement-memory tag.  If a sticky
+    # V2V row is already extended (+18%/+35%), remove it from the fresh V2V
+    # display section and surface it in Continuation/Pullback instead, while
+    # preserving Sharia-blocked/gray learning-only labels.
+    _v2v1b_moved_extended: list[dict] = []
+    _live_kept: list[dict] = []
+    for _item in list(final_map.get("live_tight_monitoring_candidates", []) or []):
+        if not isinstance(_item, dict):
+            continue
+        _target = _s(_item.get("target_bucket_v2v1") or _item.get("opportunity_bucket"))
+        _extended = bool(_item.get("extended_for_pullback_v2v1")) or _change_pct(_item) >= V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT
+        if _extended or _target == "continuation_pullback":
+            _item["opportunity_bucket"] = "continuation_pullback"
+            _item["opportunity_stage"] = "continuation_pullback"
+            _item["target_bucket_v2v1"] = "continuation_pullback"
+            _item["extended_for_pullback_v2v1"] = True
+            _item["v2v1_priority_router"] = _v2v1_tight_monitoring_priority(_item, "continuation_pullback_candidates")
+            _item["opportunity_reasons"] = _dedupe([
+                "V2V1b: السهم كان في ذاكرة V2V لكنه أصبح ممتدًا؛ عرضه العملي Continuation/Pullback وليس تأكيدًا حيًا قريبًا من الشراء."
+            ] + list(_item.get("opportunity_reasons") or []), 12)
+            _item["technical_explainer_reasons"] = _item.get("opportunity_reasons")
+            _v2v1b_moved_extended.append(_item)
+        else:
+            _live_kept.append(_item)
+    if _v2v1b_moved_extended:
+        final_map["live_tight_monitoring_candidates"] = _live_kept
+        _cont_existing = final_map.get("continuation_pullback_candidates", []) or []
+        _cont_merged = []
+        _cont_seen: set[str] = set()
+        for _item in _v2v1b_moved_extended + list(_cont_existing):
+            _sym = _u((_item or {}).get("symbol"))
+            if not _sym or _sym in _cont_seen:
+                continue
+            _cont_seen.add(_sym)
+            _cont_merged.append(_item)
+            if len(_cont_merged) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                break
+        final_map["continuation_pullback_candidates"] = _cont_merged
 
     # V2U4b bridge: the Prepared Watch memory may contain gray/non-compliant
     # critical candidates that were intentionally removed from the clean-only
