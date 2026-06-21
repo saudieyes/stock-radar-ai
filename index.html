@@ -3802,6 +3802,7 @@
 
     const SECTION_DEFAULT_LIMIT = 5;
     const OPPORTUNITY_RADAR_GROUP_KEYS = [
+      'live_tight_monitoring_candidates',
       'critical_pre_explosion_watch',
       'promotion_bridge_candidates',
       'learning_opportunity_candidates',
@@ -3820,6 +3821,7 @@
       'strong-section-content',
       'cautious-section-content',
       'learning-overlay-section-content',
+      'live-tight-monitoring-section-content',
       'critical-pre-explosion-section-content',
       'promotion-bridge-section-content',
       'learning-opportunity-section-content',
@@ -4709,6 +4711,7 @@
       const cautious = sortDisplayItems(data.cautious_entries || []);
       const learningOverlay = normalizeLearningOverlayItems(data);
       const oppRowsRaw = [
+        ...(data.live_tight_monitoring_candidates || data.opportunity_radar?.live_tight_monitoring_candidates || []),
         ...(data.critical_pre_explosion_watch || data.opportunity_radar?.critical_pre_explosion_watch || []),
         ...(data.promotion_bridge_candidates || []),
         ...(data.learning_opportunity_candidates || []),
@@ -4731,6 +4734,7 @@
         oppSeen.add(key);
         return true;
       });
+      const liveTightMonitoring = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'live_tight_monitoring'));
       const criticalPreExplosion = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'critical_pre_explosion_watch'));
       const promotionBridge = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'promotion_bridge'));
       const learningOpportunity = sortDisplayItems(oppRows.filter(x => String(x?.opportunity_bucket || '') === 'learning_opportunity'));
@@ -4753,6 +4757,7 @@
         'strong-section-content': strong,
         'cautious-section-content': cautious,
         'learning-overlay-section-content': learningOverlay,
+        'live-tight-monitoring-section-content': liveTightMonitoring,
         'critical-pre-explosion-section-content': criticalPreExplosion,
         'promotion-bridge-section-content': promotionBridge,
         'learning-opportunity-section-content': learningOpportunity,
@@ -4775,6 +4780,7 @@
         ${renderLearningOverlayPanel(data, learningOverlay)}
         ${renderNextWeekAnalysisPanel(data)}
         <div id="earlyMovementAnchor" class="scroll-anchor"></div>
+        ${renderSection('⚡ تأكيد حي سريع / مراقبة لصيقة V2V', liveTightMonitoring.length, 'live-tight-monitoring-section-content', 'live-tight-monitoring-section', liveTightMonitoring, { tone: 'cautious', defaultOpen: liveTightMonitoring.length > 0, orderedText: 'مرشح من Prepared Watch أو مرشح جديد بدأ +3%/+5% مع حجم. مراقبة/تأكيد مبكر فقط؛ Strong/Cautious لا يتغيران إلا إذا الشرعية والخطة والسعر والسيولة سليمة.' })}
         ${renderSection('🚨 مرشحو انفجار حرجة قبل السوق', criticalPreExplosion.length, 'critical-pre-explosion-section-content', 'critical-pre-explosion-section', criticalPreExplosion, { tone: 'cautious', defaultOpen: criticalPreExplosion.length > 0, orderedText: 'هذه قائمة مراقبة حرجة قبل الانفجار: راجع الشرعية الآن، وراقب +3%/+5% مع حجم في البري ماركت/الافتتاح. ليست شراء مباشر ولا تتجاوز فلتر الشرعية.' })}
         ${renderSection('🧭 جسر الترقية قبل الافتتاح', promotionBridge.length, 'promotion-bridge-section-content', 'promotion-bridge-section', promotionBridge, { tone: 'open', defaultOpen: promotionBridge.length > 0, orderedText: 'يجمع أفضل مرشحي Low-Float وSmall Classic وPre-Trigger وSupport ويحدد من قد يترقى عند تحقق الحجم والسعر. هذا ليس شراء مباشر ولا يغير Strong/Cautious.' })}
         ${renderSection('🧠 مرشحو طبقة التعلم / تحضير مبكر', learningOpportunity.length, 'learning-opportunity-section-content', 'learning-opportunity-section', learningOpportunity, { tone: 'open', defaultOpen: learningOpportunity.length > 0, orderedText: 'هذا القسم يجسر البيانات الموجودة في المراقبة/الحركة المبكرة إلى طبقة تعلم مرئية. ليس Strong ولا Cautious، لكنه يمنع اختفاء الفرص التحضيرية عندما لا تكتمل شروط الأقسام المتخصصة.' })}

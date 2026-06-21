@@ -1479,6 +1479,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     promotion_bridge_candidates = opportunity_radar_payload.get("promotion_bridge_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    live_tight_monitoring_candidates = opportunity_radar_payload.get("live_tight_monitoring_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     critical_pre_explosion_watch = opportunity_radar_payload.get("critical_pre_explosion_watch", []) if isinstance(opportunity_radar_payload, dict) else []
 
     try:
@@ -1561,6 +1562,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
         "promotion_bridge_candidates": promotion_bridge_candidates[:limit] if 'limit' in locals() else promotion_bridge_candidates[:25],
+        "live_tight_monitoring_debug": opportunity_radar_payload.get("live_tight_monitoring_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "live_tight_monitoring_rule_ar": opportunity_radar_payload.get("live_tight_monitoring_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "live_tight_monitoring_candidates_count": len(live_tight_monitoring_candidates),
+        "live_tight_monitoring_candidates": live_tight_monitoring_candidates[:limit] if 'limit' in locals() else live_tight_monitoring_candidates[:25],
         "critical_pre_explosion_watch_debug": opportunity_radar_payload.get("prepared_watch_ui_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "critical_pre_explosion_watch_rule_ar": opportunity_radar_payload.get("prepared_watch_ui_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "critical_pre_explosion_watch_count": len(critical_pre_explosion_watch),
@@ -1581,6 +1586,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "low_float_fast_lane_raw_watch": low_float_fast_lane_raw_watch[:limit] if 'limit' in locals() else low_float_fast_lane_raw_watch[:25],
         "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
         "learning_opportunity_candidates": learning_opportunity_candidates[:limit],
+        "live_tight_monitoring_candidates_count": len(live_tight_monitoring_candidates),
         "support_bounce_candidates_count": len(support_bounce_candidates),
         "reclaim_candidates_count": len(reclaim_candidates),
         "pre_trigger_candidates_count": len(pre_trigger_candidates),
@@ -1590,6 +1596,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "low_float_fast_lane_raw_watch_count": len(low_float_fast_lane_raw_watch),
         "gap_fill_watch_count": len(gap_fill_watch),
         "catalyst_watch_count": len(catalyst_watch),
+        "live_tight_monitoring_candidates": live_tight_monitoring_candidates[:limit],
         "support_bounce_candidates": support_bounce_candidates[:limit],
         "reclaim_candidates": reclaim_candidates[:limit],
         "pre_trigger_candidates": pre_trigger_candidates[:limit],
@@ -1610,6 +1617,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
             "premarket_setups": _live_bucket_payload(premarket_setups, limit),
             "early_movement_watchlist": _live_bucket_payload(early_movement_payload.get("early_movement_watchlist", []), limit),
             "promotion_bridge_candidates": _live_bucket_payload(promotion_bridge_candidates, limit),
+            "live_tight_monitoring_candidates": _live_bucket_payload(live_tight_monitoring_candidates, limit),
             "support_bounce_candidates": _live_bucket_payload(support_bounce_candidates, limit),
             "reclaim_candidates": _live_bucket_payload(reclaim_candidates, limit),
             "pre_trigger_candidates": _live_bucket_payload(pre_trigger_candidates, limit),
@@ -2955,6 +2963,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     catalyst_watch = opportunity_radar_payload.get("catalyst_watch", []) if isinstance(opportunity_radar_payload, dict) else []
     learning_opportunity_candidates = opportunity_radar_payload.get("learning_opportunity_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     promotion_bridge_candidates = opportunity_radar_payload.get("promotion_bridge_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
+    live_tight_monitoring_candidates = opportunity_radar_payload.get("live_tight_monitoring_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
     critical_pre_explosion_watch = opportunity_radar_payload.get("critical_pre_explosion_watch", []) if isinstance(opportunity_radar_payload, dict) else []
 
     out = {
@@ -3002,6 +3011,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
         "promotion_bridge_candidates": promotion_bridge_candidates[:limit] if 'limit' in locals() else promotion_bridge_candidates[:25],
+        "live_tight_monitoring_debug": opportunity_radar_payload.get("live_tight_monitoring_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
+        "live_tight_monitoring_rule_ar": opportunity_radar_payload.get("live_tight_monitoring_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
+        "live_tight_monitoring_candidates_count": len(live_tight_monitoring_candidates),
+        "live_tight_monitoring_candidates": live_tight_monitoring_candidates[:limit] if 'limit' in locals() else live_tight_monitoring_candidates[:25],
         "critical_pre_explosion_watch_debug": opportunity_radar_payload.get("prepared_watch_ui_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "critical_pre_explosion_watch_rule_ar": opportunity_radar_payload.get("prepared_watch_ui_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "critical_pre_explosion_watch_count": len(critical_pre_explosion_watch),
@@ -3022,6 +3035,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "low_float_fast_lane_raw_watch": low_float_fast_lane_raw_watch[:limit] if 'limit' in locals() else low_float_fast_lane_raw_watch[:25],
         "learning_opportunity_candidates_count": len(learning_opportunity_candidates),
         "learning_opportunity_candidates": learning_opportunity_candidates[:25],
+        "live_tight_monitoring_candidates_count": len(live_tight_monitoring_candidates),
         "support_bounce_candidates_count": len(support_bounce_candidates),
         "reclaim_candidates_count": len(reclaim_candidates),
         "pre_trigger_candidates_count": len(pre_trigger_candidates),
@@ -3045,6 +3059,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "premarket_setups": premarket_setups[:25],
         "watchlist": watch[:50],
         "early_movement_watchlist": early_movement_watchlist[:30],
+        "live_tight_monitoring_candidates": live_tight_monitoring_candidates[:25],
         "support_bounce_candidates": support_bounce_candidates[:25],
         "reclaim_candidates": reclaim_candidates[:25],
         "pre_trigger_candidates": pre_trigger_candidates[:25],
@@ -3100,6 +3115,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
             "big_explosion_live_count": int(scan_debug.get("dynamic_big_explosion_live_count", 0) or 0),
             "big_explosion_live_symbols": scan_debug.get("dynamic_big_explosion_live_symbols", []),
             "big_explosion_live_debug": scan_debug.get("dynamic_big_explosion_live_debug", {}),
+            "live_tight_monitoring_v2v_count": int(scan_debug.get("dynamic_live_tight_monitoring_v2v_count", 0) or 0),
+            "live_tight_monitoring_v2v_symbols": scan_debug.get("dynamic_live_tight_monitoring_v2v_symbols", []),
+            "live_tight_monitoring_v2v_memory": scan_debug.get("dynamic_live_tight_monitoring_v2v_memory", {}),
+            "live_tight_monitoring_v2v_rule_ar": scan_debug.get("dynamic_live_tight_monitoring_v2v_rule_ar", ""),
             "elapsed_sec": scan_debug.get("dynamic_discovery_elapsed_sec", None),
         },
         "full_market_scan_status": {
