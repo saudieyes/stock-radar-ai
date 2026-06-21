@@ -740,7 +740,7 @@ def live_hunting_replay_endpoint(
     except Exception as exc:
         payload = {
             "ok": False,
-            "version": "v2v3_replay_audit_endpoint_guard_2026_06_21",
+            "version": "v2v4_prepared_anchor_endpoint_guard_2026_06_21",
             "error": f"live_hunting_replay_exception:{type(exc).__name__}:{str(exc)[:240]}",
             "rule_ar": "حارس endpoint يمنع سقوط الخدمة؛ خفّض max_symbols أو max_minute_rows إذا كان ملف الدقيقة كبيرًا.",
         }
