@@ -1923,6 +1923,7 @@ def source_discovery_status(client_updated_at: str = ""):
 
 @app.get("/diagnostics/live-monitoring-budget")
 @app.get("/diagnostics/v2v6-live-budget")
+@app.get("/diagnostics/v2v6c-rotation-budget")
 def diagnostics_live_monitoring_budget_endpoint():
     dynamic_status = get_last_dynamic_discovery_status()
     budget = (dynamic_status or {}).get("live_monitoring_budget_guard_v2v6", {}) if isinstance(dynamic_status, dict) else {}
@@ -1940,18 +1941,26 @@ def diagnostics_live_monitoring_budget_endpoint():
     budget_state = "active" if isinstance(budget, dict) and budget else "missing_or_stale"
     return {
         "ok": True,
-        "version": "v2v6b_live_monitoring_budget_status_2026_06_21",
+        "version": "v2v6c_dynamic_rotation_budget_status_2026_06_21",
         "installed_source_discovery_module_version": installed_module_version,
         "installed_source_discovery_module_file": installed_module_file,
         "dynamic_discovery_engine_version": engine_version,
-        "engine_is_v2v6b_or_newer": bool("v2v6b" in str(engine_version).lower() or "v3l" in str(engine_version).lower()),
+        "engine_is_v2v6b_or_newer": bool("v2v6b" in str(engine_version).lower() or "v3l" in str(engine_version).lower() or "v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower()),
+        "engine_is_v2v6c_or_newer": bool("v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower()),
         "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
+        "fmp_confirm_batches": (dynamic_status or {}).get("fmp_confirm_batches", None) if isinstance(dynamic_status, dict) else None,
+        "fmp_confirm_batch_size": (dynamic_status or {}).get("fmp_confirm_batch_size", None) if isinstance(dynamic_status, dict) else None,
+        "rotation_confirm_count_v2v6c": (dynamic_status or {}).get("rotation_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
+        "low_float_confirm_count_v2v6c": (dynamic_status or {}).get("low_float_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
+        "micro_live_confirm_count_v2v6c": (dynamic_status or {}).get("micro_live_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
+        "emergency_confirm_count_v2v6c": (dynamic_status or {}).get("emergency_confirm_count_v2v6c", None) if isinstance(dynamic_status, dict) else None,
+        "rotating_discovery_v2v6c": (dynamic_status or {}).get("rotating_discovery_v2v6c", {}) if isinstance(dynamic_status, dict) else {},
         "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
         "budget_state": budget_state,
         "budget": budget if isinstance(budget, dict) else {},
-        "diagnosis_ar": "إذا كانت installed_source_discovery_module_version مفقودة أو dynamic_discovery_engine_version بقي v3j بعد force scan، فهذا يعني أن app/source_discovery.py لم يُنشر أو لم يُعاد تشغيله فعليًا. إذا ظهرت v3l/v2v6b ومعها budget، فالحماية فعالة.",
-        "rule_ar": "V2V6b: الفحص الحي أخف من المحاكي التاريخي؛ لا يقرأ ملفات minute ولا يشغل replay، ويطبق سقف FMP نهائيًا لحماية Railway.",
+        "diagnosis_ar": "إذا ظهر v3m/v2v6c ومع budget وrotating_discovery فهذا يعني أن المنبع لم يعد 180 فقط: 180 للعطلة، وبعد الإغلاق/أثناء السوق توجد ميزانية ديناميكية ودفعات اكتشاف جديدة.",
+        "rule_ar": "V2V6c: لا يقرأ ملفات minute ولا يشغل replay أثناء السوق؛ يستخدم FMP على دفعات، ويسمح Polygon كدعم مؤخر بعد الإغلاق فقط، ويضيف rotating discovery حتى لا تضيع الأسهم الصغيرة خارج المنبع.",
     }
 
 # Fix20: compact Market Mood / Sentiment layer.
