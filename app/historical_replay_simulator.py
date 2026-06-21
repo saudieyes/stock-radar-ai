@@ -53,7 +53,7 @@ except Exception:
         return None
 
 HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u4_live_critical_pre_explosion_2026_06_20"
-LIVE_HUNTING_REPLAY_VERSION = "v2v5_early_capture_boost_2026_06_21"
+LIVE_HUNTING_REPLAY_VERSION = "v2v5c_early_capture_boost_runtime_safe_2026_06_21"
 
 
 def _s(v: Any) -> str:
@@ -2661,7 +2661,7 @@ def run_live_hunting_replay(
         trade_date=hunt_date,
         target_symbols=target_set,
         max_minute_rows=max_minute_rows,
-        max_seconds=max(20.0, float(prior_scan_timeout_sec or 45.0)),
+        max_seconds=max(5.0, min(45.0, float(prior_scan_timeout_sec or 12.0))),
         force_minute_pull=force_minute_pull,
         redownload_processed=redownload_processed,
     )
@@ -2763,7 +2763,7 @@ def run_live_hunting_replay(
     payload = {
         "ok": True,
         "version": LIVE_HUNTING_REPLAY_VERSION,
-        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_anchor_plus_early_capture_boost_v2v5",
+        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_anchor_plus_early_capture_boost_v2v5c_runtime_safe",
         "requested_date": str(date_value or "").strip(),
         "hunt_date": hunt_date,
         "prior_session_date": prior_date,
@@ -2829,7 +2829,7 @@ def run_live_hunting_replay(
             "prepared_crossed_3_or_5_but_not_detected_count": len(prepared_crossed_but_missed),
             "bucket_counts": {},
         },
-        "rule_ar": "V2V5 يحاكي جلسة تاريخية كأن السوق مفتوح، مع Prepared Anchor + Early Capture Boost: مرشحو Prepared عند +3% بحجم يدخلون V2V probe بسرعة، والرموز الجديدة عند +5% بحجم تدخل ignition probe. لا يفتح شراء مباشر.",
+        "rule_ar": "V2V5c يحاكي جلسة تاريخية كأن السوق مفتوح، مع Prepared Anchor + Early Capture Boost، لكن بحدود runtime آمنة حتى لا يسقط Railway. لا يفتح شراء مباشر.",
         "storage_rule_ar": "يقرأ Polygon minute من /tmp فقط، ويرجع ملخصات مدمجة؛ لا يحفظ raw files في SQLite/GitHub/Railway.",
         "next_step_ar": "قارن نفس اليوم قبل/بعد V2V5: نريد early <=8% وacceptable <=20% أعلى، وlate >=20% أقل. بعدها شغّل 3-5 أيام قبل أي تغيير على Strong/Cautious.",
     }
