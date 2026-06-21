@@ -1920,6 +1920,23 @@ def source_discovery_status(client_updated_at: str = ""):
         "message": "يمسح السيرفر السوق كاملًا في الخلفية ويحفظ آخر قائمة جاهزة؛ الأسعار الحية لا تستخدم كاش أثناء السوق النشط.",
     }
 
+
+@app.get("/diagnostics/live-monitoring-budget")
+@app.get("/diagnostics/v2v6-live-budget")
+def diagnostics_live_monitoring_budget_endpoint():
+    dynamic_status = get_last_dynamic_discovery_status()
+    budget = (dynamic_status or {}).get("live_monitoring_budget_guard_v2v6", {}) if isinstance(dynamic_status, dict) else {}
+    return {
+        "ok": True,
+        "version": "v2v6_live_monitoring_budget_status_2026_06_21",
+        "dynamic_discovery_engine_version": (dynamic_status or {}).get("engine_version", "") if isinstance(dynamic_status, dict) else "",
+        "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
+        "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
+        "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
+        "budget": budget if isinstance(budget, dict) else {},
+        "rule_ar": "V2V6: الفحص الحي أخف من المحاكي التاريخي؛ لا يقرأ ملفات minute ولا يشغل replay، بل يؤكد Quote لقائمة محدودة ذات أولوية حتى لا يضغط Railway.",
+    }
+
 # Fix20: compact Market Mood / Sentiment layer.
 # Context-only: does not add points to stock scoring and does not promote/demote opportunities.
 MARKET_MOOD_INDEX_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM"]
