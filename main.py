@@ -701,6 +701,8 @@ def historical_replay_simulator_status_endpoint():
 @app.get("/simulator/v2v2-live-hunting-replay")
 @app.get("/simulator/v2v3-live-hunting-audit")
 @app.get("/simulator/v2v4-prepared-anchor-audit")
+@app.get("/simulator/v2v5-early-capture-replay")
+@app.get("/simulator/early-capture-boost")
 @app.get("/simulator/prepared-anchor-audit")
 @app.get("/simulator/replay-audit-prepared-link")
 @app.get("/replay/live-hunting")
@@ -742,7 +744,7 @@ def live_hunting_replay_endpoint(
     except Exception as exc:
         payload = {
             "ok": False,
-            "version": "v2v4_prepared_anchor_endpoint_guard_2026_06_21",
+            "version": "v2v5_early_capture_boost_endpoint_guard_2026_06_21",
             "error": f"live_hunting_replay_exception:{type(exc).__name__}:{str(exc)[:240]}",
             "rule_ar": "حارس endpoint يمنع سقوط الخدمة؛ خفّض max_symbols أو max_minute_rows إذا كان ملف الدقيقة كبيرًا.",
         }
