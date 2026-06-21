@@ -1949,14 +1949,15 @@ def diagnostics_live_monitoring_budget_endpoint():
     budget_state = "active" if isinstance(budget, dict) and budget else "missing_or_stale"
     return {
         "ok": True,
-        "version": "v2w2_polygon_distribution_budget_status_2026_06_21",
+        "version": "v2w3_polygon_distribution_catalyst_guard_status_2026_06_21",
         "installed_source_discovery_module_version": installed_module_version,
         "installed_source_discovery_module_file": installed_module_file,
         "dynamic_discovery_engine_version": engine_version,
         "engine_is_v2v6b_or_newer": bool("v2v6b" in str(engine_version).lower() or "v3l" in str(engine_version).lower() or "v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower()),
         "engine_is_v2v6c_or_newer": bool("v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower() or "v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower()),
-        "engine_is_v2w_or_newer": bool("v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower() or "v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower()),
-        "engine_is_v2w2_or_newer": bool("v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower()),
+        "engine_is_v2w_or_newer": bool("v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower() or "v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower()),
+        "engine_is_v2w2_or_newer": bool("v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower()),
+        "engine_is_v2w3_or_newer": bool("v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower()),
         "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirm_batches": (dynamic_status or {}).get("fmp_confirm_batches", None) if isinstance(dynamic_status, dict) else None,
@@ -1973,8 +1974,8 @@ def diagnostics_live_monitoring_budget_endpoint():
         "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
         "budget_state": budget_state,
         "budget": budget if isinstance(budget, dict) else {},
-        "diagnosis_ar": "إذا ظهر v3o/v2w2 فهذا يعني أن Polygon أصبح مصدرًا خلفيًا يوزع على القوائم الحالية، وليس قائمة مستقلة تزاحم الواجهة.",
-        "rule_ar": "V2W2: يحافظ على V2V6c، ويستخدم Polygon كمنبع خلفي يوزع أفضل المرشحين على القوائم الحالية؛ السعر والتفعيل من FMP/V2V فقط.",
+        "diagnosis_ar": "إذا ظهر v3p/v2w3 فهذا يعني أن Polygon أصبح مصدرًا خلفيًا، وأن Catalyst لا يظهر إلا بوجود خبر/محفز حقيقي.",
+        "rule_ar": "V2W3: يحافظ على V2V6c/V2W2، ويوزع Polygon على القوائم الحالية؛ ويمنع وضع سهم في Catalyst/News إذا لم يوجد خبر واضح.",
     }
 
 # Fix20: compact Market Mood / Sentiment layer.
