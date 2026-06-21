@@ -253,6 +253,8 @@ from app.historical_replay_simulator import (
     run_historical_replay,
     format_historical_replay_brief,
     build_prior_session_explosion_watch,
+    run_live_hunting_replay,
+    format_live_hunting_replay_brief,
 )
 from app.polygon_weekly_builder import (
     build_weekly_candidates_from_path,
@@ -694,6 +696,53 @@ def replay_lab_small_stock_classic_pull_run_endpoint(end_date: str = "", minute_
 @app.get("/historical-replay/status")
 def historical_replay_simulator_status_endpoint():
     return historical_replay_status()
+
+@app.get("/simulator/live-hunting-replay")
+@app.get("/simulator/v2v2-live-hunting-replay")
+@app.get("/replay/live-hunting")
+def live_hunting_replay_endpoint(
+    date: str = "",
+    max_prepared: int = 80,
+    max_symbols: int = 80,
+    missed_gain_threshold: float = 20.0,
+    context_days: int = 3,
+    recovery_days: int = 7,
+    prior_full_session_scan: bool = True,
+    prior_scan_max_rows: int = 2500000,
+    max_minute_rows: int = 1800000,
+    prior_scan_timeout_sec: float = 45.0,
+    force_minute_pull: bool = False,
+    redownload_processed: bool = True,
+    include_candidates: bool = True,
+    format: str = "json",
+):
+    fmt = str(format or "json").strip().lower()
+    try:
+        payload = run_live_hunting_replay(
+            date_value=date,
+            max_prepared=max_prepared,
+            max_symbols=max_symbols,
+            missed_gain_threshold=missed_gain_threshold,
+            context_days=context_days,
+            recovery_days=recovery_days,
+            prior_full_session_scan=prior_full_session_scan,
+            prior_scan_max_rows=prior_scan_max_rows,
+            max_minute_rows=max_minute_rows,
+            prior_scan_timeout_sec=prior_scan_timeout_sec,
+            force_minute_pull=force_minute_pull,
+            redownload_processed=redownload_processed,
+            include_candidates=include_candidates,
+        )
+    except Exception as exc:
+        payload = {
+            "ok": False,
+            "version": "v2v2_live_hunting_replay_endpoint_guard_2026_06_21",
+            "error": f"live_hunting_replay_exception:{type(exc).__name__}:{str(exc)[:240]}",
+            "rule_ar": "حارس endpoint يمنع سقوط الخدمة؛ خفّض max_symbols أو max_minute_rows إذا كان ملف الدقيقة كبيرًا.",
+        }
+    if fmt in {"brief", "text", "txt", "chatgpt"}:
+        return PlainTextResponse(format_live_hunting_replay_brief(payload), media_type="text/plain; charset=utf-8")
+    return payload
 
 
 @app.get("/simulator/historical-replay")
