@@ -58,12 +58,12 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3l_v2v6b_budget_enforced_2026_06_21"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3m_v2v6c_dynamic_rotation_discovery_2026_06_21"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
 DYNAMIC_DISCOVERY_USE_FMP_MOVERS = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_MOVERS", True)
-DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT = _env_int("DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT", 180, 40, 220)
+DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT = _env_int("DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT", 560, 80, 700)
 DYNAMIC_DISCOVERY_REFERENCE_LIMIT_PAGES = _env_int("DYNAMIC_DISCOVERY_REFERENCE_LIMIT_PAGES", 12, 4, 20)
 DYNAMIC_DISCOVERY_REFERENCE_PAGE_LIMIT = _env_int("DYNAMIC_DISCOVERY_REFERENCE_PAGE_LIMIT", 1000, 100, 1000)
 DYNAMIC_DISCOVERY_MIN_PREFERRED_PRICE = float(os.getenv("DYNAMIC_DISCOVERY_MIN_PREFERRED_PRICE", "2") or 2)
@@ -142,18 +142,38 @@ LIVE_TIGHT_MONITORING_MIN_DOLLAR_VOLUME = float(os.getenv("LIVE_TIGHT_MONITORING
 LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_EXTENDED_CONTINUATION_MIN_CHANGE_PCT", "18") or 18)
 LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT = float(os.getenv("LIVE_TIGHT_MONITORING_EXTREME_EXTENSION_MIN_CHANGE_PCT", "35") or 35)
 
-# V2V6: Railway-safe live monitoring budget. Live trading refresh is much lighter
-# than historical replay because it only checks compact candidate queues with FMP
-# live quotes; it must not read millions of Polygon minute rows or confirm hundreds
-# of raw symbols every 30 seconds. These caps keep Prepared/V2V priority alive
-# without putting continuous pressure on Railway/FMP.
+# V2V6c: dynamic live monitoring + rotating discovery.
+# Important distinction:
+# - live monitoring budget = how many symbols receive FMP live confirmation in this scan.
+# - discovery source = broad queues/rotating sweeps that keep feeding new names into monitoring.
+# The scanner must not shrink to 180 during active sessions. 180 is only a quiet
+# closed/weekend diagnostic budget. After-hours and trading sessions use a wider
+# budget plus rotating market slices so small/unknown stocks can enter tomorrow's
+# Prepared Watch without running a heavy historical replay.
 LIVE_MONITORING_BUDGET_GUARD_ENABLED = _env_bool("LIVE_MONITORING_BUDGET_GUARD_ENABLED", True)
-LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT = _env_int("LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT", 180, 60, 220)
-LIVE_MONITORING_PREPARED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_PREPARED_CONFIRM_LIMIT", 80, 20, 120)
-LIVE_MONITORING_MEMORY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MEMORY_CONFIRM_LIMIT", 50, 10, 90)
-LIVE_MONITORING_RANKED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_RANKED_CONFIRM_LIMIT", 70, 20, 120)
-LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT", 35, 5, 70)
-LIVE_MONITORING_SEED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_SEED_CONFIRM_LIMIT", 25, 5, 60)
+LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT = _env_int("LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT", 560, 180, 700)
+LIVE_MONITORING_PREPARED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_PREPARED_CONFIRM_LIMIT", 120, 40, 180)
+LIVE_MONITORING_MEMORY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MEMORY_CONFIRM_LIMIT", 100, 20, 160)
+LIVE_MONITORING_RANKED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_RANKED_CONFIRM_LIMIT", 120, 40, 220)
+LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT", 80, 10, 140)
+LIVE_MONITORING_SEED_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_SEED_CONFIRM_LIMIT", 60, 10, 120)
+LIVE_MONITORING_LOW_FLOAT_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_LOW_FLOAT_CONFIRM_LIMIT", 160, 30, 240)
+LIVE_MONITORING_MICRO_LIVE_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_MICRO_LIVE_CONFIRM_LIMIT", 120, 20, 200)
+LIVE_MONITORING_ROTATION_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_ROTATION_CONFIRM_LIMIT", 300, 0, 360)
+LIVE_MONITORING_EMERGENCY_CONFIRM_LIMIT = _env_int("LIVE_MONITORING_EMERGENCY_CONFIRM_LIMIT", 80, 0, 160)
+# Confirmation calls are sent in batches because app/live_quotes.py intentionally
+# normalizes a single request to at most 300 symbols. Chunking keeps the wider
+# market coverage without creating single huge HTTP calls.
+LIVE_MONITORING_FMP_BATCH_SIZE = _env_int("LIVE_MONITORING_FMP_BATCH_SIZE", 280, 80, 300)
+LIVE_MONITORING_MAX_FMP_BATCHES = _env_int("LIVE_MONITORING_MAX_FMP_BATCHES", 3, 1, 4)
+# Rotating discovery is the broad source feeder. It does not create buy calls;
+# it only gives new names a chance to be live-confirmed and then scored normally.
+AFTER_HOURS_ROTATING_DISCOVERY_ENABLED = _env_bool("AFTER_HOURS_ROTATING_DISCOVERY_ENABLED", True)
+AFTER_HOURS_ROTATING_DISCOVERY_BATCH_SIZE = _env_int("AFTER_HOURS_ROTATING_DISCOVERY_BATCH_SIZE", 300, 60, 360)
+INTRADAY_ROTATING_DISCOVERY_BATCH_SIZE = _env_int("INTRADAY_ROTATING_DISCOVERY_BATCH_SIZE", 160, 40, 260)
+PREMARKET_ROTATING_DISCOVERY_BATCH_SIZE = _env_int("PREMARKET_ROTATING_DISCOVERY_BATCH_SIZE", 220, 60, 320)
+ROTATING_DISCOVERY_SLOT_MINUTES = _env_int("ROTATING_DISCOVERY_SLOT_MINUTES", 15, 5, 60)
+ROTATING_DISCOVERY_WEEKEND_ENABLED = _env_bool("ROTATING_DISCOVERY_WEEKEND_ENABLED", False)
 
 MICRO_EXPLOSION_SEED_SYMBOLS = {
     # V2U3 regression canaries from replay: these are not buy calls; they only force live quote confirmation so the scanner can detect similar/prepared movement early.
@@ -176,24 +196,24 @@ def dynamic_discovery_enabled() -> bool:
 def _phase_detail(now: datetime | None = None) -> dict:
     now = now or datetime.now(NY_TZ)
     if now.weekday() >= 5:
-        return {"phase": "closed", "detail": "weekend", "interval_sec": 3600, "target": 150, "label": "عطلة السوق"}
+        return {"phase": "closed", "detail": "weekend", "interval_sec": 3600, "target": 180, "label": "عطلة السوق"}
     t = now.time()
     mins = now.hour * 60 + now.minute
     if dt_time(4, 0) <= t < dt_time(7, 0):
-        return {"phase": "pre_market", "detail": "pre_market_early", "interval_sec": 1200, "target": 150, "label": "قبل الافتتاح المبكر"}
+        return {"phase": "pre_market", "detail": "pre_market_early", "interval_sec": 900, "target": 420, "label": "قبل الافتتاح المبكر"}
     if dt_time(7, 0) <= t < dt_time(9, 30):
-        return {"phase": "pre_market", "detail": "pre_market_active", "interval_sec": 600, "target": 220, "label": "قبل الافتتاح النشط"}
+        return {"phase": "pre_market", "detail": "pre_market_active", "interval_sec": 480, "target": 560, "label": "قبل الافتتاح النشط"}
     if dt_time(9, 30) <= t < dt_time(10, 30):
-        return {"phase": "open", "detail": "open_first_hour", "interval_sec": 420, "target": 240, "label": "أول ساعة تداول"}
+        return {"phase": "open", "detail": "open_first_hour", "interval_sec": 360, "target": 560, "label": "أول ساعة تداول"}
     if dt_time(10, 30) <= t < dt_time(15, 0):
-        return {"phase": "open", "detail": "open_mid_session", "interval_sec": 720, "target": 210, "label": "وسط الجلسة"}
+        return {"phase": "open", "detail": "open_mid_session", "interval_sec": 600, "target": 480, "label": "وسط الجلسة"}
     if dt_time(15, 0) <= t <= dt_time(16, 0):
-        return {"phase": "open", "detail": "open_last_hour", "interval_sec": 480, "target": 230, "label": "آخر ساعة تداول"}
+        return {"phase": "open", "detail": "open_last_hour", "interval_sec": 420, "target": 520, "label": "آخر ساعة تداول"}
     if dt_time(16, 0) < t <= dt_time(18, 0):
-        return {"phase": "after_hours", "detail": "after_hours_early", "interval_sec": 600, "target": 220, "label": "بعد الإغلاق النشط"}
+        return {"phase": "after_hours", "detail": "after_hours_early", "interval_sec": 900, "target": 560, "label": "بعد الإغلاق النشط"}
     if dt_time(18, 0) < t <= dt_time(20, 0):
-        return {"phase": "after_hours", "detail": "after_hours_late", "interval_sec": 1200, "target": 180, "label": "بعد الإغلاق المتأخر"}
-    return {"phase": "closed", "detail": "overnight_closed", "interval_sec": 3600, "target": 150, "label": "السوق مغلق"}
+        return {"phase": "after_hours", "detail": "after_hours_late", "interval_sec": 900, "target": 500, "label": "بعد الإغلاق المتأخر"}
+    return {"phase": "closed", "detail": "overnight_closed", "interval_sec": 1800, "target": 300, "label": "السوق مغلق"}
 
 
 def get_full_market_scan_interval_sec() -> int:
@@ -205,7 +225,7 @@ def get_recommended_deep_scan_target(default: int = 190) -> int:
         phase = _phase_detail()
         target = int(phase.get("target") or default or 190)
         # Keep the user's preference: enough choices, but not an inflated noisy list.
-        return max(120, min(260, target))
+        return max(120, min(620, target))
     except Exception:
         return int(default or 190)
 
@@ -445,6 +465,148 @@ def _cap_unique_symbols(values, limit: int) -> list[str]:
     return out
 
 
+def _symbols_from_candidate_rows(rows: list[dict] | None, wanted_sources: set[str], limit: int = 500) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    wanted = {str(x or "").strip() for x in (wanted_sources or set()) if str(x or "").strip()}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        sources = {str(x or "").strip() for x in (row.get("sources") or []) if str(x or "").strip()}
+        if wanted and not (sources & wanted):
+            continue
+        sym = _clean_symbol(row.get("symbol"))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        out.append(sym)
+        if len(out) >= int(limit or 500):
+            break
+    return out
+
+
+def _rotating_discovery_symbols(reference_tickers: list[str] | None, *, phase_info: dict, existing_symbols: list[str] | None = None) -> tuple[list[str], dict]:
+    """Return a deterministic market-rotation slice for broad discovery.
+
+    This is the answer to the 180-symbol problem: monitoring can be budgeted,
+    but source discovery must keep feeding new symbols. During after-hours it
+    rotates through large chunks of the reference universe every 15 minutes to
+    prepare tomorrow's watchlist. During live trading it uses a smaller slice so
+    new intraday movers/small stocks can enter without a full-market replay.
+    """
+    detail = str((phase_info or {}).get("detail", "") or "")
+    phase = str((phase_info or {}).get("phase", "") or "")
+    enabled = bool(AFTER_HOURS_ROTATING_DISCOVERY_ENABLED)
+    if not enabled:
+        return [], {"enabled": False, "reason": "disabled"}
+    if detail == "weekend" and not ROTATING_DISCOVERY_WEEKEND_ENABLED:
+        return [], {"enabled": False, "phase_detail": detail, "reason": "weekend_disabled"}
+
+    if phase == "after_hours":
+        batch_size = int(AFTER_HOURS_ROTATING_DISCOVERY_BATCH_SIZE or 300)
+        mode = "after_hours_prepare_tomorrow"
+    elif phase == "pre_market":
+        batch_size = int(PREMARKET_ROTATING_DISCOVERY_BATCH_SIZE or 220)
+        mode = "premarket_new_feed"
+    elif phase == "open":
+        batch_size = int(INTRADAY_ROTATING_DISCOVERY_BATCH_SIZE or 160)
+        mode = "intraday_new_feed"
+    elif detail == "overnight_closed":
+        batch_size = min(220, int(AFTER_HOURS_ROTATING_DISCOVERY_BATCH_SIZE or 300))
+        mode = "overnight_light_feed"
+    else:
+        batch_size = 0
+        mode = "quiet_no_rotation"
+
+    if batch_size <= 0:
+        return [], {"enabled": True, "phase_detail": detail, "mode": mode, "batch_size": 0, "count": 0}
+
+    all_syms: list[str] = []
+    seen: set[str] = set()
+    for raw in reference_tickers or []:
+        sym = _clean_symbol(raw)
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        all_syms.append(sym)
+    total = len(all_syms)
+    if total <= 0:
+        return [], {"enabled": True, "phase_detail": detail, "mode": mode, "batch_size": batch_size, "count": 0, "reason": "empty_reference_universe"}
+
+    try:
+        slot_minutes = max(5, int(ROTATING_DISCOVERY_SLOT_MINUTES or 15))
+    except Exception:
+        slot_minutes = 15
+    now = datetime.now(NY_TZ)
+    day_key = int(now.strftime("%Y%m%d"))
+    minutes_from_midnight = int(now.hour * 60 + now.minute)
+    slot = int(minutes_from_midnight // slot_minutes)
+    start = int(((day_key % 997) * 17 + slot) * batch_size) % max(total, 1)
+    existing = {_clean_symbol(x) for x in (existing_symbols or []) if _clean_symbol(x)}
+
+    selected: list[str] = []
+    scanned = 0
+    idx = start
+    while scanned < total and len(selected) < batch_size:
+        sym = all_syms[idx % total]
+        idx += 1
+        scanned += 1
+        if sym in existing:
+            continue
+        selected.append(sym)
+
+    return selected, {
+        "enabled": True,
+        "version": "rotating_discovery_v2v6c_2026_06_21",
+        "phase": phase,
+        "phase_detail": detail,
+        "mode": mode,
+        "batch_size": batch_size,
+        "slot_minutes": slot_minutes,
+        "slot": slot,
+        "reference_universe_count": total,
+        "start_index": start,
+        "count": len(selected),
+        "sample": selected[:40],
+        "rule_ar": "V2V6c: هذه ليست قائمة شراء؛ هي دفعة اكتشاف دوّارة حتى تدخل أسهم جديدة، خصوصًا الصغيرة، إلى التأكيد الحي ثم إلى Prepared/Watch إذا ظهرت حركة وحجم.",
+    }
+
+
+def _budget_caps_for_phase(phase_info: dict) -> dict:
+    detail = str((phase_info or {}).get("detail", "") or "").lower()
+    phase = str((phase_info or {}).get("phase", "") or "").lower()
+    # Start with env-configured active-session defaults.
+    caps = {
+        "total": int(LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT or 560),
+        "prepared": int(LIVE_MONITORING_PREPARED_CONFIRM_LIMIT or 120),
+        "live_tight_memory": int(LIVE_MONITORING_MEMORY_CONFIRM_LIMIT or 100),
+        "emergency_ignition": int(LIVE_MONITORING_EMERGENCY_CONFIRM_LIMIT or 80),
+        "low_float_fast_lane": int(LIVE_MONITORING_LOW_FLOAT_CONFIRM_LIMIT or 160),
+        "micro_live_candidates": int(LIVE_MONITORING_MICRO_LIVE_CONFIRM_LIMIT or 120),
+        "rotating_discovery": int(LIVE_MONITORING_ROTATION_CONFIRM_LIMIT or 300),
+        "ranked_source_candidates": int(LIVE_MONITORING_RANKED_CONFIRM_LIMIT or 120),
+        "micro_close_watch_memory": int(LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT or 80),
+        "seed_symbols": int(LIVE_MONITORING_SEED_CONFIRM_LIMIT or 60),
+    }
+    if "weekend" in detail:
+        caps.update({"total": 180, "prepared": 80, "live_tight_memory": 50, "emergency_ignition": 20, "low_float_fast_lane": 50, "micro_live_candidates": 40, "rotating_discovery": 0, "ranked_source_candidates": 50, "micro_close_watch_memory": 35, "seed_symbols": 25})
+    elif "overnight_closed" in detail:
+        caps.update({"total": 300, "prepared": 100, "live_tight_memory": 70, "emergency_ignition": 35, "low_float_fast_lane": 80, "micro_live_candidates": 70, "rotating_discovery": 180, "ranked_source_candidates": 70, "micro_close_watch_memory": 50, "seed_symbols": 35})
+    elif phase == "after_hours":
+        caps.update({"total": 560 if "early" in detail else 500, "prepared": 120, "live_tight_memory": 100, "emergency_ignition": 70, "low_float_fast_lane": 160, "micro_live_candidates": 120, "rotating_discovery": 300, "ranked_source_candidates": 110, "micro_close_watch_memory": 80, "seed_symbols": 50})
+    elif "pre_market_early" in detail:
+        caps.update({"total": 420, "prepared": 120, "live_tight_memory": 90, "emergency_ignition": 60, "low_float_fast_lane": 130, "micro_live_candidates": 100, "rotating_discovery": 220, "ranked_source_candidates": 100, "micro_close_watch_memory": 70, "seed_symbols": 45})
+    elif "pre_market_active" in detail:
+        caps.update({"total": 560, "prepared": 140, "live_tight_memory": 110, "emergency_ignition": 80, "low_float_fast_lane": 170, "micro_live_candidates": 130, "rotating_discovery": 220, "ranked_source_candidates": 120, "micro_close_watch_memory": 80, "seed_symbols": 50})
+    elif "open_first_hour" in detail:
+        caps.update({"total": 560, "prepared": 140, "live_tight_memory": 120, "emergency_ignition": 100, "low_float_fast_lane": 180, "micro_live_candidates": 140, "rotating_discovery": 180, "ranked_source_candidates": 130, "micro_close_watch_memory": 80, "seed_symbols": 45})
+    elif "open_mid_session" in detail:
+        caps.update({"total": 480, "prepared": 120, "live_tight_memory": 100, "emergency_ignition": 80, "low_float_fast_lane": 150, "micro_live_candidates": 120, "rotating_discovery": 120, "ranked_source_candidates": 120, "micro_close_watch_memory": 70, "seed_symbols": 40})
+    elif "open_last_hour" in detail:
+        caps.update({"total": 520, "prepared": 130, "live_tight_memory": 110, "emergency_ignition": 90, "low_float_fast_lane": 160, "micro_live_candidates": 130, "rotating_discovery": 160, "ranked_source_candidates": 120, "micro_close_watch_memory": 80, "seed_symbols": 45})
+    return {k: max(0, int(v or 0)) for k, v in caps.items()}
+
+
 def _live_monitoring_confirmation_budget(
     *,
     phase_info: dict,
@@ -453,73 +615,70 @@ def _live_monitoring_confirmation_budget(
     ranked_symbols: list[str],
     memory_symbols: list[str],
     seed_symbols: list[str],
+    low_float_symbols: list[str] | None = None,
+    micro_live_symbols: list[str] | None = None,
+    emergency_symbols: list[str] | None = None,
+    rotation_symbols: list[str] | None = None,
+    rotation_debug: dict | None = None,
 ) -> tuple[list[str], dict]:
-    """V2V6 live-budget router for FMP quote confirmation.
+    """V2V6c dynamic router for FMP live confirmation.
 
-    Historical replay is heavy because it reads large Polygon minute files. Live
-    monitoring should be quote-budgeted: Prepared/V2V memory first, then ranked
-    candidates, then small seed coverage. This preserves tight monitoring while
-    preventing a full-market deep replay from running during live trading.
+    180 is no longer treated as the live market source. It is only a quiet
+    weekend/closed cap. Active market and after-hours phases receive wider,
+    phase-aware confirmation while rotating-discovery keeps feeding new names.
     """
     phase_detail = str((phase_info or {}).get("detail", "") or "")
     phase_label = str((phase_info or {}).get("label", "") or "")
     if not LIVE_MONITORING_BUDGET_GUARD_ENABLED:
         raw = _scanner.unique_keep_order(
-            list(prepared_symbols or []) + list(live_tight_symbols or []) + list(ranked_symbols or []) + list(memory_symbols or []) + list(seed_symbols or [])
+            list(prepared_symbols or []) + list(live_tight_symbols or []) + list(emergency_symbols or []) + list(low_float_symbols or []) + list(micro_live_symbols or []) + list(rotation_symbols or []) + list(ranked_symbols or []) + list(memory_symbols or []) + list(seed_symbols or [])
         )
         return raw, {
-            "version": "live_monitoring_budget_guard_v2v6b_enforced_2026_06_21",
+            "version": "live_monitoring_dynamic_budget_v2v6c_2026_06_21",
             "enabled": False,
             "final_count": len(raw),
             "phase_detail": phase_detail,
             "phase_label": phase_label,
-            "rule_ar": "V2V6 budget guard disabled by env؛ لا يُنصح بهذا أثناء السوق الحي.",
+            "rotation_discovery": rotation_debug or {},
+            "rule_ar": "V2V6c budget guard disabled by env؛ لا يُنصح بهذا أثناء السوق الحي.",
         }
-    # Keep caps conservative by default. During active market, Prepared/V2V memory
-    # are the highest priority; raw seeds are deliberately bounded.
-    total_cap = int(LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT or 320)
-    prepared_cap = int(LIVE_MONITORING_PREPARED_CONFIRM_LIMIT or 140)
-    memory_cap = int(LIVE_MONITORING_MEMORY_CONFIRM_LIMIT or 80)
-    ranked_cap = int(LIVE_MONITORING_RANKED_CONFIRM_LIMIT or 140)
-    micro_memory_cap = int(LIVE_MONITORING_MICRO_MEMORY_CONFIRM_LIMIT or 50)
-    seed_cap = int(LIVE_MONITORING_SEED_CONFIRM_LIMIT or 60)
-    # If the app reports a closed/quiet phase, keep the same priority but reduce
-    # churn a little; manual force scans can still override via env limits.
-    quiet_phase = any(x in phase_detail.lower() for x in ["closed", "weekend", "holiday"])
-    if quiet_phase:
-        total_cap = min(total_cap, 220)
-        ranked_cap = min(ranked_cap, 80)
-        seed_cap = min(seed_cap, 40)
+
+    caps = _budget_caps_for_phase(phase_info or {})
     groups = {
-        "prepared": _cap_unique_symbols(prepared_symbols, prepared_cap),
-        "live_tight_memory": _cap_unique_symbols(live_tight_symbols, memory_cap),
-        "ranked_source_candidates": _cap_unique_symbols(ranked_symbols, ranked_cap),
-        "micro_close_watch_memory": _cap_unique_symbols(memory_symbols, micro_memory_cap),
-        "seed_symbols": _cap_unique_symbols(seed_symbols, seed_cap),
+        "prepared": _cap_unique_symbols(prepared_symbols, caps.get("prepared", 0)),
+        "live_tight_memory": _cap_unique_symbols(live_tight_symbols, caps.get("live_tight_memory", 0)),
+        "emergency_ignition": _cap_unique_symbols(emergency_symbols or [], caps.get("emergency_ignition", 0)),
+        "low_float_fast_lane": _cap_unique_symbols(low_float_symbols or [], caps.get("low_float_fast_lane", 0)),
+        "micro_live_candidates": _cap_unique_symbols(micro_live_symbols or [], caps.get("micro_live_candidates", 0)),
+        "rotating_discovery": _cap_unique_symbols(rotation_symbols or [], caps.get("rotating_discovery", 0)),
+        "ranked_source_candidates": _cap_unique_symbols(ranked_symbols, caps.get("ranked_source_candidates", 0)),
+        "micro_close_watch_memory": _cap_unique_symbols(memory_symbols, caps.get("micro_close_watch_memory", 0)),
+        "seed_symbols": _cap_unique_symbols(seed_symbols, caps.get("seed_symbols", 0)),
     }
     final = _scanner.unique_keep_order(
         groups["prepared"]
         + groups["live_tight_memory"]
+        + groups["emergency_ignition"]
+        + groups["low_float_fast_lane"]
+        + groups["micro_live_candidates"]
+        + groups["rotating_discovery"]
         + groups["ranked_source_candidates"]
         + groups["micro_close_watch_memory"]
         + groups["seed_symbols"]
-    )[:total_cap]
+    )[:int(caps.get("total", 560) or 560)]
     debug = {
-        "version": "live_monitoring_budget_guard_v2v6b_enforced_2026_06_21",
+        "version": "live_monitoring_dynamic_budget_v2v6c_2026_06_21",
         "enabled": True,
         "phase_detail": phase_detail,
         "phase_label": phase_label,
-        "caps": {
-            "total": total_cap,
-            "prepared": prepared_cap,
-            "live_tight_memory": memory_cap,
-            "ranked_source_candidates": ranked_cap,
-            "micro_close_watch_memory": micro_memory_cap,
-            "seed_symbols": seed_cap,
-        },
+        "caps": caps,
         "requested_counts": {
             "prepared": len(list(prepared_symbols or [])),
             "live_tight_memory": len(list(live_tight_symbols or [])),
+            "emergency_ignition": len(list(emergency_symbols or [])),
+            "low_float_fast_lane": len(list(low_float_symbols or [])),
+            "micro_live_candidates": len(list(micro_live_symbols or [])),
+            "rotating_discovery": len(list(rotation_symbols or [])),
             "ranked_source_candidates": len(list(ranked_symbols or [])),
             "micro_close_watch_memory": len(list(memory_symbols or [])),
             "seed_symbols": len(list(seed_symbols or [])),
@@ -527,7 +686,8 @@ def _live_monitoring_confirmation_budget(
         "selected_counts": {k: len(v) for k, v in groups.items()},
         "final_count": len(final),
         "final_sample": final[:80],
-        "rule_ar": "V2V6: الفحص الحي لا يقرأ ملفات الدقيقة ولا يشغل replay؛ يؤكد فقط قائمة مدمجة محدودة تبدأ بـ Prepared Watch ثم ذاكرة V2V ثم أفضل المرشحين، حتى لا يضغط Railway/FMP.",
+        "rotation_discovery": rotation_debug or {},
+        "rule_ar": "V2V6c: 180 ليس منبع السوق؛ هو حد عطلة فقط. بعد الإغلاق والبري ماركت وأثناء التداول تستخدم الأداة ميزانية ديناميكية + دفعات اكتشاف دوّارة، مع مقاعد مخصصة للأسهم الصغيرة/Low-Float/Fast Lane.",
     }
     return final, debug
 
@@ -2408,6 +2568,11 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     prepared_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (prepared_big_explosion_watch_rows or [])[:BIG_EXPLOSION_PREPARED_WATCH_LIMIT]]
     live_tight_confirm_symbols = [str((x or {}).get("symbol") or "").upper() for x in (live_tight_monitoring_memory_rows or [])[:LIVE_TIGHT_MONITORING_LIMIT]]
     ranked_confirm_symbols = [r["symbol"] for r in rows_before_confirm[:DYNAMIC_DISCOVERY_FMP_CONFIRM_LIMIT]]
+    low_float_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"low_float_fast_lane_v1"}, limit=500)
+    micro_live_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"micro_explosion_capture_v2r", "micro_explosion_capture_v2r1", "big_explosion_live_lane_v2t", "big_explosion_live_lane_v2u", "intraday_early_ramp", "high_risk_live_mover", "dip_reclaim_radar", "quiet_accumulation_radar"}, limit=500)
+    emergency_confirm_symbols = _symbols_from_candidate_rows(rows_before_confirm, {"live_ignition_hot_lane", "big_explosion_live_lane_v2t", "micro_explosion_capture_v2r", "micro_explosion_capture_v2r1"}, limit=300)
+    existing_confirm_pool = prepared_confirm_symbols + live_tight_confirm_symbols + ranked_confirm_symbols + memory_confirm_symbols + seed_confirm_symbols + low_float_confirm_symbols + micro_live_confirm_symbols + emergency_confirm_symbols
+    rotation_confirm_symbols, rotation_discovery_debug = _rotating_discovery_symbols(reference_tickers, phase_info=phase_info, existing_symbols=existing_confirm_pool)
     fmp_confirm_symbols, live_monitoring_budget_debug = _live_monitoring_confirmation_budget(
         phase_info=phase_info,
         prepared_symbols=prepared_confirm_symbols,
@@ -2415,32 +2580,79 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         ranked_symbols=ranked_confirm_symbols,
         memory_symbols=memory_confirm_symbols,
         seed_symbols=seed_confirm_symbols,
+        low_float_symbols=low_float_confirm_symbols,
+        micro_live_symbols=micro_live_confirm_symbols,
+        emergency_symbols=emergency_confirm_symbols,
+        rotation_symbols=rotation_confirm_symbols,
+        rotation_debug=rotation_discovery_debug,
     )
-    # V2V6b: hard fail-safe cap. Even if an older env value or caller expands
-    # candidate lists, live scan should not request hundreds of FMP confirmations.
+    # V2V6c: final phase-aware cap.  It protects Railway/FMP, but does not force
+    # active-market and after-hours discovery down to the weekend 180 limit.
     try:
-        hard_cap = int(LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT or 180)
+        hard_cap = int(((live_monitoring_budget_debug or {}).get("caps") or {}).get("total") or LIVE_MONITORING_FMP_CONFIRM_TOTAL_LIMIT or 560)
     except Exception:
-        hard_cap = 180
+        hard_cap = 560
     if len(fmp_confirm_symbols or []) > hard_cap:
         original_len = len(fmp_confirm_symbols or [])
         fmp_confirm_symbols = list(fmp_confirm_symbols or [])[:hard_cap]
         if isinstance(live_monitoring_budget_debug, dict):
-            live_monitoring_budget_debug["hard_cap_applied_v2v6b"] = True
+            live_monitoring_budget_debug["hard_cap_applied_v2v6c"] = True
             live_monitoring_budget_debug["hard_cap"] = hard_cap
             live_monitoring_budget_debug["pre_hard_cap_count"] = original_len
             live_monitoring_budget_debug["final_count"] = len(fmp_confirm_symbols)
-            live_monitoring_budget_debug["rule_ar"] = "V2V6b: تم تطبيق سقف حماية نهائي على FMP live confirmation حتى لو كانت البيئة أو الكاش قديمًا."
+            live_monitoring_budget_debug["rule_ar"] = "V2V6c: تم تطبيق سقف نهائي حسب مرحلة السوق؛ 180 للعطلة فقط، وليس أثناء السوق/بعد الإغلاق."
     fmp_quotes = {}
     fmp_diag = {}
     if DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION and FMP_API_KEY and fmp_confirm_symbols:
         try:
-            bundle = get_live_quotes(fmp_confirm_symbols, prefer_cache=False, allow_fallback=False)
-            if isinstance(bundle, dict):
-                fmp_quotes = bundle.get("quotes", {}) or {}
-                fmp_diag = bundle.get("diagnostics", {}) or {}
+            batch_size = max(80, min(300, int(LIVE_MONITORING_FMP_BATCH_SIZE or 280)))
+        except Exception:
+            batch_size = 280
+        try:
+            max_batches = max(1, min(4, int(LIVE_MONITORING_MAX_FMP_BATCHES or 3)))
+        except Exception:
+            max_batches = 3
+        phase_name = str((phase_info or {}).get("phase", "") or "")
+        phase_detail_name = str((phase_info or {}).get("detail", "") or "")
+        # Polygon fallback is useful for after-hours/closed preparation only. It
+        # remains delayed and never means execution. During live open/premarket,
+        # use FMP-only for actionable freshness.
+        polygon_fallback_allowed = bool(phase_name in {"after_hours", "closed"} and phase_detail_name != "weekend")
+        max_fetch = int(batch_size * max_batches)
+        fetch_symbols = list(fmp_confirm_symbols or [])[:max_fetch]
+        if len(fetch_symbols) < len(fmp_confirm_symbols or []) and isinstance(live_monitoring_budget_debug, dict):
+            live_monitoring_budget_debug["batch_capacity_cap_applied_v2v6c"] = True
+            live_monitoring_budget_debug["batch_capacity"] = max_fetch
+            live_monitoring_budget_debug["pre_batch_capacity_count"] = len(fmp_confirm_symbols or [])
+            live_monitoring_budget_debug["final_count"] = len(fetch_symbols)
+        fmp_confirm_symbols = fetch_symbols
+        all_diags = []
+        try:
+            for i in range(0, len(fmp_confirm_symbols), batch_size):
+                chunk = list(fmp_confirm_symbols[i:i + batch_size])
+                if not chunk:
+                    continue
+                bundle = get_live_quotes(chunk, prefer_cache=False, allow_fallback=polygon_fallback_allowed)
+                if isinstance(bundle, dict):
+                    fmp_quotes.update(bundle.get("quotes", {}) or {})
+                    all_diags.append(bundle.get("diagnostics", {}) or {})
+            fetched_total = sum(int((d or {}).get("fetched", 0) or 0) for d in all_diags)
+            cache_used_total = sum(int((d or {}).get("cache_used", 0) or 0) for d in all_diags)
+            fmp_diag = {
+                "chunked_v2v6c": True,
+                "batch_size": batch_size,
+                "max_batches": max_batches,
+                "batch_count": len(all_diags),
+                "requested": len(fmp_confirm_symbols),
+                "fetched": fetched_total,
+                "cache_used": cache_used_total,
+                "polygon_fallback_allowed_for_after_hours_only": polygon_fallback_allowed,
+                "sources": sorted({str((d or {}).get("source") or "none") for d in all_diags}),
+            }
+            if isinstance(live_monitoring_budget_debug, dict):
+                live_monitoring_budget_debug["quote_fetch"] = dict(fmp_diag)
         except Exception as exc:
-            fmp_diag = {"error": f"{type(exc).__name__}: {str(exc)[:100]}"}
+            fmp_diag = {"error": f"{type(exc).__name__}: {str(exc)[:100]}", "chunked_v2v6c": True}
 
     live_confirmed = 0
     extended_confirmed = 0
@@ -2676,9 +2888,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3l_v2v6b_budget_enforced_2026_06_21",
+        "engine_version": "dynamic_discovery_v3m_v2v6c_dynamic_rotation_discovery_2026_06_21",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2v6b_enforced_budget_fast_promotion",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2v6c_dynamic_rotation_discovery_fast_promotion",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -2704,6 +2916,13 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "live_monitoring_budget_guard_v2v6": live_monitoring_budget_debug if 'live_monitoring_budget_debug' in locals() else {},
         "fmp_confirmed": live_confirmed,
         "fmp_extended_confirmed": extended_confirmed,
+        "fmp_confirm_batches": (fmp_diag or {}).get("batch_count") if isinstance(fmp_diag, dict) else None,
+        "fmp_confirm_batch_size": (fmp_diag or {}).get("batch_size") if isinstance(fmp_diag, dict) else None,
+        "rotating_discovery_v2v6c": rotation_discovery_debug if 'rotation_discovery_debug' in locals() else {},
+        "low_float_confirm_count_v2v6c": len(low_float_confirm_symbols) if 'low_float_confirm_symbols' in locals() else 0,
+        "micro_live_confirm_count_v2v6c": len(micro_live_confirm_symbols) if 'micro_live_confirm_symbols' in locals() else 0,
+        "emergency_confirm_count_v2v6c": len(emergency_confirm_symbols) if 'emergency_confirm_symbols' in locals() else 0,
+        "rotation_confirm_count_v2v6c": len(rotation_confirm_symbols) if 'rotation_confirm_symbols' in locals() else 0,
         "low_float_fast_lane_count": int(source_bucket_counts.get("low_float_fast_lane_v1", 0)) if 'source_bucket_counts' in locals() else int(low_float_fast_lane_count or 0),
         "low_float_fast_lane": low_float_fast_lane_status,
         "low_float_fast_lane_funnel_debug": low_float_fast_lane_funnel_debug,
@@ -2725,7 +2944,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "live_tight_monitoring_v2v_symbols": _scanner.unique_keep_order(live_tight_monitoring_symbols)[:120],
         "live_tight_monitoring_v2v_by_symbol": {k: v for k, v in (live_tight_monitoring_by_symbol or {}).items()},
         "live_tight_monitoring_v2v_memory": live_tight_monitoring_memory_debug,
-        "live_tight_monitoring_v2v_rule_ar": "V2V6: Prepared Watch أو رمز جديد يبدأ +3%/+5% مع حجم يدخل تأكيد مبكر/مراقبة لصيقة عبر ميزانية FMP محدودة وآمنة. لا يفتح شراء مباشر ولا يتجاوز الشرعية.",
+        "live_tight_monitoring_v2v_rule_ar": "V2V6c: Prepared/V2V/Low-Float/Fast Lane محمية، والأسهم الجديدة تدخل عبر rotating discovery ثم FMP/Polygon after-hours confirmation. لا يفتح شراء مباشر ولا يتجاوز الشرعية.",
         "live_ignition_hot_lane_count": int(source_bucket_counts.get("live_ignition_hot_lane", 0)) if 'source_bucket_counts' in locals() else 0,
         "intraday_early_ramp_count": int(source_bucket_counts.get("intraday_early_ramp", 0)) if 'source_bucket_counts' in locals() else 0,
         "dip_reclaim_radar_count": int(source_bucket_counts.get("dip_reclaim_radar", 0)) if 'source_bucket_counts' in locals() else 0,
