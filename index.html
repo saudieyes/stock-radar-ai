@@ -2261,7 +2261,7 @@
     <div class="quick-nav">
       <a class="quick-link" href="#openingSection">🚀 الافتتاح</a>
       <a class="quick-link" href="#strong-section">🔥 دخول قوي</a>
-      <a class="quick-link" href="#polygonNextDaySection">🛰️ Polygon للغد</a>
+      <a class="quick-link" href="#polygonNextDaySection">🛰️ مصدر Polygon</a>
       <a class="quick-link" href="#premarket-section">🚀 تهيئة قوية</a>
       <a class="quick-link" href="#gray-strong-section">⚠️ غير محسومة</a>
       <a class="quick-link" href="#cautious-section">🟠 دخول بحذر</a>
@@ -2375,15 +2375,15 @@
     <div class="section scroll-anchor" id="polygonNextDaySection">
       <div class="section-header section-tone-watch">
         <div class="section-heading">
-          <div class="section-title">🛰️ مرشحو الغد من Polygon</div>
-          <div class="section-count" id="polygonNextDayCount">قائمة تحضير منفصلة — مخفية افتراضيًا وليست شراء مباشر</div>
+          <div class="section-title">🛰️ مصدر Polygon الخلفي للغد</div>
+          <div class="section-count" id="polygonNextDayCount">مصدر خلفي يوزّع المرشحين على القوائم الحالية — ليس قائمة تداول مستقلة</div>
         </div>
         <div class="section-tools">
-          <button class="ghost" onclick="loadPolygonNextDay(true)">تحديث</button>
-          <button class="ghost" data-section-toggle="polygonNextDayContent" onclick="togglePolygonNextDaySection(this)">إظهار</button>
+          <button class="ghost" onclick="loadPolygonNextDay(true)">تحديث الملخص</button>
+          <button class="ghost" data-section-toggle="polygonNextDayContent" onclick="togglePolygonNextDaySection(this)">إظهار الملخص</button>
         </div>
       </div>
-      <div id="polygonNextDayContent" class="panel hidden-section">اضغط إظهار لعرض مرشحي Polygon للغد...</div>
+      <div id="polygonNextDayContent" class="panel hidden-section">اضغط إظهار الملخص لمعرفة ما أضافه Polygon للخلفية. الأسهم نفسها تظهر داخل Low-Float / Pre-Trigger / Reclaim / Pullback وغيرها.</div>
     </div>
 
     <div id="content"><div class="loading">جاري تحميل الفرص...</div></div>
@@ -6425,23 +6425,42 @@
       const root = (payload && payload.data && Array.isArray(payload.data.candidates)) ? payload.data : payload;
       const items = Array.isArray(root?.candidates) ? root.candidates : [];
       const counts = root?.counts || {};
+      const low = Number(counts.low_float_proxy || items.filter(x => (x.tags || []).includes('low_float_proxy')).length || 0);
+      const quiet = Number(counts.quiet_accumulation || 0);
+      const reclaim = Number(counts.reclaim_watch || 0);
+      const continuation = Number(counts.continuation_pullback_only || 0);
+      const review = Number(counts.needs_sharia_review || 0);
+      const blocked = Number(counts.blocked_learning_only || 0);
       if (countEl) {
-        const low = Number(counts.low_float_proxy || items.filter(x => (x.tags || []).includes('low_float_proxy')).length || 0);
-        const review = Number(counts.needs_sharia_review || 0);
         countEl.textContent = items.length
-          ? `${formatNumber(items.length)} مرشح • ${formatNumber(low)} Small/Low-Float • مراجعة شرعية ${formatNumber(review)}`
-          : 'لا توجد قائمة محفوظة الآن — ابنِ القائمة من Polygon بعد الإغلاق';
+          ? `${formatNumber(items.length)} مرشح بالخلفية • Low-Float ${formatNumber(low)} • Reclaim ${formatNumber(reclaim)} • مراجعة شرعية ${formatNumber(review)}`
+          : 'لا توجد قائمة Polygon محفوظة الآن — تبقى القوائم الحالية كما هي';
       }
       if (!items.length) {
-        wrap.innerHTML = '<div class="empty">لا توجد قائمة Polygon للغد محفوظة الآن. استخدم /polygon-next-day/build-from-polygon?execute=true بعد الإغلاق.</div>';
+        wrap.innerHTML = '<div class="empty">لا توجد قائمة Polygon للغد محفوظة الآن. عند البناء ستعمل كمصدر خلفي يوزع على القوائم الحالية، لا كقائمة مستقلة.</div>';
         return;
       }
-      const top = items.slice(0, 60);
       const builtAt = safeText(root.built_at || '');
       const tradeDate = safeText(root.trade_date || '');
+      const clean = Array.isArray(root?.sections?.clean_approved) ? root.sections.clean_approved : [];
+      const topSymbols = items.slice(0, 18).map(x => safeText(x.symbol || '')).filter(Boolean).join('، ');
       wrap.innerHTML = `
-        <div class="section-limit-note">هذه قائمة تحضير فقط من Polygon وليست شراء مباشر. معروضة مخفية افتراضيًا حتى لا تزاحم قوائم الدخول. تاريخ البيانات: ${tradeDate || '—'} ${builtAt ? '• بنيت: ' + builtAt : ''}. يتم عرض أول ${formatNumber(top.length)} من ${formatNumber(items.length)}.</div>
-        <div class="cards">${top.map((item, idx) => renderPolygonNextDayCandidate(item, idx)).join('')}</div>`;
+        <div class="section-limit-note">
+          V2W2: Polygon هنا مصدر خلفي فقط. لا نعرض 180 كروت ولا نفتح شراء مباشر. يتم توزيع أفضل الأسماء على القوائم الموجودة مثل Low-Float / Pre-Trigger / Reclaim / Continuation Pullback، والسعر الحي لاحقًا من FMP/V2V.
+          ${tradeDate ? '<br>تاريخ بيانات Polygon: <b>' + tradeDate + '</b>' : ''}${builtAt ? ' • بنيت: ' + builtAt : ''}
+        </div>
+        <div class="stats-grid">
+          <div class="stat"><div class="stat-label">إجمالي بالخلفية</div><div class="stat-value">${formatNumber(items.length)}</div></div>
+          <div class="stat"><div class="stat-label">Low-Float / صغير</div><div class="stat-value">${formatNumber(low)}</div></div>
+          <div class="stat"><div class="stat-label">تجميع هادئ</div><div class="stat-value">${formatNumber(quiet)}</div></div>
+          <div class="stat"><div class="stat-label">Reclaim</div><div class="stat-value">${formatNumber(reclaim)}</div></div>
+          <div class="stat"><div class="stat-label">Continuation/Pullback</div><div class="stat-value">${formatNumber(continuation)}</div></div>
+          <div class="stat"><div class="stat-label">شرعي معتمد</div><div class="stat-value">${formatNumber(clean.length)}</div></div>
+          <div class="stat"><div class="stat-label">يحتاج شرعية</div><div class="stat-value">${formatNumber(review)}</div></div>
+          <div class="stat"><div class="stat-label">تعلم فقط</div><div class="stat-value">${formatNumber(blocked)}</div></div>
+        </div>
+        <div class="owner-action">أمثلة من المصدر الخلفي: ${topSymbols || '—'}</div>
+        <div class="section-limit-note">لمراقبة الأسهم، استخدم القوائم الحالية في الأعلى؛ إذا ظهر سهم Polygon مناسبًا سيظهر داخل قائمته الطبيعية مع وسم أنه من Polygon.</div>`;
     }
 
     async function loadPolygonNextDay(force=false) {
@@ -6462,7 +6481,7 @@
     function togglePolygonNextDaySection(buttonEl) {
       const wrap = document.getElementById('polygonNextDayContent');
       if (wrap && (wrap.dataset.loaded !== '1')) loadPolygonNextDay(false);
-      toggleSection('polygonNextDayContent', buttonEl || null, 'إظهار', 'إخفاء');
+      toggleSection('polygonNextDayContent', buttonEl || null, 'إظهار الملخص', 'إخفاء الملخص');
     }
 
     async function refreshWeeklyPriorityLiveQuotes(silent=true) {
