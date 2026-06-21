@@ -23,7 +23,14 @@ except Exception:  # pragma: no cover
     def set_json(key, value):
         return False
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w3_polygon_distribution_catalyst_guard_2026_06_21"
+try:
+    from app.polygon_next_day_builder import load_polygon_next_day_candidates, POLYGON_NEXT_DAY_BUILDER_VERSION
+except Exception:  # pragma: no cover
+    POLYGON_NEXT_DAY_BUILDER_VERSION = "polygon_next_day_builder_unavailable"
+    def load_polygon_next_day_candidates():
+        return {"ok": False, "candidates": [], "reason": "polygon_next_day_builder_unavailable"}
+
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w4_polygon_direct_distribution_injection_2026_06_21"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -2996,7 +3003,7 @@ CLOSED_MARKET_PREP_VERSION = "closed_market_prep_sections_v1_2026_06_19"
 PREMARKET_PROMOTION_BRIDGE_VERSION = "premarket_promotion_bridge_v1_2026_06_20"
 LOW_FLOAT_FAST_LANE_CAPTURE_VERSION = "low_float_fast_lane_capture_v2q_funnel_display_2026_06_20"
 MICRO_EXPLOSION_CLOSE_WATCH_VERSION = "micro_explosion_close_watch_v2r1_2026_06_20"
-POLYGON_DISTRIBUTION_ROUTER_VERSION = "polygon_distribution_router_v2w3_catalyst_guard_2026_06_21"
+POLYGON_DISTRIBUTION_ROUTER_VERSION = "polygon_distribution_router_v2w4_direct_file_injection_2026_06_21"
 
 PREP_SECTION_TO_BUCKET = {
     "small_stock_classic_radar": "small_stock_classic",
@@ -3781,46 +3788,183 @@ def _make_polygon_distributed_row(row: dict, section: str, market_phase: str = "
     out["technical_explainer_reasons"] = merged
     out["why_appeared_ar"] = "، ".join(merged[:4])
     out["special_bucket_reason"] = out["why_appeared_ar"]
-    # Keep Polygon candidates visible inside prep sections without outranking true
-    # live-confirmed candidates. Existing live rows generally have much larger scores.
-    out["opportunity_rank_score"] = round(max(_num(out.get("opportunity_rank_score"), 0.0), 700.0 + score), 2)
+    # Keep Polygon candidates competitive inside prep sections without overwhelming
+    # live/V2V rows. Direct Polygon-only rows stay preparation candidates.
+    polygon_rank_floor = 118.0 + min(max(score, 0.0), 110.0) * 0.42
+    if out.get("polygon_next_day_source_mode_v2w4") == "merged_with_fmp_row":
+        polygon_rank_floor += 18.0
+    if section == "low_float_premarket_radar":
+        polygon_rank_floor += 10.0
+    out["opportunity_rank_score"] = round(max(_num(out.get("opportunity_rank_score"), 0.0), polygon_rank_floor), 2)
     if section == "low_float_premarket_radar":
         out["low_float_capture_v2m"] = _low_float_proxy_metrics(out)
         out["low_float_label_ar"] = (out.get("low_float_capture_v2m") or {}).get("label_ar") or "Polygon Low-Float proxy"
     return out
 
 
+
+
+def _normalize_polygon_next_day_payload(payload: dict) -> dict:
+    """Return the saved V2W Polygon payload even if an endpoint wrapper is used."""
+    if not isinstance(payload, dict):
+        return {"ok": False, "candidates": [], "reason": "invalid_polygon_payload"}
+    data = payload.get("data")
+    if isinstance(data, dict) and isinstance(data.get("candidates"), list):
+        return data
+    return payload
+
+
+def _polygon_next_day_direct_rows(limit: int = 260, live_rows: list[dict] | None = None) -> tuple[list[dict], dict]:
+    """Load Polygon Next-Day candidates directly from the compact saved file.
+
+    V2W2 originally tried to route only rows that still carried the
+    polygon_next_day_* source metadata inside trade-scan rows. Some downstream
+    analysis strips those source fields, so the router could see zero Polygon
+    rows even though the source engine had injected the symbols. V2W4 fixes that
+    by reading the compact Polygon file directly and merging each symbol with a
+    matching FMP/deep-analysis row when one exists. This preserves live/FMP price
+    when available while keeping Polygon as preparation-only metadata.
+    """
+    debug = {
+        "builder_version": POLYGON_NEXT_DAY_BUILDER_VERSION,
+        "loaded": 0,
+        "usable": 0,
+        "merged_with_trade_scan_rows": 0,
+        "direct_file_only_rows": 0,
+        "trade_date": "",
+        "source_mode": "direct_file_plus_live_row_merge",
+    }
+    try:
+        payload = _normalize_polygon_next_day_payload(load_polygon_next_day_candidates() or {})
+    except Exception as exc:
+        debug["error"] = f"{type(exc).__name__}: {str(exc)[:140]}"
+        return [], debug
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    debug["loaded"] = len(candidates or [])
+    debug["trade_date"] = _s(payload.get("trade_date"))
+    by_symbol: dict[str, dict] = {}
+    for r in live_rows or []:
+        if isinstance(r, dict):
+            sym = _u(r.get("symbol"))
+            if sym and sym not in by_symbol:
+                by_symbol[sym] = r
+    out_rows: list[dict] = []
+    for item in candidates or []:
+        if len(out_rows) >= max(1, int(limit or 260)):
+            break
+        if not isinstance(item, dict):
+            continue
+        sym = _u(item.get("symbol"))
+        if not sym:
+            continue
+        sharia_status = _s(item.get("sharia_status") or "needs_review").lower()
+        if sharia_status == "blocked" or bool(item.get("blocked_learning_only")):
+            continue
+        base = dict(by_symbol.get(sym) or {})
+        if base:
+            debug["merged_with_trade_scan_rows"] += 1
+        else:
+            debug["direct_file_only_rows"] += 1
+        # Preserve any live/FMP fields already calculated by trade-scan. Polygon
+        # fields are stored separately and marked as preparation-only reference.
+        base.update({
+            "symbol": sym,
+            "sources": _dedupe(list(base.get("sources") or []) + ["polygon_next_day_builder"], 12),
+            "watch_only_polygon_next_day_v2w": True,
+            "polygon_next_day_builder_score": item.get("score"),
+            "polygon_next_day_lane": item.get("lane"),
+            "polygon_next_day_price": item.get("price"),
+            "polygon_next_day_change_pct": item.get("change_pct"),
+            "polygon_next_day_dollar_volume": item.get("dollar_volume"),
+            "polygon_next_day_tags": list(item.get("tags") or [])[:10],
+            "polygon_next_day_reasons_ar": list(item.get("reasons_ar") or [])[:8],
+            "polygon_next_day_sharia_status": item.get("sharia_status"),
+            "polygon_next_day_trade_date": item.get("trade_date") or payload.get("trade_date"),
+            "polygon_next_day_source_mode_v2w4": "merged_with_fmp_row" if sym in by_symbol else "direct_polygon_reference_only",
+            "data_freshness_label_ar": ("سعر FMP/تحليل حي متاح مع دعم Polygon" if sym in by_symbol else "سعر Polygon تحضيري فقط — يحتاج تأكيد FMP"),
+            "not_buy_reason_ar": "مرشح Polygon للغد؛ لا شراء ولا ترقية قبل تأكيد FMP/V2V والشرعية والخطة.",
+        })
+        if not base.get("price") and item.get("price") is not None:
+            # UI may need a reference price in closed/prep mode. It is explicitly
+            # labelled as Polygon reference, not live execution price.
+            base["price"] = item.get("price")
+            base["display_price"] = item.get("price")
+            base["price_source"] = "polygon_next_day_reference_only"
+        out_rows.append(base)
+    debug["usable"] = len(out_rows)
+    return out_rows, debug
+
+
 def _distribute_polygon_next_day_to_existing_sections(final_map: dict[str, list[dict]], rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
     """Route Polygon next-day candidates into existing sections.
 
-    This keeps the 180 Polygon candidates in the background/source universe and
-    shows only the best relevant names inside the current operational sections.
+    V2W4 reads the compact Polygon file directly when trade-scan rows no longer
+    carry polygon_next_day metadata. It merges by symbol with existing FMP/deep
+    analysis rows when possible, prevents duplicate visible cards, and fills only
+    the current operational sections up to their normal limit.
     """
+    direct_rows, direct_debug = _polygon_next_day_direct_rows(limit=260, live_rows=rows or [])
+    phase_l = _s(market_phase).lower()
+    if phase_l in {"open", "regular", "market_open"}:
+        # During the official session, do not show Polygon-only reference-price
+        # rows. They may still feed the source universe, but visible cards need
+        # live/FMP/deep-analysis confirmation.
+        before_filter = len(direct_rows or [])
+        direct_rows = [r for r in (direct_rows or []) if (r or {}).get("polygon_next_day_source_mode_v2w4") == "merged_with_fmp_row"]
+        direct_debug["open_session_direct_file_only_hidden"] = max(0, before_filter - len(direct_rows or []))
     debug: dict[str, Any] = {
         "version": POLYGON_DISTRIBUTION_ROUTER_VERSION,
         "enabled": True,
         "rows_seen": len(rows or []),
         "polygon_rows_seen": 0,
+        "direct_polygon_rows_loaded": int((direct_debug or {}).get("loaded", 0) or 0),
+        "direct_polygon_rows_usable": int((direct_debug or {}).get("usable", 0) or 0),
+        "merged_with_trade_scan_rows": int((direct_debug or {}).get("merged_with_trade_scan_rows", 0) or 0),
+        "direct_file_only_rows": int((direct_debug or {}).get("direct_file_only_rows", 0) or 0),
+        "direct_loader_debug": direct_debug,
         "routed_by_section": {},
         "added_by_section": {},
         "skipped_duplicate_symbols": 0,
+        "skipped_existing_visible_symbols": 0,
         "skipped_blocked_or_invalid": 0,
         "hidden_source_mode": True,
-        "rule_ar": "V2W2: قائمة Polygon لا تظهر كقائمة ضخمة؛ توزع على القوائم الحالية مع منع التكرار وحد أقصى لكل قسم.",
+        "source_mode": "rows_plus_direct_file_injection",
+        "rule_ar": "V2W4: Polygon يبقى مصدرًا خلفيًا؛ إذا فقدت صفوف trade-scan وسم Polygon يقرأ الملف compact مباشرة ويوزع الأفضل على القوائم الحالية بدون تكرار.",
     }
     section_candidates: dict[str, list[dict]] = {k: [] for k in PREP_SECTION_TO_BUCKET}
-    global_seen: set[str] = set()
+
+    # Existing specialized sections win.  We do not add a second visible card if
+    # the symbol is already in a real operational section. Learning is ignored
+    # here because it is only an overlay and should not block a better prep slot.
+    visible_existing: set[str] = set()
     for key, vals in (final_map or {}).items():
         if key == "learning_opportunity_candidates":
             continue
         for item in vals or []:
             sym = _u(item.get("symbol")) if isinstance(item, dict) else ""
             if sym:
-                global_seen.add(sym)
+                visible_existing.add(sym)
 
-    for row in rows or []:
+    # Combine rows that still carry Polygon metadata with direct-file rows, but
+    # dedupe by symbol and prefer the row with live/FMP analysis fields.
+    candidate_by_symbol: dict[str, dict] = {}
+    for row in list(rows or []) + list(direct_rows or []):
         if not isinstance(row, dict) or not _is_polygon_next_day_source_row(row):
             continue
+        sym = _u(row.get("symbol"))
+        if not sym:
+            continue
+        old = candidate_by_symbol.get(sym)
+        if old is None:
+            candidate_by_symbol[sym] = row
+        else:
+            # Prefer the candidate with a live/FMP row merge or richer analysis.
+            old_live = old.get("polygon_next_day_source_mode_v2w4") == "merged_with_fmp_row" or bool(old.get("fmp_price") or old.get("live_price") or old.get("current_price_live"))
+            new_live = row.get("polygon_next_day_source_mode_v2w4") == "merged_with_fmp_row" or bool(row.get("fmp_price") or row.get("live_price") or row.get("current_price_live"))
+            if new_live and not old_live:
+                candidate_by_symbol[sym] = row
+
+    for row in candidate_by_symbol.values():
         debug["polygon_rows_seen"] += 1
         sym = _u(row.get("symbol"))
         if not sym:
@@ -3832,24 +3976,21 @@ def _distribute_polygon_next_day_to_existing_sections(final_map: dict[str, list[
         if not _is_personal_section_eligible(row):
             debug["skipped_blocked_or_invalid"] += 1
             continue
-        if sym in global_seen:
-            debug["skipped_duplicate_symbols"] += 1
+        if sym in visible_existing:
+            debug["skipped_existing_visible_symbols"] += 1
             continue
         section, _reasons = _polygon_next_day_target_section(row)
         if section not in section_candidates:
             section = "small_stock_classic_radar"
         debug["routed_by_section"][section] = int(debug["routed_by_section"].get(section, 0) or 0) + 1
         section_candidates[section].append(_make_polygon_distributed_row(row, section, market_phase=market_phase))
-        global_seen.add(sym)
+        visible_existing.add(sym)
 
     lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
     for section, candidates in section_candidates.items():
         existing = list(final_map.get(section, []) or [])
         merged: list[dict] = []
         seen_section: set[str] = set()
-        # Existing rows first if their rank is similar; then sort and cap.  This
-        # prevents Polygon from becoming a separate list while still allowing a
-        # good Polygon candidate to fill empty slots.
         for item in _sort_bucket(existing + candidates):
             if not isinstance(item, dict):
                 continue
