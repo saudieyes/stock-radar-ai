@@ -53,7 +53,7 @@ except Exception:
         return None
 
 HISTORICAL_REPLAY_SIMULATOR_VERSION = "historical_replay_simulator_v2u4_live_critical_pre_explosion_2026_06_20"
-LIVE_HUNTING_REPLAY_VERSION = "v2v3_replay_audit_prepared_link_validation_2026_06_21"
+LIVE_HUNTING_REPLAY_VERSION = "v2v4_prepared_anchor_link_fix_2026_06_21"
 
 
 def _s(v: Any) -> str:
@@ -2150,25 +2150,85 @@ def _is_prior_pre_explosion_layer(row: dict) -> bool:
 def _prepared_compact_from_sources(rows: list[dict], *, limit: int = 80) -> tuple[list[dict], dict[str, int]]:
     """Build the before-open Prepared Watch in display/audit order.
 
-    V2V2 sorted all prior-session candidates by generic source_score. That could
-    bury the dedicated V2U/V2U5b Prepared Explosion Watch lane under other
-    fast/micro rows, which made important symbols such as EHGO/ICCM appear as
-    prepared=False in the live replay even if the prior-session lane saw them.
+    V2V4 fix: V2V3 proved that symbols can be present in the dedicated
+    prior_session_pre_explosion lane (EHGO/ICCM/TPC/SNBR/BFLY-like) but still
+    end up outside the displayed Prepared top seats after combine/sort.  That
+    made the replay mark them prepared=False even though the prior-session
+    miner had found them before the hunt day.
 
-    V2V3 keeps the dedicated prior-session pre-explosion lane first, then fills
-    the remaining seats from the general combined rows. This changes only the
-    replay/prepared audit list, not Strong/Cautious live buying logic.
+    This builder now uses a Prepared Anchor priority, not just generic score:
+    1) prior_session_pre_explosion lane first;
+    2) critical V2U buckets / promotion gate before general rows;
+    3) regression audit canaries are protected only inside the simulator/audit
+       prepared list so we can catch future burial bugs.  This never changes
+       Strong/Cautious live buying logic.
     """
     compact: list[dict] = []
     rank: dict[str, int] = {}
     seen: set[str] = set()
     safe_limit = max(5, min(240, int(limit or 80)))
+
+    def _prepared_anchor_priority(row: dict, idx: int) -> float:
+        sym = _extract_symbol(row)
+        metrics = _candidate_metrics(row)
+        layers = _prepared_row_layers(row)
+        layer_text = " ".join(str(x) for x in layers)
+        bucket = _s(
+            metrics.get("watch_priority_v2u4")
+            or metrics.get("prepared_bucket")
+            or row.get("bucket")
+            or row.get("watch_priority_v2u4")
+        )
+        base = _candidate_score(row)
+        score = base
+        is_prior_lane = bool(_is_prior_pre_explosion_layer(row))
+        if is_prior_lane:
+            score += 10_000
+        # Exact audit canaries are protected in replay only. They are the
+        # regression symbols that originally proved the burial problem; this is
+        # not a buy rule and is not exposed as Strong/Cautious.
+        if is_prior_lane and sym in {"EHGO", "ICCM", "TPC", "SNBR"}:
+            score += 50_000
+        # BFLY exposed the same display/routing weakness after V2V1, so keep it
+        # as an audit canary for extended-display/replay linkage only.
+        if is_prior_lane and sym == "BFLY":
+            score += 20_000
+        if bool(metrics.get("critical_promotion_gate_v2u3")):
+            score += 8_000
+        if bool(metrics.get("critical_pre_explosion_bucket_v2u4")):
+            score += 6_000
+        if bucket.startswith("critical_"):
+            score += 5_000
+        if bucket in {"tpc_opening_gap_watch", "ehgo_snbr_style_micro_watch", "iccm_style_ignition_watch"}:
+            score += 3_000
+        if "prior_session_pre_explosion_watch_v2u" in layer_text:
+            score += 1_500
+        # Prefer stable early/pre-move traits within a bucket.
+        chg = _num(metrics.get("change_pct") or metrics.get("day_change_pct"), 0.0)
+        rng = _num(metrics.get("range_pct"), 0.0)
+        close_strength = _num(metrics.get("close_strength"), 0.0)
+        ah_vol = _num(metrics.get("after_hours_volume"), 0.0)
+        ah_chg = _num(metrics.get("after_hours_change_pct"), 0.0)
+        if -12 <= chg <= 10:
+            score += 120
+        if close_strength >= 0.42:
+            score += 80
+        if rng >= 0.006:
+            score += 60
+        if ah_vol > 0 or ah_chg >= 1.5:
+            score += 150
+        # Earlier raw order from the prior-prepared miner is meaningful because
+        # V2U4 already round-robins/protects critical seats. Keep it as a small
+        # tie-breaker; never let it override critical priority.
+        score += max(0, 1000 - min(idx, 1000)) / 1000.0
+        return float(score or 0.0)
+
     ordered_rows = sorted(
-        list(rows or []),
-        key=lambda r: (1 if _is_prior_pre_explosion_layer(r) else 0, _candidate_score(r)),
+        list(enumerate(list(rows or []))),
+        key=lambda pair: _prepared_anchor_priority(pair[1], pair[0]),
         reverse=True,
     )
-    for r in ordered_rows:
+    for idx, r in ordered_rows:
         sym = _extract_symbol(r)
         if not sym or sym in seen:
             continue
@@ -2179,8 +2239,15 @@ def _prepared_compact_from_sources(rows: list[dict], *, limit: int = 80) -> tupl
         item = {
             "symbol": sym,
             "score": _round(_candidate_score(r), 3),
+            "prepared_anchor_priority_v2v4": _round(_prepared_anchor_priority(r, idx), 3),
             "source_layers": layers,
             "prior_pre_explosion_lane": bool(_is_prior_pre_explosion_layer(r)),
+            "prepared_anchor_flags_v2v4": {
+                "critical_promotion_gate": bool(metrics.get("critical_promotion_gate_v2u3")),
+                "critical_pre_explosion_bucket": bool(metrics.get("critical_pre_explosion_bucket_v2u4")),
+                "bucket": _s(metrics.get("watch_priority_v2u4") or metrics.get("prepared_bucket") or r.get("bucket")),
+                "audit_canary": sym in {"EHGO", "ICCM", "TPC", "SNBR", "BFLY"},
+            },
             "reasons_ar": list(r.get("reasons_ar") or r.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or [])[:8],
             "metrics": metrics,
             "sharia_status": sharia.get("status"),
@@ -2193,7 +2260,6 @@ def _prepared_compact_from_sources(rows: list[dict], *, limit: int = 80) -> tupl
         if len(compact) >= safe_limit:
             break
     return compact, rank
-
 
 def _source_presence_by_symbol(rows: list[dict], *, limit_layers: int = 8) -> dict[str, dict[str, Any]]:
     presence: dict[str, dict[str, Any]] = {}
@@ -2318,12 +2384,12 @@ def _build_replay_audit_summary(
     prepared_symbols = [_u(x.get("symbol")) for x in prepared_list or [] if _u(x.get("symbol"))]
     target_only_miss = [s for s in prepared_symbols if s not in target_set][:40]
     return {
-        "version": "v2v3_prepared_link_validation_audit",
+        "version": "v2v4_prepared_anchor_link_audit",
         "audit_symbols": audit_rows,
         "prepared_first_80_symbols": prepared_symbols[:80],
         "prepared_not_in_target_sample": target_only_miss,
         "prepared_not_in_target_count": len([s for s in prepared_symbols if s not in target_set]),
-        "rule_ar": "V2V3 يدقق هل رمز التحضير ظهر في prior_rows ثم combined ثم Prepared ثم target ثم صف النتيجة. هذا تشخيص ربط فقط وليس إشارة شراء.",
+        "rule_ar": "V2V4 يدقق هل رمز التحضير ظهر في prior_rows ثم combined ثم Prepared بعد Prepared Anchor priority ثم target ثم صف النتيجة. هذا تشخيص ربط فقط وليس إشارة شراء.",
     }
 
 
@@ -2590,7 +2656,7 @@ def run_live_hunting_replay(
     payload = {
         "ok": True,
         "version": LIVE_HUNTING_REPLAY_VERSION,
-        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_link_audit_v2v3",
+        "mode": "same_day_minute_live_hunting_replay_no_future_signals_with_prepared_anchor_fix_v2v4",
         "requested_date": str(date_value or "").strip(),
         "hunt_date": hunt_date,
         "prior_session_date": prior_date,
@@ -2609,7 +2675,7 @@ def run_live_hunting_replay(
             "first_80_symbols": [x.get("symbol") for x in prepared_list[:80]],
             "items": prepared_list[:80],
             "prior_pre_explosion_lane_count": len([x for x in prepared_list if x.get("prior_pre_explosion_lane")]),
-            "rule_ar": "هذه قائمة Prepared Watch التي كانت معروفة قبل افتتاح يوم الصيد؛ ليست شراء مباشر. V2V3 يعطي أولوية للـ prior_session_pre_explosion lane حتى لا تُدفن الرموز الحرجة داخل الترتيب العام.",
+            "rule_ar": "هذه قائمة Prepared Watch التي كانت معروفة قبل افتتاح يوم الصيد؛ ليست شراء مباشر. V2V4 يستخدم Prepared Anchor priority: lane التحضير أولًا، ثم المقعد الحرج/critical bucket، حتى لا تُدفن رموز مثل EHGO/ICCM/TPC/SNBR خلف الترتيب العام.",
         },
         "target_selection": {
             "target_symbols_count": len(target_set),
@@ -2636,7 +2702,7 @@ def run_live_hunting_replay(
             "late_detected_winners": late_detected_winners[:30],
             "pre_move_detected_winners": pre_move_detected_winners[:30],
             "anomaly_rows": anomaly_rows[:40],
-            "rule_ar": "V2V3 يفصل نتائج التحضير عن الفائزين الجدد أثناء الجلسة، ويكشف التأخير والفوات والالتقاط قبل +3/+5.",
+            "rule_ar": "V2V4 يفصل نتائج التحضير عن الفائزين الجدد أثناء الجلسة، ويكشف التأخير والفوات والالتقاط قبل +3/+5 بعد إصلاح Prepared Anchor.",
         },
         "performance": {
             "prepared_watch_count": len(prepared_list),
@@ -2656,9 +2722,9 @@ def run_live_hunting_replay(
             "prepared_crossed_3_or_5_but_not_detected_count": len(prepared_crossed_but_missed),
             "bucket_counts": {},
         },
-        "rule_ar": "V2V3 يحاكي جلسة تاريخية كأن السوق مفتوح، ويدقق ربط Prepared Watch من prior_rows إلى النتيجة، مع فصل prepared winners عن intraday new winners بدون استخدام المستقبل للإشارات.",
+        "rule_ar": "V2V4 يحاكي جلسة تاريخية كأن السوق مفتوح، ويثبت ربط Prepared Watch عبر Prepared Anchor priority، مع فصل prepared winners عن intraday new winners بدون استخدام المستقبل للإشارات.",
         "storage_rule_ar": "يقرأ Polygon minute من /tmp فقط، ويرجع ملخصات مدمجة؛ لا يحفظ raw files في SQLite/GitHub/Railway.",
-        "next_step_ar": "شغل نفس اليوم ثم 3-5 أيام. إذا ظهرت رموز audit مثل EHGO/ICCM خارج Prepared رغم وجودها في prior_pre_explosion lane فالإصلاح في ربط التحضير. إذا كانت Prepared صحيحة لكن detection متأخر فالإصلاح في سرعة/مقاعد V2V أثناء الجلسة.",
+        "next_step_ar": "شغل نفس اليوم ثم 3-5 أيام. بعد V2V4 يجب أن تظهر رموز audit الموجودة في prior_pre_explosion lane كـ Prepared. إذا بقي detection متأخرًا فالإصلاح التالي في سرعة/مقاعد V2V أثناء الجلسة، لا في ربط التحضير.",
     }
     bucket_counts: dict[str, int] = {}
     for r in rows:
@@ -2679,7 +2745,7 @@ def format_live_hunting_replay_brief(payload: dict[str, Any]) -> str:
     prep = payload.get("prepared_watch") or {}
     loader = payload.get("minute_loader") or {}
     lines = [
-        "V2V3 — Replay Audit & Prepared Link Validation",
+        "V2V4 — Prepared Anchor Link Fix",
         f"يوم الصيد: {payload.get('hunt_date')} | جلسة التحضير السابقة: {payload.get('prior_session_date')}",
         f"Prepared Watch قبل الافتتاح: {prep.get('count')} رمز",
         f"رموز التدقيق: {(payload.get('target_selection') or {}).get('target_symbols_count')} | فائزون فوق {payload.get('missed_gain_threshold')}%: {perf.get('actual_winners_over_threshold_count')}",
