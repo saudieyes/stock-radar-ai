@@ -3826,6 +3826,7 @@
         <div class="price-plan-value ${cls}">${safeText(formatNumber(displayPrice))}</div>
         <div class="live-change-line ${cls}">${safeText(changeText)}</div>
         ${source ? `<div class="compact-source-line">${safeText(source)}</div>` : ''}
+        ${(stock?.extended_hours_price_overlay_v2w6 || stock?.extended_price) ? `<div class="compact-source-line">${safeText(stock?.extended_display_note_ar || 'سعر خارج السوق للعرض فقط')}</div>` : ''}
       </div>`;
     }
 
@@ -4200,6 +4201,7 @@
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
       details.push(detailBox('مدة الصلاحية', safeText(stock.valid_for)));
       details.push(detailBox('مصدر السعر', safeText(stock.price_source_label)));
+      if (stock.extended_hours_price_overlay_v2w6 || stock.extended_price) details.push(detailBox('سعر خارج السوق', `${formatNumber(stock.extended_price || stock.current_price_live || stock.display_price)}${stock.extended_change_pct !== undefined ? ' / ' + formatNumber(stock.extended_change_pct) + '%' : ''}<br>${safeText(stock.extended_display_note_ar || '')}`, true));
       details.push(detailBox('حداثة السعر', `${safeText(stock.price_freshness_icon || '')} ${safeText(stock.price_freshness_label || '')}`));
       details.push(detailBox('شرح حداثة السعر', safeText(stock.price_freshness_detail || ''), true));
       details.push(detailBox('جاهزية التنفيذ', `${safeText(stock.execution_readiness_icon || '')} ${safeText(stock.execution_readiness_label || '')} (${formatNumber(stock.execution_readiness_score)})`, false, 'جاهزية التنفيذ'));
@@ -5520,6 +5522,16 @@
 
           item.price_source = q.source || item.price_source;
           item.price_source_label = q.source_label || item.price_source_label || 'FMP Live/REST';
+          if (q.extended_hours || String(q.source || '').startsWith('fmp_extended')) {
+            item.extended_hours_price_overlay_v2w6 = true;
+            item.extended_price = Number(q.extended_price || q.price || 0);
+            item.extended_change_pct = q.extended_change_pct ?? q.change_pct;
+            item.extended_reference_price = q.extended_reference_price ?? q.previous_close;
+            item.extended_session_label_ar = q.extended_session_label_ar || 'خارج السوق';
+            item.extended_display_note_ar = q.extended_display_note_ar || 'سعر خارج السوق للعرض والمراقبة فقط.';
+            item.price_reliable_for_execution = false;
+            item.price_monitoring_only = true;
+          }
           item.live_price_available = true;
           item.last_price_update_label = q.updated_label || item.last_price_update_label;
           changed = true;

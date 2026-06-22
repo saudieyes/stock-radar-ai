@@ -372,6 +372,38 @@ def _prefer_price_cache_for_phase(phase: str | None = None) -> bool:
     return not _is_active_market_phase(phase)
 
 
+def _closed_extended_display_window_now() -> bool:
+    """V2W6: display extended-hours prices in the overnight window when available.
+
+    This is display-only.  It lets the UI show the broker-like last aftermarket or
+    premarket price even when get_market_phase() is "closed" after 20:00 ET or
+    before 04:00 ET.  Weekends stay cached/closed to protect API/Railway usage.
+    """
+    try:
+        now = datetime.now(ZoneInfo("America/New_York"))
+        if now.weekday() >= 5:
+            return False
+        minutes = now.hour * 60 + now.minute
+        return minutes >= (16 * 60) or minutes < (9 * 60 + 30)
+    except Exception:
+        return False
+
+
+def _price_overlay_window_for_phase(phase: str | None = None) -> bool:
+    phase = str(phase or get_market_phase() or "closed")
+    return _is_active_market_phase(phase) or (phase == "closed" and _closed_extended_display_window_now())
+
+
+def _price_overlay_cache_allowed_for_phase(phase: str | None = None) -> bool:
+    # During open/pre/after we need fresh FMP.  During overnight closed extended
+    # display we allow the live_quotes helper to use a fresh extended cache, while
+    # it ignores regular-close cache and refetches missing extended symbols.
+    phase = str(phase or get_market_phase() or "closed")
+    if _is_active_market_phase(phase):
+        return False
+    return True
+
+
 def _server_full_market_scan_interval_sec(phase: str | None = None) -> int:
     """Server-side full-market discovery cadence.
 
@@ -1329,6 +1361,26 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
         "analysis_snapshot_price": original_display_price,
         "analysis_snapshot_note": "الخطة الأصلية محفوظة؛ السعر الحي يستخدم لتحديث القرب والترتيب فقط.",
     })
+
+    # V2W6 safety: premarket/after-hours/overnight prices are display-only.
+    # They fix stale card prices, but they must not promote or demote Strong/Cautious
+    # or otherwise change the saved technical decision.  Regular-session live quotes
+    # keep the existing live-plan validity guard below.
+    if bool(quote.get("extended_hours")) or str(quote_source).startswith("fmp_extended"):
+        out["extended_hours_price_overlay_v2w6"] = True
+        out["extended_price"] = live_price
+        out["extended_change_pct"] = change_pct
+        out["extended_reference_price"] = prev_close
+        out["extended_session_label_ar"] = str(quote.get("extended_session_label_ar", "خارج السوق") or "خارج السوق")
+        out["extended_display_note_ar"] = str(quote.get("extended_display_note_ar", "سعر خارج السوق للعرض والمراقبة فقط.") or "سعر خارج السوق للعرض والمراقبة فقط.")
+        out["price_reliable_for_execution"] = False
+        out["price_monitoring_only"] = True
+        out["live_plan_status"] = str(out.get("live_plan_status") or "extended_display_only")
+        out["live_plan_action"] = str(out.get("live_plan_action") or "مراقبة فقط — سعر خارج السوق للعرض")
+        out["live_plan_reason"] = str(out.get("live_plan_reason") or "تم تحديث السعر من FMP Extended بدون تغيير قرار الخطة.")
+        out["live_rank_score"] = safe_round(out.get("live_rank_score", base_rank), 2)
+        return out
+
     return _live_plan_validity_guard(out)
 
 
@@ -1484,9 +1536,9 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     using the SQLite quote cache keeps the page fast and avoids unnecessary calls.
     """
     phase = get_market_phase()
-    active_price_window = phase in {"open", "pre_market", "after_hours"}
+    active_price_window = _price_overlay_window_for_phase(phase)
     if prefer_cache is None:
-        prefer_cache = not active_price_window
+        prefer_cache = _price_overlay_cache_allowed_for_phase(phase)
 
     snapshot = get_json("last_trade_scan_snapshot", {})
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
@@ -1666,7 +1718,9 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "symbols_requested": len(symbols),
         "quotes_available": len(quotes),
         "quote_diagnostics": quote_bundle.get("diagnostics", {}) if isinstance(quote_bundle, dict) else {},
-        "quote_cache_policy": "cache_ok_closed_market" if bool(prefer_cache) else "fresh_fmp_during_active_market",
+        "quote_cache_policy": "cache_or_extended_refetch_closed" if bool(prefer_cache) else "fresh_fmp_during_active_market",
+        "extended_price_overlay_version": "v2w6_extended_hours_price_overlay_2026_06_22",
+        "extended_price_overlay_window": bool(active_price_window),
         "news_score_enabled": bool(NEWS_SCORE_ENABLED),
         "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         "tracking_intelligence": tracking_live_stats,
@@ -1819,6 +1873,8 @@ def _live_radar_worker_loop():
             LIVE_RADAR_WORKER_STATE["iterations"] = int(LIVE_RADAR_WORKER_STATE.get("iterations", 0) or 0) + 1
             LIVE_RADAR_WORKER_STATE["market_phase"] = phase
             LIVE_RADAR_WORKER_STATE["active_price_window"] = active
+            LIVE_RADAR_WORKER_STATE["extended_display_window"] = bool(_price_overlay_window_for_phase(phase))
+            LIVE_RADAR_WORKER_STATE["all_day_scan_note_ar"] = "المسح الكامل يعمل حسب مرحلة السوق؛ الأسعار الحية تتحدث عبر الواجهة/العامل أثناء النوافذ النشطة، والليل يستخدم طبقة Extended للعرض عند الطلب."
             if not active:
                 _live_radar_worker_save_state(last_error="", active_price_window=False)
                 time.sleep(60)
@@ -3458,17 +3514,17 @@ def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 24
     """
     phase = get_market_phase()
     diag = {
-        "version": "v2w5b_active_scan_price_overlay_route_restore_2026_06_22",
+        "version": "v2w6_extended_hours_price_overlay_2026_06_22",
         "enabled": False,
         "phase": phase,
         "symbols_requested": 0,
         "quotes_available": 0,
         "extended_quotes_available": 0,
-        "rule_ar": "أثناء السوق/قبل الافتتاح/بعد الإغلاق لا تعرض لقطة سعر قديمة بعد المسح؛ يتم تركيب سعر FMP حديث على صفوف الفحص نفسها.",
+        "rule_ar": "V2W6: السعر خارج السوق للعرض فقط. أثناء السوق الرسمي/قبل الافتتاح/بعد الإغلاق/نافذة الليل يعرض آخر سعر FMP Extended إن توفر، ولا يغيّر Strong/Cautious أو الشرعية.",
     }
     try:
-        if not _is_active_market_phase(phase):
-            diag["reason"] = "closed_cache_ok"
+        if not _price_overlay_window_for_phase(phase):
+            diag["reason"] = "closed_cache_ok_or_weekend"
             return list(rows or []), diag
         symbols = _extract_live_symbol_list(list(rows or []), limit=int(limit or 240))
         diag["enabled"] = True
@@ -3603,25 +3659,36 @@ def diagnostics_quote_resolver_symbol(symbol: str, prefer_cache: bool = False, a
 
 @app.get("/diagnostics/scan-cadence")
 def diagnostics_scan_cadence():
-    """Explain the new safe scan cadence plan."""
+    """Explain scan cadence and V2W6 extended price overlay state."""
     phase = get_market_phase()
     status = get_json("live_radar_worker_status", {}) or {}
     snapshot = get_json("last_trade_scan_snapshot", {}) or {}
     age_sec = _parse_scan_snapshot_age_sec(snapshot) if isinstance(snapshot, dict) else None
     interval = _server_full_market_scan_interval_sec(phase)
+    next_scan = None
+    try:
+        next_scan = max(0, int(interval - float(age_sec or 0))) if age_sec is not None else None
+    except Exception:
+        next_scan = None
     return {
         "ok": True,
-        "version": "scan_cadence_v1_fast_light_plus_deep_safe_2026_06_05",
+        "version": "scan_cadence_diagnostics_v2w6_2026_06_22",
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
+        "price_overlay_window": bool(_price_overlay_window_for_phase(phase)),
+        "active_background_worker_window": bool(_is_active_market_phase(phase)),
         "full_scan_interval_sec": int(interval),
         "live_price_refresh_sec": int(LIVE_RADAR_PRICE_REFRESH_SEC),
-        "snapshot_age_sec": age_sec,
+        "latest_snapshot_at": str((snapshot or {}).get("updated_at", "") or "") if isinstance(snapshot, dict) else "",
+        "latest_snapshot_age_sec": round(float(age_sec or 0), 1) if age_sec is not None else None,
+        "latest_snapshot_count": int((snapshot or {}).get("count", 0) or 0) if isinstance(snapshot, dict) else 0,
+        "next_full_scan_in_sec": next_scan,
         "worker": status if isinstance(status, dict) else {},
-        "design_ar": [
-            "تحديث السعر سريع للأسهم الموجودة بدون كاش أثناء السوق النشط.",
-            "المسح العميق لا يعمل كل دقيقة حتى لا يضغط FMP/Railway؛ يعمل حسب المرحلة.",
-            "المرشحات المبكرة وWeekly Priority تحصل على متابعة لصيقة عبر Early Watch Lifecycle.",
+        "rules_ar": [
+            "لا يغيّر هذا التشخيص Strong/Cautious أو الشرعية أو توزيع Polygon.",
+            "المسح الكامل يعمل وفق مرحلة السوق وميزانية Dynamic Discovery، وليس كل ثانية حتى لا يضغط FMP/Railway.",
+            "تحديث السعر سريع للأسهم الموجودة أثناء النوافذ النشطة، وV2W6 يضيف سعر FMP Extended للعرض قبل/بعد السوق.",
+            "بعض القوائم قد لا تتغير إذا بقيت نفس الأسماء أعلى ترتيبًا أو إذا كان سقف العرض ممتلئًا.",
             "أي ترقية إلى دخول بحذر/قوي تمر عبر Decision Contract وFinal Decision فقط.",
         ],
     }
