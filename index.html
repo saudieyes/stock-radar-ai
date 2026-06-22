@@ -6701,6 +6701,7 @@
     const company = txt(q('.company', card)) || symbol;
     const price = txt(q('.price-plan-grid .price-plan-value', card)) || '—';
     const change = txt(q('.live-change-line', card)) || txt(q('.compact-source-line', card)) || txt(q('.price-change-chip', card)) || '';
+    const cardPriceNum = Number(String(price || '').replace(/[^0-9.\-]/g,'')) || 0;
     const detailGrid = q('.details-grid', details);
     const overlay = document.getElementById('modernDetailOverlay');
     const body = document.getElementById('modernDetailBody');
@@ -6715,7 +6716,14 @@
     const liveItem = (typeof latestStockBySymbolFromScanData === 'function')
       ? (latestStockBySymbolFromScanData()[String(symbol || '').toUpperCase().trim()] || null)
       : null;
-    const livePresentation = livePricePresentationFromItem(liveItem);
+    const livePresentationRaw = livePricePresentationFromItem(liveItem);
+    // V2W5c: لا تسمح لنافذة التفاصيل أن تعرض سعرًا مختلفًا عن البطاقة التي فتحها المستخدم.
+    // يحدث الاختلاف عندما يكون الرمز مكررًا بين أكثر من قائمة وتبقى نسخة داخلية أقدم في بيانات الفحص.
+    const livePriceNum = Number(livePresentationRaw?.displayPrice || 0);
+    const cardAndLiveConflict = cardPriceNum > 0 && livePriceNum > 0 && Math.abs(cardPriceNum - livePriceNum) >= Math.max(0.01, cardPriceNum * 0.004);
+    const livePresentation = (cardAndLiveConflict && cardPriceNum > 0)
+      ? { displayPrice: cardPriceNum, cls: colorChangeClass(change) === 'green' ? 'price-up' : colorChangeClass(change) === 'red' ? 'price-down' : 'price-flat', changeText: change || 'آخر تحديث السعر ظاهر في البطاقة', sourceText: 'مطابق للبطاقة الظاهرة', changeReliable: Boolean(change && /[+\-]/.test(change)) }
+      : livePresentationRaw;
 
     const symEl = document.getElementById('modernDetailSymbol');
     const coEl = document.getElementById('modernDetailCompany');
@@ -6734,7 +6742,11 @@
         chgEl.className = 'md-change ' + colorChangeClass(change);
       }
     }
-    if (liveItem) updateModernDetailLiveFields(symbol, liveItem, cloned);
+    if (liveItem && !cardAndLiveConflict) updateModernDetailLiveFields(symbol, liveItem, cloned);
+    if (cardAndLiveConflict && cardPriceNum > 0) {
+      setDetailBoxValue(cloned, label => label === 'سعر السهم' || label.includes('سعر السهم'), formatNumber(cardPriceNum));
+      setDetailBoxValue(cloned, label => label.includes('مصدر السعر'), 'مطابق للبطاقة الظاهرة');
+    }
     if (metaEl) {
       const chips = qa('.badges .badge', card).slice(0, 4).map(b => `<span class="modern-detail-chip">${b.textContent.trim()}</span>`).join('');
       metaEl.innerHTML = chips || '<span class="modern-detail-chip">تحليل شامل</span>';
