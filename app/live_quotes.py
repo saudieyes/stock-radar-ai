@@ -1,6 +1,6 @@
 """FMP/Polygon live quote helpers.
 
-Fix33: extended-hours aware live quotes.
+Fix33/V2W5: extended-hours aware live quotes with missing-symbol refill.
 
 Why this exists:
 - FMP regular batch quote can return the regular-session/previous-close style price during
@@ -29,6 +29,7 @@ LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
 # Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
 FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
+LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w5_extended_hours_missing_symbol_refill_2026_06_22"
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -366,15 +367,24 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
         if out:
             break
 
-    # Last-resort single-symbol extended trade fallback, capped for API safety.
-    if not out:
-        for sym in symbols[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
+    # V2W5: batch/CSV extended endpoints may return only a partial subset.
+    # Previously we only tried the single-symbol trade fallback when *zero* rows were
+    # returned, so symbols such as EHGO could keep a stale regular close even while
+    # other symbols received extended prices. Refill every missing symbol within the
+    # safety cap before falling back to aftermarket quote/midpoint.
+    trade_refill_attempted = 0
+    trade_refill_filled = 0
+    missing_trade = [s for s in symbols if s not in out]
+    if missing_trade:
+        for sym in missing_trade[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
+            trade_refill_attempted += 1
             rows = _fetch_json_rows(f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={sym}&apikey={FMP_API_KEY}")
             for row in rows:
                 reg = regular_quotes.get(sym)
                 norm = _normalize_fmp_extended_trade_row(row, reg)
                 if norm:
                     out[norm["symbol"]] = norm
+                    trade_refill_filled += 1
                     break
 
     missing = [s for s in symbols if s not in out]
@@ -496,6 +506,7 @@ def get_live_quotes(symbols, prefer_cache: bool = True, allow_fallback: bool = T
         "cache_used": 0,
         "fetched": 0,
         "extended_fetched": 0,
+        "extended_refill_version": LIVE_QUOTES_EXTENDED_REFILL_VERSION,
     }
     if not LIVE_QUOTES_ENABLED or not clean:
         return {"ok": True, "quotes": {}, "diagnostics": diagnostics}
