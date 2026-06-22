@@ -1949,7 +1949,7 @@ def diagnostics_live_monitoring_budget_endpoint():
     budget_state = "active" if isinstance(budget, dict) and budget else "missing_or_stale"
     return {
         "ok": True,
-        "version": "v2w5_live_price_refresh_status_2026_06_22",
+        "version": "v2w5b_trade_scan_route_restore_status_2026_06_22",
         "installed_source_discovery_module_version": installed_module_version,
         "installed_source_discovery_module_file": installed_module_file,
         "dynamic_discovery_engine_version": engine_version,
@@ -1958,7 +1958,7 @@ def diagnostics_live_monitoring_budget_endpoint():
         "engine_is_v2w_or_newer": bool("v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower() or "v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower()),
         "engine_is_v2w2_or_newer": bool("v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower()),
         "engine_is_v2w3_or_newer": bool("v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower()),
-        "engine_is_v2w4_or_newer": bool("v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower()),
+        "engine_is_v2w4_or_newer": bool("v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower() or "v2w5b" in str(engine_version).lower() or "v3s" in str(engine_version).lower()),
         "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirm_batches": (dynamic_status or {}).get("fmp_confirm_batches", None) if isinstance(dynamic_status, dict) else None,
@@ -1975,8 +1975,8 @@ def diagnostics_live_monitoring_budget_endpoint():
         "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
         "budget_state": budget_state,
         "budget": budget if isinstance(budget, dict) else {},
-        "diagnosis_ar": "إذا ظهر v3r/v2w5 فهذا يعني أن V2W4 ما زال محفوظًا، مع إصلاح تحديث الأسعار الحية داخل القوائم بعد المسح.",
-        "rule_ar": "V2W5: يحافظ على توزيع Polygon، ويجبر فحص السوق أثناء التداول/البري/بعد الإغلاق على تركيب سعر FMP حديث بدل إبقاء سعر الإغلاق القديم.",
+        "diagnosis_ar": "إذا ظهر v3s/v2w5b فهذا يعني أن مسار /trade-scan عاد كما كان، مع حفظ V2W4 وتحديث الأسعار الحية دون تصفير القوائم.",
+        "rule_ar": "V2W5b: إصلاح طارئ يحافظ على توزيع Polygon وتحديث الأسعار، ويعيد ربط /trade-scan بالدالة الصحيحة حتى لا تظهر القوائم صفر.",
     }
 
 # Fix20: compact Market Mood / Sentiment layer.
@@ -3448,7 +3448,6 @@ def diagnostics_source_early_discovery_v2(limit: int = 50):
     }
 
 
-@app.get("/trade-scan")
 def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 240) -> tuple[list[dict], dict]:
     """V2W5: make a full scan return fresh FMP prices during active/pre/after hours.
 
@@ -3459,7 +3458,7 @@ def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 24
     """
     phase = get_market_phase()
     diag = {
-        "version": "v2w5_active_scan_price_overlay_2026_06_22",
+        "version": "v2w5b_active_scan_price_overlay_route_restore_2026_06_22",
         "enabled": False,
         "phase": phase,
         "symbols_requested": 0,
@@ -3492,6 +3491,7 @@ def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 24
         return list(rows or []), diag
 
 
+@app.get("/trade-scan")
 def trade_scan(include_all: bool = False, force: bool = False, prefer_cache: bool = False):
     """Full radar scan with a safe snapshot cache.
 
