@@ -1949,15 +1949,15 @@ def diagnostics_live_monitoring_budget_endpoint():
     budget_state = "active" if isinstance(budget, dict) and budget else "missing_or_stale"
     return {
         "ok": True,
-        "version": "v2w4_polygon_direct_distribution_status_2026_06_21",
+        "version": "v2w5_live_price_refresh_status_2026_06_22",
         "installed_source_discovery_module_version": installed_module_version,
         "installed_source_discovery_module_file": installed_module_file,
         "dynamic_discovery_engine_version": engine_version,
         "engine_is_v2v6b_or_newer": bool("v2v6b" in str(engine_version).lower() or "v3l" in str(engine_version).lower() or "v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower()),
         "engine_is_v2v6c_or_newer": bool("v2v6c" in str(engine_version).lower() or "v3m" in str(engine_version).lower() or "v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower()),
-        "engine_is_v2w_or_newer": bool("v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower() or "v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower()),
-        "engine_is_v2w2_or_newer": bool("v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower()),
-        "engine_is_v2w3_or_newer": bool("v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower()),
+        "engine_is_v2w_or_newer": bool("v2w" in str(engine_version).lower() or "v3n" in str(engine_version).lower() or "v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower()),
+        "engine_is_v2w2_or_newer": bool("v2w2" in str(engine_version).lower() or "v3o" in str(engine_version).lower() or "v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower()),
+        "engine_is_v2w3_or_newer": bool("v2w3" in str(engine_version).lower() or "v3p" in str(engine_version).lower() or "v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower() or "v2w5" in str(engine_version).lower() or "v3r" in str(engine_version).lower()),
         "engine_is_v2w4_or_newer": bool("v2w4" in str(engine_version).lower() or "v3q" in str(engine_version).lower()),
         "fmp_confirm_requested": (dynamic_status or {}).get("fmp_confirm_requested", None) if isinstance(dynamic_status, dict) else None,
         "fmp_confirmed": (dynamic_status or {}).get("fmp_confirmed", None) if isinstance(dynamic_status, dict) else None,
@@ -1975,8 +1975,8 @@ def diagnostics_live_monitoring_budget_endpoint():
         "next_scan_interval_sec": (dynamic_status or {}).get("next_scan_interval_sec", None) if isinstance(dynamic_status, dict) else None,
         "budget_state": budget_state,
         "budget": budget if isinstance(budget, dict) else {},
-        "diagnosis_ar": "إذا ظهر v3q/v2w4 فهذا يعني أن Polygon أصبح مصدرًا خلفيًا، وأن Catalyst لا يظهر إلا بوجود خبر/محفز حقيقي.",
-        "rule_ar": "V2W4: يحافظ على V2V6c/V2W2، ويوزع Polygon على القوائم الحالية؛ ويمنع وضع سهم في Catalyst/News إذا لم يوجد خبر واضح.",
+        "diagnosis_ar": "إذا ظهر v3r/v2w5 فهذا يعني أن V2W4 ما زال محفوظًا، مع إصلاح تحديث الأسعار الحية داخل القوائم بعد المسح.",
+        "rule_ar": "V2W5: يحافظ على توزيع Polygon، ويجبر فحص السوق أثناء التداول/البري/بعد الإغلاق على تركيب سعر FMP حديث بدل إبقاء سعر الإغلاق القديم.",
     }
 
 # Fix20: compact Market Mood / Sentiment layer.
@@ -3449,6 +3449,49 @@ def diagnostics_source_early_discovery_v2(limit: int = 50):
 
 
 @app.get("/trade-scan")
+def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 240) -> tuple[list[dict], dict]:
+    """V2W5: make a full scan return fresh FMP prices during active/pre/after hours.
+
+    The UI already has /radar-live-refresh, but users observed that cards could still
+    show the saved regular close after pressing scan. This helper overlays fresh quotes
+    into the scan rows before the snapshot/response is built, while preserving the
+    saved technical plan and Sharia gates.
+    """
+    phase = get_market_phase()
+    diag = {
+        "version": "v2w5_active_scan_price_overlay_2026_06_22",
+        "enabled": False,
+        "phase": phase,
+        "symbols_requested": 0,
+        "quotes_available": 0,
+        "extended_quotes_available": 0,
+        "rule_ar": "أثناء السوق/قبل الافتتاح/بعد الإغلاق لا تعرض لقطة سعر قديمة بعد المسح؛ يتم تركيب سعر FMP حديث على صفوف الفحص نفسها.",
+    }
+    try:
+        if not _is_active_market_phase(phase):
+            diag["reason"] = "closed_cache_ok"
+            return list(rows or []), diag
+        symbols = _extract_live_symbol_list(list(rows or []), limit=int(limit or 240))
+        diag["enabled"] = True
+        diag["symbols_requested"] = len(symbols)
+        if not symbols:
+            diag["reason"] = "no_symbols"
+            return list(rows or []), diag
+        bundle = get_live_quotes(symbols, prefer_cache=False, allow_fallback=True)
+        quotes = (bundle or {}).get("quotes", {}) if isinstance(bundle, dict) else {}
+        diag["quotes_available"] = len(quotes or {})
+        diag["extended_quotes_available"] = sum(1 for q in (quotes or {}).values() if str((q or {}).get("source", "")).startswith("fmp_extended"))
+        diag["quote_diagnostics"] = (bundle or {}).get("diagnostics", {}) if isinstance(bundle, dict) else {}
+        out = []
+        for row in rows or []:
+            sym = normalize_symbol_text((row or {}).get("symbol", ""))
+            out.append(_apply_live_quote_overlay(row, (quotes or {}).get(sym)))
+        return out, diag
+    except Exception as exc:
+        diag["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        return list(rows or []), diag
+
+
 def trade_scan(include_all: bool = False, force: bool = False, prefer_cache: bool = False):
     """Full radar scan with a safe snapshot cache.
 
@@ -3476,6 +3519,12 @@ def trade_scan(include_all: bool = False, force: bool = False, prefer_cache: boo
 
     results = scan_all()
     scan_debug = get_last_scan_debug()
+    try:
+        results, active_price_overlay_debug = _overlay_fresh_quotes_for_active_scan_rows(results, limit=240)
+        scan_debug = dict(scan_debug or {})
+        scan_debug["active_scan_price_overlay_v2w5"] = active_price_overlay_debug
+    except Exception:
+        pass
     try:
         snapshot_payload = {
             "updated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),

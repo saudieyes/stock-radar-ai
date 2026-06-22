@@ -5298,7 +5298,7 @@
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
-        const res = await apiFetch(`/radar-live-refresh?limit=120&_=${Date.now()}`);
+        const res = await apiFetch(`/radar-live-refresh?limit=220&_=${Date.now()}`);
         const data = await res.json();
         const changed = data.ok && applyRadarLivePayload(data);
 
