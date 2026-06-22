@@ -3362,6 +3362,14 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         },
     }
 
+    # V2W7: final visible-card price sweep. This runs after Opportunity/Polygon/Low-Float
+    # sections are built so every displayed card gets the same quote coverage, without
+    # changing decisions, Sharia, source routing, or section order.
+    try:
+        out = _apply_visible_cards_price_sweep(out, limit=260)
+    except Exception:
+        pass
+
     try:
         out["plan_ledger"] = record_active_strong_plans(strong, source="trade_scan_full" if not cache_hit else "trade_scan_cache")
     except Exception as exc:
@@ -3503,6 +3511,244 @@ def diagnostics_source_early_discovery_v2(limit: int = 50):
         ],
     }
 
+
+
+
+def _visible_section_names_for_price_sweep() -> list[str]:
+    """V2W7: section-level price refresh for cards that were injected after base scan.
+
+    Some visible buckets (Pre-Trigger / Low-Float / High-Risk / Polygon-injected
+    candidates) are built after the base scan price overlay.  They can therefore
+    have a valid row but no fresh display_change_pct until radar-live-refresh later
+    touches them.  This list is intentionally only the visible response sections;
+    it does not change source selection, Sharia, Strong/Cautious, or ranking rules.
+    """
+    return [
+        "strong_entries",
+        "top_ranked",
+        "cautious_entries",
+        "gray_strong",
+        "premarket_setups",
+        "watchlist",
+        "early_movement_watchlist",
+        "live_tight_monitoring_candidates",
+        "critical_pre_explosion_watch",
+        "promotion_bridge_candidates",
+        "support_bounce_candidates",
+        "reclaim_candidates",
+        "pre_trigger_candidates",
+        "continuation_pullback_candidates",
+        "high_risk_day_trades",
+        "low_float_premarket_radar",
+        "low_float_fast_lane_raw_watch",
+        "gap_fill_watch",
+        "catalyst_watch",
+        "learning_opportunity_candidates",
+    ]
+
+
+def _visible_price_sweep_symbol_list(out: dict, limit: int = 260) -> list[str]:
+    seen: set[str] = set()
+    symbols: list[str] = []
+    for section in _visible_section_names_for_price_sweep():
+        rows = (out or {}).get(section, [])
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = normalize_symbol_text(row.get("symbol", ""))
+            if not sym or sym in seen:
+                continue
+            seen.add(sym)
+            symbols.append(sym)
+            if len(symbols) >= max(1, int(limit or 260)):
+                return symbols
+    return symbols
+
+
+def _apply_display_quote_fields_only(row: dict, quote: dict | None) -> dict:
+    """Overlay quote display fields only; do not alter decisions or buckets.
+
+    This is deliberately narrower than _apply_live_quote_overlay().  It fixes cards
+    that show price/change unavailable after section injection, but avoids the live
+    plan validity guard and never promotes/demotes Strong/Cautious.
+    """
+    out = dict(row or {})
+    sym = normalize_symbol_text(out.get("symbol", ""))
+    if not sym:
+        return out
+    if not isinstance(quote, dict) or not quote:
+        out["visible_price_sweep_v2w7"] = "missing_quote"
+        out.setdefault("price_status_ar", "السعر غير متوفر من المصدر في هذه الدفعة")
+        out.setdefault("display_change_note_ar", "التغير غير متوفر من المصدر الآن؛ سيعاد تحديثه في دورة السعر التالية.")
+        return out
+
+    try:
+        price = to_float(quote.get("price"))
+    except Exception:
+        price = 0.0
+    if price <= 0:
+        out["visible_price_sweep_v2w7"] = "invalid_quote_price"
+        out.setdefault("price_status_ar", "السعر غير متوفر من المصدر في هذه الدفعة")
+        out.setdefault("display_change_note_ar", "التغير غير متوفر من المصدر الآن؛ سيعاد تحديثه في دورة السعر التالية.")
+        return out
+
+    source = str(quote.get("source", "") or "")
+    source_label = str(quote.get("source_label", source or "FMP") or "FMP")
+    delayed = bool(quote.get("delayed") or source.startswith("polygon"))
+    extended = bool(quote.get("extended_hours") or source.startswith("fmp_extended"))
+    reliable_for_execution = bool(quote.get("reliable_for_execution", True)) and not delayed and not extended
+    change_reliable = bool(quote.get("change_pct_reliable"))
+    change_pct = quote.get("change_pct")
+
+    out.update({
+        "visible_price_sweep_v2w7": "updated",
+        "visible_price_sweep_version": "visible_cards_price_sweep_v2w7_2026_06_22",
+        "current_price_live": safe_round(price, 4),
+        "display_price": safe_round(price, 4),
+        "price": safe_round(price, 4),
+        "live_price": safe_round(price, 4),
+        "price_source": source,
+        "price_source_label": source_label,
+        "price_source_delayed": delayed,
+        "price_reliable_for_execution": reliable_for_execution,
+        "price_monitoring_only": bool(delayed or extended or not reliable_for_execution),
+        "last_price_update_label": str(quote.get("updated_label", "") or out.get("last_price_update_label", "")),
+        "live_change_pct_reliable": change_reliable,
+        "quote_updated_by_visible_sweep": True,
+    })
+
+    if change_reliable:
+        try:
+            cp = safe_round(to_float(change_pct), 2)
+            out["display_change_pct"] = cp
+            out["change_vs_prev_close_pct"] = cp
+            out["display_change_note_ar"] = "تم تحديث السعر والتغير من المصدر في هذه الدفعة."
+        except Exception:
+            out.setdefault("display_change_note_ar", "السعر توفر لكن التغير لم يرجع من المصدر.")
+    else:
+        # Do not overwrite a previously valid change with 0/unknown.
+        out.setdefault("display_change_note_ar", "السعر توفر لكن التغير غير متوفر من المصدر الآن.")
+
+    prev = to_float(quote.get("previous_close"))
+    if prev > 0:
+        out["previous_close_live"] = safe_round(prev, 4)
+    volume = to_float(quote.get("volume"))
+    if volume > 0:
+        out["volume_live"] = safe_round(volume)
+        out["live_volume"] = safe_round(volume)
+
+    if extended:
+        out["extended_hours_price_overlay_v2w6"] = True
+        out["extended_hours_price_overlay_v2w7_visible_sweep"] = True
+        out["extended_price"] = safe_round(price, 4)
+        out["extended_session_label_ar"] = str(quote.get("extended_session_label_ar", "خارج السوق") or "خارج السوق")
+        out["extended_display_note_ar"] = str(quote.get("extended_display_note_ar", "سعر خارج السوق للعرض والمراقبة فقط.") or "سعر خارج السوق للعرض والمراقبة فقط.")
+        if quote.get("extended_change_pct") is not None:
+            out["extended_change_pct"] = safe_round(to_float(quote.get("extended_change_pct")), 2)
+        if quote.get("extended_reference_price") is not None:
+            out["extended_reference_price"] = safe_round(to_float(quote.get("extended_reference_price")), 4)
+        out["price_reliable_for_execution"] = False
+        out["price_monitoring_only"] = True
+    return out
+
+
+def _apply_visible_cards_price_sweep(out: dict, limit: int = 260) -> dict:
+    """Refresh all visible section cards after sections are built.
+
+    This fixes rows inserted by opportunity/Polygon/low-float sections after the base
+    scan overlay.  It is display-only and intentionally does not rebuild or re-rank
+    sections, so tomorrow's trading logic remains the same.
+    """
+    result = dict(out or {})
+    phase = get_market_phase()
+    diag = {
+        "version": "visible_cards_price_sweep_v2w7_2026_06_22",
+        "enabled": False,
+        "phase": phase,
+        "sections_checked": _visible_section_names_for_price_sweep(),
+        "symbols_requested": 0,
+        "quotes_available": 0,
+        "cards_seen": 0,
+        "cards_updated": 0,
+        "cards_missing_quote": 0,
+        "cards_change_available": 0,
+        "cards_change_unavailable": 0,
+        "extended_quotes_used": 0,
+        "rule_ar": "V2W7: تحديث سعر/تغير كل البطاقات الظاهرة فقط بعد بناء القوائم. لا يغيّر Strong/Cautious ولا الشرعية ولا ترتيب القوائم ولا توزيع Polygon.",
+    }
+    try:
+        symbols = _visible_price_sweep_symbol_list(result, limit=limit)
+        diag["symbols_requested"] = len(symbols)
+        if not symbols:
+            diag["reason"] = "no_visible_symbols"
+            result["visible_cards_price_sweep"] = diag
+            return result
+
+        # During active/pre/after/extended-display windows do not let regular cached
+        # close prices hide fresh FMP Extended data.  Outside those windows cached
+        # prices are acceptable and avoid unnecessary API pressure.
+        prefer_cache = _price_overlay_cache_allowed_for_phase(phase)
+        bundle = get_live_quotes(symbols, prefer_cache=bool(prefer_cache), allow_fallback=True)
+        quotes = (bundle or {}).get("quotes", {}) if isinstance(bundle, dict) else {}
+        diag["enabled"] = True
+        diag["quotes_available"] = len(quotes or {})
+        diag["quote_diagnostics"] = (bundle or {}).get("diagnostics", {}) if isinstance(bundle, dict) else {}
+        diag["extended_quotes_used"] = sum(1 for q in (quotes or {}).values() if str((q or {}).get("source", "")).startswith("fmp_extended"))
+
+        # Replace rows in top-level visible sections.  The nested opportunity_radar
+        # payload often shares objects, but we update it explicitly below for safety.
+        for section in _visible_section_names_for_price_sweep():
+            rows = result.get(section, [])
+            if not isinstance(rows, list):
+                continue
+            new_rows = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    new_rows.append(row)
+                    continue
+                diag["cards_seen"] += 1
+                sym = normalize_symbol_text(row.get("symbol", ""))
+                q = (quotes or {}).get(sym)
+                updated = _apply_display_quote_fields_only(row, q)
+                if q:
+                    diag["cards_updated"] += 1
+                    if bool((updated or {}).get("live_change_pct_reliable")) or updated.get("display_change_pct") is not None:
+                        diag["cards_change_available"] += 1
+                    else:
+                        diag["cards_change_unavailable"] += 1
+                else:
+                    diag["cards_missing_quote"] += 1
+                new_rows.append(updated)
+            result[section] = new_rows
+            count_key = f"{section}_count"
+            if count_key in result:
+                try:
+                    result[count_key] = len(new_rows)
+                except Exception:
+                    pass
+
+        opp = result.get("opportunity_radar")
+        if isinstance(opp, dict):
+            opp = dict(opp)
+            for section in _visible_section_names_for_price_sweep():
+                rows = opp.get(section, [])
+                if not isinstance(rows, list):
+                    continue
+                opp[section] = [
+                    _apply_display_quote_fields_only(r, (quotes or {}).get(normalize_symbol_text((r or {}).get("symbol", "")))) if isinstance(r, dict) else r
+                    for r in rows
+                ]
+            opp["visible_cards_price_sweep"] = diag
+            result["opportunity_radar"] = opp
+
+        result["visible_cards_price_sweep"] = diag
+        return result
+    except Exception as exc:
+        diag["error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        result["visible_cards_price_sweep"] = diag
+        return result
 
 def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 240) -> tuple[list[dict], dict]:
     """V2W5: make a full scan return fresh FMP prices during active/pre/after hours.
@@ -3672,7 +3918,7 @@ def diagnostics_scan_cadence():
         next_scan = None
     return {
         "ok": True,
-        "version": "scan_cadence_diagnostics_v2w6_2026_06_22",
+        "version": "scan_cadence_diagnostics_v2w7_2026_06_22",
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
         "price_overlay_window": bool(_price_overlay_window_for_phase(phase)),
@@ -3687,7 +3933,7 @@ def diagnostics_scan_cadence():
         "rules_ar": [
             "لا يغيّر هذا التشخيص Strong/Cautious أو الشرعية أو توزيع Polygon.",
             "المسح الكامل يعمل وفق مرحلة السوق وميزانية Dynamic Discovery، وليس كل ثانية حتى لا يضغط FMP/Railway.",
-            "تحديث السعر سريع للأسهم الموجودة أثناء النوافذ النشطة، وV2W6 يضيف سعر FMP Extended للعرض قبل/بعد السوق.",
+            "تحديث السعر سريع للأسهم الموجودة أثناء النوافذ النشطة، وV2W6 يضيف سعر FMP Extended، وV2W7 يمسح كل البطاقات الظاهرة بعد بناء القوائم حتى لا تبقى بعض الأقسام بلا تغير سعر.",
             "بعض القوائم قد لا تتغير إذا بقيت نفس الأسماء أعلى ترتيبًا أو إذا كان سقف العرض ممتلئًا.",
             "أي ترقية إلى دخول بحذر/قوي تمر عبر Decision Contract وFinal Decision فقط.",
         ],
