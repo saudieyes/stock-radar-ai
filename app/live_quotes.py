@@ -29,7 +29,9 @@ LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
 # Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
 FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w5b_extended_hours_missing_symbol_refill_route_restore_2026_06_22"
+LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w6_extended_hours_price_overlay_2026_06_22"
+LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED = str(os.getenv("LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w6_2026_06_22"
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -60,6 +62,43 @@ def _active_price_phase(phase: str | None = None) -> bool:
 def _extended_hours_phase(phase: str | None = None) -> bool:
     phase = phase or _market_phase_now()
     return phase in {"premarket", "afterhours"}
+
+
+def _closed_extended_display_window() -> bool:
+    """Treat weekday overnight immediately after/before trading as an extended-price display window.
+
+    FMP regular quotes often stay at the 16:00 close after the market closes.  The
+    user's broker UI continues to show the last extended-hours trade/quote after
+    20:00 ET, so we may still use the FMP aftermarket endpoints for display while
+    keeping those prices monitoring-only.  Weekends remain normal closed-market
+    cache/fallback to avoid unnecessary polling.
+    """
+    try:
+        if not LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED:
+            return False
+        now = datetime.now(NY_TZ)
+        if now.weekday() >= 5:
+            return False
+        minutes = now.hour * 60 + now.minute
+        return minutes >= (16 * 60) or minutes < (9 * 60 + 30)
+    except Exception:
+        return False
+
+
+def _extended_display_phase(phase: str | None = None) -> bool:
+    phase = phase or _market_phase_now()
+    return _extended_hours_phase(phase) or (str(phase or "") == "closed" and _closed_extended_display_window())
+
+
+def _extended_session_label_ar(phase: str | None = None) -> str:
+    phase = phase or _market_phase_now()
+    if str(phase) == "premarket":
+        return "قبل الافتتاح"
+    if str(phase) == "afterhours":
+        return "بعد الإغلاق"
+    if _closed_extended_display_window():
+        return "خارج السوق"
+    return "خارج السوق"
 
 
 def _clean_symbols(symbols) -> list[str]:
@@ -139,6 +178,7 @@ def _normalize_fmp_regular_row(row: dict) -> dict | None:
         return {
             "symbol": symbol,
             "price": safe_round(price, 4),
+            "regular_price": safe_round(price, 4),
             # previous_close is the normal day-change baseline during the regular session.
             "previous_close": safe_round(prev, 4),
             # In premarket/afterhours FMP regular quote price usually represents the last
@@ -155,6 +195,7 @@ def _normalize_fmp_regular_row(row: dict) -> dict | None:
             "updated_label": datetime.now(NY_TZ).strftime("%H:%M:%S"),
             "market_phase": _market_phase_now(),
             "extended_hours": False,
+            "reliable_for_execution": True,
         }
     except Exception:
         return None
@@ -204,6 +245,15 @@ def _normalize_fmp_extended_trade_row(row: dict, regular_quote: dict | None = No
             "volume": safe_round(volume),
             "source": "fmp_extended_trade",
             "source_label": "FMP Extended/Trade",
+            "display_price_source": "extended_hours",
+            "regular_price": safe_round(prev, 4),
+            "extended_price": safe_round(price, 4),
+            "extended_change_pct": safe_round(change_pct, 2),
+            "extended_reference_price": safe_round(prev, 4),
+            "extended_session_label_ar": _extended_session_label_ar(phase),
+            "extended_display_note_ar": f"سعر {_extended_session_label_ar(phase)} من FMP؛ للعرض والمراقبة فقط وليس تنفيذًا مباشرًا.",
+            "reliable_for_execution": False,
+            "monitoring_only": True,
             "updated_at": now,
             "updated_label": _ts_to_label(raw_ts),
             "market_phase": phase,
@@ -263,6 +313,15 @@ def _normalize_fmp_extended_quote_row(row: dict, regular_quote: dict | None = No
             "volume": safe_round(volume),
             "source": "fmp_extended_quote",
             "source_label": "FMP Extended/Quote",
+            "display_price_source": "extended_hours",
+            "regular_price": safe_round(prev, 4),
+            "extended_price": safe_round(price, 4),
+            "extended_change_pct": safe_round(change_pct, 2),
+            "extended_reference_price": safe_round(prev, 4),
+            "extended_session_label_ar": _extended_session_label_ar(phase),
+            "extended_display_note_ar": f"سعر {_extended_session_label_ar(phase)} من FMP؛ للعرض والمراقبة فقط وليس تنفيذًا مباشرًا.",
+            "reliable_for_execution": False,
+            "monitoring_only": True,
             "updated_at": now,
             "updated_label": _ts_to_label(raw_ts),
             "market_phase": phase,
@@ -431,9 +490,9 @@ def _fetch_fmp_quotes(symbols: list[str]) -> dict[str, dict]:
     phase = _market_phase_now()
     regular = _fetch_fmp_regular_quotes(symbols)
 
-    if _extended_hours_phase(phase):
+    if _extended_display_phase(phase):
         extended = _fetch_fmp_extended_quotes(symbols, regular)
-        # Use extended prices where available; keep regular quote only for symbols with no extended data.
+        # Use extended prices where available for display; keep regular quote only for symbols with no extended data.
         out = dict(regular or {})
         out.update(extended or {})
         if out:
@@ -501,6 +560,9 @@ def get_live_quotes(symbols, prefer_cache: bool = True, allow_fallback: bool = T
         "market_phase": phase,
         "active_price_phase": active_phase,
         "extended_hours_phase": _extended_hours_phase(phase),
+        "extended_display_phase": _extended_display_phase(phase),
+        "extended_display_version": LIVE_QUOTES_EXTENDED_DISPLAY_VERSION,
+        "extended_display_when_closed_enabled": bool(LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED),
         "price_cache_allowed": bool(prefer_cache and not active_phase),
         "source": "none",
         "cache_used": 0,
@@ -514,7 +576,17 @@ def get_live_quotes(symbols, prefer_cache: bool = True, allow_fallback: bool = T
     # Never use SQLite price cache during active trading phases, including premarket and afterhours.
     use_cache = bool(prefer_cache and not active_phase)
     cached = get_cached_live_quotes(clean, max_age_sec=LIVE_QUOTES_CACHE_MAX_AGE_SEC) if use_cache else {}
-    quotes = dict(cached or {})
+    # V2W6: during extended-display windows do not let a fresh-but-regular cached
+    # quote hide an available premarket/after-hours price.  Keep only cached
+    # extended quotes; refetch symbols whose cache is only regular close.
+    if use_cache and _extended_display_phase(phase):
+        quotes = {
+            s: q for s, q in (cached or {}).items()
+            if str((q or {}).get("source", "")).startswith("fmp_extended")
+        }
+        diagnostics["regular_cache_ignored_for_extended_display"] = max(0, len(cached or {}) - len(quotes))
+    else:
+        quotes = dict(cached or {})
     missing = [s for s in clean if s not in quotes]
     diagnostics["cache_used"] = len(quotes)
 

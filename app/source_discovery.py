@@ -59,7 +59,7 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3s_v2w5b_trade_scan_route_restore_2026_06_22"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3t_v2w6_extended_hours_price_overlay_2026_06_22"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
@@ -2954,7 +2954,7 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3s_v2w5b_trade_scan_route_restore_2026_06_22",
+        "engine_version": "dynamic_discovery_v3t_v2w6_extended_hours_price_overlay_2026_06_22",
         "dynamic_discovery_enabled": True,
         "dynamic_discovery_mode": "real_pre_explosion_capture_v2w5b_trade_scan_route_restore_fast_promotion",
         "requested_target": int(max_symbols),
