@@ -29,7 +29,7 @@ LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
 # Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
 FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w5_extended_hours_missing_symbol_refill_2026_06_22"
+LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w5b_extended_hours_missing_symbol_refill_route_restore_2026_06_22"
 
 NY_TZ = ZoneInfo("America/New_York")
 

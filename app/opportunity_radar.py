@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     def load_polygon_next_day_candidates():
         return {"ok": False, "candidates": [], "reason": "polygon_next_day_builder_unavailable"}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w5_live_price_refresh_guard_2026_06_22"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w5b_trade_scan_route_restore_2026_06_22"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
