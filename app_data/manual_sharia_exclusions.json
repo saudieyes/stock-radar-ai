@@ -255,6 +255,14 @@
     "symbol": "ARRY",
     "updated_at": "2026-06-03 10:34:58"
   },
+  "ARVN": {
+    "excluded_at": "2026-06-23 14:30:34",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ARVN",
+    "updated_at": "2026-06-23 14:30:34"
+  },
   "ASTI": {
     "excluded_at": "2026-06-11 10:00:29",
     "note": "استبعاد يدوي شرعي",
@@ -518,6 +526,14 @@
     "source": "manual",
     "symbol": "CALY",
     "updated_at": "2026-05-01 11:27:59"
+  },
+  "CAMP": {
+    "excluded_at": "2026-06-23 14:27:07",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CAMP",
+    "updated_at": "2026-06-23 14:27:07"
   },
   "CAMT": {
     "excluded_at": "2026-06-12 09:58:19",
@@ -1479,6 +1495,14 @@
     "symbol": "IVVD",
     "updated_at": "2026-06-22 03:39:38"
   },
+  "IZEA": {
+    "excluded_at": "2026-06-23 14:31:18",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "IZEA",
+    "updated_at": "2026-06-23 14:31:18"
+  },
   "JANX": {
     "excluded_at": "2026-06-23 13:29:57",
     "note": "استبعاد يدوي شرعي",
@@ -1718,6 +1742,14 @@
     "source": "manual",
     "symbol": "LUCD",
     "updated_at": "2026-06-22 03:41:25"
+  },
+  "LULG": {
+    "excluded_at": "2026-06-23 14:32:11",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LULG",
+    "updated_at": "2026-06-23 14:32:11"
   },
   "LW": {
     "excluded_at": "2026-06-06 17:12:00",
@@ -1998,6 +2030,14 @@
     "source": "manual",
     "symbol": "OCS",
     "updated_at": "2026-06-23 13:32:25"
+  },
+  "OLMA": {
+    "excluded_at": "2026-06-23 14:29:13",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "OLMA",
+    "updated_at": "2026-06-23 14:29:13"
   },
   "ONDS": {
     "excluded_at": "2026-05-01 13:45:25",
@@ -2295,6 +2335,14 @@
     "symbol": "RPAY",
     "updated_at": "2026-06-22 04:15:49"
   },
+  "RPD": {
+    "excluded_at": "2026-06-23 14:30:49",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "RPD",
+    "updated_at": "2026-06-23 14:30:49"
+  },
   "RRGB": {
     "excluded_at": "2026-05-21 15:13:32",
     "note": "استبعاد يدوي شرعي",
@@ -2334,6 +2382,14 @@
     "source": "manual",
     "symbol": "SCOR",
     "updated_at": "2026-06-22 04:16:28"
+  },
+  "SEAT": {
+    "excluded_at": "2026-06-23 14:27:36",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "SEAT",
+    "updated_at": "2026-06-23 14:27:36"
   },
   "SEGG": {
     "excluded_at": "2026-05-18 10:22:05",
