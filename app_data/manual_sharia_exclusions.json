@@ -1991,6 +1991,14 @@
     "symbol": "NVAX",
     "updated_at": "2026-05-20 10:12:32"
   },
+  "OCS": {
+    "excluded_at": "2026-06-23 13:32:25",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "OCS",
+    "updated_at": "2026-06-23 13:32:25"
+  },
   "ONDS": {
     "excluded_at": "2026-05-01 13:45:25",
     "note": "استبعاد يدوي شرعي",
@@ -2511,6 +2519,14 @@
     "symbol": "TASK",
     "updated_at": "2026-06-22 10:15:08"
   },
+  "TDAY": {
+    "excluded_at": "2026-06-23 14:15:18",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "TDAY",
+    "updated_at": "2026-06-23 14:15:18"
+  },
   "TDIC": {
     "excluded_at": "2026-06-23 11:00:02",
     "note": "استبعاد يدوي شرعي",
@@ -2526,6 +2542,14 @@
     "source": "manual",
     "symbol": "TE",
     "updated_at": "2026-05-18 10:23:39"
+  },
+  "TENX": {
+    "excluded_at": "2026-06-23 14:15:36",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "TENX",
+    "updated_at": "2026-06-23 14:15:36"
   },
   "TERG": {
     "excluded_at": "2026-06-03 10:43:46",
