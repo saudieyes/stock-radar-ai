@@ -1819,6 +1819,20 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
             "watchlist": _live_bucket_payload(watch, limit if include_watch else 1),
         },
     }
+    # V2W8b: after the live payload has built all visible sections/groups, refresh
+    # those visible cards too. This prevents a background full scan from making
+    # the UI revert to the saved regular close / yesterday close.
+    try:
+        payload = _apply_live_refresh_visible_cards_price_sweep(
+            payload,
+            base_quotes=quotes,
+            limit=max(260, int(limit or 220)),
+            prefer_cache=bool(prefer_cache),
+            allow_fallback=bool(allow_fallback),
+        )
+    except Exception:
+        pass
+
     try:
         set_json("last_radar_live_refresh", {
             "updated_at": payload["live_updated_at"],
@@ -3872,6 +3886,153 @@ def _apply_visible_cards_price_sweep(out: dict, limit: int = 260) -> dict:
     except Exception as exc:
         diag["error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
         result["visible_cards_price_sweep"] = diag
+        return result
+
+
+# V2W8b: live-refresh visible-card price persistence.
+# Problem fixed: /radar-live-refresh previously fetched prices for the saved raw snapshot
+# first, then rebuilt visible sections.  Section-injected cards (Pre-Trigger / Low-Float /
+# High-Risk / Prepared/Tomorrow candidates) could therefore fall back to old close prices
+# after a full scan completed.  This helper runs after the live payload sections are built,
+# reuses already-fetched quotes, and fetches only missing visible symbols.  Display-only.
+def _visible_price_sweep_symbol_list_with_groups(out: dict, limit: int = 260) -> list[str]:
+    seen: set[str] = set()
+    symbols: list[str] = []
+
+    def add_from_rows(rows):
+        nonlocal symbols
+        if not isinstance(rows, list):
+            return
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = normalize_symbol_text(row.get("symbol", ""))
+            if not sym or sym in seen:
+                continue
+            seen.add(sym)
+            symbols.append(sym)
+            if len(symbols) >= max(1, int(limit or 260)):
+                return
+
+    for section in _visible_section_names_for_price_sweep():
+        add_from_rows((out or {}).get(section, []))
+        if len(symbols) >= max(1, int(limit or 260)):
+            return symbols
+
+    groups = (out or {}).get("groups", {})
+    if isinstance(groups, dict):
+        for group in groups.values():
+            if isinstance(group, dict):
+                add_from_rows(group.get("items", []))
+                if len(symbols) >= max(1, int(limit or 260)):
+                    return symbols
+    return symbols
+
+
+def _overlay_visible_payload_rows_with_quotes(payload: dict, quotes: dict) -> tuple[dict, dict]:
+    result = dict(payload or {})
+    diag = {
+        "version": "visible_cards_price_sweep_v2w8b_live_persistence_2026_06_23",
+        "enabled": True,
+        "cards_seen": 0,
+        "cards_updated": 0,
+        "cards_missing_quote": 0,
+        "groups_updated": 0,
+        "sections_checked": _visible_section_names_for_price_sweep(),
+        "rule_ar": "V2W8b: يثبت تحديث الأسعار داخل كل القوائم الظاهرة ومجموعات live-refresh بعد اكتمال المسح، ولا يغير القرار أو الشرعية أو ترتيب القوائم.",
+    }
+
+    def overlay_rows(rows):
+        new_rows = []
+        if not isinstance(rows, list):
+            return rows
+        for row in rows:
+            if not isinstance(row, dict):
+                new_rows.append(row)
+                continue
+            diag["cards_seen"] += 1
+            sym = normalize_symbol_text(row.get("symbol", ""))
+            q = (quotes or {}).get(sym)
+            updated = _apply_display_quote_fields_only(row, q)
+            updated["visible_price_sweep_v2w8b"] = updated.get("visible_price_sweep_v2w7") or "updated"
+            updated["visible_price_sweep_version"] = "visible_cards_price_sweep_v2w8b_live_persistence_2026_06_23"
+            if q:
+                diag["cards_updated"] += 1
+            else:
+                diag["cards_missing_quote"] += 1
+            new_rows.append(updated)
+        return new_rows
+
+    for section in _visible_section_names_for_price_sweep():
+        if isinstance(result.get(section), list):
+            result[section] = overlay_rows(result.get(section, []))
+
+    opp = result.get("opportunity_radar")
+    if isinstance(opp, dict):
+        opp = dict(opp)
+        for section in _visible_section_names_for_price_sweep():
+            if isinstance(opp.get(section), list):
+                opp[section] = overlay_rows(opp.get(section, []))
+        opp["visible_cards_price_sweep_v2w8b"] = diag
+        result["opportunity_radar"] = opp
+
+    groups = result.get("groups")
+    if isinstance(groups, dict):
+        groups = dict(groups)
+        for key, group in list(groups.items()):
+            if not isinstance(group, dict):
+                continue
+            if isinstance(group.get("items"), list):
+                g2 = dict(group)
+                g2["items"] = overlay_rows(group.get("items", []))
+                groups[key] = g2
+                diag["groups_updated"] += 1
+        result["groups"] = groups
+
+    return result, diag
+
+
+def _apply_live_refresh_visible_cards_price_sweep(payload: dict, base_quotes: dict | None = None, limit: int = 260, prefer_cache: bool = True, allow_fallback: bool = True) -> dict:
+    result = dict(payload or {})
+    phase = get_market_phase()
+    diag = {
+        "version": "visible_cards_price_sweep_v2w8b_live_persistence_2026_06_23",
+        "enabled": False,
+        "phase": phase,
+        "visible_symbols": 0,
+        "base_quotes_available": len(base_quotes or {}),
+        "extra_symbols_requested": 0,
+        "extra_quotes_available": 0,
+        "extended_quotes_used": 0,
+        "rule_ar": "V2W8b: live-refresh لا يترك البطاقات تعود لسعر إغلاق أمس بعد اكتمال المسح؛ يعيد تغطية كل الرموز الظاهرة فقط وبأقل طلبات إضافية.",
+    }
+    try:
+        visible_symbols = _visible_price_sweep_symbol_list_with_groups(result, limit=limit)
+        diag["visible_symbols"] = len(visible_symbols)
+        if not visible_symbols:
+            diag["reason"] = "no_visible_symbols"
+            result["visible_cards_price_sweep_live_v2w8b"] = diag
+            return result
+
+        quotes = dict(base_quotes or {})
+        missing = [s for s in visible_symbols if s not in quotes]
+        diag["extra_symbols_requested"] = len(missing)
+        if missing:
+            extra = get_live_quotes(missing, prefer_cache=bool(prefer_cache), allow_fallback=allow_fallback)
+            extra_quotes = (extra or {}).get("quotes", {}) if isinstance(extra, dict) else {}
+            quotes.update(extra_quotes or {})
+            diag["extra_quotes_available"] = len(extra_quotes or {})
+            diag["extra_quote_diagnostics"] = (extra or {}).get("diagnostics", {}) if isinstance(extra, dict) else {}
+
+        diag["extended_quotes_used"] = sum(1 for q in (quotes or {}).values() if str((q or {}).get("source", "")).startswith("fmp_extended"))
+        result, overlay_diag = _overlay_visible_payload_rows_with_quotes(result, quotes)
+        diag.update({k: v for k, v in overlay_diag.items() if k not in {"version", "rule_ar"}})
+        diag["enabled"] = True
+        result["visible_cards_price_sweep_live_v2w8b"] = diag
+        return result
+    except Exception as exc:
+        diag["error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        result["visible_cards_price_sweep_live_v2w8b"] = diag
         return result
 
 def _overlay_fresh_quotes_for_active_scan_rows(rows: list[dict], limit: int = 240) -> tuple[list[dict], dict]:
