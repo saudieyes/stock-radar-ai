@@ -4642,7 +4642,7 @@
       const snap = notice?.dataset?.snapshotAt || window.__pendingSourceSnapshotAt || '';
       hideSourceDiscoveryNotice(snap);
       if (window.__pendingScanData) {
-        applyPendingScanData();
+        await applyPendingScanData();
       } else {
         await loadScan(false, { applyImmediately: true });
       }
@@ -4908,6 +4908,7 @@
         const res = await apiFetch(`/trade-scan?prefer_cache=true&_=${Date.now()}`);
         const data = await res.json();
         if (!data || data.ok === false) return;
+        await hydrateScanDataWithLiveQuotesBeforeRender(data, 260);
         if (radarScreenIsSafeForImmediateApply()) {
           const uiState = preserveScanUiState();
           setScanData(data);
@@ -4962,10 +4963,11 @@
       el.style.display = 'block';
     }
 
-    function applyPendingScanData() {
+    async function applyPendingScanData() {
       const data = window.__pendingScanData;
       if (!data) { hideRadarPendingNotice(); return; }
       const uiState = preserveScanUiState();
+      await hydrateScanDataWithLiveQuotesBeforeRender(data, 260);
       setScanData(data);
       window.__pendingScanData = null;
       window.__pendingSourceSnapshotAt = '';
@@ -5300,7 +5302,7 @@
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
-        const res = await apiFetch(`/radar-live-refresh?limit=220&_=${Date.now()}`);
+        const res = await apiFetch(`/radar-live-refresh?limit=220&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
         const changed = data.ok && applyRadarLivePayload(data);
 
@@ -5540,11 +5542,124 @@
       return changed;
     }
 
+
+    // V2W8c: pre-render live quote hydration.
+    // The previous fixes updated the DOM after render, but a fresh full scan could still
+    // render saved close prices first, then briefly overwrite the current pre-market price.
+    // This hydrates the data object itself before render/apply, and also overlays nested
+    // opportunity_radar/groups rows so every visible card keeps the active price.
+    function collectSymbolsFromScanLikeData(data, limit=260) {
+      const out = [];
+      const add = (sym) => {
+        const s = String(sym || '').toUpperCase().trim();
+        if (s && !out.includes(s)) out.push(s);
+      };
+      const addRows = (rows) => {
+        if (!Array.isArray(rows)) return;
+        rows.forEach(item => add(item && item.symbol));
+      };
+      ALL_SCAN_GROUP_KEYS.forEach(key => addRows(data && data[key]));
+      const opp = data && data.opportunity_radar;
+      if (opp && typeof opp === 'object') ALL_SCAN_GROUP_KEYS.forEach(key => addRows(opp[key]));
+      const groups = data && data.groups;
+      if (groups && typeof groups === 'object') {
+        Object.values(groups).forEach(g => {
+          if (g && typeof g === 'object') addRows(g.items);
+        });
+      }
+      return out.slice(0, Math.max(1, Number(limit || 260)));
+    }
+
+    function applyLiveQuoteToOneItem(item, q) {
+      if (!item || !q || !Number(q.price || 0)) return false;
+      item.current_price_live = Number(q.price || 0);
+      item.display_price = Number(q.price || 0);
+      item.price = Number(q.price || 0);
+      const rawQuoteChange = q.change_pct ?? q.changesPercentage ?? q.changePercentage;
+      const quoteChange = Number(rawQuoteChange);
+      const quoteChangeReliable = Number.isFinite(quoteChange) && q.change_pct_reliable !== false;
+      if (quoteChangeReliable) {
+        item.display_change_pct = quoteChange;
+        item.change_vs_prev_close_pct = quoteChange;
+        item.live_change_pct_reliable = true;
+      } else {
+        item.live_change_pct_reliable = false;
+      }
+      item.price_source = q.source || item.price_source;
+      item.price_source_label = q.source_label || item.price_source_label || 'FMP Live/REST';
+      if (q.extended_hours || String(q.source || '').startsWith('fmp_extended')) {
+        item.extended_hours_price_overlay_v2w6 = true;
+        item.extended_hours_price_overlay_v2w8c_no_rollback = true;
+        item.extended_price = Number(q.extended_price || q.price || 0);
+        item.extended_change_pct = q.extended_change_pct ?? q.change_pct;
+        item.extended_reference_price = q.extended_reference_price ?? q.previous_close;
+        item.extended_session_label_ar = q.extended_session_label_ar || 'خارج السوق';
+        item.extended_display_note_ar = q.extended_display_note_ar || 'سعر خارج السوق للعرض والمراقبة فقط.';
+        item.price_reliable_for_execution = false;
+        item.price_monitoring_only = true;
+      }
+      item.live_price_available = true;
+      item.last_price_update_label = q.updated_label || item.last_price_update_label;
+      item.quote_updated_by_v2w8c_no_rollback = true;
+      return true;
+    }
+
+    function applyLiveQuotesToScanLikeData(data, quotes) {
+      if (!data || !quotes) return false;
+      let changed = false;
+      const applyRows = (rows) => {
+        if (!Array.isArray(rows)) return;
+        rows.forEach(item => {
+          const s = String(item?.symbol || '').toUpperCase().trim();
+          const q = quotes[s];
+          if (applyLiveQuoteToOneItem(item, q)) changed = true;
+        });
+      };
+      ALL_SCAN_GROUP_KEYS.forEach(key => applyRows(data[key]));
+      const opp = data.opportunity_radar;
+      if (opp && typeof opp === 'object') ALL_SCAN_GROUP_KEYS.forEach(key => applyRows(opp[key]));
+      const groups = data.groups;
+      if (groups && typeof groups === 'object') {
+        Object.values(groups).forEach(g => {
+          if (g && typeof g === 'object') applyRows(g.items);
+        });
+      }
+      if (changed) {
+        data.live_price_no_rollback_v2w8c = {
+          enabled: true,
+          version: 'live_price_no_rollback_v2w8c_2026_06_23',
+          rule_ar: 'يتم تحديث بيانات السعر داخل اللقطة نفسها قبل عرضها حتى لا تعود البطاقات إلى سعر الإغلاق بعد اكتمال المسح.'
+        };
+      }
+      return changed;
+    }
+
+    async function hydrateScanDataWithLiveQuotesBeforeRender(data, limit=260) {
+      const symbols = collectSymbolsFromScanLikeData(data, limit);
+      if (!symbols.length) return data;
+      try {
+        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&prefer_cache=false&_=${Date.now()}`);
+        const qData = await res.json();
+        applyLiveQuotesToScanLikeData(data, qData.quotes || {});
+        data.live_price_no_rollback_v2w8c = {
+          ...(data.live_price_no_rollback_v2w8c || {}),
+          enabled: true,
+          version: 'live_price_no_rollback_v2w8c_2026_06_23',
+          symbols_requested: symbols.length,
+          quotes_available: qData && qData.quotes ? Object.keys(qData.quotes).length : 0,
+          market_phase: qData?.market_phase || data?.market_phase || '',
+          quote_cache_policy: qData?.quote_cache_policy || '',
+          rule_ar: 'V2W8c: قبل رسم القوائم، يتم جلب سعر حي/قبل الافتتاح للرموز الظاهرة وتثبيته داخل البيانات حتى لا تظهر أسعار إغلاق أمس.'
+        };
+      } catch(_) {}
+      return data;
+    }
+
     async function refreshLiveQuotesForScan(silent=false) {
       const symbols = collectVisibleScanSymbols();
       if (!symbols.length) return;
       try {
-        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&_=${Date.now()}`);
+        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
         const changed = applyLiveQuotesToScan(data.quotes || {});
         if (changed) {
@@ -5576,6 +5691,7 @@
         const qs = force ? 'force=true' : 'prefer_cache=true';
         const res = await apiFetch(`/trade-scan?${qs}&_=${Date.now()}`);
         const data = await res.json();
+        await hydrateScanDataWithLiveQuotesBeforeRender(data, 260);
         const oldSignature = scanListSignature(window.__scanData);
         const newSignature = scanListSignature(data);
         const shouldDefer = hadScan && !force && !explicitApply && (visibleRadarIsInUse() || oldSignature !== newSignature);
@@ -5993,7 +6109,7 @@
       const symbols = collectPortfolioSymbols();
       if (!symbols.length) return;
       try {
-        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&_=${Date.now()}`);
+        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
         const quotes = data.quotes || {};
         symbols.forEach(sym => {
@@ -6502,7 +6618,7 @@
       const symbols = collectWeeklyPrioritySymbols();
       if (!symbols.length) return;
       try {
-        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&_=${Date.now()}`);
+        const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
         const quotes = data.quotes || {};
         symbols.forEach(sym => applyWeeklyLiveQuote(sym, quotes[sym]));

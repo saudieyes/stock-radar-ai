@@ -404,11 +404,13 @@ def _price_overlay_window_for_phase(phase: str | None = None) -> bool:
 
 
 def _price_overlay_cache_allowed_for_phase(phase: str | None = None) -> bool:
-    # During open/pre/after we need fresh FMP.  During overnight closed extended
-    # display we allow the live_quotes helper to use a fresh extended cache, while
-    # it ignores regular-close cache and refetches missing extended symbols.
+    # V2W8c: never use the old regular-close cache while the UI is supposed to
+    # display an active price (regular / pre-market / after-hours / overnight
+    # extended display window).  This fixes the observed rollback where a full
+    # scan completed and the UI returned from the pre-market price to yesterday's
+    # close.  Outside those windows, cache remains allowed to protect FMP/Railway.
     phase = str(phase or get_market_phase() or "closed")
-    if _is_active_market_phase(phase):
+    if _price_overlay_window_for_phase(phase):
         return False
     return True
 
