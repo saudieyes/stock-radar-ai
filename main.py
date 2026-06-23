@@ -272,6 +272,15 @@ from app.polygon_next_day_builder import (
     load_polygon_next_day_candidates,
     format_polygon_next_day_brief,
 )
+from app.tomorrow_prep_session_builder import (
+    TOMORROW_PREP_SESSION_BUILDER_VERSION,
+    TOMORROW_PREP_WORKER_ENABLED,
+    TOMORROW_PREP_INTERVAL_SEC,
+    tomorrow_prep_session_status,
+    run_tomorrow_prep_session_chunk,
+    load_tomorrow_prep_session_candidates,
+    format_tomorrow_prep_session_brief,
+)
 
 app = FastAPI()
 
@@ -1942,6 +1951,121 @@ def live_radar_worker_status():
     out["market_phase_label"] = market_phase_label(get_market_phase())
     out["rule"] = "fresh_fmp_prices_during_open_pre_after; no sqlite quote cache while active"
     return {"ok": True, "worker": out}
+
+
+# V2W8: after-close / overnight tomorrow prep worker.
+# This worker is intentionally separate from /trade-scan. It builds a compact
+# FMP/session-based prep list in small chunks after the full session is complete,
+# then stops before the premarket review buffer. It does not change Strong/Cautious.
+TOMORROW_PREP_WORKER_LOCK = threading.Lock()
+TOMORROW_PREP_WORKER_STATE = {
+    "enabled": bool(TOMORROW_PREP_WORKER_ENABLED),
+    "running": False,
+    "iterations": 0,
+    "chunks_run": 0,
+    "last_chunk_at": "",
+    "last_error": "",
+    "interval_sec": int(TOMORROW_PREP_INTERVAL_SEC),
+    "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
+}
+
+
+def _tomorrow_prep_worker_save_state(**kwargs):
+    try:
+        TOMORROW_PREP_WORKER_STATE.update(kwargs)
+        TOMORROW_PREP_WORKER_STATE["updated_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+        set_json("tomorrow_prep_worker_status", dict(TOMORROW_PREP_WORKER_STATE))
+    except Exception:
+        pass
+
+
+def _tomorrow_prep_worker_loop():
+    if not TOMORROW_PREP_WORKER_ENABLED:
+        _tomorrow_prep_worker_save_state(enabled=False, running=False, last_error="worker_disabled")
+        return
+    with TOMORROW_PREP_WORKER_LOCK:
+        if TOMORROW_PREP_WORKER_STATE.get("running"):
+            return
+        TOMORROW_PREP_WORKER_STATE["running"] = True
+    _tomorrow_prep_worker_save_state(enabled=True, running=True, last_error="")
+    last_run_ts = 0.0
+    time.sleep(12)
+    while True:
+        try:
+            TOMORROW_PREP_WORKER_STATE["iterations"] = int(TOMORROW_PREP_WORKER_STATE.get("iterations", 0) or 0) + 1
+            status = tomorrow_prep_session_status()
+            window = status.get("window", {}) if isinstance(status, dict) else {}
+            TOMORROW_PREP_WORKER_STATE["window_open"] = bool(window.get("window_open"))
+            TOMORROW_PREP_WORKER_STATE["trade_date"] = str(window.get("trade_date") or "")
+            TOMORROW_PREP_WORKER_STATE["saved_status"] = str((status or {}).get("saved_status") or "")
+            TOMORROW_PREP_WORKER_STATE["saved_candidate_count"] = int((status or {}).get("saved_candidate_count", 0) or 0)
+            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W8: يبني قائمة الغد بعد الإغلاق من FMP على دفعات، ويتوقف قبل البري ماركت بساعتين؛ لا يغير قرارات الشراء."
+            now_ts = time.time()
+            completed = str((status or {}).get("saved_status") or "").startswith("completed")
+            if bool(window.get("window_open")) and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_INTERVAL_SEC)):
+                TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = True
+                _tomorrow_prep_worker_save_state(chunk_in_progress=True)
+                result = run_tomorrow_prep_session_chunk(execute=True, max_batches=1, respect_window=True)
+                last_run_ts = time.time()
+                TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = False
+                TOMORROW_PREP_WORKER_STATE["chunks_run"] = int(TOMORROW_PREP_WORKER_STATE.get("chunks_run", 0) or 0) + (1 if result.get("ran") else 0)
+                TOMORROW_PREP_WORKER_STATE["last_chunk_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+                TOMORROW_PREP_WORKER_STATE["last_result_ok"] = bool(result.get("ok"))
+                TOMORROW_PREP_WORKER_STATE["last_result_reason"] = str(result.get("reason") or "")[:180]
+            _tomorrow_prep_worker_save_state(last_error="", running=True)
+            time.sleep(60)
+        except Exception as exc:
+            TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = False
+            _tomorrow_prep_worker_save_state(last_error=f"{type(exc).__name__}: {str(exc)[:180]}", running=True, chunk_in_progress=False)
+            time.sleep(60)
+
+
+@app.on_event("startup")
+def start_tomorrow_prep_worker():
+    if not TOMORROW_PREP_WORKER_ENABLED:
+        return
+    try:
+        t = threading.Thread(target=_tomorrow_prep_worker_loop, daemon=True, name="tomorrow-prep-worker")
+        t.start()
+    except Exception as exc:
+        _tomorrow_prep_worker_save_state(running=False, last_error=f"startup_error: {str(exc)[:160]}")
+
+
+@app.get("/tomorrow-prep/status")
+def tomorrow_prep_status_endpoint(format: str = "json"):
+    try:
+        data = tomorrow_prep_session_status()
+        worker = get_json("tomorrow_prep_worker_status", {}) or {}
+        data["worker"] = worker if isinstance(worker, dict) else {}
+        if str(format or "").lower() == "brief":
+            saved = load_tomorrow_prep_session_candidates()
+            return {"ok": bool(saved.get("ok")), "brief": format_tomorrow_prep_session_brief(saved), "status": data, "saved": saved}
+        return data
+    except Exception as exc:
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+
+@app.get("/tomorrow-prep/run-chunk")
+def tomorrow_prep_run_chunk_endpoint(execute: bool = True, max_batches: int = 1, force_reset: bool = False, respect_window: bool = True, format: str = "json"):
+    try:
+        result = run_tomorrow_prep_session_chunk(execute=bool(execute), max_batches=int(max_batches or 1), force_reset=bool(force_reset), respect_window=bool(respect_window))
+        if str(format or "").lower() == "brief":
+            return {"ok": bool(result.get("ok")), "brief": format_tomorrow_prep_session_brief(result), "result": result}
+        return result
+    except Exception as exc:
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+
+@app.get("/tomorrow-prep/build")
+def tomorrow_prep_build_endpoint(execute: bool = True, max_batches: int = 3, force_reset: bool = False, respect_window: bool = True, format: str = "json"):
+    # Manual bounded build: more than one chunk, still capped to prevent FMP pressure.
+    return tomorrow_prep_run_chunk_endpoint(execute=execute, max_batches=max_batches, force_reset=force_reset, respect_window=respect_window, format=format)
+
+
+@app.get("/tomorrow-prep/brief")
+def tomorrow_prep_brief_endpoint():
+    saved = load_tomorrow_prep_session_candidates()
+    return {"ok": bool(saved.get("ok")), "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "brief": format_tomorrow_prep_session_brief(saved), "data": saved}
 
 
 def _snapshot_updated_at(snapshot: dict) -> str:
@@ -3918,7 +4042,7 @@ def diagnostics_scan_cadence():
         next_scan = None
     return {
         "ok": True,
-        "version": "scan_cadence_diagnostics_v2w7_2026_06_22",
+        "version": "scan_cadence_diagnostics_v2w8_tomorrow_prep_2026_06_23",
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
         "price_overlay_window": bool(_price_overlay_window_for_phase(phase)),
@@ -3930,10 +4054,13 @@ def diagnostics_scan_cadence():
         "latest_snapshot_count": int((snapshot or {}).get("count", 0) or 0) if isinstance(snapshot, dict) else 0,
         "next_full_scan_in_sec": next_scan,
         "worker": status if isinstance(status, dict) else {},
+        "tomorrow_prep": tomorrow_prep_session_status(),
+        "tomorrow_prep_worker": get_json("tomorrow_prep_worker_status", {}) or {},
         "rules_ar": [
             "لا يغيّر هذا التشخيص Strong/Cautious أو الشرعية أو توزيع Polygon.",
             "المسح الكامل يعمل وفق مرحلة السوق وميزانية Dynamic Discovery، وليس كل ثانية حتى لا يضغط FMP/Railway.",
             "تحديث السعر سريع للأسهم الموجودة أثناء النوافذ النشطة، وV2W6 يضيف سعر FMP Extended، وV2W7 يمسح كل البطاقات الظاهرة بعد بناء القوائم حتى لا تبقى بعض الأقسام بلا تغير سعر.",
+            "V2W8 يبني قائمة الغد من جلسة اليوم عبر FMP على دفعات بعد الإغلاق، ويتوقف قبل البري ماركت بساعتين على الأقل، ثم يحقنها كـ Prepared Watch للمراجعة فقط.",
             "بعض القوائم قد لا تتغير إذا بقيت نفس الأسماء أعلى ترتيبًا أو إذا كان سقف العرض ممتلئًا.",
             "أي ترقية إلى دخول بحذر/قوي تمر عبر Decision Contract وFinal Decision فقط.",
         ],
