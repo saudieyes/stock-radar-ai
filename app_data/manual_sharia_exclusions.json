@@ -215,6 +215,14 @@
     "symbol": "AMWD",
     "updated_at": "2026-04-24 12:29:30"
   },
+  "ANGX": {
+    "excluded_at": "2026-06-24 04:41:20",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ANGX",
+    "updated_at": "2026-06-24 04:41:20"
+  },
   "APA": {
     "excluded_at": "2026-05-04 14:20:28",
     "note": "استبعاد يدوي شرعي",
@@ -238,6 +246,14 @@
     "source": "manual",
     "symbol": "AREC",
     "updated_at": "2026-06-22 10:15:33"
+  },
+  "AREN": {
+    "excluded_at": "2026-06-24 04:40:48",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "AREN",
+    "updated_at": "2026-06-24 04:40:48"
   },
   "ARKO": {
     "excluded_at": "2026-05-01 14:55:34",
@@ -999,6 +1015,14 @@
     "symbol": "EAT",
     "updated_at": "2026-04-29 22:08:29"
   },
+  "EDSA": {
+    "excluded_at": "2026-06-24 04:31:07",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "EDSA",
+    "updated_at": "2026-06-24 04:31:07"
+  },
   "EG": {
     "excluded_at": "2026-06-06 17:13:07",
     "note": "استبعاد يدوي شرعي",
@@ -1447,6 +1471,14 @@
     "symbol": "INDI",
     "updated_at": "2026-04-27 10:59:43"
   },
+  "INFQ": {
+    "excluded_at": "2026-06-24 04:31:24",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "INFQ",
+    "updated_at": "2026-06-24 04:31:34"
+  },
   "INN": {
     "excluded_at": "2026-04-27 12:38:39",
     "note": "",
@@ -1478,6 +1510,14 @@
     "source": "manual",
     "symbol": "IP",
     "updated_at": "2026-05-30 20:02:05"
+  },
+  "IPSC": {
+    "excluded_at": "2026-06-24 04:41:04",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "IPSC",
+    "updated_at": "2026-06-24 04:41:04"
   },
   "IRDM": {
     "excluded_at": "2026-04-24 19:55:22",
@@ -2262,6 +2302,14 @@
     "source": "manual",
     "symbol": "QNTM",
     "updated_at": "2026-06-23 12:28:52"
+  },
+  "RAIN": {
+    "excluded_at": "2026-06-24 06:00:43",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "RAIN",
+    "updated_at": "2026-06-24 06:00:43"
   },
   "RCAT": {
     "excluded_at": "2026-06-02 10:50:27",
