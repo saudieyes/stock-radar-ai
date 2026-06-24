@@ -2017,12 +2017,12 @@ def _tomorrow_prep_worker_loop():
             TOMORROW_PREP_WORKER_STATE["trade_date"] = str(window.get("trade_date") or "")
             TOMORROW_PREP_WORKER_STATE["saved_status"] = str((status or {}).get("saved_status") or "")
             TOMORROW_PREP_WORKER_STATE["saved_candidate_count"] = int((status or {}).get("saved_candidate_count", 0) or 0)
-            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W9b: يبني بعد الإغلاق، وإذا اكتشف قائمة قديمة أثناء premarket/open/after-hours يشغّل بناء إنقاذ حي محدود من FMP."
+            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W9c: يبني بعد الإغلاق، وإذا كانت القائمة قديمة أو قائمة اليوم غير مكتملة أثناء premarket/open/after-hours يشغّل/يواصل بناء إنقاذ حي محدود من FMP."
             now_ts = time.time()
             saved_current = bool((status or {}).get("saved_is_current_trade_date", False))
             completed = bool(saved_current and str((status or {}).get("saved_status") or "").startswith("completed"))
             stale_saved = bool((status or {}).get("stale_saved_list", False))
-            rescue_available = bool((status or {}).get("rescue_build_available_v2w9b", False))
+            rescue_available = bool((status or {}).get("rescue_build_available_v2w9c", (status or {}).get("rescue_build_available_v2w9b", False)))
             TOMORROW_PREP_WORKER_STATE["saved_is_current_trade_date"] = saved_current
             TOMORROW_PREP_WORKER_STATE["stale_saved_list"] = stale_saved
             TOMORROW_PREP_WORKER_STATE["rescue_build_available_v2w9b"] = rescue_available
@@ -2095,8 +2095,13 @@ def tomorrow_prep_build_endpoint(execute: bool = True, max_batches: int = 3, for
 
 
 @app.get("/tomorrow-prep/rescue-build")
-def tomorrow_prep_rescue_build_endpoint(execute: bool = True, max_batches: int = 6, force_reset: bool = True, format: str = "json"):
-    """Run a bounded V2W9b rescue build when saved prep is stale outside the after-close window."""
+def tomorrow_prep_rescue_build_endpoint(execute: bool = True, max_batches: int = 6, force_reset: bool = False, format: str = "json"):
+    """Run/continue a bounded V2W9c rescue build outside the after-close window.
+
+    Default force_reset=False is critical: repeated manual calls continue from
+    the saved cursor instead of restarting at the first 6 batches. If the saved
+    list is stale, the builder resets automatically.
+    """
     try:
         result = run_tomorrow_prep_rescue_build(execute=bool(execute), max_batches=int(max_batches or 6), force_reset=bool(force_reset))
         if str(format or "").lower() == "brief":
@@ -4233,7 +4238,7 @@ def diagnostics_scan_cadence():
         next_scan = None
     return {
         "ok": True,
-        "version": "scan_cadence_diagnostics_v2w9b_rescue_build_2026_06_24",
+        "version": "scan_cadence_diagnostics_v2w9c_rescue_continue_2026_06_24",
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
         "price_overlay_window": bool(_price_overlay_window_for_phase(phase)),
