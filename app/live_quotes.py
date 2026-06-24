@@ -29,9 +29,9 @@ LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
 # Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
 FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w9_premarket_price_priority_2026_06_24"
+LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w9b_premarket_price_priority_phase_fix_2026_06_24"
 LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED = str(os.getenv("LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w9_premarket_price_priority_2026_06_24"
+LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w9b_premarket_phase_fix_2026_06_24"
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -405,6 +405,11 @@ def _fetch_fmp_regular_quotes(symbols: list[str]) -> dict[str, dict]:
 def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dict] | None = None) -> dict[str, dict]:
     if not FMP_API_KEY or not symbols:
         return {}
+    # V2W9b: this function previously referenced `phase` before defining it.
+    # That could break the extended-hours fetch path and leave premarket cards
+    # stuck on the regular close. Define it locally and keep it consistent for
+    # all trade/quote fallback endpoint choices.
+    phase = _market_phase_now()
     regular_quotes = regular_quotes or {}
     csv_symbols = ",".join(symbols)
 
@@ -548,6 +553,7 @@ def _fetch_fmp_quotes(symbols: list[str]) -> dict[str, dict]:
                     _q["source"] = "fmp_regular_close_no_premarket"
                     _q["source_label"] = "FMP إغلاق رسمي — لا يوجد سعر premarket من FMP"
                     _q["premarket_price_missing_v2w9"] = True
+                    _q["premarket_price_missing_v2w9b"] = True
                     _q["reliable_for_execution"] = False
                     _q["monitoring_only"] = True
                     _q["change_pct_reliable"] = bool(_q.get("change_pct_reliable"))

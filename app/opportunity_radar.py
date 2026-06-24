@@ -36,12 +36,12 @@ except Exception:  # pragma: no cover
     def get_manual_sharia_exclusions_map():
         return {}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w9_dynamic_live_lists_sharia_visibility_guard_2026_06_24"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w9b_rescue_build_price_fix_2026_06_24"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
-PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2w9_premarket_only_hidden_manual_exclusions_2026_06_24"
+PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2w9b_current_trade_date_only_2026_06_24"
 LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
 LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2w9_dynamic_validation_2026_06_24"
 V2V1_PRIORITY_ROUTER_VERSION = "v2w9_live_priority_monitoring_router_dynamic_lists_2026_06_24"
@@ -274,6 +274,25 @@ def _now_text() -> str:
 
 def _today() -> str:
     return datetime.now(NY_TZ).strftime("%Y-%m-%d")
+
+
+def _previous_trading_day_v2w9b(d):
+    x = d - timedelta(days=1)
+    while x.weekday() >= 5:
+        x -= timedelta(days=1)
+    return x
+
+
+def _current_prep_trade_date_v2w9b() -> str:
+    # Same trade-date convention as Tomorrow Prep: before 16:10 ET, the most
+    # recent completed regular session is yesterday's trading day; after 16:10,
+    # today is complete and becomes the prep source date.
+    now = datetime.now(NY_TZ)
+    minutes = now.hour * 60 + now.minute
+    d = now.date() if minutes >= (16 * 60 + 10) else _previous_trading_day_v2w9b(now.date())
+    while d.weekday() >= 5:
+        d = _previous_trading_day_v2w9b(d)
+    return d.isoformat()
 
 
 def _manual_exclusion_symbols_v2w9() -> set[str]:
@@ -2326,13 +2345,20 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT, market_ph
     items = list(payload.get("items") or [])
     debug["stored_count"] = int(payload.get("count", len(items)) or 0)
     debug["trade_date"] = payload.get("trade_date", "")
+    debug["expected_trade_date_v2w9b"] = _current_prep_trade_date_v2w9b()
     debug["updated_at_utc"] = payload.get("updated_at_utc", "")
+    if str(debug.get("trade_date") or "") and str(debug.get("trade_date") or "") != str(debug.get("expected_trade_date_v2w9b") or ""):
+        debug["enabled"] = False
+        debug["bridge_count"] = 0
+        debug["stale_prepared_watch_hidden_v2w9b"] = True
+        debug["empty_reason_ar"] = "V2W9b: تم إخفاء Prepared Watch القديمة لأنها لا تخص trade_date الحالي؛ انتظر rescue-build أو بناء قائمة اليوم."
+        return [], debug
     sharia_cache: dict[str, dict[str, Any]] = {}
     for it0 in items:
         sym0 = _prepared_item_symbol(it0)
         if sym0 and sym0 not in sharia_cache:
             sharia_cache[sym0] = _fast_sharia_for_prepared_symbol(sym0)
-    debug["v2u5_visible_blocked_rule_ar"] = "غير الشرعي يبقى ظاهرًا في القسم الحرِج لتجنب أخطاء التصنيف، لكنه محجوب من الشراء وتظهر له بدائل شرعية/قابلة للمراجعة."
+    debug["v2u5_visible_blocked_rule_ar"] = "المستبعد يدويًا لا يظهر نهائيًا؛ الاشتباه الشرعي الآلي فقط يبقى كمراجعة عاجلة إذا لم يكن استبعادًا يدويًا."
     rows: list[dict] = []
     seen: set[str] = set()
     for idx, it in enumerate(items):
