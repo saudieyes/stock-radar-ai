@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -36,12 +36,12 @@ except Exception:  # pragma: no cover
     def get_manual_sharia_exclusions_map():
         return {}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w9b_rescue_build_price_fix_2026_06_24"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w9d_opportunity_radar_runtime_fix_2026_06_24"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
-PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2w9b_current_trade_date_only_2026_06_24"
+PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2w9d_runtime_fix_2026_06_24"
 LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
 LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2w9_dynamic_validation_2026_06_24"
 V2V1_PRIORITY_ROUTER_VERSION = "v2w9_live_priority_monitoring_router_dynamic_lists_2026_06_24"
