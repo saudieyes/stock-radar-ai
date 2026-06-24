@@ -63,6 +63,14 @@
     "symbol": "ACIU",
     "updated_at": "2026-06-22 11:40:28"
   },
+  "ADAG": {
+    "excluded_at": "2026-06-24 17:46:47",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ADAG",
+    "updated_at": "2026-06-24 17:46:47"
+  },
   "ADNT": {
     "excluded_at": "2026-06-03 13:48:46",
     "note": "استبعاد يدوي شرعي",
@@ -1046,6 +1054,14 @@
     "source": "manual",
     "symbol": "DLPN",
     "updated_at": "2026-06-22 11:44:00"
+  },
+  "DLTH": {
+    "excluded_at": "2026-06-24 14:19:41",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DLTH",
+    "updated_at": "2026-06-24 14:19:41"
   },
   "DNA": {
     "excluded_at": "2026-05-04 11:20:15",
