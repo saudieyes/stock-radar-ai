@@ -59,7 +59,7 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3w_v2w8b_live_price_persistence_2026_06_23"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v3z_v2w9_dynamic_live_lists_2026_06_24"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
@@ -428,7 +428,7 @@ def _save_live_tight_monitoring_memory(items: list[dict] | None, *, source: str 
         }
     ordered = sorted(merged.values(), key=lambda x: (float(x.get("updated_ts", 0) or 0), float(x.get("score", 0) or 0)), reverse=True)[: int(LIVE_TIGHT_MONITORING_LIMIT or 160)]
     payload = {
-        "version": "live_tight_monitoring_v2v_2026_06_21",
+        "version": "live_tight_monitoring_v2w9_dynamic_live_lists_2026_06_24",
         "updated_at_utc": now_iso,
         "source": str(source or ""),
         "count": len(ordered),

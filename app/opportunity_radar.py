@@ -30,15 +30,21 @@ except Exception:  # pragma: no cover
     def load_polygon_next_day_candidates():
         return {"ok": False, "candidates": [], "reason": "polygon_next_day_builder_unavailable"}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w5b_trade_scan_route_restore_2026_06_22"
+try:
+    from app.data_store import get_manual_sharia_exclusions_map
+except Exception:  # pragma: no cover
+    def get_manual_sharia_exclusions_map():
+        return {}
+
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w9_dynamic_live_lists_sharia_visibility_guard_2026_06_24"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
 PREPARED_EXPLOSION_WATCH_MEMORY_KEY = "source_discovery:big_explosion_prepared_watch_v2u"
-PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2u5_sharia_replacement_visible_blocked_2026_06_20"
+PREPARED_WATCH_UI_BRIDGE_VERSION = "prepared_watch_ui_bridge_v2w9_premarket_only_hidden_manual_exclusions_2026_06_24"
 LIVE_TIGHT_MONITORING_MEMORY_KEY = "source_discovery:live_tight_monitoring_v2v"
-LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2v1b_extended_display_fix_2026_06_21"
-V2V1_PRIORITY_ROUTER_VERSION = "v2v1b_live_priority_monitoring_router_extended_display_fix_2026_06_21"
+LIVE_TIGHT_MONITORING_UI_BRIDGE_VERSION = "live_tight_monitoring_ui_bridge_v2w9_dynamic_validation_2026_06_24"
+V2V1_PRIORITY_ROUTER_VERSION = "v2w9_live_priority_monitoring_router_dynamic_lists_2026_06_24"
 V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT = 18.0
 V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT = 35.0
 LIVE_TIGHT_MONITORING_PREPARED_MIN_CHANGE_PCT = 3.0
@@ -62,7 +68,10 @@ V2U5_USER_BLOCKED_SHARIA = {
 V2U5_USER_PLATFORM_SHARIA_REVIEW = {"EHGO", "ICCM", "NIXX"}
 V2U5_USER_CONFIRMED_COMPLIANT = {"HOUR"}
 V2U5_SECTOR_CONFLICT_REVIEW = {"EU"}
-V2U5_SHARIA_REPLACEMENT_VERSION = "sharia_replacement_engine_v2u5_2026_06_20"
+V2U5_SHARIA_REPLACEMENT_VERSION = "sharia_replacement_engine_v2w9_manual_exclusion_replacements_2026_06_24"
+V2W9_LIVE_TIGHT_ACTIVE_MAX_AGE_MIN = 45.0
+V2W9_PREPARED_VISIBLE_PHASES = {"pre_market", "premarket"}
+V2W9_HARD_HARAM_REASON_KEYWORDS = {"casino", "gambling", "betting", "tobacco", "alcohol", "brewery", "distillery", "sportsbook"}
 
 
 # Learning Overlay V1
@@ -265,6 +274,147 @@ def _now_text() -> str:
 
 def _today() -> str:
     return datetime.now(NY_TZ).strftime("%Y-%m-%d")
+
+
+def _manual_exclusion_symbols_v2w9() -> set[str]:
+    try:
+        data = get_manual_sharia_exclusions_map() or {}
+        if isinstance(data, dict):
+            return {_u(k) for k in data.keys() if _u(k)}
+    except Exception:
+        pass
+    return set()
+
+
+def _manual_excluded_v2w9(row_or_symbol) -> bool:
+    if isinstance(row_or_symbol, dict):
+        sym = _u(row_or_symbol.get("symbol"))
+        if bool(row_or_symbol.get("sharia_manual_excluded") or row_or_symbol.get("manual_sharia_excluded")):
+            return True
+    else:
+        sym = _u(row_or_symbol)
+    if not sym:
+        return False
+    return sym in _manual_exclusion_symbols_v2w9() or sym in V2U5_USER_BLOCKED_SHARIA
+
+
+def _hard_haram_auto_reason_v2w9(row: dict) -> bool:
+    text = " ".join([
+        _s(row.get("sharia_reason")), _s(row.get("sector")), _s(row.get("industry")),
+        _s(row.get("company")), _s(row.get("business_summary")), _s(row.get("sharia_label")),
+    ]).lower()
+    return any(k in text for k in V2W9_HARD_HARAM_REASON_KEYWORDS)
+
+
+def _active_market_for_dynamic_lists_v2w9(market_phase: str = "") -> bool:
+    return _s(market_phase).lower() in {"pre_market", "premarket", "open", "after_hours", "afterhours"}
+
+
+def _market_is_premarket_v2w9(market_phase: str = "") -> bool:
+    return _s(market_phase).lower() in V2W9_PREPARED_VISIBLE_PHASES
+
+
+def _item_age_minutes_v2w9(item: dict) -> float:
+    try:
+        ts = float((item or {}).get("updated_ts") or (item or {}).get("created_ts") or 0)
+        if ts > 0:
+            return max(0.0, (time.time() - ts) / 60.0)
+    except Exception:
+        pass
+    return 99999.0
+
+
+def _ensure_visible_monitoring_plan_v2w9(row: dict, section_key: str = "") -> bool:
+    """Every visible item must have entry/exit/target.
+
+    For non-buy watch/prep rows, synthesize a conservative monitoring plan from
+    the current price only when a real plan is missing. This is display-only and
+    never promotes to Strong/Cautious. If no usable price exists, hide the item.
+    """
+    if not isinstance(row, dict):
+        return False
+    price = _price(row)
+    entry = _entry(row)
+    stop = _stop(row)
+    target = _target1(row)
+    if entry > 0 and stop > 0 and target > 0:
+        return True
+    if price <= 0:
+        row["hidden_reason_v2w9"] = "لا يظهر بدون سعر وخطة دخول/خروج/هدف."
+        return False
+    if entry <= 0:
+        trigger = _first(row, ["trigger_price", "breakout_price", "confirmation_price", "resistance"], 0.0)
+        if trigger <= 0 or trigger < price * 0.995:
+            trigger = price * 1.03
+        row["display_entry_price"] = _round(trigger, 4)
+        row["display_entry_label"] = "شرط التفعيل / لا قرار قبلها"
+    if stop <= 0:
+        support = _first(row, ["support", "nearest_support", "stop_invalidation"], 0.0)
+        if support <= 0 or support >= price:
+            support = price * 0.94
+        row["display_stop_price"] = _round(support, 4)
+        row["display_stop_label"] = "إلغاء المراقبة / حد الفشل"
+    if target <= 0:
+        tgt = _first(row, ["resistance", "next_resistance", "target_price"], 0.0)
+        if tgt <= max(price, _entry(row)):
+            tgt = max(price, _entry(row) or price) * 1.10
+        row["display_target_price"] = _round(tgt, 4)
+        row["display_target_label"] = "هدف مراقبة أول"
+    row["visible_monitoring_plan_v2w9"] = True
+    row["visible_monitoring_plan_rule_ar"] = "لا تظهر البطاقة بدون دخول/إلغاء/هدف؛ هذه خطة مراقبة فقط ولا تعني شراء مباشر."
+    reasons = list(row.get("opportunity_reasons") or [])
+    reasons = _dedupe(["V2W9: أُضيفت خطة مراقبة واضحة لأن البطاقة لا تظهر بدون شرط دخول/إلغاء/هدف."] + reasons, 12)
+    row["opportunity_reasons"] = reasons
+    row["technical_explainer_reasons"] = row.get("technical_explainer_reasons") or reasons
+    return _entry(row) > 0 and _stop(row) > 0 and _target1(row) > 0
+
+
+def _final_visible_guard_v2w9(final_map: dict[str, list[dict]], *, market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
+    debug = {
+        "version": "visible_stock_guard_v2w9_2026_06_24",
+        "manual_excluded_hidden": [],
+        "auto_hard_haram_hidden": [],
+        "missing_plan_hidden": [],
+        "plans_added": 0,
+        "critical_premarket_hidden_outside_premarket": 0,
+        "rule_ar": "لا يظهر المستبعد يدويًا إطلاقًا، ولا تظهر أي بطاقة بلا دخول/إلغاء/هدف. الاشتباه الشرعي الآلي لا يساوي استبعادًا يدويًا.",
+    }
+    active_manual = _manual_exclusion_symbols_v2w9()
+    for section, vals in list(final_map.items()):
+        clean = []
+        seen = set()
+        for row in vals or []:
+            if not isinstance(row, dict):
+                continue
+            sym = _u(row.get("symbol"))
+            if not sym or sym in seen:
+                continue
+            if sym in active_manual or _manual_excluded_v2w9(row):
+                debug["manual_excluded_hidden"].append(sym)
+                continue
+            if _s(row.get("sharia_status")).lower() in {"non_compliant", "haram", "excluded", "blocked"} and _hard_haram_auto_reason_v2w9(row):
+                debug["auto_hard_haram_hidden"].append(sym)
+                continue
+            if section == "critical_pre_explosion_watch" and not _market_is_premarket_v2w9(market_phase):
+                # After the premarket window this lane becomes an internal seed;
+                # confirmed movers must enter V2V/Low-Float/Pre-Trigger/etc.
+                debug["critical_premarket_hidden_outside_premarket"] += 1
+                continue
+            before = bool(row.get("visible_monitoring_plan_v2w9"))
+            if not _ensure_visible_monitoring_plan_v2w9(row, section):
+                debug["missing_plan_hidden"].append(sym)
+                continue
+            if row.get("visible_monitoring_plan_v2w9") and not before:
+                debug["plans_added"] += 1
+            seen.add(sym)
+            clean.append(row)
+            if len(clean) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
+                break
+        final_map[section] = clean
+    for k in ["manual_excluded_hidden", "auto_hard_haram_hidden", "missing_plan_hidden"]:
+        debug[k] = _dedupe(debug.get(k, []), 80)
+        debug[f"{k}_count"] = len(debug[k])
+    return debug
 
 
 def _price(row: dict) -> float:
@@ -1944,6 +2094,16 @@ def _fast_sharia_for_prepared_symbol(symbol: str) -> dict[str, Any]:
     if not sym:
         return {"status": "needs_review", "label": "يحتاج مراجعة شرعية", "reason": "لا يوجد رمز صالح", "gray": True, "blocked": False}
 
+    if _manual_excluded_v2w9(sym):
+        return {
+            "status": "manual_excluded",
+            "label": "مستبعد يدويًا",
+            "reason": "مستبعد يدويًا من قائمتك؛ لا يظهر في أي قائمة ظاهرة ويُستخدم داخليًا للتعلم فقط.",
+            "gray": False,
+            "blocked": True,
+            "manual_excluded": True,
+        }
+
     # V2U5: user reviewed the visible critical list against the platform.
     # Keep blocked names visible in the critical lane to avoid hidden mistakes,
     # but mark them clearly as non-actionable / learning only.
@@ -1991,9 +2151,24 @@ def _fast_sharia_for_prepared_symbol(symbol: str) -> dict[str, Any]:
         from app.sharia_filter import assess_sharia_source_fast
         a = assess_sharia_source_fast(sym) or {}
         status = _s(a.get("status") or a.get("sharia_status") or ("compliant" if a.get("is_halal") else "needs_review")).lower()
-        blocked = bool(a.get("should_block") or a.get("manual_excluded") or status in {"non_compliant", "haram", "excluded"})
+        reason_text = _s(a.get("reason")) or "تقييم شرعي سريع من البيانات المحلية فقط."
+        manual_excluded = bool(a.get("manual_excluded"))
+        blocked = bool(a.get("should_block") or manual_excluded or status in {"non_compliant", "haram", "excluded"})
         gray = bool(a.get("is_gray") or status in {"needs_review", "unknown", "gray", "review"})
-        if blocked:
+        hard_auto = any(k in reason_text.lower() for k in V2W9_HARD_HARAM_REASON_KEYWORDS)
+        if manual_excluded:
+            status = "manual_excluded"
+            blocked = True
+            gray = False
+        elif blocked and not hard_auto:
+            # V2W9: broad sector/activity auto blocks, especially finance-like
+            # false positives, become urgent review in visible monitoring lanes.
+            # They still never become Strong/Buy without manual approval.
+            status = "needs_review"
+            blocked = False
+            gray = True
+            reason_text = "اشتباه شرعي آلي قابل للمراجعة؛ لا يعتبر استبعادًا يدويًا. " + reason_text
+        elif blocked:
             status = "non_compliant"
         elif gray:
             status = "needs_review"
@@ -2002,11 +2177,12 @@ def _fast_sharia_for_prepared_symbol(symbol: str) -> dict[str, Any]:
             gray = True
         return {
             "status": status,
-            "label": _s(a.get("label")) or ("متوافق مبدئيًا" if status in {"compliant", "halal"} else "يحتاج مراجعة شرعية"),
-            "reason": _s(a.get("reason")) or "تقييم شرعي سريع من البيانات المحلية فقط.",
+            "label": _s(a.get("label")) or ("متوافق مبدئيًا" if status in {"compliant", "halal"} else ("مستبعد يدويًا" if manual_excluded else "يحتاج مراجعة شرعية")),
+            "reason": reason_text,
             "gray": gray,
             "blocked": blocked,
-            "manual_excluded": bool(a.get("manual_excluded")),
+            "manual_excluded": manual_excluded,
+            "auto_sharia_caution_v2w9": bool(gray and not manual_excluded),
         }
     except Exception as exc:
         return {"status": "needs_review", "label": "يحتاج مراجعة شرعية", "reason": f"تعذر التقييم السريع: {type(exc).__name__}", "gray": True, "blocked": False}
@@ -2115,7 +2291,7 @@ def _find_sharia_replacements_for_blocked_prepared(
     return out
 
 
-def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[list[dict], dict[str, Any]]:
+def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT, market_phase: str = "") -> tuple[list[dict], dict[str, Any]]:
     """V2U4b: surface Prepared Watch memory directly in the visible UI section.
 
     V2U4 correctly saved EHGO/ICCM/TPC/SNBR-like candidates in SQLite, but the
@@ -2131,8 +2307,14 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
         "stored_count": 0,
         "bridge_count": 0,
         "symbols": [],
-        "reason_ar": "يعرض مرشحي Prepared Watch مباشرة حتى لو أسقطتهم فلترة clean-only؛ مراقبة/مراجعة فقط وليست شراء.",
+        "reason_ar": "يعرض مرشحي Prepared Watch فقط في premarket؛ بعد الافتتاح يصبح مصدرًا داخليًا وتنتقل الأسهم المؤكدة إلى الأقسام الحية المناسبة.",
+        "market_phase": market_phase,
     }
+    if not _market_is_premarket_v2w9(market_phase):
+        debug["enabled"] = False
+        debug["bridge_count"] = 0
+        debug["empty_reason_ar"] = "V2W9: قسم مرشحي الانفجار قبل السوق لا يظهر خارج premarket؛ يستخدم داخليًا كمصدر فقط."
+        return [], debug
     try:
         payload = get_json(PREPARED_EXPLOSION_WATCH_MEMORY_KEY, {}) or {}
     except Exception as exc:
@@ -2163,6 +2345,9 @@ def _prepared_watch_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT) -> tuple[
         metrics = dict(it.get("metrics") or {})
         raw_reasons = [str(x) for x in list(it.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or []) if str(x or "").strip()]
         sh = sharia_cache.get(sym) or _fast_sharia_for_prepared_symbol(sym)
+        if bool(sh.get("manual_excluded")) or _manual_excluded_v2w9(sym):
+            debug.setdefault("manual_excluded_hidden", []).append(sym)
+            continue
         blocked = bool(sh.get("blocked"))
         gray = bool(sh.get("gray"))
         replacements = _find_sharia_replacements_for_blocked_prepared(sym, it, items, sharia_cache, limit=3) if blocked else []
@@ -2360,9 +2545,14 @@ def _row_sharia_v2v(row: dict) -> dict[str, Any]:
     sym = _u(row.get("symbol"))
     sh = _fast_sharia_for_prepared_symbol(sym) if sym else {"status": "needs_review", "gray": True, "blocked": False}
     row_status = _s(row.get("sharia_status") or row.get("sharia_compliance") or row.get("sharia_label")).lower()
-    manual_excluded = bool(row.get("sharia_manual_excluded") or row.get("manual_sharia_excluded") or row.get("sharia_blocked_from_buy_v2u5"))
-    if manual_excluded or row_status in {"non_compliant", "haram", "excluded", "blocked"}:
-        sh = {**sh, "status": "non_compliant", "label": "محجوب شرعيًا", "blocked": True, "gray": False, "manual_excluded": True}
+    manual_excluded = bool(row.get("sharia_manual_excluded") or row.get("manual_sharia_excluded")) or _manual_excluded_v2w9(sym)
+    auto_blocked_status = row_status in {"non_compliant", "haram", "excluded", "blocked"}
+    if manual_excluded:
+        sh = {**sh, "status": "manual_excluded", "label": "مستبعد يدويًا", "blocked": True, "gray": False, "manual_excluded": True}
+    elif auto_blocked_status and _hard_haram_auto_reason_v2w9(row):
+        sh = {**sh, "status": "non_compliant", "label": "غير متوافق", "blocked": True, "gray": False, "manual_excluded": False}
+    elif auto_blocked_status:
+        sh = {**sh, "status": "needs_review", "label": "اشتباه شرعي آلي — يحتاج مراجعة", "blocked": False, "gray": True, "manual_excluded": False}
     elif row_status in {"needs_review", "unknown", "gray", "review"}:
         sh = {**sh, "status": "needs_review", "label": _s(row.get("sharia_label")) or sh.get("label") or "يحتاج مراجعة شرعية", "gray": True}
     return sh
@@ -2645,12 +2835,24 @@ def _live_tight_ui_bridge_rows(limit: int = DEFAULT_SECTION_LIMIT, market_phase:
     items, debug = _load_live_tight_monitoring_memory_items()
     rows: list[dict] = []
     seen: set[str] = set()
+    active_phase = _active_market_for_dynamic_lists_v2w9(market_phase)
     for idx, item in enumerate(items or []):
         sym = _u((item or {}).get("symbol"))
         if not sym or sym in seen:
             continue
+        if _manual_excluded_v2w9(sym):
+            debug.setdefault("manual_excluded_hidden", []).append(sym)
+            continue
+        age_min = _item_age_minutes_v2w9(item)
+        # During live sessions, stale V2V memory is only a source seed, not a
+        # visible top-row card. If still active, source_discovery will refresh
+        # updated_ts on the next scan and it will reappear.
+        if active_phase and age_min > float(V2W9_LIVE_TIGHT_ACTIVE_MAX_AGE_MIN):
+            debug.setdefault("stale_hidden_symbols", []).append(sym)
+            continue
         seen.add(sym)
         row = _live_tight_row_from_item(item, idx=idx, market_phase=market_phase)
+        row["v2w9_memory_age_min"] = _round(age_min, 1)
         if row.get("symbol"):
             rows.append(row)
         if len(rows) >= lim:
@@ -2958,8 +3160,12 @@ OPPORTUNITY_BUCKET_KEYS = [
 
 
 def _is_blocked(row: dict) -> bool:
+    # V2W9: manual exclusion is absolute. Auto Sharia caution/sector mismatch
+    # should not erase monitoring lists; it only blocks execution/Strong until reviewed.
     sharia = _s(row.get("sharia_status")).lower()
-    if row.get("sharia_manual_excluded") or sharia in {"non_compliant", "haram", "excluded", "blocked", "learning_only"}:
+    if _manual_excluded_v2w9(row):
+        return True
+    if sharia in {"non_compliant", "haram", "excluded", "blocked", "learning_only"} and _hard_haram_auto_reason_v2w9(row):
         return True
     if _s(row.get("final_decision_code")) in {"PLAN_BROKEN", "DATA_INCOMPLETE"}:
         return True
@@ -4469,7 +4675,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             existing = final_map.get("live_tight_monitoring_candidates", []) or []
             merged = []
             seen_live_bridge: set[str] = set()
-            for item in list(bridge_live) + list(existing):
+            for item in list(existing) + list(bridge_live):
                 if not isinstance(item, dict):
                     continue
                 sym = _u(item.get("symbol"))
@@ -4485,7 +4691,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             existing = final_map.get("continuation_pullback_candidates", []) or []
             merged = []
             seen_cont_bridge: set[str] = set()
-            for item in list(bridge_cont) + list(existing):
+            for item in list(existing) + list(bridge_cont):
                 if not isinstance(item, dict):
                     continue
                 sym = _u(item.get("symbol"))
@@ -4540,12 +4746,12 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     # V2U4b bridge: the Prepared Watch memory may contain gray/non-compliant
     # critical candidates that were intentionally removed from the clean-only
     # deep universe. Surface them directly in the non-actionable critical section.
-    prepared_watch_ui_bridge_rows, prepared_watch_ui_bridge_debug = _prepared_watch_ui_bridge_rows(limit=limit)
+    prepared_watch_ui_bridge_rows, prepared_watch_ui_bridge_debug = _prepared_watch_ui_bridge_rows(limit=limit, market_phase=market_phase)
     if prepared_watch_ui_bridge_rows:
         existing = final_map.get("critical_pre_explosion_watch", []) or []
         merged = []
         seen_bridge: set[str] = set()
-        for item in list(prepared_watch_ui_bridge_rows) + list(existing):
+        for item in list(existing) + list(prepared_watch_ui_bridge_rows):
             if not isinstance(item, dict):
                 continue
             sym = _u(item.get("symbol"))
@@ -4606,6 +4812,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         final_map[section_key] = tagged_vals
     v2v1_priority_router_debug["tight_monitoring_recommended_symbols"] = _dedupe(v2v1_priority_router_debug.get("tight_monitoring_recommended_symbols", []), 80)
 
+    visible_guard_debug = _final_visible_guard_v2w9(final_map, market_phase=market_phase, limit=limit)
+
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
     learning_overlay_candidates = _build_visible_learning_overlay_candidates(rows or [], limit=16)
@@ -4643,6 +4851,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "v2v1_priority_router_debug": v2v1_priority_router_debug,
         "v2v1_priority_router_rule_ar": v2v1_priority_router_debug.get("rule_ar"),
         "v2v1_tight_monitoring_recommended_symbols": v2v1_priority_router_debug.get("tight_monitoring_recommended_symbols", []),
+        "visible_stock_guard_v2w9": visible_guard_debug,
+        "visible_stock_guard_rule_ar": visible_guard_debug.get("rule_ar"),
         "low_float_fast_lane_raw_watch_count": len(fast_lane_raw_watch_rows),
         "low_float_fast_lane_raw_watch": fast_lane_raw_watch_rows,
         "prepared_watch_ui_bridge_debug": prepared_watch_ui_bridge_debug,

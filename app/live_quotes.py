@@ -29,9 +29,9 @@ LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
 # Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
 FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w6_extended_hours_price_overlay_2026_06_22"
+LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w9_premarket_price_priority_2026_06_24"
 LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED = str(os.getenv("LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w6_2026_06_22"
+LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w9_premarket_price_priority_2026_06_24"
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -256,6 +256,7 @@ def _normalize_fmp_extended_trade_row(row: dict, regular_quote: dict | None = No
             "monitoring_only": True,
             "updated_at": now,
             "updated_label": _ts_to_label(raw_ts),
+            "raw_timestamp": raw_ts,
             "market_phase": phase,
             "extended_hours": True,
             "extended_source": "trade",
@@ -324,6 +325,7 @@ def _normalize_fmp_extended_quote_row(row: dict, regular_quote: dict | None = No
             "monitoring_only": True,
             "updated_at": now,
             "updated_label": _ts_to_label(raw_ts),
+            "raw_timestamp": raw_ts,
             "market_phase": phase,
             "extended_hours": True,
             "extended_source": "quote",
@@ -411,10 +413,20 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
     # First preference: last extended trade because it is closest to a traded price.
     # The user's FMP plan returns /stable/aftermarket-trade?symbol=AAPL, while some
     # previous code expected batch-aftermarket-trade. Try both before falling back.
-    trade_urls = [
-        f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={csv_symbols}&apikey={FMP_API_KEY}",
-        f"{FMP_BASE_URL}/stable/batch-aftermarket-trade?symbols={csv_symbols}&apikey={FMP_API_KEY}",
-    ]
+    if phase == "premarket":
+        trade_urls = [
+            f"{FMP_BASE_URL}/stable/pre-post-market-trade?symbol={csv_symbols}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/batch-pre-post-market-trade?symbols={csv_symbols}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={csv_symbols}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/batch-aftermarket-trade?symbols={csv_symbols}&apikey={FMP_API_KEY}",
+        ]
+    else:
+        trade_urls = [
+            f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={csv_symbols}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/batch-aftermarket-trade?symbols={csv_symbols}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/pre-post-market-trade?symbol={csv_symbols}&apikey={FMP_API_KEY}",
+            f"{FMP_BASE_URL}/stable/batch-pre-post-market-trade?symbols={csv_symbols}&apikey={FMP_API_KEY}",
+        ]
     for url in trade_urls:
         rows = _fetch_json_rows(url)
         for row in rows:
@@ -437,7 +449,18 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
     if missing_trade:
         for sym in missing_trade[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
             trade_refill_attempted += 1
-            rows = _fetch_json_rows(f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={sym}&apikey={FMP_API_KEY}")
+            single_trade_urls = [
+                f"{FMP_BASE_URL}/stable/pre-post-market-trade?symbol={sym}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={sym}&apikey={FMP_API_KEY}",
+            ] if phase == "premarket" else [
+                f"{FMP_BASE_URL}/stable/aftermarket-trade?symbol={sym}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/pre-post-market-trade?symbol={sym}&apikey={FMP_API_KEY}",
+            ]
+            rows = []
+            for _url in single_trade_urls:
+                rows = _fetch_json_rows(_url)
+                if rows:
+                    break
             for row in rows:
                 reg = regular_quotes.get(sym)
                 norm = _normalize_fmp_extended_trade_row(row, reg)
@@ -449,11 +472,21 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
     missing = [s for s in symbols if s not in out]
     if missing:
         csv_missing = ",".join(missing)
-        quote_urls = [
-            # Newer FMP stable endpoint that returned bidPrice/askPrice in live testing.
-            f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={csv_missing}&apikey={FMP_API_KEY}",
-            f"{FMP_BASE_URL}/stable/batch-aftermarket-quote?symbols={csv_missing}&apikey={FMP_API_KEY}",
-        ]
+        if phase == "premarket":
+            quote_urls = [
+                f"{FMP_BASE_URL}/stable/pre-post-market-quote?symbol={csv_missing}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/batch-pre-post-market-quote?symbols={csv_missing}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={csv_missing}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/batch-aftermarket-quote?symbols={csv_missing}&apikey={FMP_API_KEY}",
+            ]
+        else:
+            quote_urls = [
+                # Newer FMP stable endpoint that returned bidPrice/askPrice in live testing.
+                f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={csv_missing}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/batch-aftermarket-quote?symbols={csv_missing}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/pre-post-market-quote?symbol={csv_missing}&apikey={FMP_API_KEY}",
+                f"{FMP_BASE_URL}/stable/batch-pre-post-market-quote?symbols={csv_missing}&apikey={FMP_API_KEY}",
+            ]
         for url in quote_urls:
             rows = _fetch_json_rows(url)
             for row in rows:
@@ -469,7 +502,18 @@ def _fetch_fmp_extended_quotes(symbols: list[str], regular_quotes: dict[str, dic
         still_missing = [s for s in missing if s not in out]
         if still_missing:
             for sym in still_missing[:max(0, FMP_SINGLE_FALLBACK_LIMIT)]:
-                rows = _fetch_json_rows(f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={sym}&apikey={FMP_API_KEY}")
+                single_quote_urls = [
+                    f"{FMP_BASE_URL}/stable/pre-post-market-quote?symbol={sym}&apikey={FMP_API_KEY}",
+                    f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={sym}&apikey={FMP_API_KEY}",
+                ] if phase == "premarket" else [
+                    f"{FMP_BASE_URL}/stable/aftermarket-quote?symbol={sym}&apikey={FMP_API_KEY}",
+                    f"{FMP_BASE_URL}/stable/pre-post-market-quote?symbol={sym}&apikey={FMP_API_KEY}",
+                ]
+                rows = []
+                for _url in single_quote_urls:
+                    rows = _fetch_json_rows(_url)
+                    if rows:
+                        break
                 for row in rows:
                     reg = regular_quotes.get(sym)
                     norm = _normalize_fmp_extended_quote_row(row, reg)
@@ -495,6 +539,18 @@ def _fetch_fmp_quotes(symbols: list[str]) -> dict[str, dict]:
         # Use extended prices where available for display; keep regular quote only for symbols with no extended data.
         out = dict(regular or {})
         out.update(extended or {})
+        # V2W9: if FMP does not return an extended/pre-market row, do not label
+        # the regular-session close as a current premarket price. Keep the value
+        # as reference only and make it monitoring-only/stale in diagnostics/UI.
+        if phase == "premarket":
+            for _sym, _q in list(out.items()):
+                if _sym not in (extended or {}) and isinstance(_q, dict):
+                    _q["source"] = "fmp_regular_close_no_premarket"
+                    _q["source_label"] = "FMP إغلاق رسمي — لا يوجد سعر premarket من FMP"
+                    _q["premarket_price_missing_v2w9"] = True
+                    _q["reliable_for_execution"] = False
+                    _q["monitoring_only"] = True
+                    _q["change_pct_reliable"] = bool(_q.get("change_pct_reliable"))
         if out:
             upsert_live_quotes(list(out.values()))
         return out

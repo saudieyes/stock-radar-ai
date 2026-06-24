@@ -35,7 +35,7 @@ from .live_quotes import get_live_quotes
 from .sqlite_store import get_json as _get_json, set_json as _set_json
 from .data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
 
-TOMORROW_PREP_SESSION_BUILDER_VERSION = "tomorrow_prep_session_builder_v2w8_fmp_session_chunks_2026_06_23"
+TOMORROW_PREP_SESSION_BUILDER_VERSION = "tomorrow_prep_session_builder_v2w9_trade_date_reset_2026_06_24"
 TOMORROW_PREP_STATE_KEY = "tomorrow_prep:session_scan_state_v2w8"
 TOMORROW_PREP_OUTPUT_KEY = "tomorrow_prep:session_candidates_v2w8"
 TOMORROW_PREP_OUTPUT_PATH = Path(DATA_DIR) / "tomorrow_prep_session_candidates.json"
@@ -604,6 +604,12 @@ def tomorrow_prep_session_status() -> dict:
         next_due = max(0, int(float(TOMORROW_PREP_INTERVAL_SEC) - (time.time() - last_ts))) if last_ts > 0 else 0
     except Exception:
         next_due = None
+    window_trade_date = str((window or {}).get("trade_date") or "")
+    saved_trade_date = str((saved or {}).get("trade_date") or "") if isinstance(saved, dict) else ""
+    state_trade_date = str((state or {}).get("trade_date") or "") if isinstance(state, dict) else ""
+    saved_is_current_trade_date = bool(saved_trade_date and window_trade_date and saved_trade_date == window_trade_date)
+    state_is_current_trade_date = bool(state_trade_date and window_trade_date and state_trade_date == window_trade_date)
+    stale_reason = "" if saved_is_current_trade_date else f"saved_trade_date {saved_trade_date or '-'} لا يساوي trade_date الحالي {window_trade_date or '-'}"
     return {
         "ok": True,
         "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
@@ -620,9 +626,13 @@ def tomorrow_prep_session_status() -> dict:
         "saved_progress": (saved or {}).get("progress", {}),
         "saved_status": (saved or {}).get("status", ""),
         "saved_trade_date": (saved or {}).get("trade_date", ""),
+        "saved_is_current_trade_date": saved_is_current_trade_date,
+        "state_is_current_trade_date": state_is_current_trade_date,
+        "stale_saved_list": not saved_is_current_trade_date,
+        "stale_reason_ar": stale_reason,
         "saved_candidate_count": len((saved or {}).get("candidates") or []) if isinstance(saved, dict) else 0,
         "saved_sample": [x.get("symbol") for x in list((saved or {}).get("candidates") or [])[:30] if isinstance(x, dict)] if isinstance(saved, dict) else [],
-        "rule_ar": "V2W8 يبني قائمة الغد من FMP/جلسة اليوم على دفعات، ويحقنها كـ Prepared Watch للمراجعة قبل البري ماركت. Polygon يعزز لاحقًا فقط عند توفر بيانات اليوم.",
+        "rule_ar": "V2W9: يبني قائمة كل trade_date جديد ولا يعتبر قائمة أمس صالحة لليوم؛ إذا اختلف saved_trade_date عن trade_date الحالي تُوسم القائمة كقديمة ويبدأ العامل بناء جلسة جديدة في النافذة.",
     }
 
 
