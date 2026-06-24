@@ -276,6 +276,8 @@ from app.tomorrow_prep_session_builder import (
     TOMORROW_PREP_SESSION_BUILDER_VERSION,
     TOMORROW_PREP_WORKER_ENABLED,
     TOMORROW_PREP_INTERVAL_SEC,
+    TOMORROW_PREP_RESCUE_INTERVAL_SEC,
+    run_tomorrow_prep_rescue_build,
     tomorrow_prep_session_status,
     run_tomorrow_prep_session_chunk,
     load_tomorrow_prep_session_candidates,
@@ -2015,22 +2017,33 @@ def _tomorrow_prep_worker_loop():
             TOMORROW_PREP_WORKER_STATE["trade_date"] = str(window.get("trade_date") or "")
             TOMORROW_PREP_WORKER_STATE["saved_status"] = str((status or {}).get("saved_status") or "")
             TOMORROW_PREP_WORKER_STATE["saved_candidate_count"] = int((status or {}).get("saved_candidate_count", 0) or 0)
-            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W8: يبني قائمة الغد بعد الإغلاق من FMP على دفعات، ويتوقف قبل البري ماركت بساعتين؛ لا يغير قرارات الشراء."
+            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W9b: يبني بعد الإغلاق، وإذا اكتشف قائمة قديمة أثناء premarket/open/after-hours يشغّل بناء إنقاذ حي محدود من FMP."
             now_ts = time.time()
             saved_current = bool((status or {}).get("saved_is_current_trade_date", False))
             completed = bool(saved_current and str((status or {}).get("saved_status") or "").startswith("completed"))
+            stale_saved = bool((status or {}).get("stale_saved_list", False))
+            rescue_available = bool((status or {}).get("rescue_build_available_v2w9b", False))
             TOMORROW_PREP_WORKER_STATE["saved_is_current_trade_date"] = saved_current
-            TOMORROW_PREP_WORKER_STATE["stale_saved_list"] = bool((status or {}).get("stale_saved_list", False))
-            if bool(window.get("window_open")) and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_INTERVAL_SEC)):
+            TOMORROW_PREP_WORKER_STATE["stale_saved_list"] = stale_saved
+            TOMORROW_PREP_WORKER_STATE["rescue_build_available_v2w9b"] = rescue_available
+            should_run_normal = bool(window.get("window_open")) and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_INTERVAL_SEC))
+            should_run_rescue = rescue_available and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_RESCUE_INTERVAL_SEC))
+            if should_run_normal or should_run_rescue:
                 TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = True
-                _tomorrow_prep_worker_save_state(chunk_in_progress=True)
-                result = run_tomorrow_prep_session_chunk(execute=True, max_batches=1, respect_window=True)
+                TOMORROW_PREP_WORKER_STATE["rescue_in_progress_v2w9b"] = bool(should_run_rescue)
+                _tomorrow_prep_worker_save_state(chunk_in_progress=True, rescue_in_progress_v2w9b=bool(should_run_rescue))
+                if should_run_rescue:
+                    result = run_tomorrow_prep_rescue_build(execute=True, max_batches=6, force_reset=stale_saved)
+                else:
+                    result = run_tomorrow_prep_session_chunk(execute=True, max_batches=1, respect_window=True)
                 last_run_ts = time.time()
                 TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = False
-                TOMORROW_PREP_WORKER_STATE["chunks_run"] = int(TOMORROW_PREP_WORKER_STATE.get("chunks_run", 0) or 0) + (1 if result.get("ran") else 0)
+                TOMORROW_PREP_WORKER_STATE["rescue_in_progress_v2w9b"] = False
+                TOMORROW_PREP_WORKER_STATE["chunks_run"] = int(TOMORROW_PREP_WORKER_STATE.get("chunks_run", 0) or 0) + (int(result.get("batches_run", 0) or 0) if result.get("ran") else 0)
                 TOMORROW_PREP_WORKER_STATE["last_chunk_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
                 TOMORROW_PREP_WORKER_STATE["last_result_ok"] = bool(result.get("ok"))
-                TOMORROW_PREP_WORKER_STATE["last_result_reason"] = str(result.get("reason") or "")[:180]
+                TOMORROW_PREP_WORKER_STATE["last_result_reason"] = str(result.get("reason") or ("rescue_build" if should_run_rescue else ""))[:180]
+                TOMORROW_PREP_WORKER_STATE["last_rescue_build_v2w9b"] = bool(should_run_rescue)
             _tomorrow_prep_worker_save_state(last_error="", running=True)
             time.sleep(60)
         except Exception as exc:
@@ -2079,6 +2092,18 @@ def tomorrow_prep_run_chunk_endpoint(execute: bool = True, max_batches: int = 1,
 def tomorrow_prep_build_endpoint(execute: bool = True, max_batches: int = 3, force_reset: bool = False, respect_window: bool = True, format: str = "json"):
     # Manual bounded build: more than one chunk, still capped to prevent FMP pressure.
     return tomorrow_prep_run_chunk_endpoint(execute=execute, max_batches=max_batches, force_reset=force_reset, respect_window=respect_window, format=format)
+
+
+@app.get("/tomorrow-prep/rescue-build")
+def tomorrow_prep_rescue_build_endpoint(execute: bool = True, max_batches: int = 6, force_reset: bool = True, format: str = "json"):
+    """Run a bounded V2W9b rescue build when saved prep is stale outside the after-close window."""
+    try:
+        result = run_tomorrow_prep_rescue_build(execute=bool(execute), max_batches=int(max_batches or 6), force_reset=bool(force_reset))
+        if str(format or "").lower() == "brief":
+            return {"ok": bool(result.get("ok")), "brief": format_tomorrow_prep_session_brief(result), "result": result}
+        return result
+    except Exception as exc:
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
 
 @app.get("/tomorrow-prep/brief")
@@ -4208,7 +4233,7 @@ def diagnostics_scan_cadence():
         next_scan = None
     return {
         "ok": True,
-        "version": "scan_cadence_diagnostics_v2w9_dynamic_lists_2026_06_24",
+        "version": "scan_cadence_diagnostics_v2w9b_rescue_build_2026_06_24",
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
         "price_overlay_window": bool(_price_overlay_window_for_phase(phase)),
