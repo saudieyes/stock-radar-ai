@@ -35,7 +35,7 @@ from .live_quotes import get_live_quotes
 from .sqlite_store import get_json as _get_json, set_json as _set_json
 from .data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
 
-TOMORROW_PREP_SESSION_BUILDER_VERSION = "tomorrow_prep_session_builder_v2w9b_rescue_build_2026_06_24"
+TOMORROW_PREP_SESSION_BUILDER_VERSION = "tomorrow_prep_session_builder_v2w9c_rescue_continue_2026_06_24"
 TOMORROW_PREP_STATE_KEY = "tomorrow_prep:session_scan_state_v2w8"
 TOMORROW_PREP_OUTPUT_KEY = "tomorrow_prep:session_candidates_v2w8"
 TOMORROW_PREP_OUTPUT_PATH = Path(DATA_DIR) / "tomorrow_prep_session_candidates.json"
@@ -74,8 +74,9 @@ TOMORROW_PREP_STOP_MINUTE_ET = _env_int("TOMORROW_PREP_STOP_MINUTE_ET", 2 * 60, 
 TOMORROW_PREP_PREMARKET_START_MINUTE_ET = _env_int("TOMORROW_PREP_PREMARKET_START_MINUTE_ET", 4 * 60, 4 * 60, 7 * 60)
 TOMORROW_PREP_REFERENCE_LIMIT_PAGES = _env_int("TOMORROW_PREP_REFERENCE_LIMIT_PAGES", 12, 4, 20)
 TOMORROW_PREP_REFERENCE_PAGE_LIMIT = _env_int("TOMORROW_PREP_REFERENCE_PAGE_LIMIT", 1000, 100, 1000)
-# V2W9b: if yesterday's prepared list is stale during premarket/regular/after-hours,
-# allow a bounded rescue build from FMP live/current data instead of showing old names.
+# V2W9c: if the prepared list is stale OR current-but-incomplete during
+# premarket/regular/after-hours, allow a bounded rescue continuation from FMP
+# live/current data instead of showing old names or stopping at the first chunk.
 TOMORROW_PREP_RESCUE_ENABLED = _env_bool("TOMORROW_PREP_RESCUE_ENABLED", True)
 TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN = _env_int("TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN", 6, 1, 10)
 TOMORROW_PREP_RESCUE_INTERVAL_SEC = _env_int("TOMORROW_PREP_RESCUE_INTERVAL_SEC", 180, 60, 900)
@@ -182,7 +183,7 @@ def tomorrow_prep_rescue_window_info(now: datetime | None = None) -> dict:
         "trade_date": _session_trade_date_for_now(now),
         "max_batches_per_run": int(TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN),
         "interval_sec": int(TOMORROW_PREP_RESCUE_INTERVAL_SEC),
-        "rule_ar": "V2W9b: إذا كانت قائمة التحضير قديمة أثناء premarket/open/after-hours يتم بناء إنقاذ حي محدود من FMP بدل عرض قائمة أمس.",
+        "rule_ar": "V2W9c: إذا كانت قائمة التحضير قديمة أو غير مكتملة أثناء premarket/open/after-hours يتم بناء/استكمال إنقاذ حي محدود من FMP بدل عرض قائمة أمس أو التوقف عند أول دفعات.",
     }
 
 
@@ -192,8 +193,15 @@ def _saved_is_current_for_trade_date(saved: dict | None, trade_date: str) -> boo
     return bool(str(saved.get("trade_date") or "") == str(trade_date or "") and saved.get("ok") is not False)
 
 
-def run_tomorrow_prep_rescue_build(*, execute: bool = True, max_batches: int | None = None, force_reset: bool = True) -> dict:
-    """Bounded rescue builder for stale lists outside the normal after-close window."""
+def run_tomorrow_prep_rescue_build(*, execute: bool = True, max_batches: int | None = None, force_reset: bool = False) -> dict:
+    """Bounded rescue builder/continuation outside the normal after-close window.
+
+    V2W9c important behavior:
+    - If saved trade_date is stale, reset and rebuild for the current trade_date.
+    - If saved trade_date is current but status is in_progress, continue from the
+      saved cursor. Do NOT reset to zero on repeated manual calls.
+    - If saved trade_date is current and completed, do nothing.
+    """
     rescue = tomorrow_prep_rescue_window_info()
     if not rescue.get("rescue_window_open"):
         return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "ran": False, "reason": "rescue_window_closed", "rescue": rescue}
@@ -207,16 +215,19 @@ def run_tomorrow_prep_rescue_build(*, execute: bool = True, max_batches: int | N
     except Exception:
         batches = int(TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN)
     batches = max(1, min(batches, int(TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN)))
+    reset_needed = bool((force_reset and not saved_current) or not saved_current)
     result = run_tomorrow_prep_session_chunk(
         execute=bool(execute),
         max_batches=batches,
-        force_reset=bool(force_reset or not saved_current),
+        force_reset=reset_needed,
         respect_window=False,
     )
     if isinstance(result, dict):
-        result["rescue_build_v2w9b"] = True
+        result["rescue_build_v2w9c"] = True
+        result["rescue_continue_v2w9c"] = bool(saved_current and not reset_needed)
+        result["rescue_reset_v2w9c"] = bool(reset_needed)
         result["rescue"] = rescue
-        result["rule_ar"] = "V2W9b: تم تشغيل بناء إنقاذ حي لأن القائمة المحفوظة ليست لتاريخ التداول الحالي."
+        result["rule_ar"] = "V2W9c: تشغيل إنقاذ/استكمال حي؛ يعيد البناء فقط إذا كانت القائمة قديمة، ويكمل من المؤشر إذا كانت قائمة اليوم غير مكتملة."
     return result
 
 
@@ -686,7 +697,15 @@ def tomorrow_prep_session_status() -> dict:
     state_is_current_trade_date = bool(state_trade_date and window_trade_date and state_trade_date == window_trade_date)
     stale_reason = "" if saved_is_current_trade_date else f"saved_trade_date {saved_trade_date or '-'} لا يساوي trade_date الحالي {window_trade_date or '-'}"
     rescue = tomorrow_prep_rescue_window_info()
-    rescue_available = bool((not saved_is_current_trade_date) and rescue.get("rescue_window_open"))
+    saved_status_text = str((saved or {}).get("status", "") or "") if isinstance(saved, dict) else ""
+    saved_progress_dict = (saved or {}).get("progress", {}) if isinstance(saved, dict) else {}
+    try:
+        saved_coverage_pct = float((saved_progress_dict or {}).get("coverage_pct", 0) or 0)
+    except Exception:
+        saved_coverage_pct = 0.0
+    saved_completed = bool(saved_is_current_trade_date and saved_status_text.startswith("completed") and saved_coverage_pct >= 99.9)
+    current_incomplete = bool(saved_is_current_trade_date and not saved_completed)
+    rescue_available = bool(rescue.get("rescue_window_open") and (not saved_is_current_trade_date or current_incomplete))
     return {
         "ok": True,
         "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
@@ -708,10 +727,14 @@ def tomorrow_prep_session_status() -> dict:
         "stale_saved_list": not saved_is_current_trade_date,
         "stale_reason_ar": stale_reason,
         "rescue_build_available_v2w9b": rescue_available,
+        "rescue_build_available_v2w9c": rescue_available,
+        "rescue_continue_needed_v2w9c": current_incomplete,
+        "saved_completed_v2w9c": saved_completed,
         "rescue_window_v2w9b": rescue,
+        "rescue_window_v2w9c": rescue,
         "saved_candidate_count": len((saved or {}).get("candidates") or []) if isinstance(saved, dict) else 0,
         "saved_sample": [x.get("symbol") for x in list((saved or {}).get("candidates") or [])[:30] if isinstance(x, dict)] if isinstance(saved, dict) else [],
-        "rule_ar": "V2W9b: لا تعتبر قائمة أمس صالحة؛ وإذا كانت قديمة أثناء premarket/open/after-hours يفتح بناء إنقاذ حي محدود من FMP.",
+        "rule_ar": "V2W9c: لا تعتبر قائمة أمس صالحة؛ وإذا كانت القائمة الحالية غير مكتملة أثناء premarket/open/after-hours يواصل بناء الإنقاذ من نفس المؤشر بدل إعادة أول 6 دفعات.",
     }
 
 
@@ -724,7 +747,7 @@ def format_tomorrow_prep_session_brief(data: dict) -> str:
     counts = (saved or {}).get("counts", {}) or {}
     progress = (saved or {}).get("progress", {}) or {}
     lines = [
-        "V2W9b — Tomorrow Prep / Rescue من FMP",
+        "V2W9c — Tomorrow Prep / Rescue Continue من FMP",
         f"تاريخ الجلسة: {(saved or {}).get('trade_date', '-')}",
         f"الحالة: {(saved or {}).get('status', '-')}",
         f"التقدم: {progress.get('cursor', 0)}/{progress.get('universe_count', 0)} ({progress.get('coverage_pct', 0)}%) | دفعات: {progress.get('batches_done', 0)}/{progress.get('max_batches_per_session', 0)}",
