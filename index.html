@@ -4908,7 +4908,6 @@
         const res = await apiFetch(`/trade-scan?prefer_cache=true&_=${Date.now()}`);
         const data = await res.json();
         if (!data || data.ok === false) return;
-        await hydrateScanDataWithLiveQuotesBeforeRender(data, 260);
         if (radarScreenIsSafeForImmediateApply()) {
           const uiState = preserveScanUiState();
           setScanData(data);
@@ -4945,7 +4944,7 @@
       el.innerHTML = isError ? `
         <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">⚠️ تعذر تحميل التحديث الجديد</div>
         <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
-          بقيت النتائج الحالية كما هي، ولم أعد رسم الصفحة أو أغير مكانك.
+          بقيت النتائج الحالية كما هي، ولم أعد رسم الصفحة أو أغير مكانك.${data?.apply_error_message_v2w9 ? `<br>السبب التقني: <b>${safeText(data.apply_error_message_v2w9)}</b>` : ''}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
           <button class="ghost" type="button" onclick="hideRadarPendingNotice()">إغلاق</button>
@@ -4964,18 +4963,33 @@
     }
 
     async function applyPendingScanData() {
+      if (window.__applyPendingScanBusy) return;
       const data = window.__pendingScanData;
       if (!data) { hideRadarPendingNotice(); return; }
+      window.__applyPendingScanBusy = true;
+      const notice = document.getElementById('radarPendingNotice');
+      const btn = notice ? notice.querySelector('button.primary') : null;
+      const oldText = btn ? btn.textContent : '';
+      if (btn) { btn.textContent = 'جارٍ التطبيق...'; btn.disabled = true; }
       const uiState = preserveScanUiState();
-      await hydrateScanDataWithLiveQuotesBeforeRender(data, 260);
-      setScanData(data);
-      window.__pendingScanData = null;
-      window.__pendingSourceSnapshotAt = '';
-      hideRadarPendingNotice();
-      hideSourceDiscoveryNotice();
-      renderScanData();
-      restoreScanUiState(uiState);
-      requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+      try {
+        // V2W9: apply the new list first. Price hydration runs after render and
+        // must not block the button or keep the old list stuck on screen.
+        setScanData(data);
+        window.__pendingScanData = null;
+        window.__pendingSourceSnapshotAt = '';
+        hideRadarPendingNotice();
+        hideSourceDiscoveryNotice();
+        renderScanData();
+        restoreScanUiState(uiState);
+        requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+        refreshLiveQuotesForScan(true);
+      } catch (e) {
+        if (btn) { btn.textContent = oldText || 'عرض النتائج الجديدة'; btn.disabled = false; }
+        showRadarPendingNotice(window.__scanData || {}, 'error');
+      } finally {
+        window.__applyPendingScanBusy = false;
+      }
     }
 
     function renderScanData() {
@@ -5548,6 +5562,14 @@
     // render saved close prices first, then briefly overwrite the current pre-market price.
     // This hydrates the data object itself before render/apply, and also overlays nested
     // opportunity_radar/groups rows so every visible card keeps the active price.
+    function firstPositiveNumberV2W9(values=[]) {
+      for (const v of (values || [])) {
+        const n = Number(v || 0);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return 0;
+    }
+
     function collectSymbolsFromScanLikeData(data, limit=260) {
       const out = [];
       const add = (sym) => {
@@ -5572,9 +5594,17 @@
 
     function applyLiveQuoteToOneItem(item, q) {
       if (!item || !q || !Number(q.price || 0)) return false;
-      item.current_price_live = Number(q.price || 0);
-      item.display_price = Number(q.price || 0);
-      item.price = Number(q.price || 0);
+      const incomingPrice = Number(q.price || 0);
+      const preOverlayBaseline = firstPositiveNumberV2W9([
+        q.extended_reference_price, q.regular_session_close, q.regular_price, q.previous_close,
+        item.extended_reference_price, item.regular_session_close, item.regular_close, item.regular_price,
+        item.current_price_live, item.display_price, item.current_price, item.price, item.metrics?.close,
+        item.close, item.day_close, item.previous_close_live, item.previous_close
+      ]);
+      item.__regular_close_baseline_v2w9 = preOverlayBaseline;
+      item.current_price_live = incomingPrice;
+      item.display_price = incomingPrice;
+      item.price = incomingPrice;
       const rawQuoteChange = q.change_pct ?? q.changesPercentage ?? q.changePercentage;
       const quoteChange = Number(rawQuoteChange);
       const quoteChangeReliable = Number.isFinite(quoteChange) && q.change_pct_reliable !== false;
@@ -5582,6 +5612,15 @@
         item.display_change_pct = quoteChange;
         item.change_vs_prev_close_pct = quoteChange;
         item.live_change_pct_reliable = true;
+      } else if (incomingPrice > 0 && preOverlayBaseline > 0 && (q.extended_hours || String(q.source || '').startsWith('fmp_extended'))) {
+        const derivedChange = ((incomingPrice - preOverlayBaseline) / preOverlayBaseline) * 100;
+        item.display_change_pct = derivedChange;
+        item.change_vs_prev_close_pct = derivedChange;
+        item.extended_change_pct = derivedChange;
+        item.extended_reference_price = preOverlayBaseline;
+        item.live_change_pct_reliable = true;
+        item.change_pct_derived_v2w9 = true;
+        item.display_change_note_ar = 'تم حساب التغير مقابل آخر إغلاق رسمي لأن FMP أعاد السعر بدون نسبة تغير.';
       } else {
         item.live_change_pct_reliable = false;
       }
@@ -5589,7 +5628,7 @@
       item.price_source_label = q.source_label || item.price_source_label || 'FMP Live/REST';
       if (q.extended_hours || String(q.source || '').startsWith('fmp_extended')) {
         item.extended_hours_price_overlay_v2w6 = true;
-        item.extended_hours_price_overlay_v2w8c_no_rollback = true;
+        item.extended_hours_price_overlay_v2w9_no_rollback = true;
         item.extended_price = Number(q.extended_price || q.price || 0);
         item.extended_change_pct = q.extended_change_pct ?? q.change_pct;
         item.extended_reference_price = q.extended_reference_price ?? q.previous_close;
@@ -5600,7 +5639,7 @@
       }
       item.live_price_available = true;
       item.last_price_update_label = q.updated_label || item.last_price_update_label;
-      item.quote_updated_by_v2w8c_no_rollback = true;
+      item.quote_updated_by_v2w9_no_rollback = true;
       return true;
     }
 
@@ -5625,9 +5664,9 @@
         });
       }
       if (changed) {
-        data.live_price_no_rollback_v2w8c = {
+        data.live_price_no_rollback_v2w9 = {
           enabled: true,
-          version: 'live_price_no_rollback_v2w8c_2026_06_23',
+          version: 'live_price_no_rollback_v2w9_dynamic_prices_2026_06_24',
           rule_ar: 'يتم تحديث بيانات السعر داخل اللقطة نفسها قبل عرضها حتى لا تعود البطاقات إلى سعر الإغلاق بعد اكتمال المسح.'
         };
       }
@@ -5641,15 +5680,15 @@
         const res = await apiFetch(`/live-quotes?symbols=${encodeURIComponent(symbols.join(','))}&prefer_cache=false&_=${Date.now()}`);
         const qData = await res.json();
         applyLiveQuotesToScanLikeData(data, qData.quotes || {});
-        data.live_price_no_rollback_v2w8c = {
-          ...(data.live_price_no_rollback_v2w8c || {}),
+        data.live_price_no_rollback_v2w9 = {
+          ...(data.live_price_no_rollback_v2w9 || {}),
           enabled: true,
-          version: 'live_price_no_rollback_v2w8c_2026_06_23',
+          version: 'live_price_no_rollback_v2w9_dynamic_prices_2026_06_24',
           symbols_requested: symbols.length,
           quotes_available: qData && qData.quotes ? Object.keys(qData.quotes).length : 0,
           market_phase: qData?.market_phase || data?.market_phase || '',
           quote_cache_policy: qData?.quote_cache_policy || '',
-          rule_ar: 'V2W8c: قبل رسم القوائم، يتم جلب سعر حي/قبل الافتتاح للرموز الظاهرة وتثبيته داخل البيانات حتى لا تظهر أسعار إغلاق أمس.'
+          rule_ar: 'V2W9: قبل الرسم أو بعده، تُحدث الأسعار مستقلة عن تطبيق القوائم، وتُحسب نسبة التغير من الإغلاق عند توفر سعر extended بلا change%.'
         };
       } catch(_) {}
       return data;
@@ -5712,7 +5751,8 @@
           document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';
           document.getElementById('openingContent').innerHTML = '<div class="error">تعذر تحميل وضع الافتتاح</div>';
         } else {
-          showRadarPendingNotice(window.__scanData || {}, 'error');
+          const errData = { ...(window.__scanData || {}), apply_error_message_v2w9: String(e && (e.message || e.name) || e || 'unknown') };
+          showRadarPendingNotice(errData, 'error');
         }
       } finally {
         if (btn) { btn.textContent = oldText || '🔄 تحديث النتائج'; btn.classList.remove('refreshing'); btn.disabled = false; }

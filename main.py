@@ -2017,7 +2017,10 @@ def _tomorrow_prep_worker_loop():
             TOMORROW_PREP_WORKER_STATE["saved_candidate_count"] = int((status or {}).get("saved_candidate_count", 0) or 0)
             TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W8: يبني قائمة الغد بعد الإغلاق من FMP على دفعات، ويتوقف قبل البري ماركت بساعتين؛ لا يغير قرارات الشراء."
             now_ts = time.time()
-            completed = str((status or {}).get("saved_status") or "").startswith("completed")
+            saved_current = bool((status or {}).get("saved_is_current_trade_date", False))
+            completed = bool(saved_current and str((status or {}).get("saved_status") or "").startswith("completed"))
+            TOMORROW_PREP_WORKER_STATE["saved_is_current_trade_date"] = saved_current
+            TOMORROW_PREP_WORKER_STATE["stale_saved_list"] = bool((status or {}).get("stale_saved_list", False))
             if bool(window.get("window_open")) and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_INTERVAL_SEC)):
                 TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = True
                 _tomorrow_prep_worker_save_state(chunk_in_progress=True)
@@ -4205,7 +4208,7 @@ def diagnostics_scan_cadence():
         next_scan = None
     return {
         "ok": True,
-        "version": "scan_cadence_diagnostics_v2w8_tomorrow_prep_2026_06_23",
+        "version": "scan_cadence_diagnostics_v2w9_dynamic_lists_2026_06_24",
         "market_phase": phase,
         "market_phase_label": market_phase_label(phase),
         "price_overlay_window": bool(_price_overlay_window_for_phase(phase)),
