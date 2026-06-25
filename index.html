@@ -5666,14 +5666,14 @@
       if (changed) {
         data.live_price_no_rollback_v2w9 = {
           enabled: true,
-          version: 'live_price_no_rollback_v2w9c_dynamic_prices_rescue_continue_2026_06_24',
+          version: 'live_price_no_rollback_v2w9e_fast_initial_render_extended_prices_2026_06_25',
           rule_ar: 'يتم تحديث بيانات السعر داخل اللقطة نفسها قبل عرضها حتى لا تعود البطاقات إلى سعر الإغلاق بعد اكتمال المسح.'
         };
       }
       return changed;
     }
 
-    async function hydrateScanDataWithLiveQuotesBeforeRender(data, limit=260) {
+    async function hydrateScanDataWithLiveQuotesBeforeRender(data, limit=220) {
       const symbols = collectSymbolsFromScanLikeData(data, limit);
       if (!symbols.length) return data;
       try {
@@ -5683,15 +5683,25 @@
         data.live_price_no_rollback_v2w9 = {
           ...(data.live_price_no_rollback_v2w9 || {}),
           enabled: true,
-          version: 'live_price_no_rollback_v2w9c_dynamic_prices_rescue_continue_2026_06_24',
+          version: 'live_price_no_rollback_v2w9e_fast_initial_render_extended_prices_2026_06_25',
           symbols_requested: symbols.length,
           quotes_available: qData && qData.quotes ? Object.keys(qData.quotes).length : 0,
           market_phase: qData?.market_phase || data?.market_phase || '',
           quote_cache_policy: qData?.quote_cache_policy || '',
-          rule_ar: 'V2W9: قبل الرسم أو بعده، تُحدث الأسعار مستقلة عن تطبيق القوائم، وتُحسب نسبة التغير من الإغلاق عند توفر سعر extended بلا change%.'
+          diagnostics: qData?.diagnostics || {},
+          rule_ar: 'V2W9e: تُعرض اللقطة المحفوظة بسرعة أولًا، ثم تُحدث الأسعار الممتدة في الخلفية حتى لا يتأخر فتح الصفحة.'
         };
       } catch(_) {}
       return data;
+    }
+
+    function hydrateVisiblePricesAfterRender(limit=160) {
+      if (window.__fastHydrateBusy || !window.__scanData) return;
+      window.__fastHydrateBusy = true;
+      hydrateScanDataWithLiveQuotesBeforeRender(window.__scanData, limit)
+        .then(() => updateVisibleLivePriceDomFromScanData())
+        .catch(() => {})
+        .finally(() => { window.__fastHydrateBusy = false; });
     }
 
     async function refreshLiveQuotesForScan(silent=false) {
@@ -5730,7 +5740,8 @@
         const qs = force ? 'force=true' : 'prefer_cache=true';
         const res = await apiFetch(`/trade-scan?${qs}&_=${Date.now()}`);
         const data = await res.json();
-        await hydrateScanDataWithLiveQuotesBeforeRender(data, 260);
+        // V2W9e speed fix: do not block opening the page on fresh FMP price hydration.
+        // Render saved scan immediately, then update extended/pre-market prices in the background.
         const oldSignature = scanListSignature(window.__scanData);
         const newSignature = scanListSignature(data);
         const shouldDefer = hadScan && !force && !explicitApply && (visibleRadarIsInUse() || oldSignature !== newSignature);
@@ -5739,13 +5750,14 @@
           showRadarPendingNotice(data, 'scan');
           // لا نعيد رسم القوائم. نكتفي بتحديث السعر الحي على البطاقات الحالية.
           refreshLiveQuotesForScan(true);
+          hydrateScanDataWithLiveQuotesBeforeRender(window.__pendingScanData, 120).catch(() => {});
           return;
         }
         setScanData(data);
         hideRadarPendingNotice();
         renderScanData();
         if (uiState) restoreScanUiState(uiState);
-        refreshLiveQuotesForScan(true);
+        hydrateVisiblePricesAfterRender(160);
       } catch (e) {
         if (!hadScan) {
           document.getElementById('content').innerHTML = '<div class="error">تعذر تحميل الفرص</div>';

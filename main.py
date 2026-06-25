@@ -277,7 +277,9 @@ from app.tomorrow_prep_session_builder import (
     TOMORROW_PREP_WORKER_ENABLED,
     TOMORROW_PREP_INTERVAL_SEC,
     TOMORROW_PREP_RESCUE_INTERVAL_SEC,
+    TOMORROW_PREP_FINAL_SWEEP_INTERVAL_SEC,
     run_tomorrow_prep_rescue_build,
+    run_tomorrow_prep_after_hours_final_sweep,
     tomorrow_prep_session_status,
     run_tomorrow_prep_session_chunk,
     load_tomorrow_prep_session_candidates,
@@ -2017,33 +2019,42 @@ def _tomorrow_prep_worker_loop():
             TOMORROW_PREP_WORKER_STATE["trade_date"] = str(window.get("trade_date") or "")
             TOMORROW_PREP_WORKER_STATE["saved_status"] = str((status or {}).get("saved_status") or "")
             TOMORROW_PREP_WORKER_STATE["saved_candidate_count"] = int((status or {}).get("saved_candidate_count", 0) or 0)
-            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W9c: يبني بعد الإغلاق، وإذا كانت القائمة قديمة أو قائمة اليوم غير مكتملة أثناء premarket/open/after-hours يشغّل/يواصل بناء إنقاذ حي محدود من FMP."
+            TOMORROW_PREP_WORKER_STATE["rule_ar"] = "V2W9e: يبني بعد الإغلاق من FMP، ويكمل فحصًا نهائيًا بعد انتهاء after-hours من FMP فقط، مع إنقاذ محدود عند الحاجة."
             now_ts = time.time()
             saved_current = bool((status or {}).get("saved_is_current_trade_date", False))
             completed = bool(saved_current and str((status or {}).get("saved_status") or "").startswith("completed"))
             stale_saved = bool((status or {}).get("stale_saved_list", False))
             rescue_available = bool((status or {}).get("rescue_build_available_v2w9c", (status or {}).get("rescue_build_available_v2w9b", False)))
+            final_sweep_needed = bool((status or {}).get("after_hours_final_sweep_needed_v2w9e", False))
+            TOMORROW_PREP_WORKER_STATE["after_hours_final_sweep_needed_v2w9e"] = final_sweep_needed
+            TOMORROW_PREP_WORKER_STATE["after_hours_final_sweep_status_v2w9e"] = str((status or {}).get("after_hours_final_sweep_status_v2w9e") or "")
             TOMORROW_PREP_WORKER_STATE["saved_is_current_trade_date"] = saved_current
             TOMORROW_PREP_WORKER_STATE["stale_saved_list"] = stale_saved
             TOMORROW_PREP_WORKER_STATE["rescue_build_available_v2w9b"] = rescue_available
             should_run_normal = bool(window.get("window_open")) and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_INTERVAL_SEC))
             should_run_rescue = rescue_available and not completed and (now_ts - last_run_ts >= int(TOMORROW_PREP_RESCUE_INTERVAL_SEC))
-            if should_run_normal or should_run_rescue:
+            should_run_final_sweep = final_sweep_needed and (now_ts - last_run_ts >= int(TOMORROW_PREP_FINAL_SWEEP_INTERVAL_SEC))
+            if should_run_normal or should_run_rescue or should_run_final_sweep:
                 TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = True
                 TOMORROW_PREP_WORKER_STATE["rescue_in_progress_v2w9b"] = bool(should_run_rescue)
-                _tomorrow_prep_worker_save_state(chunk_in_progress=True, rescue_in_progress_v2w9b=bool(should_run_rescue))
-                if should_run_rescue:
+                TOMORROW_PREP_WORKER_STATE["after_hours_final_sweep_in_progress_v2w9e"] = bool(should_run_final_sweep)
+                _tomorrow_prep_worker_save_state(chunk_in_progress=True, rescue_in_progress_v2w9b=bool(should_run_rescue), after_hours_final_sweep_in_progress_v2w9e=bool(should_run_final_sweep))
+                if should_run_final_sweep:
+                    result = run_tomorrow_prep_after_hours_final_sweep(execute=True, max_batches=6, force_reset=False)
+                elif should_run_rescue:
                     result = run_tomorrow_prep_rescue_build(execute=True, max_batches=6, force_reset=stale_saved)
                 else:
                     result = run_tomorrow_prep_session_chunk(execute=True, max_batches=1, respect_window=True)
                 last_run_ts = time.time()
                 TOMORROW_PREP_WORKER_STATE["chunk_in_progress"] = False
                 TOMORROW_PREP_WORKER_STATE["rescue_in_progress_v2w9b"] = False
+                TOMORROW_PREP_WORKER_STATE["after_hours_final_sweep_in_progress_v2w9e"] = False
                 TOMORROW_PREP_WORKER_STATE["chunks_run"] = int(TOMORROW_PREP_WORKER_STATE.get("chunks_run", 0) or 0) + (int(result.get("batches_run", 0) or 0) if result.get("ran") else 0)
                 TOMORROW_PREP_WORKER_STATE["last_chunk_at"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
                 TOMORROW_PREP_WORKER_STATE["last_result_ok"] = bool(result.get("ok"))
-                TOMORROW_PREP_WORKER_STATE["last_result_reason"] = str(result.get("reason") or ("rescue_build" if should_run_rescue else ""))[:180]
+                TOMORROW_PREP_WORKER_STATE["last_result_reason"] = str(result.get("reason") or ("after_hours_final_sweep" if should_run_final_sweep else ("rescue_build" if should_run_rescue else "")))[:180]
                 TOMORROW_PREP_WORKER_STATE["last_rescue_build_v2w9b"] = bool(should_run_rescue)
+                TOMORROW_PREP_WORKER_STATE["last_after_hours_final_sweep_v2w9e"] = bool(should_run_final_sweep)
             _tomorrow_prep_worker_save_state(last_error="", running=True)
             time.sleep(60)
         except Exception as exc:
@@ -2104,6 +2115,22 @@ def tomorrow_prep_rescue_build_endpoint(execute: bool = True, max_batches: int =
     """
     try:
         result = run_tomorrow_prep_rescue_build(execute=bool(execute), max_batches=int(max_batches or 6), force_reset=bool(force_reset))
+        if str(format or "").lower() == "brief":
+            return {"ok": bool(result.get("ok")), "brief": format_tomorrow_prep_session_brief(result), "result": result}
+        return result
+    except Exception as exc:
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+
+
+@app.get("/tomorrow-prep/after-hours-final-sweep")
+def tomorrow_prep_after_hours_final_sweep_endpoint(execute: bool = True, max_batches: int = 6, force_reset: bool = False, format: str = "json"):
+    """Run/continue the V2W9e FMP-only final after-hours sweep.
+
+    This is optional/manual; the background worker also runs it automatically
+    after the final after-hours window opens.
+    """
+    try:
+        result = run_tomorrow_prep_after_hours_final_sweep(execute=bool(execute), max_batches=int(max_batches or 6), force_reset=bool(force_reset))
         if str(format or "").lower() == "brief":
             return {"ok": bool(result.get("ok")), "brief": format_tomorrow_prep_session_brief(result), "result": result}
         return result
