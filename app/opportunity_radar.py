@@ -4579,6 +4579,89 @@ def _fill_closed_market_prep_sections(final_map: dict[str, list[dict]], rows: li
     return debug
 
 
+
+def _inject_tomorrow_prep_section_bridge_v2w9g(final_map: dict[str, list[dict]], rows: list[dict], *, limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
+    """Keep Tomorrow Prep bridge section-specific after the normal global section dedupe.
+
+    V2W9f injected V2W9e rows into the common rows stream, then the radar did
+    global symbol dedupe. Because most pre-trigger names were also low-float,
+    Pre-Trigger was starved. This injector re-adds V2W9e bridge rows to their
+    intended visible section and dedupes only inside that section.
+    """
+    debug = {
+        "version": "tomorrow_prep_section_specific_bridge_v2w9g_2026_06_25",
+        "enabled": True,
+        "candidate_counts_by_section": {},
+        "added_by_section": {},
+        "displayed_bridge_by_section": {},
+        "overlap_symbols_count": 0,
+        "overlap_symbols_sample": [],
+        "rule_ar": "V2W9g: يعيد إدخال مرشحي V2W9e داخل القسم المقصود نفسه، ولا يحذف Pre-Trigger لمجرد أن الرمز موجود أيضًا في Low-Float.",
+    }
+    target_sections = {
+        "pre_trigger": "pre_trigger_candidates",
+        "low_float_premarket": "low_float_premarket_radar",
+    }
+    candidates: dict[str, list[dict]] = {v: [] for v in target_sections.values()}
+    low_syms: set[str] = set()
+    pre_syms: set[str] = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if not (row.get("tomorrow_prep_bridge_v2w9g") or row.get("tomorrow_prep_bridge_v2w9f") or row.get("source_origin") == "tomorrow_prep_final_sweep_v2w9e"):
+            continue
+        bucket = _s(row.get("tomorrow_prep_target_bucket_v2w9g") or row.get("opportunity_bucket"))
+        section = _s(row.get("tomorrow_prep_target_section_v2w9g") or target_sections.get(bucket, ""))
+        if section not in candidates:
+            continue
+        item = dict(row)
+        item["tomorrow_prep_section_bridge_v2w9g"] = True
+        item["source_layer"] = item.get("source_layer") or "tomorrow_prep_section_specific_bridge_v2w9g"
+        item["opportunity_bucket"] = bucket
+        if bucket == "pre_trigger":
+            item["opportunity_stage"] = "pre_trigger"
+            pre_syms.add(_u(item.get("symbol")))
+        elif bucket == "low_float_premarket":
+            item["opportunity_stage"] = "low_float_premarket"
+            low_syms.add(_u(item.get("symbol")))
+        candidates[section].append(item)
+
+    overlap = sorted([s for s in (low_syms & pre_syms) if s])
+    debug["overlap_symbols_count"] = len(overlap)
+    debug["overlap_symbols_sample"] = overlap[:20]
+
+    lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
+    for section, vals in candidates.items():
+        vals = _sort_bucket(vals)
+        debug["candidate_counts_by_section"][section] = len(vals)
+        if not vals:
+            debug["added_by_section"][section] = 0
+            debug["displayed_bridge_by_section"][section] = 0
+            continue
+        existing = list(final_map.get(section, []) or [])
+        merged = []
+        seen_section: set[str] = set()
+        added = 0
+        # Bridge rows first: if today's final prep exists, it should not be buried by
+        # yesterday's snapshot/polygon rows inside these two prep lists.
+        for item in vals + existing:
+            if not isinstance(item, dict):
+                continue
+            sym = _u(item.get("symbol"))
+            if not sym or sym in seen_section:
+                continue
+            seen_section.add(sym)
+            merged.append(item)
+            if item.get("tomorrow_prep_section_bridge_v2w9g"):
+                added += 1
+            if len(merged) >= lim:
+                break
+        final_map[section] = merged
+        debug["added_by_section"][section] = added
+        debug["displayed_bridge_by_section"][section] = len([x for x in merged if isinstance(x, dict) and x.get("tomorrow_prep_section_bridge_v2w9g")])
+    debug["total_added_visible"] = sum(debug["added_by_section"].values())
+    return debug
+
 def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict:
     bucket_map = {key: [] for key in OPPORTUNITY_BUCKET_KEYS}
     raw_counts: dict[str, int] = {}
@@ -4689,6 +4772,10 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
             if len(items) >= max(1, int(limit or 25)):
                 break
         final_map[key] = items
+
+    # V2W9g: restore section-specific Tomorrow Prep bridge rows after the normal
+    # global dedupe, so Pre-Trigger is not starved by overlapping Low-Float symbols.
+    tomorrow_prep_section_bridge_debug_v2w9g = _inject_tomorrow_prep_section_bridge_v2w9g(final_map, rows or [], limit=limit)
 
     # V2V bridge: surface sticky live-tight candidates directly.  This keeps
     # intraday +3%/+5% candidates visible even if broad ranking/caching would
@@ -4879,6 +4966,8 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "v2v1_tight_monitoring_recommended_symbols": v2v1_priority_router_debug.get("tight_monitoring_recommended_symbols", []),
         "visible_stock_guard_v2w9": visible_guard_debug,
         "visible_stock_guard_rule_ar": visible_guard_debug.get("rule_ar"),
+        "tomorrow_prep_section_bridge_debug_v2w9g": tomorrow_prep_section_bridge_debug_v2w9g,
+        "tomorrow_prep_section_bridge_rule_ar_v2w9g": tomorrow_prep_section_bridge_debug_v2w9g.get("rule_ar"),
         "low_float_fast_lane_raw_watch_count": len(fast_lane_raw_watch_rows),
         "low_float_fast_lane_raw_watch": fast_lane_raw_watch_rows,
         "prepared_watch_ui_bridge_debug": prepared_watch_ui_bridge_debug,
