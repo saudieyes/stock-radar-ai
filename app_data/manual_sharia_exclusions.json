@@ -871,6 +871,14 @@
     "symbol": "CLF",
     "updated_at": "2026-04-27 05:50:23"
   },
+  "CLNE": {
+    "excluded_at": "2026-06-25 13:22:56",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CLNE",
+    "updated_at": "2026-06-25 13:22:56"
+  },
   "CLSK": {
     "excluded_at": "2026-05-04 12:11:11",
     "note": "استبعاد يدوي شرعي",
@@ -1726,6 +1734,14 @@
     "source": "manual",
     "symbol": "HELP",
     "updated_at": "2026-06-25 04:24:25"
+  },
+  "HGTY": {
+    "excluded_at": "2026-06-25 13:24:33",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "HGTY",
+    "updated_at": "2026-06-25 13:24:33"
   },
   "HIMX": {
     "excluded_at": "2026-04-27 05:46:46",
