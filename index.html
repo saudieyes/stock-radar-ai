@@ -4934,7 +4934,8 @@
     function showRadarPendingNotice(data, reason='scan') {
       const el = ensureRadarPendingNotice();
       const isError = reason === 'error';
-      const updated = data?.analysis_updated_at || data?.updated_at || data?.full_market_scan_status?.last_scan_at || 'الآن';
+      const isRadarLive = reason === 'radar-live';
+      const updated = data?.analysis_updated_at || data?.updated_at || data?.full_market_scan_status?.last_scan_at || window.__pendingRadarLiveSectionsAt || 'الآن';
       const strong = Number(data?.strong_entries_count ?? (data?.strong_entries || []).length ?? 0);
       const cautious = Number(data?.cautious_entries_count ?? (data?.cautious_entries || []).length ?? 0);
       const early = Number(data?.early_movement_count ?? (data?.early_movement_watchlist || []).length ?? 0);
@@ -4949,9 +4950,9 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
           <button class="ghost" type="button" onclick="hideRadarPendingNotice()">إغلاق</button>
         </div>` : `
-        <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">✅ اكتمل تحديث جديد بدون تحريك الصفحة</div>
+        <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">${isRadarLive ? '✅ وصلت قوائم حية أحدث بدون تحريك الصفحة' : '✅ اكتمل تحديث جديد بدون تحريك الصفحة'}</div>
         <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
-          وصلت نتائج جديدة، لكن لم أعد رسم القوائم حتى لا يتغير مكانك أثناء القراءة.<br>
+          ${isRadarLive ? 'تغيرت عضوية بعض قوائم الرادار الحي، لكن لم أعد رسم الصفحة حتى لا تقفز أثناء القراءة.' : 'وصلت نتائج جديدة، لكن لم أعد رسم القوائم حتى لا يتغير مكانك أثناء القراءة.'}<br>
           آخر تحديث: <b>${safeText(updated)}</b> • دخول قوي: ${formatNumber(strong)} • دخول بحذر: ${formatNumber(cautious)} • Pre-Trigger: ${formatNumber(preTrigger)} • Bounce/Reclaim: ${formatNumber(bounceReclaim)} • Low-Float: ${formatNumber(lowFloat)} • مراقبة مبكرة: ${formatNumber(early)}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
@@ -5180,18 +5181,29 @@
       return changed;
     }
 
-    function applyRadarLivePayload(payload) {
-      // V2W9g: radar-live-refresh may carry a fresher Tomorrow Prep bridge for
-      // Pre-Trigger/Low-Float. Update visible sections when their membership changes,
-      // then update prices. This fixes the old behavior where only prices changed and
-      // the two lists looked stuck on yesterday's snapshot.
+    function applyRadarLivePayload(payload, options={}) {
+      // V2W9h: keep the V2W9g live-list bridge, but do not auto re-render the whole
+      // radar while the user is reading. Full re-render is the main cause of the page
+      // jumping after market / after completion notices. Silent refresh now updates
+      // prices in-place and stores fresher list membership behind a fixed notice.
+      const silent = options?.silent !== false;
       const uiState = preserveScanUiState();
       const sectionsChanged = mergeRadarLiveSectionsIntoScanData(payload);
       const pricesChanged = mergeRadarLivePricesIntoScanData(payload);
       if (sectionsChanged) {
-        renderScanData();
-        if (uiState) restoreScanUiState(uiState);
-        requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+        if (silent && visibleRadarIsInUse()) {
+          // Keep the current DOM stable. The data is ready, but the user decides when
+          // to redraw the lists via the fixed bottom notice.
+          window.__pendingScanData = { ...(window.__scanData || {}) };
+          window.__pendingRadarLiveSectionsAt = payload?.live_updated_at || payload?.updated_at || new Date().toISOString();
+          showRadarPendingNotice(window.__pendingScanData, 'radar-live');
+          requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+        } else {
+          hideRadarPendingNotice();
+          renderScanData();
+          if (uiState) restoreScanUiState(uiState);
+          requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+        }
       }
       return sectionsChanged || pricesChanged;
     }
@@ -5363,10 +5375,11 @@
       try {
         const res = await apiFetch(`/radar-live-refresh?limit=220&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
-        const changed = data.ok && applyRadarLivePayload(data);
+        const changed = data.ok && applyRadarLivePayload(data, { silent });
 
         if (changed) {
-          // التحديث الحي يلمس السعر/النسبة/مصدر السعر فقط، ولا يعيد بناء القوائم.
+          // V2W9h: في التحديث الصامت نحدّث السعر/النسبة داخل البطاقات فقط.
+          // إذا تغيرت عضوية القوائم أثناء القراءة تُحفظ كتحديث جاهز خلف زر، ولا نعيد رسم الصفحة تلقائيًا.
           updateVisibleLivePriceDomFromScanData();
 
           const updated = document.getElementById('heroUpdated');
