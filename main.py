@@ -1109,6 +1109,240 @@ def _extract_live_symbol_list(rows: list[dict], limit: int = 220) -> list[str]:
     return out
 
 
+TOMORROW_PREP_FINAL_BRIDGE_VERSION = "tomorrow_prep_final_bridge_to_live_lists_v2w9f_2026_06_25"
+
+
+def _tomorrow_prep_bridge_price_fields(item: dict) -> dict:
+    """Normalize FMP Tomorrow Prep candidate prices for display and live overlay.
+
+    The bridge keeps the official close and extended/final-sweep price separate so
+    the UI can show both instead of presenting a regular close as a live price.
+    """
+    item = item or {}
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    price = safe_round(item.get("price", metrics.get("price", item.get("display_price", 0))), 4)
+    regular_close = safe_round(metrics.get("close", item.get("regular_close_price", item.get("previous_close", price))), 4)
+    change_pct = safe_round(item.get("change_pct", metrics.get("change_pct", metrics.get("day_change_pct", 0))), 2)
+    extended_seen = bool(item.get("extended_price_seen") or item.get("after_hours_confirmed_v2w9e") or metrics.get("after_hours_pressure_v2u3"))
+    extended_price = price if extended_seen else 0
+    extended_change_pct = None
+    if extended_price and regular_close:
+        try:
+            extended_change_pct = safe_round(((float(extended_price) - float(regular_close)) / float(regular_close)) * 100.0, 2)
+        except Exception:
+            extended_change_pct = None
+    return {
+        "display_price": price,
+        "current_price": price,
+        "price": price,
+        "display_change_pct": change_pct,
+        "change_pct": change_pct,
+        "day_change_pct": change_pct,
+        "regular_close_price": regular_close,
+        "regular_session_close": regular_close,
+        "previous_close": regular_close,
+        "extended_price": extended_price or None,
+        "extended_change_pct": extended_change_pct,
+        "extended_price_seen": bool(extended_seen),
+        "price_source": str(item.get("quote_source") or item.get("source") or "tomorrow_prep_fmp_final"),
+        "price_source_label": "FMP final after-hours" if extended_seen else "FMP regular close / no extended price",
+        "extended_display_note_ar": "يعرض السعرين: الإغلاق الرسمي وسعر after-hours إذا توفر من FMP.",
+    }
+
+
+def _make_tomorrow_prep_bridge_row(item: dict, section: str, saved: dict, rank_index: int = 0) -> dict:
+    item = dict(item or {})
+    sym = normalize_symbol_text(item.get("symbol", ""))
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    price_fields = _tomorrow_prep_bridge_price_fields(item)
+    price = safe_round(price_fields.get("display_price", 0), 4)
+    regular_close = safe_round(price_fields.get("regular_close_price", price), 4)
+    score = safe_round(item.get("score", metrics.get("big_explosion_prepared_score", 0)), 2)
+    tags = list(item.get("tags") or [])
+    reasons = list(item.get("reasons_ar") or item.get("reasons") or metrics.get("big_explosion_prepared_reasons_ar") or [])
+    source_session = str((saved or {}).get("source_session_date") or (saved or {}).get("trade_date") or item.get("trade_date") or "")
+    target_session = str((saved or {}).get("intended_for_trading_date") or "")
+    time_meta = (saved or {}).get("time_meta_v2w9e", {}) if isinstance((saved or {}).get("time_meta_v2w9e"), dict) else {}
+    final_completed_ksa = str(time_meta.get("after_hours_final_sweep_completed_at_ksa") or "")
+    final_status = str((saved or {}).get("after_hours_final_sweep_status_v2w9e") or "")
+
+    is_low_float = section == "low_float_premarket_radar"
+    label = "🚀 Low-Float / Pre-Market Radar" if is_low_float else "قريب من التفعيل / Pre-Trigger"
+    bucket = "low_float_premarket" if is_low_float else "pre_trigger"
+    floor = 1700.0 if is_low_float else 1600.0
+    trigger = safe_round(max(price, regular_close) * (1.012 if is_low_float else 1.008), 4) if max(price, regular_close) > 0 else None
+    stop = safe_round(min(price, regular_close) * (0.955 if is_low_float else 0.972), 4) if min(price, regular_close) > 0 else None
+    target = safe_round((trigger or price) * (1.07 if is_low_float else 1.045), 4) if (trigger or price) else None
+
+    base_reasons = [
+        "V2W9f: أُدخل من قائمة الغد النهائية بعد after-hours بدل الاعتماد على snapshot قديم.",
+        f"مبني من جلسة {source_session} ومخصص لتداول {target_session}." if source_session or target_session else "مبني من قائمة الغد النهائية.",
+    ]
+    if final_completed_ksa:
+        base_reasons.append(f"انتهى فحص after-hours النهائي: {final_completed_ksa}")
+    if is_low_float:
+        base_reasons.append("تصنيف Low-Float proxy من فحص FMP النهائي — مراقبة فقط حتى يؤكد premarket/الافتتاح.")
+    else:
+        base_reasons.append("قريب من التفعيل من فحص FMP النهائي — لا يدخل إلا عند وصول السعر للTrigger مع سيولة.")
+    merged_reasons = []
+    for r in base_reasons + reasons:
+        r = str(r or "").strip()
+        if r and r not in merged_reasons:
+            merged_reasons.append(r)
+
+    out = {
+        "symbol": sym,
+        **price_fields,
+        "volume": safe_round(item.get("volume", metrics.get("volume", 0)), 0),
+        "current_dollar_volume": safe_round(item.get("dollar_volume", metrics.get("dollar_volume", 0)), 0),
+        "dollar_volume": safe_round(item.get("dollar_volume", metrics.get("dollar_volume", 0)), 0),
+        "source_origin": "tomorrow_prep_final_sweep_v2w9e",
+        "source_layer": "tomorrow_prep_final_bridge_v2w9f",
+        "source_session_date": source_session,
+        "target_trading_date": target_session,
+        "tomorrow_prep_bridge_v2w9f": True,
+        "tomorrow_prep_bridge_version": TOMORROW_PREP_FINAL_BRIDGE_VERSION,
+        "tomorrow_prep_final_sweep_status": final_status,
+        "tomorrow_prep_final_sweep_completed_at_ksa": final_completed_ksa,
+        "candidate_from_previous_trading_session": True,
+        "detected_previous_session": True,
+        "after_hours_final_sweep_v2w9e": bool(item.get("after_hours_final_sweep_v2w9e")),
+        "after_hours_confirmed_v2w9e": bool(item.get("after_hours_confirmed_v2w9e")),
+        "low_float_fast_lane": bool(is_low_float),
+        "opportunity_bucket": bucket,
+        "opportunity_stage": f"tomorrow_prep_final_bridge_{bucket}",
+        "opportunity_stage_label": label,
+        "display_plan_family_label": label,
+        "trade_type_label_ar": "قائمة الغد النهائية → القوائم الحية",
+        "decision": "مراقبة فقط — ليست شراء مباشر",
+        "effective_decision": "مراقبة",
+        "non_actionable_prep": True,
+        "actionability": "watch_only",
+        "sharia_status": str(item.get("sharia_status") or "needs_review"),
+        "sharia_note": str(item.get("sharia_note") or "يحتاج مراجعة شرعية قبل أي شراء"),
+        "urgent_sharia_review_v2u": str(item.get("sharia_status") or "") != "approved",
+        "tags": list(dict.fromkeys(tags + (["low_float_proxy"] if is_low_float else ["pre_trigger_candidate"]) + ["tomorrow_prep_final_bridge_v2w9f"]))[:18],
+        "opportunity_reasons": merged_reasons[:12],
+        "technical_explainer_reasons": merged_reasons[:12],
+        "why_appeared_ar": "، ".join(merged_reasons[:4]),
+        "special_bucket_reason": "، ".join(merged_reasons[:4]),
+        "display_entry_price": trigger,
+        "smart_entry_price": trigger,
+        "confirmation_price": trigger,
+        "display_stop_price": stop,
+        "smart_stop_loss": stop,
+        "display_target_price": target,
+        "smart_target_1": target,
+        "owner_action": f"راقب {sym}: التفعيل فوق {trigger}، إلغاء المراقبة تحت {stop}، هدف مراقبة أول {target}. ليست شراء مباشر قبل تأكيد السعر والسيولة." if trigger and stop and target else "مراقبة فقط من قائمة الغد النهائية؛ ليست شراء مباشر.",
+        "monitoring_plan_v2w9f": {
+            "entry_trigger": trigger,
+            "invalid_below": stop,
+            "target_1": target,
+            "source": "tomorrow_prep_final_sweep_v2w9e",
+            "rule_ar": "خطة مراقبة فقط حتى يتأكد السعر والسيولة في premarket/الافتتاح.",
+        },
+        "opportunity_rank_score": safe_round(floor + score - (rank_index * 0.05), 2),
+        "display_rank_score": safe_round(floor + score - (rank_index * 0.05), 2),
+        "rebuilt_at": final_completed_ksa or str((saved or {}).get("updated_at_utc") or ""),
+        "list_freshness_v2w9f": "tomorrow_prep_final_after_hours" if str(final_status).startswith("completed") else "tomorrow_prep_initial_after_close",
+    }
+    if is_low_float:
+        out["low_float_label_ar"] = "FMP Tomorrow Prep Low-Float proxy"
+        out["low_float_capture_v2m"] = {
+            "label_ar": "FMP Tomorrow Prep Low-Float proxy",
+            "proxy_candidate": True,
+            "strong_proxy": True,
+            "reasons": merged_reasons[:6],
+        }
+    return out
+
+
+def _tomorrow_prep_final_bridge_rows(max_per_section: int = 120) -> tuple[list[dict], dict]:
+    debug = {
+        "version": TOMORROW_PREP_FINAL_BRIDGE_VERSION,
+        "enabled": True,
+        "used": False,
+        "reason": "",
+        "source_session_date": "",
+        "target_trading_date": "",
+        "list_stage": "",
+        "final_sweep_status": "",
+        "rows_added": 0,
+        "low_float_rows": 0,
+        "pre_trigger_rows": 0,
+        "rule_ar": "يربط قائمة V2W9e النهائية بعد after-hours بقائمتي Pre-Trigger و Low-Float حتى لا تبقيا من snapshot قديم.",
+    }
+    try:
+        saved = load_tomorrow_prep_session_candidates()
+    except Exception as exc:
+        debug["reason"] = f"load_error: {type(exc).__name__}: {str(exc)[:120]}"
+        return [], debug
+    if not isinstance(saved, dict) or not saved.get("ok"):
+        debug["reason"] = "no_valid_tomorrow_prep_saved_payload"
+        return [], debug
+    debug["source_session_date"] = str(saved.get("source_session_date") or saved.get("trade_date") or "")
+    debug["target_trading_date"] = str(saved.get("intended_for_trading_date") or "")
+    debug["list_stage"] = str(saved.get("list_stage_v2w9e") or "")
+    debug["final_sweep_status"] = str(saved.get("after_hours_final_sweep_status_v2w9e") or "")
+    try:
+        st = tomorrow_prep_session_status()
+        if isinstance(st, dict) and st.get("saved_is_current_trade_date") is False:
+            debug["reason"] = "saved_tomorrow_prep_not_current_trade_date"
+            debug["status_trade_date"] = ((st or {}).get("window") or {}).get("trade_date")
+            return [], debug
+    except Exception as exc:
+        debug["status_check_error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+    if str(saved.get("status") or "").startswith("completed") is False:
+        debug["reason"] = "tomorrow_prep_not_completed"
+        return [], debug
+    sections = saved.get("sections") if isinstance(saved.get("sections"), dict) else {}
+    low_items = [x for x in list(sections.get("low_float_proxy") or []) if isinstance(x, dict) and x.get("sharia_status") != "blocked"][:max(1, int(max_per_section or 120))]
+    pre_items = [x for x in list(sections.get("pre_trigger") or []) if isinstance(x, dict) and x.get("sharia_status") != "blocked"][:max(1, int(max_per_section or 120))]
+    rows: list[dict] = []
+    for idx, item in enumerate(low_items):
+        row = _make_tomorrow_prep_bridge_row(item, "low_float_premarket_radar", saved, idx)
+        if row.get("symbol"):
+            rows.append(row)
+    for idx, item in enumerate(pre_items):
+        row = _make_tomorrow_prep_bridge_row(item, "pre_trigger_candidates", saved, idx)
+        if row.get("symbol"):
+            rows.append(row)
+    # Deduplicate while preserving priority: Low-Float bridge first, then Pre-Trigger.
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        sym = normalize_symbol_text(row.get("symbol", ""))
+        if sym and sym not in seen:
+            seen.add(sym)
+            deduped.append(row)
+    debug["used"] = bool(deduped)
+    debug["rows_added"] = len(deduped)
+    debug["low_float_rows"] = len(low_items)
+    debug["pre_trigger_rows"] = len(pre_items)
+    debug["reason"] = "ok" if deduped else "no_bridge_candidates"
+    return deduped, debug
+
+
+def _merge_tomorrow_prep_final_bridge_rows(rows: list[dict], max_per_section: int = 120) -> tuple[list[dict], dict]:
+    bridge_rows, debug = _tomorrow_prep_final_bridge_rows(max_per_section=max_per_section)
+    if not bridge_rows:
+        return list(rows or []), debug
+    merged: list[dict] = []
+    seen: set[str] = set()
+    # Put final prep rows first so live quote refresh prioritizes the new tomorrow list.
+    for row in list(bridge_rows) + list(rows or []):
+        if not isinstance(row, dict):
+            continue
+        sym = normalize_symbol_text(row.get("symbol", ""))
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        merged.append(row)
+    debug["base_rows_in"] = len(rows or [])
+    debug["merged_rows_out"] = len(merged)
+    return merged, debug
+
+
 def _first_positive_number(row: dict, keys: list[str]) -> float:
     for key in keys:
         try:
@@ -1566,7 +1800,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
             "news_mode": "scored" if NEWS_SCORE_ENABLED else "context_only",
         }
 
-    symbols = _extract_live_symbol_list(rows, limit=220)
+    rows, tomorrow_prep_bridge_debug = _merge_tomorrow_prep_final_bridge_rows(rows, max_per_section=120)
+    symbols = _extract_live_symbol_list(rows, limit=260)
     quote_bundle = get_live_quotes(symbols, prefer_cache=bool(prefer_cache), allow_fallback=allow_fallback)
     quotes = quote_bundle.get("quotes", {}) if isinstance(quote_bundle, dict) else {}
     overlaid = []
@@ -1753,6 +1988,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "opportunity_radar": opportunity_radar_payload,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "tomorrow_prep_final_bridge_v2w9f": tomorrow_prep_bridge_debug if 'tomorrow_prep_bridge_debug' in locals() else {},
         "promotion_bridge_debug": opportunity_radar_payload.get("promotion_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
@@ -3310,6 +3546,8 @@ def _post_early_movement_decision_safety(results):
 
 
 def _build_trade_scan_response(results, scan_debug, include_all: bool = False, cache_hit: bool = False, cache_age_sec=None, payload_note: str = ""):
+    phase = get_market_phase()
+    results, tomorrow_prep_bridge_debug = _merge_tomorrow_prep_final_bridge_rows(list(results or []), max_per_section=120)
     results = _apply_manual_sharia_overrides(list(results or []))
     try:
         results = enrich_opportunity_intelligence_bulk(results)
@@ -3359,7 +3597,6 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         results = enrich_rows_with_active_plan_status(results)
     except Exception:
         pass
-    phase = get_market_phase()
     try:
         results = enrich_rows_with_opportunity_plan_memory(results)
     except Exception:
@@ -3374,6 +3611,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     except Exception as exc:
         opportunity_radar_payload = {"ok": False, "version": OPPORTUNITY_RADAR_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
     scan_debug = dict(scan_debug or {})
+    scan_debug["tomorrow_prep_final_bridge_v2w9f"] = tomorrow_prep_bridge_debug if 'tomorrow_prep_bridge_debug' in locals() else {}
     strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
     gray_strong, premarket_setups, watch = _build_special_buckets(results, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
@@ -3440,6 +3678,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "opportunity_radar": opportunity_radar_payload,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "tomorrow_prep_final_bridge_v2w9f": tomorrow_prep_bridge_debug if 'tomorrow_prep_bridge_debug' in locals() else {},
         "promotion_bridge_debug": opportunity_radar_payload.get("promotion_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
         "promotion_bridge_candidates_count": len(promotion_bridge_candidates),
@@ -4287,6 +4526,40 @@ def diagnostics_scan_cadence():
             "بعض القوائم قد لا تتغير إذا بقيت نفس الأسماء أعلى ترتيبًا أو إذا كان سقف العرض ممتلئًا.",
             "أي ترقية إلى دخول بحذر/قوي تمر عبر Decision Contract وFinal Decision فقط.",
         ],
+    }
+
+
+
+@app.get("/diagnostics/list-freshness")
+def diagnostics_list_freshness():
+    """Show whether key visible prep lists are fed by the current V2W9e final sweep."""
+    phase = get_market_phase()
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    bridge_rows, bridge_debug = _tomorrow_prep_final_bridge_rows(max_per_section=120)
+    syms_low = [r.get("symbol") for r in bridge_rows if isinstance(r, dict) and r.get("opportunity_bucket") == "low_float_premarket"]
+    syms_pre = [r.get("symbol") for r in bridge_rows if isinstance(r, dict) and r.get("opportunity_bucket") == "pre_trigger"]
+    return {
+        "ok": True,
+        "version": TOMORROW_PREP_FINAL_BRIDGE_VERSION,
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "latest_snapshot_at": str((snapshot or {}).get("updated_at", "") or "") if isinstance(snapshot, dict) else "",
+        "latest_snapshot_count": len(rows or []) if isinstance(rows, list) else 0,
+        "tomorrow_prep_bridge": bridge_debug,
+        "pre_trigger": {
+            "source": "tomorrow_prep_final_sweep_v2w9e" if bridge_debug.get("used") else "last_trade_scan_snapshot_only",
+            "bridge_count": len(syms_pre),
+            "sample_symbols": syms_pre[:15],
+            "fresh": bool(bridge_debug.get("used")),
+        },
+        "low_float_premarket": {
+            "source": "tomorrow_prep_final_sweep_v2w9e" if bridge_debug.get("used") else "last_trade_scan_snapshot_only",
+            "bridge_count": len(syms_low),
+            "sample_symbols": syms_low[:15],
+            "fresh": bool(bridge_debug.get("used")),
+        },
+        "rule_ar": "V2W9f: إذا fresh=true فالقائمتان لم تعودا معتمدتين فقط على snapshot قديم؛ تم حقنهما من قائمة الغد النهائية.",
     }
 
 

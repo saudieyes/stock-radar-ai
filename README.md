@@ -1,36 +1,15 @@
-# 🚀 Stock Radar AI
+# Stock Radar AI — V2W9e
 
-AI-powered stock market radar that scans US equities, applies a Shariah-compliant filter, and detects high-probability trading opportunities using price action, volume, momentum, and news.
+V2W9e adds an FMP-only final after-hours sweep after 20:05 ET / about 03:05 KSA, clear completion timestamps in Tomorrow Prep status, safer extended-price labels, and a faster initial UI render.
 
-----
+Key checks:
 
-## 📊 Features
+- `/tomorrow-prep/status?format=brief`
+- `/tomorrow-prep/after-hours-final-sweep?execute=true&max_batches=6&format=brief` only if needed.
 
-- 🔍 Market-wide stock scanning
-- 🕌 Shariah-compliant filtering
-- ⚡ Real-time price & volume analysis
-- 📈 Momentum & breakout detection
-- 🧠 AI-powered insights (on demand)
-- 📰 News-based confirmation layer
-- 🎯 Entry, Stop Loss, and Target suggestions
+The final sweep does not depend on Polygon. Polygon remains optional confirmation only.
 
----
 
-## 🧠 How It Works
+## V2W9f — Tomorrow Prep Final Bridge to Live Lists
 
-1. Fetch active stocks from the market
-2. Apply Shariah filter (sector + financial ratios)
-3. Analyze:
-   - Volume
-   - Momentum
-   - Price location
-   - Breakout / pullback logic
-4. Score opportunities
-5. Generate trade setup
-6. Apply AI analysis (optional)
-
----
-
-## 🔌 API Endpoints
-
-### 🔹 Scan Market
+ربط مباشر بين قائمة V2W9e النهائية بعد after-hours وقائمتي Pre-Trigger و Low-Float في /trade-scan و /radar-live-refresh. يضيف /diagnostics/list-freshness للتحقق من مصدر وحداثة القائمتين.
