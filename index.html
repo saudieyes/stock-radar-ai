@@ -4920,7 +4920,10 @@
         } else {
           window.__pendingScanData = data;
           hideSourceDiscoveryNotice(snapshotAt);
-          showRadarPendingNotice(data, reason);
+          // V2W9i: keep completed-scan updates quiet while the user is reading; the
+          // previous notice itself caused mobile page jumps. Prices still refresh in place.
+          window.__silentRadarPendingCount = Number(window.__silentRadarPendingCount || 0) + 1;
+          hideRadarPendingNotice();
           refreshLiveQuotesForScan(true);
         }
         if (snapshotAt) window.__lastPreparedScanSnapshotAt = snapshotAt;
@@ -5182,21 +5185,23 @@
     }
 
     function applyRadarLivePayload(payload, options={}) {
-      // V2W9h: keep the V2W9g live-list bridge, but do not auto re-render the whole
-      // radar while the user is reading. Full re-render is the main cause of the page
-      // jumping after market / after completion notices. Silent refresh now updates
-      // prices in-place and stores fresher list membership behind a fixed notice.
+      // V2W9i: keep V2W9g live-list bridge and V2W9h stable refresh, but make silent
+      // radar refresh completely quiet. The bottom "وصلت نتائج جديدة" notice was
+      // appearing every ~20-30 seconds and caused mobile scroll/viewport jumps. Silent
+      // refresh now updates visible prices only, stores fresher list membership in
+      // memory, and waits for a manual refresh/apply action before any full redraw.
       const silent = options?.silent !== false;
       const uiState = preserveScanUiState();
       const sectionsChanged = mergeRadarLiveSectionsIntoScanData(payload);
       const pricesChanged = mergeRadarLivePricesIntoScanData(payload);
       if (sectionsChanged) {
         if (silent && visibleRadarIsInUse()) {
-          // Keep the current DOM stable. The data is ready, but the user decides when
-          // to redraw the lists via the fixed bottom notice.
+          // Keep the current DOM stable. Do not show/rebuild a toast on every live poll.
           window.__pendingScanData = { ...(window.__scanData || {}) };
           window.__pendingRadarLiveSectionsAt = payload?.live_updated_at || payload?.updated_at || new Date().toISOString();
-          showRadarPendingNotice(window.__pendingScanData, 'radar-live');
+          window.__silentRadarPendingCount = Number(window.__silentRadarPendingCount || 0) + 1;
+          hideRadarPendingNotice();
+          hideSourceDiscoveryNotice();
           requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
         } else {
           hideRadarPendingNotice();
