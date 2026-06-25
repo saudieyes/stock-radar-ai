@@ -5146,9 +5146,54 @@
       return changed;
     }
 
+    function mergeRadarLiveSectionsIntoScanData(payload) {
+      if (!payload || payload.ok === false || !window.__scanData) return false;
+      let changed = false;
+      OPPORTUNITY_RADAR_GROUP_KEYS.forEach(key => {
+        const fresh = Array.isArray(payload[key])
+          ? payload[key]
+          : (Array.isArray(payload?.opportunity_radar?.[key]) ? payload.opportunity_radar[key] : null);
+        if (!fresh) return;
+        const before = scanGroupSymbols(window.__scanData, key);
+        const after = fresh.map(item => String(item?.symbol || '').toUpperCase().trim()).filter(Boolean).join('|');
+        if (before !== after) {
+          window.__scanData[key] = [...fresh];
+          changed = true;
+        } else {
+          // Same symbols but fresher rows: keep plans/source labels from live refresh.
+          window.__scanData[key] = window.__scanData[key].map(oldItem => {
+            const s = String(oldItem?.symbol || '').toUpperCase().trim();
+            const newer = fresh.find(x => String(x?.symbol || '').toUpperCase().trim() === s);
+            return newer ? { ...oldItem, ...newer } : oldItem;
+          });
+        }
+        const countKey = `${key}_count`;
+        if (payload[countKey] !== undefined) window.__scanData[countKey] = payload[countKey];
+      });
+      if (payload.market_phase_label) window.__scanData.market_phase_label = payload.market_phase_label;
+      if (payload.live_updated_at) window.__scanData.updated_at = payload.live_updated_at;
+      if (payload.tomorrow_prep_final_bridge_v2w9f) window.__scanData.tomorrow_prep_final_bridge_v2w9f = payload.tomorrow_prep_final_bridge_v2w9f;
+      if (payload.opportunity_radar?.tomorrow_prep_section_bridge_debug_v2w9g) {
+        window.__scanData.tomorrow_prep_section_bridge_debug_v2w9g = payload.opportunity_radar.tomorrow_prep_section_bridge_debug_v2w9g;
+      }
+      if (changed) refreshScanCountsFromGroups(window.__scanData);
+      return changed;
+    }
+
     function applyRadarLivePayload(payload) {
-      // التحديث الحي لا يعيد رسم القوائم. يدمج السعر/النسبة فقط داخل البيانات الحالية ثم يحدث DOM مباشرة.
-      return mergeRadarLivePricesIntoScanData(payload);
+      // V2W9g: radar-live-refresh may carry a fresher Tomorrow Prep bridge for
+      // Pre-Trigger/Low-Float. Update visible sections when their membership changes,
+      // then update prices. This fixes the old behavior where only prices changed and
+      // the two lists looked stuck on yesterday's snapshot.
+      const uiState = preserveScanUiState();
+      const sectionsChanged = mergeRadarLiveSectionsIntoScanData(payload);
+      const pricesChanged = mergeRadarLivePricesIntoScanData(payload);
+      if (sectionsChanged) {
+        renderScanData();
+        if (uiState) restoreScanUiState(uiState);
+        requestAnimationFrame(() => updateVisibleLivePriceDomFromScanData());
+      }
+      return sectionsChanged || pricesChanged;
     }
 
 

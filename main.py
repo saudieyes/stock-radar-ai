@@ -1109,7 +1109,7 @@ def _extract_live_symbol_list(rows: list[dict], limit: int = 220) -> list[str]:
     return out
 
 
-TOMORROW_PREP_FINAL_BRIDGE_VERSION = "tomorrow_prep_final_bridge_to_live_lists_v2w9f_2026_06_25"
+TOMORROW_PREP_FINAL_BRIDGE_VERSION = "tomorrow_prep_section_specific_bridge_v2w9g_2026_06_25"
 
 
 def _tomorrow_prep_bridge_price_fields(item: dict) -> dict:
@@ -1197,11 +1197,15 @@ def _make_tomorrow_prep_bridge_row(item: dict, section: str, saved: dict, rank_i
         "current_dollar_volume": safe_round(item.get("dollar_volume", metrics.get("dollar_volume", 0)), 0),
         "dollar_volume": safe_round(item.get("dollar_volume", metrics.get("dollar_volume", 0)), 0),
         "source_origin": "tomorrow_prep_final_sweep_v2w9e",
-        "source_layer": "tomorrow_prep_final_bridge_v2w9f",
+        "source_layer": "tomorrow_prep_section_specific_bridge_v2w9g",
+        "source_layer_previous": "tomorrow_prep_final_bridge_v2w9f",
         "source_session_date": source_session,
         "target_trading_date": target_session,
         "tomorrow_prep_bridge_v2w9f": True,
+        "tomorrow_prep_bridge_v2w9g": True,
         "tomorrow_prep_bridge_version": TOMORROW_PREP_FINAL_BRIDGE_VERSION,
+        "tomorrow_prep_target_section_v2w9g": "low_float_premarket_radar" if is_low_float else "pre_trigger_candidates",
+        "tomorrow_prep_target_bucket_v2w9g": bucket,
         "tomorrow_prep_final_sweep_status": final_status,
         "tomorrow_prep_final_sweep_completed_at_ksa": final_completed_ksa,
         "candidate_from_previous_trading_session": True,
@@ -1210,7 +1214,7 @@ def _make_tomorrow_prep_bridge_row(item: dict, section: str, saved: dict, rank_i
         "after_hours_confirmed_v2w9e": bool(item.get("after_hours_confirmed_v2w9e")),
         "low_float_fast_lane": bool(is_low_float),
         "opportunity_bucket": bucket,
-        "opportunity_stage": f"tomorrow_prep_final_bridge_{bucket}",
+        "opportunity_stage": f"tomorrow_prep_section_bridge_{bucket}",
         "opportunity_stage_label": label,
         "display_plan_family_label": label,
         "trade_type_label_ar": "قائمة الغد النهائية → القوائم الحية",
@@ -1221,7 +1225,7 @@ def _make_tomorrow_prep_bridge_row(item: dict, section: str, saved: dict, rank_i
         "sharia_status": str(item.get("sharia_status") or "needs_review"),
         "sharia_note": str(item.get("sharia_note") or "يحتاج مراجعة شرعية قبل أي شراء"),
         "urgent_sharia_review_v2u": str(item.get("sharia_status") or "") != "approved",
-        "tags": list(dict.fromkeys(tags + (["low_float_proxy"] if is_low_float else ["pre_trigger_candidate"]) + ["tomorrow_prep_final_bridge_v2w9f"]))[:18],
+        "tags": list(dict.fromkeys(tags + (["low_float_proxy"] if is_low_float else ["pre_trigger_candidate"]) + ["tomorrow_prep_final_bridge_v2w9f", "tomorrow_prep_section_bridge_v2w9g"]))[:18],
         "opportunity_reasons": merged_reasons[:12],
         "technical_explainer_reasons": merged_reasons[:12],
         "why_appeared_ar": "، ".join(merged_reasons[:4]),
@@ -1270,7 +1274,7 @@ def _tomorrow_prep_final_bridge_rows(max_per_section: int = 120) -> tuple[list[d
         "rows_added": 0,
         "low_float_rows": 0,
         "pre_trigger_rows": 0,
-        "rule_ar": "يربط قائمة V2W9e النهائية بعد after-hours بقائمتي Pre-Trigger و Low-Float حتى لا تبقيا من snapshot قديم.",
+        "rule_ar": "V2W9g: يربط قائمة V2W9e النهائية بعد after-hours بقائمتي Pre-Trigger و Low-Float كجسر مستقل لكل قسم، بدون حذف تداخل الرموز بين القائمتين.",
     }
     try:
         saved = load_tomorrow_prep_session_candidates()
@@ -1307,20 +1311,31 @@ def _tomorrow_prep_final_bridge_rows(max_per_section: int = 120) -> tuple[list[d
         row = _make_tomorrow_prep_bridge_row(item, "pre_trigger_candidates", saved, idx)
         if row.get("symbol"):
             rows.append(row)
-    # Deduplicate while preserving priority: Low-Float bridge first, then Pre-Trigger.
-    deduped: list[dict] = []
-    seen: set[str] = set()
+    # V2W9g: do NOT dedupe Low-Float and Pre-Trigger against each other here.
+    # A large part of V2W9e intentionally overlaps (same symbol can be both low-float
+    # proxy and pre-trigger). V2W9f deduped by symbol globally and effectively starved
+    # Pre-Trigger. Keep section-specific rows and let the opportunity radar/UI dedupe
+    # inside each visible section.
+    unique_symbols = []
+    seen_symbols: set[str] = set()
+    low_symbols = {normalize_symbol_text((x or {}).get("symbol", "")) for x in low_items if isinstance(x, dict)}
+    pre_symbols = {normalize_symbol_text((x or {}).get("symbol", "")) for x in pre_items if isinstance(x, dict)}
+    overlap_symbols = sorted([s for s in (low_symbols & pre_symbols) if s])
     for row in rows:
         sym = normalize_symbol_text(row.get("symbol", ""))
-        if sym and sym not in seen:
-            seen.add(sym)
-            deduped.append(row)
-    debug["used"] = bool(deduped)
-    debug["rows_added"] = len(deduped)
+        if sym and sym not in seen_symbols:
+            seen_symbols.add(sym)
+            unique_symbols.append(sym)
+    debug["used"] = bool(rows)
+    debug["rows_added"] = len(rows)
+    debug["unique_symbols_added"] = len(unique_symbols)
     debug["low_float_rows"] = len(low_items)
     debug["pre_trigger_rows"] = len(pre_items)
-    debug["reason"] = "ok" if deduped else "no_bridge_candidates"
-    return deduped, debug
+    debug["overlap_symbols_count"] = len(overlap_symbols)
+    debug["overlap_symbols_sample"] = overlap_symbols[:20]
+    debug["section_specific_bridge_v2w9g"] = True
+    debug["reason"] = "ok" if rows else "no_bridge_candidates"
+    return rows, debug
 
 
 def _merge_tomorrow_prep_final_bridge_rows(rows: list[dict], max_per_section: int = 120) -> tuple[list[dict], dict]:
@@ -1330,13 +1345,22 @@ def _merge_tomorrow_prep_final_bridge_rows(rows: list[dict], max_per_section: in
     merged: list[dict] = []
     seen: set[str] = set()
     # Put final prep rows first so live quote refresh prioritizes the new tomorrow list.
+    # V2W9g keeps Tomorrow Prep rows section-specific: the same symbol can exist once
+    # in Low-Float and once in Pre-Trigger, while ordinary scan rows remain deduped by symbol.
     for row in list(bridge_rows) + list(rows or []):
         if not isinstance(row, dict):
             continue
         sym = normalize_symbol_text(row.get("symbol", ""))
-        if not sym or sym in seen:
+        if not sym:
             continue
-        seen.add(sym)
+        bucket = str(row.get("opportunity_bucket") or "")
+        if row.get("tomorrow_prep_bridge_v2w9g") or row.get("tomorrow_prep_bridge_v2w9f"):
+            merge_key = f"tomorrow_prep::{sym}::{bucket}"
+        else:
+            merge_key = f"scan::{sym}"
+        if merge_key in seen:
+            continue
+        seen.add(merge_key)
         merged.append(row)
     debug["base_rows_in"] = len(rows or [])
     debug["merged_rows_out"] = len(merged)
@@ -4539,6 +4563,34 @@ def diagnostics_list_freshness():
     bridge_rows, bridge_debug = _tomorrow_prep_final_bridge_rows(max_per_section=120)
     syms_low = [r.get("symbol") for r in bridge_rows if isinstance(r, dict) and r.get("opportunity_bucket") == "low_float_premarket"]
     syms_pre = [r.get("symbol") for r in bridge_rows if isinstance(r, dict) and r.get("opportunity_bucket") == "pre_trigger"]
+
+    displayed_pre: list[dict] = []
+    displayed_low: list[dict] = []
+    displayed_error = ""
+    try:
+        merged_rows, merge_debug = _merge_tomorrow_prep_final_bridge_rows(list(rows or []), max_per_section=120)
+        opp_preview = build_opportunity_radar_sections(merged_rows, market_phase=phase)
+        if isinstance(opp_preview, dict):
+            displayed_pre = opp_preview.get("pre_trigger_candidates", []) or []
+            displayed_low = opp_preview.get("low_float_premarket_radar", []) or []
+            bridge_debug["preview_merge"] = merge_debug
+            bridge_debug["preview_display_limit_per_section"] = int(opp_preview.get("display_limit_per_section", 0) or 0)
+            bridge_debug["preview_section_bridge_debug_v2w9g"] = opp_preview.get("tomorrow_prep_section_bridge_debug_v2w9g", {})
+    except Exception as exc:
+        displayed_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+
+    def _display_meta(items: list[dict], bucket: str) -> dict:
+        bridge_items = [x for x in items if isinstance(x, dict) and (x.get("tomorrow_prep_bridge_v2w9g") or x.get("tomorrow_prep_bridge_v2w9f") or x.get("source_origin") == "tomorrow_prep_final_sweep_v2w9e")]
+        return {
+            "displayed_count": len(items or []),
+            "displayed_bridge_count": len(bridge_items),
+            "displayed_symbols": [normalize_symbol_text((x or {}).get("symbol", "")) for x in (items or [])[:15] if isinstance(x, dict)],
+            "displayed_bridge_symbols": [normalize_symbol_text((x or {}).get("symbol", "")) for x in bridge_items[:15] if isinstance(x, dict)],
+            "bucket": bucket,
+        }
+
+    pre_display = _display_meta(displayed_pre, "pre_trigger")
+    low_display = _display_meta(displayed_low, "low_float_premarket")
     return {
         "ok": True,
         "version": TOMORROW_PREP_FINAL_BRIDGE_VERSION,
@@ -4548,18 +4600,21 @@ def diagnostics_list_freshness():
         "latest_snapshot_count": len(rows or []) if isinstance(rows, list) else 0,
         "tomorrow_prep_bridge": bridge_debug,
         "pre_trigger": {
-            "source": "tomorrow_prep_final_sweep_v2w9e" if bridge_debug.get("used") else "last_trade_scan_snapshot_only",
-            "bridge_count": len(syms_pre),
+            "source": "tomorrow_prep_final_sweep_v2w9e" if syms_pre else "last_trade_scan_snapshot_only",
+            "bridge_source_count": len(syms_pre),
             "sample_symbols": syms_pre[:15],
-            "fresh": bool(bridge_debug.get("used")),
+            "fresh": bool(bridge_debug.get("used") and len(syms_pre) > 0),
+            **pre_display,
         },
         "low_float_premarket": {
-            "source": "tomorrow_prep_final_sweep_v2w9e" if bridge_debug.get("used") else "last_trade_scan_snapshot_only",
-            "bridge_count": len(syms_low),
+            "source": "tomorrow_prep_final_sweep_v2w9e" if syms_low else "last_trade_scan_snapshot_only",
+            "bridge_source_count": len(syms_low),
             "sample_symbols": syms_low[:15],
-            "fresh": bool(bridge_debug.get("used")),
+            "fresh": bool(bridge_debug.get("used") and len(syms_low) > 0),
+            **low_display,
         },
-        "rule_ar": "V2W9f: إذا fresh=true فالقائمتان لم تعودا معتمدتين فقط على snapshot قديم؛ تم حقنهما من قائمة الغد النهائية.",
+        "display_preview_error": displayed_error,
+        "rule_ar": "V2W9g: fresh لا يعني فقط أن الجسر موجود؛ التشخيص يعرض أيضًا كم سهم ظهر فعليًا من الجسر داخل كل قائمة بعد الترتيب والحدّ المرئي.",
     }
 
 
