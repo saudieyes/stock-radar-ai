@@ -29,9 +29,9 @@ LIVE_QUOTES_TIMEOUT_SEC = float(os.getenv("LIVE_QUOTES_TIMEOUT_SEC", "8") or 8)
 # Normal path uses batch/CSV endpoints; this is only used when FMP plan/API does not return batch rows.
 FMP_SINGLE_FALLBACK_LIMIT = int(float(os.getenv("FMP_SINGLE_FALLBACK_LIMIT", "60") or 60))
 FMP_WEBSOCKET_ENABLED = str(os.getenv("FMP_WEBSOCKET_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w9b_premarket_price_priority_phase_fix_2026_06_24"
+LIVE_QUOTES_EXTENDED_REFILL_VERSION = "v2w9e_extended_missing_close_label_and_final_sweep_2026_06_25"
 LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED = str(os.getenv("LIVE_QUOTES_EXTENDED_DISPLAY_WHEN_CLOSED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
-LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w9b_premarket_phase_fix_2026_06_24"
+LIVE_QUOTES_EXTENDED_DISPLAY_VERSION = "extended_hours_price_overlay_v2w9e_no_close_as_live_2026_06_25"
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -544,16 +544,32 @@ def _fetch_fmp_quotes(symbols: list[str]) -> dict[str, dict]:
         # Use extended prices where available for display; keep regular quote only for symbols with no extended data.
         out = dict(regular or {})
         out.update(extended or {})
-        # V2W9: if FMP does not return an extended/pre-market row, do not label
-        # the regular-session close as a current premarket price. Keep the value
-        # as reference only and make it monitoring-only/stale in diagnostics/UI.
-        if phase == "premarket":
+        # V2W9e: if FMP does not return an extended/pre-market/after-hours row,
+        # do not label the regular-session close as a current live extended price.
+        # Keep the value as a reference only and make it monitoring-only/stale in
+        # diagnostics/UI. This directly addresses the UI showing close prices as if
+        # they were live before open or after close.
+        if _extended_display_phase(phase):
             for _sym, _q in list(out.items()):
                 if _sym not in (extended or {}) and isinstance(_q, dict):
-                    _q["source"] = "fmp_regular_close_no_premarket"
-                    _q["source_label"] = "FMP إغلاق رسمي — لا يوجد سعر premarket من FMP"
-                    _q["premarket_price_missing_v2w9"] = True
-                    _q["premarket_price_missing_v2w9b"] = True
+                    if phase == "premarket":
+                        missing_source = "fmp_regular_close_no_premarket"
+                        missing_label = "FMP إغلاق رسمي — لا يوجد سعر premarket من FMP"
+                        _q["premarket_price_missing_v2w9"] = True
+                        _q["premarket_price_missing_v2w9b"] = True
+                    elif phase == "afterhours":
+                        missing_source = "fmp_regular_close_no_afterhours"
+                        missing_label = "FMP إغلاق رسمي — لا يوجد سعر after-hours من FMP"
+                        _q["afterhours_price_missing_v2w9e"] = True
+                    else:
+                        missing_source = "fmp_regular_close_no_extended_closed_window"
+                        missing_label = "FMP إغلاق رسمي — لا يوجد سعر extended حديث من FMP"
+                        _q["extended_closed_window_price_missing_v2w9e"] = True
+                    _q["source"] = missing_source
+                    _q["source_label"] = missing_label
+                    _q["display_price_source"] = "regular_close_reference_only"
+                    _q["extended_price_missing_v2w9e"] = True
+                    _q["extended_display_note_ar"] = missing_label + "؛ لا يعتبر سعرًا حيًا."
                     _q["reliable_for_execution"] = False
                     _q["monitoring_only"] = True
                     _q["change_pct_reliable"] = bool(_q.get("change_pct_reliable"))

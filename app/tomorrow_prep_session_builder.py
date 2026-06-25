@@ -35,7 +35,7 @@ from .live_quotes import get_live_quotes
 from .sqlite_store import get_json as _get_json, set_json as _set_json
 from .data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
 
-TOMORROW_PREP_SESSION_BUILDER_VERSION = "tomorrow_prep_session_builder_v2w9c_rescue_continue_2026_06_24"
+TOMORROW_PREP_SESSION_BUILDER_VERSION = "tomorrow_prep_session_builder_v2w9e_fmp_final_afterhours_sweep_2026_06_25"
 TOMORROW_PREP_STATE_KEY = "tomorrow_prep:session_scan_state_v2w8"
 TOMORROW_PREP_OUTPUT_KEY = "tomorrow_prep:session_candidates_v2w8"
 TOMORROW_PREP_OUTPUT_PATH = Path(DATA_DIR) / "tomorrow_prep_session_candidates.json"
@@ -81,6 +81,14 @@ TOMORROW_PREP_RESCUE_ENABLED = _env_bool("TOMORROW_PREP_RESCUE_ENABLED", True)
 TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN = _env_int("TOMORROW_PREP_RESCUE_MAX_BATCHES_PER_RUN", 6, 1, 10)
 TOMORROW_PREP_RESCUE_INTERVAL_SEC = _env_int("TOMORROW_PREP_RESCUE_INTERVAL_SEC", 180, 60, 900)
 
+# V2W9e: final FMP-only sweep after the full after-hours session ends.
+# This does not depend on Polygon.  It refreshes/boosts the same next-day list
+# after 20:00 ET (≈03:00 KSA) and stamps completion times in the status.
+TOMORROW_PREP_FINAL_SWEEP_ENABLED = _env_bool("TOMORROW_PREP_FINAL_SWEEP_ENABLED", True)
+TOMORROW_PREP_FINAL_SWEEP_START_MINUTE_ET = _env_int("TOMORROW_PREP_FINAL_SWEEP_START_MINUTE_ET", 20 * 60 + 5, 20 * 60, 23 * 60 + 59)
+TOMORROW_PREP_FINAL_SWEEP_INTERVAL_SEC = _env_int("TOMORROW_PREP_FINAL_SWEEP_INTERVAL_SEC", 180, 60, 1200)
+TOMORROW_PREP_FINAL_SWEEP_MAX_BATCHES_PER_RUN = _env_int("TOMORROW_PREP_FINAL_SWEEP_MAX_BATCHES_PER_RUN", 6, 1, 10)
+
 
 def _now_utc_text() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -88,6 +96,91 @@ def _now_utc_text() -> str:
 
 def _now_ny() -> datetime:
     return datetime.now(NY_TZ)
+
+
+def _parse_utc_text(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _fmt_dt_in_tz(value: Any, tz_name: str, suffix: str = "") -> str:
+    dt = _parse_utc_text(value)
+    if not dt:
+        return ""
+    try:
+        label = dt.astimezone(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M:%S")
+        return f"{label}{suffix}" if suffix else label
+    except Exception:
+        return ""
+
+
+def _minutes_between(start_utc: Any, end_utc: Any) -> int | None:
+    a = _parse_utc_text(start_utc)
+    b = _parse_utc_text(end_utc)
+    if not a or not b:
+        return None
+    try:
+        return max(0, int(round((b - a).total_seconds() / 60.0)))
+    except Exception:
+        return None
+
+
+def _next_trading_day(d: date) -> date:
+    x = d + timedelta(days=1)
+    while x.weekday() >= 5:
+        x += timedelta(days=1)
+    return x
+
+
+def _target_trading_date_from_session(trade_date: str | None) -> str:
+    try:
+        d = date.fromisoformat(str(trade_date or ""))
+        return _next_trading_day(d).isoformat()
+    except Exception:
+        return ""
+
+
+def _time_meta_from_state(state: dict) -> dict:
+    state = state or {}
+    start = state.get("started_at_utc", "")
+    updated = state.get("updated_at_utc", "")
+    complete = state.get("completed_at_utc", "")
+    initial_complete = state.get("initial_after_close_completed_at_utc") or complete
+    final_start = state.get("after_hours_final_sweep_started_at_utc", "")
+    final_updated = state.get("after_hours_final_sweep_updated_at_utc", "")
+    final_complete = state.get("after_hours_final_sweep_completed_at_utc", "")
+    return {
+        "source_session_date": str(state.get("trade_date") or ""),
+        "intended_for_trading_date": _target_trading_date_from_session(str(state.get("trade_date") or "")),
+        "started_at_utc": start,
+        "started_at_et": _fmt_dt_in_tz(start, "America/New_York", " ET"),
+        "started_at_ksa": _fmt_dt_in_tz(start, "Asia/Riyadh", " KSA"),
+        "updated_at_utc": updated,
+        "updated_at_et": _fmt_dt_in_tz(updated, "America/New_York", " ET"),
+        "updated_at_ksa": _fmt_dt_in_tz(updated, "Asia/Riyadh", " KSA"),
+        "completed_at_utc": complete,
+        "completed_at_et": _fmt_dt_in_tz(complete, "America/New_York", " ET"),
+        "completed_at_ksa": _fmt_dt_in_tz(complete, "Asia/Riyadh", " KSA"),
+        "scan_duration_minutes": _minutes_between(start, complete),
+        "initial_after_close_completed_at_utc": initial_complete,
+        "initial_after_close_completed_at_et": _fmt_dt_in_tz(initial_complete, "America/New_York", " ET"),
+        "initial_after_close_completed_at_ksa": _fmt_dt_in_tz(initial_complete, "Asia/Riyadh", " KSA"),
+        "after_hours_final_sweep_started_at_utc": final_start,
+        "after_hours_final_sweep_started_at_et": _fmt_dt_in_tz(final_start, "America/New_York", " ET"),
+        "after_hours_final_sweep_started_at_ksa": _fmt_dt_in_tz(final_start, "Asia/Riyadh", " KSA"),
+        "after_hours_final_sweep_updated_at_utc": final_updated,
+        "after_hours_final_sweep_updated_at_et": _fmt_dt_in_tz(final_updated, "America/New_York", " ET"),
+        "after_hours_final_sweep_updated_at_ksa": _fmt_dt_in_tz(final_updated, "Asia/Riyadh", " KSA"),
+        "after_hours_final_sweep_completed_at_utc": final_complete,
+        "after_hours_final_sweep_completed_at_et": _fmt_dt_in_tz(final_complete, "America/New_York", " ET"),
+        "after_hours_final_sweep_completed_at_ksa": _fmt_dt_in_tz(final_complete, "Asia/Riyadh", " KSA"),
+        "after_hours_final_sweep_duration_minutes": _minutes_between(final_start, final_complete),
+    }
 
 
 def _clean_symbol(value: Any) -> str:
@@ -191,6 +284,35 @@ def _saved_is_current_for_trade_date(saved: dict | None, trade_date: str) -> boo
     if not isinstance(saved, dict):
         return False
     return bool(str(saved.get("trade_date") or "") == str(trade_date or "") and saved.get("ok") is not False)
+
+
+def tomorrow_prep_final_sweep_window_info(now: datetime | None = None) -> dict:
+    """Return whether the FMP-only final after-hours sweep can run now."""
+    now = now or _now_ny()
+    minutes = now.hour * 60 + now.minute
+    weekday = now.weekday()
+    after_8pm_et = weekday <= 4 and minutes >= int(TOMORROW_PREP_FINAL_SWEEP_START_MINUTE_ET)
+    # After midnight ET still belongs to the prior completed session; allow the
+    # final sweep to catch up until the regular open if the app was deployed late.
+    early_next_morning_catchup = weekday in {1, 2, 3, 4, 5} and minutes < (9 * 60 + 30)
+    active = bool(TOMORROW_PREP_FINAL_SWEEP_ENABLED and (after_8pm_et or early_next_morning_catchup))
+    reason = "final_sweep_window_open" if active else "before_final_afterhours_sweep_window"
+    if not TOMORROW_PREP_FINAL_SWEEP_ENABLED:
+        reason = "final_sweep_disabled"
+    if weekday >= 5 and not early_next_morning_catchup:
+        reason = "weekend_or_no_completed_today_session"
+    return {
+        "enabled": bool(TOMORROW_PREP_FINAL_SWEEP_ENABLED),
+        "final_sweep_window_open": active,
+        "now_et": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "trade_date": _session_trade_date_for_now(now),
+        "start_afterhours_final_sweep_et": f"{int(TOMORROW_PREP_FINAL_SWEEP_START_MINUTE_ET)//60:02d}:{int(TOMORROW_PREP_FINAL_SWEEP_START_MINUTE_ET)%60:02d}",
+        "start_afterhours_final_sweep_ksa": "03:05 تقريبًا",
+        "max_batches_per_run": int(TOMORROW_PREP_FINAL_SWEEP_MAX_BATCHES_PER_RUN),
+        "interval_sec": int(TOMORROW_PREP_FINAL_SWEEP_INTERVAL_SEC),
+        "reason": reason,
+        "source_policy_ar": "V2W9e: فحص نهائي بعد انتهاء after-hours من FMP فقط؛ Polygon اختياري للتعزيز ولا يوقف القائمة.",
+    }
 
 
 def run_tomorrow_prep_rescue_build(*, execute: bool = True, max_batches: int | None = None, force_reset: bool = False) -> dict:
@@ -342,7 +464,7 @@ def _sharia_status(sym: str) -> tuple[str, str]:
     return "needs_review", "يحتاج مراجعة شرعية قبل أي شراء"
 
 
-def _quote_score_candidate(sym: str, q: dict, trade_date: str) -> dict | None:
+def _quote_score_candidate(sym: str, q: dict, trade_date: str, scan_phase: str = "initial_after_close") -> dict | None:
     price = to_float((q or {}).get("price"))
     if price <= 0:
         return None
@@ -409,6 +531,14 @@ def _quote_score_candidate(sym: str, q: dict, trade_date: str) -> dict | None:
         tags.append("extended_price_seen")
         reasons.append("له سعر خارج السوق من FMP Extended")
 
+    if str(scan_phase or "") == "after_hours_final_sweep":
+        tags.append("after_hours_final_sweep_v2w9e")
+        reasons.append("أعيد فحصه بعد انتهاء after-hours عبر FMP")
+        if extended:
+            score += 7
+            tags.append("after_hours_confirmed_v2w9e")
+            reasons.append("تأكيد/تغير بعد الإغلاق متوفر قبل قائمة الغد")
+
     if 0.35 <= price <= 12 and dollar_volume >= 120_000 and -2 <= change_pct <= 18:
         score += 18
         tags.append("low_float_proxy")
@@ -437,8 +567,8 @@ def _quote_score_candidate(sym: str, q: dict, trade_date: str) -> dict | None:
         "dollar_volume": safe_round(dollar_volume, 0),
         "change_pct": safe_round(change_pct, 2),
         "day_change_pct": safe_round(change_pct, 2),
-        "prior_session_phase": "after_close_fmp_session_scan",
-        "prior_session_source": "fmp_quote_extended_chunked",
+        "prior_session_phase": "after_hours_final_fmp_sweep" if str(scan_phase or "") == "after_hours_final_sweep" else "after_close_fmp_session_scan",
+        "prior_session_source": "fmp_quote_extended_final_sweep" if str(scan_phase or "") == "after_hours_final_sweep" else "fmp_quote_extended_chunked",
         "big_explosion_prepared_score": safe_round(score, 3),
         "big_explosion_prepared_watch_v2u": True,
         "big_explosion_prepared_reasons_ar": reasons[:8],
@@ -449,6 +579,8 @@ def _quote_score_candidate(sym: str, q: dict, trade_date: str) -> dict | None:
         "watch_priority_v2u3": safe_round(score, 3),
         "pre_explosion_candidate_v2u3": "pre_explosion_candidate" in tags,
         "after_hours_pressure_v2u3": bool(extended),
+        "after_hours_final_sweep_v2w9e": bool(str(scan_phase or "") == "after_hours_final_sweep"),
+        "after_hours_confirmed_v2w9e": bool(str(scan_phase or "") == "after_hours_final_sweep" and extended),
     }
     return {
         "symbol": sym,
@@ -458,9 +590,12 @@ def _quote_score_candidate(sym: str, q: dict, trade_date: str) -> dict | None:
         "change_pct": safe_round(change_pct, 2),
         "volume": safe_round(volume, 0),
         "dollar_volume": safe_round(dollar_volume, 0),
-        "source": "fmp_session_chunked",
+        "source": "fmp_after_hours_final_sweep" if str(scan_phase or "") == "after_hours_final_sweep" else "fmp_session_chunked",
+        "scan_phase": str(scan_phase or "initial_after_close"),
         "quote_source": source,
         "extended_price_seen": extended,
+        "after_hours_final_sweep_v2w9e": bool(str(scan_phase or "") == "after_hours_final_sweep"),
+        "after_hours_confirmed_v2w9e": bool(str(scan_phase or "") == "after_hours_final_sweep" and extended),
         "sharia_status": sh,
         "sharia_note": sh_note,
         "actionability": "learning_only" if sh == "blocked" else "watch_only",
@@ -494,14 +629,24 @@ def _build_output_from_state(state: dict, reference_debug: dict | None = None) -
     low_float = [x for x in active if "low_float_proxy" in (x.get("tags") or [])]
     pre_trigger = [x for x in active if "pre_trigger_candidate" in (x.get("tags") or [])]
     extended = [x for x in active if bool(x.get("extended_price_seen"))]
+    final_sweep = [x for x in active if bool(x.get("after_hours_final_sweep_v2w9e"))]
+    final_confirmed = [x for x in active if bool(x.get("after_hours_confirmed_v2w9e"))]
+    time_meta = _time_meta_from_state(state or {})
+    final_sweep_status = str((state or {}).get("after_hours_final_sweep_status") or "not_started")
     payload = {
         "ok": bool(active),
         "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
         "trade_date": (state or {}).get("trade_date", ""),
+        "source_session_date": time_meta.get("source_session_date", ""),
+        "intended_for_trading_date": time_meta.get("intended_for_trading_date", ""),
+        "list_stage_v2w9e": "final_after_hours" if final_sweep_status.startswith("completed") else "initial_after_close",
+        "after_hours_final_sweep_status_v2w9e": final_sweep_status,
+        "after_hours_final_sweep_completed_v2w9e": bool(final_sweep_status.startswith("completed")),
         "status": (state or {}).get("status", "in_progress"),
         "started_at_utc": (state or {}).get("started_at_utc", ""),
         "updated_at_utc": (state or {}).get("updated_at_utc", ""),
         "completed_at_utc": (state or {}).get("completed_at_utc", ""),
+        "time_meta_v2w9e": time_meta,
         "progress": {
             "cursor": int((state or {}).get("cursor", 0) or 0),
             "universe_count": int((state or {}).get("universe_count", 0) or 0),
@@ -515,6 +660,8 @@ def _build_output_from_state(state: dict, reference_debug: dict | None = None) -
             "low_float_proxy": len(low_float),
             "pre_trigger": len(pre_trigger),
             "extended_price_seen": len(extended),
+            "after_hours_final_sweep": len(final_sweep),
+            "after_hours_confirmed": len(final_confirmed),
             "blocked_learning_only": len(blocked),
         },
         "candidates": active[: int(TOMORROW_PREP_TOP_N)],
@@ -522,13 +669,15 @@ def _build_output_from_state(state: dict, reference_debug: dict | None = None) -
             "low_float_proxy": low_float[:160],
             "pre_trigger": pre_trigger[:160],
             "extended_price_seen": extended[:160],
+            "after_hours_final_sweep": final_sweep[:180],
+            "after_hours_confirmed": final_confirmed[:180],
             "needs_sharia_review": [x for x in active if x.get("sharia_status") == "needs_review"][:220],
             "clean_approved": [x for x in active if x.get("sharia_status") == "approved"][:220],
             "learning_only_sharia_blocked": blocked[:120],
         },
         "reference_debug": reference_debug or (state or {}).get("reference_debug", {}),
         "last_run_debug": (state or {}).get("last_run_debug", {}),
-        "rule_ar": "V2W8: هذه قائمة تجهيز للغد مبنية من تداولات اليوم عبر FMP على دفعات. لا تفتح شراء مباشر ولا تستبدل Strong/Cautious. Polygon يلحق لاحقًا كتعزيز عندما يتاح.",
+        "rule_ar": "V2W9e: قائمة تجهيز للغد مبنية من FMP. يبدأ فحص أولي بعد الإغلاق الرسمي، ثم فحص نهائي بعد انتهاء after-hours. Polygon تعزيز اختياري فقط ولا يوقف القائمة.",
     }
     return payload
 
@@ -645,9 +794,11 @@ def run_tomorrow_prep_session_chunk(*, execute: bool = True, max_batches: int = 
     if int(state.get("cursor", 0) or 0) >= universe_count:
         state["status"] = "completed_full_coverage"
         state["completed_at_utc"] = _now_utc_text()
+        state.setdefault("initial_after_close_completed_at_utc", state.get("completed_at_utc", ""))
     elif int(state.get("batches_done", 0) or 0) >= int(TOMORROW_PREP_MAX_BATCHES_PER_SESSION):
         state["status"] = "completed_budget_cap"
         state["completed_at_utc"] = _now_utc_text()
+        state.setdefault("initial_after_close_completed_at_utc", state.get("completed_at_utc", ""))
     else:
         state["status"] = "in_progress"
     state["last_run_debug"] = {
@@ -657,6 +808,140 @@ def run_tomorrow_prep_session_chunk(*, execute: bool = True, max_batches: int = 
         "quote_debug": quote_debug,
         "min_score": float(TOMORROW_PREP_MIN_SCORE),
         "rule_ar": "كل تشغيل يطلب دفعة واحدة/محدودة من FMP ثم يحفظ قائمة مضغوطة للغد.",
+    }
+    _save_state(state)
+    payload = _build_output_from_state(state, ref_debug)
+    if execute:
+        _save_output(payload)
+        payload["prepared_watch_save"] = _save_prepared_watch_from_payload(payload)
+        _save_output(payload)
+    return {
+        "ok": bool(payload.get("ok")),
+        "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
+        "ran": True,
+        "execute": bool(execute),
+        "window": window,
+        "batches_run": batches_run,
+        "payload": payload,
+        "state": {k: v for k, v in state.items() if k != "candidates"},
+    }
+
+
+def run_tomorrow_prep_after_hours_final_sweep(*, execute: bool = True, max_batches: int | None = None, force_reset: bool = False) -> dict:
+    """Run/continue the V2W9e FMP-only final after-hours sweep.
+
+    This updates the same saved tomorrow-prep list after 20:05 ET (≈03:05 KSA).
+    It does not wait for Polygon and it does not reset the initial FMP list unless
+    explicitly requested for a stale trade_date.
+    """
+    window = tomorrow_prep_final_sweep_window_info()
+    if not window.get("final_sweep_window_open"):
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "ran": False, "reason": window.get("reason"), "window": window}
+    if not FMP_API_KEY:
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "ran": False, "reason": "FMP_API_KEY missing", "window": window}
+
+    trade_date = str(window.get("trade_date") or _session_trade_date_for_now())
+    state = _load_state()
+    saved = load_tomorrow_prep_session_candidates()
+    saved_current = _saved_is_current_for_trade_date(saved, trade_date)
+
+    if force_reset or not isinstance(state, dict) or state.get("trade_date") != trade_date:
+        # If the normal builder already saved a current payload, continue from it; otherwise
+        # create a thin state so the final sweep can still build late from FMP.
+        state = {
+            "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
+            "trade_date": trade_date,
+            "status": str((saved or {}).get("status") or "in_progress"),
+            "started_at_utc": str((saved or {}).get("started_at_utc") or _now_utc_text()),
+            "updated_at_utc": _now_utc_text(),
+            "completed_at_utc": str((saved or {}).get("completed_at_utc") or ""),
+            "initial_after_close_completed_at_utc": str((saved or {}).get("completed_at_utc") or ""),
+            "cursor": int(((saved or {}).get("progress") or {}).get("cursor", 0) or 0),
+            "batches_done": int(((saved or {}).get("progress") or {}).get("batches_done", 0) or 0),
+            "candidates": list((saved or {}).get("candidates") or []),
+            "symbols_scanned": int(((saved or {}).get("progress") or {}).get("cursor", 0) or 0),
+        }
+    elif saved_current and not state.get("candidates"):
+        state["candidates"] = list((saved or {}).get("candidates") or [])
+
+    if str(state.get("after_hours_final_sweep_status") or "").startswith("completed") and not force_reset:
+        payload = _build_output_from_state(state, (state or {}).get("reference_debug", {}))
+        return {"ok": bool(payload.get("ok")), "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "ran": False, "reason": "after_hours_final_sweep_already_completed", "window": window, "payload": payload}
+
+    reference, ref_debug = _reference_symbols()
+    universe_count = len(reference)
+    state["universe_count"] = universe_count
+    state["reference_debug"] = ref_debug
+    if universe_count <= 0:
+        state["after_hours_final_sweep_status"] = "failed_empty_reference_universe"
+        state["after_hours_final_sweep_updated_at_utc"] = _now_utc_text()
+        _save_state(state)
+        payload = _build_output_from_state(state, ref_debug)
+        _save_output(payload)
+        return {"ok": False, "version": TOMORROW_PREP_SESSION_BUILDER_VERSION, "ran": False, "reason": "empty_reference_universe", "window": window, "payload": payload}
+
+    if not state.get("after_hours_final_sweep_started_at_utc") or force_reset:
+        state["after_hours_final_sweep_started_at_utc"] = _now_utc_text()
+        state["after_hours_final_sweep_cursor"] = 0
+        state["after_hours_final_sweep_batches_done"] = 0
+    state["after_hours_final_sweep_status"] = "in_progress"
+
+    try:
+        batches = int(max_batches or TOMORROW_PREP_FINAL_SWEEP_MAX_BATCHES_PER_RUN)
+    except Exception:
+        batches = int(TOMORROW_PREP_FINAL_SWEEP_MAX_BATCHES_PER_RUN)
+    batches = max(1, min(batches, int(TOMORROW_PREP_FINAL_SWEEP_MAX_BATCHES_PER_RUN)))
+
+    batches_run = 0
+    all_new: list[dict] = []
+    quote_debug: list[dict] = []
+    cursor = int(state.get("after_hours_final_sweep_cursor", 0) or 0)
+    for _ in range(batches):
+        if cursor >= universe_count:
+            state["after_hours_final_sweep_status"] = "completed_full_coverage"
+            break
+        chunk = reference[cursor: cursor + int(TOMORROW_PREP_BATCH_SIZE)]
+        if not chunk:
+            state["after_hours_final_sweep_status"] = "completed_full_coverage"
+            break
+        bundle = get_live_quotes(chunk, prefer_cache=False, allow_fallback=False)
+        quotes = (bundle or {}).get("quotes", {}) if isinstance(bundle, dict) else {}
+        new_items: list[dict] = []
+        for sym in chunk:
+            q = (quotes or {}).get(sym)
+            item = _quote_score_candidate(sym, q or {}, trade_date=trade_date, scan_phase="after_hours_final_sweep") if q else None
+            if item and (float(item.get("score") or 0) >= float(TOMORROW_PREP_MIN_SCORE) or item.get("sharia_status") == "blocked"):
+                new_items.append(item)
+        all_new.extend(new_items)
+        quote_debug.append({
+            "cursor_start": cursor,
+            "requested": len(chunk),
+            "quotes_available": len(quotes or {}),
+            "selected_from_chunk": len([x for x in new_items if x.get("sharia_status") != "blocked"]),
+            "diagnostics": (bundle or {}).get("diagnostics", {}) if isinstance(bundle, dict) else {},
+        })
+        cursor += len(chunk)
+        state["after_hours_final_sweep_cursor"] = cursor
+        state["after_hours_final_sweep_batches_done"] = int(state.get("after_hours_final_sweep_batches_done", 0) or 0) + 1
+        batches_run += 1
+        if batches > 1:
+            time.sleep(0.25)
+
+    state["candidates"] = _merge_candidates(list(state.get("candidates") or []), all_new)
+    state["updated_at_utc"] = _now_utc_text()
+    state["after_hours_final_sweep_updated_at_utc"] = _now_utc_text()
+    if int(state.get("after_hours_final_sweep_cursor", 0) or 0) >= universe_count:
+        state["after_hours_final_sweep_status"] = "completed_full_coverage"
+        state["after_hours_final_sweep_completed_at_utc"] = _now_utc_text()
+    else:
+        state["after_hours_final_sweep_status"] = "in_progress"
+    state["last_after_hours_final_sweep_debug"] = {
+        "ok": True,
+        "batches_run": batches_run,
+        "new_candidates": len([x for x in all_new if x.get("sharia_status") != "blocked"]),
+        "quote_debug": quote_debug,
+        "source": "FMP only; Polygon optional/not required",
+        "rule_ar": "V2W9e: فحص نهائي بعد انتهاء after-hours من FMP فقط، يرفع/يحدث قائمة الغد ولا يفتح شراء مباشر.",
     }
     _save_state(state)
     payload = _build_output_from_state(state, ref_debug)
@@ -697,6 +982,7 @@ def tomorrow_prep_session_status() -> dict:
     state_is_current_trade_date = bool(state_trade_date and window_trade_date and state_trade_date == window_trade_date)
     stale_reason = "" if saved_is_current_trade_date else f"saved_trade_date {saved_trade_date or '-'} لا يساوي trade_date الحالي {window_trade_date or '-'}"
     rescue = tomorrow_prep_rescue_window_info()
+    final_sweep_window = tomorrow_prep_final_sweep_window_info()
     saved_status_text = str((saved or {}).get("status", "") or "") if isinstance(saved, dict) else ""
     saved_progress_dict = (saved or {}).get("progress", {}) if isinstance(saved, dict) else {}
     try:
@@ -706,6 +992,12 @@ def tomorrow_prep_session_status() -> dict:
     saved_completed = bool(saved_is_current_trade_date and saved_status_text.startswith("completed") and saved_coverage_pct >= 99.9)
     current_incomplete = bool(saved_is_current_trade_date and not saved_completed)
     rescue_available = bool(rescue.get("rescue_window_open") and (not saved_is_current_trade_date or current_incomplete))
+    final_sweep_status = str((saved or {}).get("after_hours_final_sweep_status_v2w9e") or (state or {}).get("after_hours_final_sweep_status") or "not_started") if isinstance(saved, dict) else "not_started"
+    final_sweep_completed = bool(final_sweep_status.startswith("completed"))
+    final_sweep_needed = bool(saved_completed and final_sweep_window.get("final_sweep_window_open") and not final_sweep_completed)
+    time_meta = (saved or {}).get("time_meta_v2w9e", {}) if isinstance(saved, dict) else {}
+    if not isinstance(time_meta, dict) or not time_meta:
+        time_meta = _time_meta_from_state(state or {})
     return {
         "ok": True,
         "version": TOMORROW_PREP_SESSION_BUILDER_VERSION,
@@ -730,11 +1022,19 @@ def tomorrow_prep_session_status() -> dict:
         "rescue_build_available_v2w9c": rescue_available,
         "rescue_continue_needed_v2w9c": current_incomplete,
         "saved_completed_v2w9c": saved_completed,
+        "time_meta_v2w9e": time_meta,
+        "source_session_date_v2w9e": time_meta.get("source_session_date", saved_trade_date),
+        "intended_for_trading_date_v2w9e": time_meta.get("intended_for_trading_date", ""),
+        "after_hours_final_sweep_window_v2w9e": final_sweep_window,
+        "after_hours_final_sweep_status_v2w9e": final_sweep_status,
+        "after_hours_final_sweep_completed_v2w9e": final_sweep_completed,
+        "after_hours_final_sweep_needed_v2w9e": final_sweep_needed,
+        "after_hours_final_sweep_available_v2w9e": final_sweep_needed,
         "rescue_window_v2w9b": rescue,
         "rescue_window_v2w9c": rescue,
         "saved_candidate_count": len((saved or {}).get("candidates") or []) if isinstance(saved, dict) else 0,
         "saved_sample": [x.get("symbol") for x in list((saved or {}).get("candidates") or [])[:30] if isinstance(x, dict)] if isinstance(saved, dict) else [],
-        "rule_ar": "V2W9c: لا تعتبر قائمة أمس صالحة؛ وإذا كانت القائمة الحالية غير مكتملة أثناء premarket/open/after-hours يواصل بناء الإنقاذ من نفس المؤشر بدل إعادة أول 6 دفعات.",
+        "rule_ar": "V2W9e: يبني قائمة أولية بعد الإغلاق من FMP ثم يكمل فحصًا نهائيًا من FMP بعد انتهاء after-hours. يعرض أوقات البداية/الانتهاء ويعتبر Polygon اختياريًا فقط.",
     }
 
 
@@ -746,17 +1046,33 @@ def format_tomorrow_prep_session_brief(data: dict) -> str:
         saved = data.get("saved")
     counts = (saved or {}).get("counts", {}) or {}
     progress = (saved or {}).get("progress", {}) or {}
+    tm = (saved or {}).get("time_meta_v2w9e", {}) or {}
+    if not isinstance(tm, dict) or not tm:
+        try:
+            tm = _time_meta_from_state(_load_state())
+        except Exception:
+            tm = {}
+    final_status = (saved or {}).get("after_hours_final_sweep_status_v2w9e") or ""
+    if not final_status:
+        try:
+            final_status = str((_load_state() or {}).get("after_hours_final_sweep_status") or "not_started")
+        except Exception:
+            final_status = "not_started"
+    stage = "نهائية بعد After-Hours" if str(final_status).startswith("completed") else "مبدئية بعد الإغلاق"
     lines = [
-        "V2W9c — Tomorrow Prep / Rescue Continue من FMP",
-        f"تاريخ الجلسة: {(saved or {}).get('trade_date', '-')}",
+        f"V2W9e — Tomorrow Prep من FMP ({stage})",
+        f"مبنية من جلسة: {tm.get('source_session_date') or (saved or {}).get('trade_date', '-')}",
+        f"مخصصة لتداول: {tm.get('intended_for_trading_date') or '-'}",
         f"الحالة: {(saved or {}).get('status', '-')}",
-        f"التقدم: {progress.get('cursor', 0)}/{progress.get('universe_count', 0)} ({progress.get('coverage_pct', 0)}%) | دفعات: {progress.get('batches_done', 0)}/{progress.get('max_batches_per_session', 0)}",
-        f"مرشحون: {counts.get('selected_total', 0)} | Low-Float proxy: {counts.get('low_float_proxy', 0)} | Pre-Trigger: {counts.get('pre_trigger', 0)} | Extended: {counts.get('extended_price_seen', 0)}",
+        f"التقدم الأولي: {progress.get('cursor', 0)}/{progress.get('universe_count', 0)} ({progress.get('coverage_pct', 0)}%) | دفعات: {progress.get('batches_done', 0)}/{progress.get('max_batches_per_session', 0)}",
+        f"انتهى الفحص الأول: {tm.get('initial_after_close_completed_at_ksa') or tm.get('completed_at_ksa') or '-'}",
+        f"فحص after-hours النهائي: {final_status} | بدأ: {tm.get('after_hours_final_sweep_started_at_ksa') or '-'} | انتهى: {tm.get('after_hours_final_sweep_completed_at_ksa') or '-'}",
+        f"مرشحون: {counts.get('selected_total', 0)} | Low-Float proxy: {counts.get('low_float_proxy', 0)} | Pre-Trigger: {counts.get('pre_trigger', 0)} | Extended: {counts.get('extended_price_seen', 0)} | AH confirmed: {counts.get('after_hours_confirmed', 0)}",
         "",
         "أفضل المرشحين:",
     ]
     for item in list((saved or {}).get("candidates") or [])[:25]:
         lines.append(f"- {item.get('symbol')}: score={item.get('score')} | price={item.get('price')} | chg={item.get('change_pct')}% | sharia={item.get('sharia_status')} | {'، '.join(list(item.get('reasons_ar') or item.get('reasons') or [])[:2])}")
     lines.append("")
-    lines.append("هذه قائمة تجهيز فقط. لا تغير Strong/Cautious ولا الشرعية ولا تفتح شراء مباشر.")
+    lines.append("هذه قائمة تجهيز فقط. لا تغير Strong/Cautious ولا الشرعية ولا تفتح شراء مباشر. Polygon اختياري للتعزيز فقط.")
     return "\n".join(lines)
