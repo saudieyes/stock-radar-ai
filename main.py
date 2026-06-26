@@ -4618,6 +4618,280 @@ def diagnostics_list_freshness():
     }
 
 
+# ---------------------------------------------------------------------------
+# V2W10a — Fast UI Section Snapshot Layer
+# ---------------------------------------------------------------------------
+# These endpoints are display-only. They do NOT change Strong/Cautious,
+# Telegram, paper trading, Sharia decisions, or discovery logic. They split the
+# already-built scan snapshot into lightweight section endpoints so the mobile UI
+# can render progressively instead of downloading one very large payload.
+UI_FAST_SNAPSHOT_VERSION = "fast_ui_section_snapshot_v2w10a_2026_06_26"
+UI_FAST_SNAPSHOT_CACHE: dict = {"built_at_ts": 0.0, "snapshot": None}
+
+UI_SECTION_DEFS = {
+    "live-tight": {"data_key": "live_tight_monitoring_candidates", "content_id": "live-tight-monitoring-section-content", "title": "⚡ تأكيد حي سريع / مراقبة لصيقة V2V", "priority": 10},
+    "critical-pre-explosion": {"data_key": "critical_pre_explosion_watch", "content_id": "critical-pre-explosion-section-content", "title": "🚨 مرشحو انفجار حرجة قبل السوق", "priority": 20},
+    "promotion-bridge": {"data_key": "promotion_bridge_candidates", "content_id": "promotion-bridge-section-content", "title": "🧭 جسر الترقية قبل الافتتاح", "priority": 30},
+    "learning-opportunity": {"data_key": "learning_opportunity_candidates", "content_id": "learning-opportunity-section-content", "title": "🧠 مرشحو طبقة التعلم / تحضير مبكر", "priority": 40},
+    "strong": {"data_key": "strong_entries", "content_id": "strong-section-content", "title": "دخول قوي", "priority": 50},
+    "cautious": {"data_key": "cautious_entries", "content_id": "cautious-section-content", "title": "دخول بحذر", "priority": 60},
+    "pre-trigger": {"data_key": "pre_trigger_candidates", "content_id": "pre-trigger-section-content", "title": "⏳ قريب من التفعيل / Pre-Trigger", "priority": 70},
+    "support-bounce": {"data_key": "support_bounce_candidates", "content_id": "support-bounce-section-content", "title": "↩️ ارتداد من دعم / Support Bounce", "priority": 80},
+    "reclaim": {"data_key": "reclaim_candidates", "content_id": "reclaim-section-content", "title": "🔁 Reclaim / استعادة مستوى", "priority": 90},
+    "continuation-pullback": {"data_key": "continuation_pullback_candidates", "content_id": "continuation-pullback-section-content", "title": "📈 Continuation Pullback", "priority": 100},
+    "small-stock-classic": {"data_key": "small_stock_classic_radar", "content_id": "small-stock-classic-section-content", "title": "🎯 الأسهم الصغيرة الكلاسيكية", "priority": 110},
+    "early-movement": {"data_key": "early_movement_watchlist", "content_id": "early-movement-section-content", "title": "🟣 مراقبة الحركة المبكرة", "priority": 120},
+    "low-float-premarket": {"data_key": "low_float_premarket_radar", "content_id": "low-float-premarket-section-content", "title": "🚀 Low-Float / Pre-Market Radar", "priority": 130},
+    "low-float-raw": {"data_key": "low_float_fast_lane_raw_watch", "content_id": "low-float-fast-lane-raw-section-content", "title": "🧪 مرشحو Fast Lane الخام — مراقبة عالية المخاطر", "priority": 140},
+    "high-risk-day": {"data_key": "high_risk_day_trades", "content_id": "high-risk-day-trades-section-content", "title": "⚡ مضاربة عالية المخاطرة", "priority": 150},
+    "gap-fill": {"data_key": "gap_fill_watch", "content_id": "gap-fill-section-content", "title": "🕳️ Gap Fill Watch", "priority": 160},
+    "catalyst": {"data_key": "catalyst_watch", "content_id": "catalyst-watch-section-content", "title": "📰 Catalyst / News Watch", "priority": 170},
+    "gray-strong": {"data_key": "gray_strong", "content_id": "gray-strong-section-content", "title": "فرص قوية غير محسومة شرعيًا", "priority": 180},
+    "premarket": {"data_key": "premarket_setups", "content_id": "premarket-section-content", "title": "تهيئة قوية قبل الافتتاح", "priority": 190},
+    "watch": {"data_key": "watchlist", "content_id": "watch-section-content", "title": "المراقبة", "priority": 200},
+}
+
+
+def _ui_fast_cache_ttl_sec(phase: str) -> int:
+    if _is_active_market_phase(phase):
+        return 20
+    if str(phase or "") in {"pre", "after", "overnight"}:
+        return 45
+    return 180
+
+
+def _ui_section_rows_from_payload(payload: dict, data_key: str) -> list[dict]:
+    if not isinstance(payload, dict) or not data_key:
+        return []
+    rows = payload.get(data_key, [])
+    if isinstance(rows, list):
+        return [x for x in rows if isinstance(x, dict)]
+    opp = payload.get("opportunity_radar")
+    if isinstance(opp, dict) and isinstance(opp.get(data_key), list):
+        return [x for x in opp.get(data_key, []) if isinstance(x, dict)]
+    groups = payload.get("groups")
+    if isinstance(groups, dict) and isinstance(groups.get(data_key), dict):
+        items = groups.get(data_key, {}).get("items", [])
+        if isinstance(items, list):
+            return [x for x in items if isinstance(x, dict)]
+    return []
+
+
+def _ui_build_fast_snapshot(force: bool = False, limit_per_section: int = 60) -> dict:
+    """Build a cached, sectionized UI snapshot from the saved scan.
+
+    It intentionally reads the latest saved scan and distribution logic instead
+    of running a new market scan. This keeps /ui/* endpoints fast and prevents
+    endpoint-per-section from multiplying Railway/FMP pressure.
+    """
+    phase = get_market_phase()
+    now_ts = time.time()
+    ttl = _ui_fast_cache_ttl_sec(phase)
+    cached = UI_FAST_SNAPSHOT_CACHE.get("snapshot")
+    if (not force) and isinstance(cached, dict) and (now_ts - float(UI_FAST_SNAPSHOT_CACHE.get("built_at_ts", 0.0) or 0.0) <= ttl):
+        return cached
+
+    saved = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = saved.get("rows", []) if isinstance(saved, dict) else []
+    diag = dict(saved.get("diagnostics", {}) or {}) if isinstance(saved, dict) else {}
+    updated_at = str((saved or {}).get("updated_at", "") or "") if isinstance(saved, dict) else ""
+    if not isinstance(rows, list) or not rows:
+        snap = {
+            "ok": False,
+            "version": UI_FAST_SNAPSHOT_VERSION,
+            "error": "no_saved_scan_snapshot",
+            "market_phase": phase,
+            "market_phase_label": market_phase_label(phase),
+            "snapshot_updated_at": updated_at,
+            "sections": [],
+            "rule_ar": "لا يعيد هذا المسار فحص السوق؛ يحتاج last_trade_scan_snapshot محفوظ أولًا.",
+        }
+        UI_FAST_SNAPSHOT_CACHE.update({"built_at_ts": now_ts, "snapshot": snap})
+        return snap
+
+    try:
+        age_sec = _parse_scan_snapshot_age_sec(saved) if isinstance(saved, dict) else None
+    except Exception:
+        age_sec = None
+    try:
+        payload = _build_trade_scan_response(
+            rows,
+            diag,
+            include_all=False,
+            cache_hit=True,
+            cache_age_sec=age_sec,
+            payload_note="V2W10a: لقطة واجهة سريعة مقسمة إلى أقسام؛ لا تعيد فحص السوق.",
+        )
+    except Exception as exc:
+        snap = {
+            "ok": False,
+            "version": UI_FAST_SNAPSHOT_VERSION,
+            "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+            "market_phase": phase,
+            "market_phase_label": market_phase_label(phase),
+            "snapshot_updated_at": updated_at,
+            "sections": [],
+        }
+        UI_FAST_SNAPSHOT_CACHE.update({"built_at_ts": now_ts, "snapshot": snap})
+        return snap
+
+    sections: dict[str, dict] = {}
+    summary_sections = []
+    for section_key, meta in sorted(UI_SECTION_DEFS.items(), key=lambda kv: int(kv[1].get("priority", 999))):
+        data_key = str(meta.get("data_key") or "")
+        all_items = _ui_section_rows_from_payload(payload, data_key)
+        items = all_items[:max(1, min(int(limit_per_section or 60), 250))]
+        sections[section_key] = {
+            "section_key": section_key,
+            "data_key": data_key,
+            "content_id": str(meta.get("content_id") or ""),
+            "title": str(meta.get("title") or section_key),
+            "priority": int(meta.get("priority", 999) or 999),
+            "count": len(all_items),
+            "items": items,
+            "omitted": max(0, len(all_items) - len(items)),
+            "preview_symbols": [normalize_symbol_text((x or {}).get("symbol", "")) for x in all_items[:3] if isinstance(x, dict)],
+        }
+        summary_sections.append({k: sections[section_key][k] for k in ["section_key", "data_key", "content_id", "title", "priority", "count", "omitted", "preview_symbols"]})
+
+    counts = {meta["data_key"] + "_count": int(meta["count"] or 0) for meta in sections.values() if meta.get("data_key")}
+    snap = {
+        "ok": True,
+        "version": UI_FAST_SNAPSHOT_VERSION,
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "snapshot_updated_at": updated_at,
+        "snapshot_age_sec": age_sec,
+        "built_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+        "ttl_sec": ttl,
+        "source": "last_trade_scan_snapshot_sectionized",
+        "counts": counts,
+        "sections": summary_sections,
+        "section_data": sections,
+        "meta": {
+            "updated_at": payload.get("updated_at"),
+            "analysis_updated_at": payload.get("analysis_updated_at"),
+            "cache_hit": payload.get("cache_hit"),
+            "payload_note": payload.get("payload_note"),
+            "universe_count": payload.get("universe_count"),
+            "source_engine_version": payload.get("source_engine_version"),
+            "opportunity_radar_version": payload.get("opportunity_radar_version"),
+            "tomorrow_prep_final_bridge_v2w9f": payload.get("tomorrow_prep_final_bridge_v2w9f", {}),
+        },
+        "opening_focus": payload.get("opening_focus", []),
+        "rule_ar": "V2W10a: الواجهة تقرأ summary ثم كل قسم على حدة من snapshot جاهز. هذا لا يجعل القوائم ثابتة؛ تحديث السعر والمسح الحي يبقيان منفصلين.",
+    }
+    UI_FAST_SNAPSHOT_CACHE.update({"built_at_ts": now_ts, "snapshot": snap})
+    return snap
+
+
+@app.get("/ui/snapshot-summary")
+def ui_snapshot_summary(force: bool = False, limit_per_section: int = 60):
+    snap = _ui_build_fast_snapshot(force=bool(force), limit_per_section=int(limit_per_section or 60))
+    if not snap.get("ok"):
+        return snap
+    return {
+        "ok": True,
+        "version": UI_FAST_SNAPSHOT_VERSION,
+        "market_phase": snap.get("market_phase"),
+        "market_phase_label": snap.get("market_phase_label"),
+        "snapshot_updated_at": snap.get("snapshot_updated_at"),
+        "snapshot_age_sec": snap.get("snapshot_age_sec"),
+        "built_at": snap.get("built_at"),
+        "ttl_sec": snap.get("ttl_sec"),
+        "source": snap.get("source"),
+        "counts": snap.get("counts", {}),
+        "sections": snap.get("sections", []),
+        "meta": snap.get("meta", {}),
+        "opening_focus": snap.get("opening_focus", []),
+        "rule_ar": snap.get("rule_ar"),
+    }
+
+
+@app.get("/ui/section/{section_key}")
+def ui_section(section_key: str, limit: int = 25, offset: int = 0, force: bool = False):
+    key = str(section_key or "").strip().lower()
+    if key not in UI_SECTION_DEFS:
+        return {"ok": False, "error": "unknown_section", "section_key": key, "known_sections": list(UI_SECTION_DEFS.keys())}
+    snap = _ui_build_fast_snapshot(force=bool(force), limit_per_section=max(int(limit or 25), 60))
+    if not snap.get("ok"):
+        return snap
+    sec = dict((snap.get("section_data") or {}).get(key) or {})
+    items = sec.get("items", []) if isinstance(sec.get("items"), list) else []
+    off = max(0, int(offset or 0))
+    lim = max(1, min(int(limit or 25), 250))
+    sliced = items[off:off + lim]
+    return {
+        "ok": True,
+        "version": UI_FAST_SNAPSHOT_VERSION,
+        "section_key": key,
+        "data_key": sec.get("data_key"),
+        "content_id": sec.get("content_id"),
+        "title": sec.get("title"),
+        "count": int(sec.get("count", len(items)) or 0),
+        "offset": off,
+        "limit": lim,
+        "items": sliced,
+        "returned": len(sliced),
+        "omitted": max(0, int(sec.get("count", len(items)) or 0) - (off + len(sliced))),
+        "preview_symbols": sec.get("preview_symbols", []),
+        "snapshot_updated_at": snap.get("snapshot_updated_at"),
+        "snapshot_age_sec": snap.get("snapshot_age_sec"),
+        "built_at": snap.get("built_at"),
+        "rule_ar": "هذا القسم مقروء من snapshot جاهز ومقسم؛ لا يعيد فحص السوق ولا يغير قرارات الشراء.",
+    }
+
+
+@app.get("/ui/price-patch")
+def ui_price_patch(symbols: str = "", prefer_cache: bool | None = None, allow_fallback: bool = True):
+    phase = get_market_phase()
+    if prefer_cache is None:
+        prefer_cache = _price_overlay_cache_allowed_for_phase(phase)
+    clean = []
+    for raw in str(symbols or "").replace(";", ",").split(","):
+        sym = normalize_symbol_text(raw)
+        if sym and sym not in clean:
+            clean.append(sym)
+    clean = clean[:260]
+    if not clean:
+        snap = _ui_build_fast_snapshot(force=False, limit_per_section=30)
+        for sec in (snap.get("section_data") or {}).values() if isinstance(snap, dict) else []:
+            for row in (sec.get("items") or [])[:12]:
+                sym = normalize_symbol_text((row or {}).get("symbol", ""))
+                if sym and sym not in clean:
+                    clean.append(sym)
+                if len(clean) >= 220:
+                    break
+            if len(clean) >= 220:
+                break
+    bundle = get_live_quotes(clean, prefer_cache=bool(prefer_cache), allow_fallback=bool(allow_fallback)) if clean else {"quotes": {}, "diagnostics": {}}
+    return {
+        "ok": True,
+        "version": "fast_ui_price_patch_v2w10a_2026_06_26",
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "symbols_requested": len(clean),
+        "quotes_available": len((bundle or {}).get("quotes", {}) if isinstance(bundle, dict) else {}),
+        "quotes": (bundle or {}).get("quotes", {}) if isinstance(bundle, dict) else {},
+        "diagnostics": (bundle or {}).get("diagnostics", {}) if isinstance(bundle, dict) else {},
+        "rule_ar": "تحديث أسعار صغير للرموز الظاهرة فقط؛ لا يعيد تحميل القوائم ولا يسبب قفزات.",
+    }
+
+
+@app.get("/diagnostics/ui-fast-snapshot")
+def diagnostics_ui_fast_snapshot():
+    snap = _ui_build_fast_snapshot(force=False, limit_per_section=60)
+    return {
+        "ok": bool(snap.get("ok")),
+        "version": UI_FAST_SNAPSHOT_VERSION,
+        "cache_age_sec": round(time.time() - float(UI_FAST_SNAPSHOT_CACHE.get("built_at_ts", 0.0) or 0.0), 2),
+        "snapshot_updated_at": snap.get("snapshot_updated_at"),
+        "sections": snap.get("sections", []),
+        "counts": snap.get("counts", {}),
+        "error": snap.get("error", ""),
+    }
+
+
 @app.get("/polygon-weekly/status")
 def polygon_weekly_status():
     data = load_weekly_watchlist()
