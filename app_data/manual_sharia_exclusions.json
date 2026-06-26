@@ -1071,6 +1071,14 @@
     "symbol": "CNH",
     "updated_at": "2026-06-25 13:10:33"
   },
+  "CNVS": {
+    "excluded_at": "2026-06-26 15:44:15",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CNVS",
+    "updated_at": "2026-06-26 15:44:15"
+  },
   "COMP": {
     "excluded_at": "2026-06-17 14:26:40",
     "note": "استبعاد يدوي شرعي",
@@ -1526,6 +1534,14 @@
     "source": "manual",
     "symbol": "EGY",
     "updated_at": "2026-06-20 01:05:09"
+  },
+  "EIKN": {
+    "excluded_at": "2026-06-26 15:45:08",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "EIKN",
+    "updated_at": "2026-06-26 15:45:08"
   },
   "ELDN": {
     "excluded_at": "2026-06-23 11:01:11",
