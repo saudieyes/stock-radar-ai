@@ -37,7 +37,7 @@ except Exception:  # pragma: no cover
     def get_manual_sharia_exclusions_map():
         return {}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w11_dynamic_pool_live_scan_backfill_2026_06_26"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w12b_dynamic_pool_live_scan_first_diff_ready_2026_06_26"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -73,7 +73,7 @@ V2U5_SHARIA_REPLACEMENT_VERSION = "sharia_replacement_engine_v2w9_manual_exclusi
 V2W9_LIVE_TIGHT_ACTIVE_MAX_AGE_MIN = 45.0
 V2W9_PREPARED_VISIBLE_PHASES = {"pre_market", "premarket"}
 V2W9_HARD_HARAM_REASON_KEYWORDS = {"casino", "gambling", "betting", "tobacco", "alcohol", "brewery", "distillery", "sportsbook"}
-V2W11_DYNAMIC_POOL_VERSION = "dynamic_pool_reserve_promotion_v2w11_2026_06_26"
+V2W11_DYNAMIC_POOL_VERSION = "dynamic_pool_reserve_promotion_v2w12b_live_scan_first_2026_06_26"
 V2W11_INACTIVE_SYMBOLS_DEFAULT = {"LTHM", "ALTM"}
 V2W11_INACTIVE_SYMBOLS_ENV = {
     x.strip().upper() for x in str(os.getenv("INACTIVE_TRADABILITY_SYMBOLS", "") or "").split(",") if x.strip()
@@ -3443,18 +3443,26 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
         score += 18.0
     tags = _row_source_tags_v2w11(row)
     live_bonus = 0.0
+    # V2W12b: live scan must not be a weak secondary source.  If a live-scan
+    # candidate is stronger than yesterday/reserve candidates, it should win the
+    # Top-N window.  This is ranking-only; final Strong/Cautious gates remain
+    # unchanged.
     if tags & V2W11_LIVE_SOURCE_KEYS:
-        live_bonus += 140.0
+        live_bonus += 260.0
     if row.get("live_tight_monitoring_v2v") or row.get("live_tight_memory_v2v"):
-        live_bonus += 180.0
+        live_bonus += 320.0
     if row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2u"):
-        live_bonus += 160.0
+        live_bonus += 280.0
     if row.get("micro_explosion_capture_v2r") or row.get("micro_explosion_capture_v2r1"):
-        live_bonus += 120.0
+        live_bonus += 210.0
     if row.get("low_float_fast_lane") or row.get("low_float_fast_lane_v1"):
-        live_bonus += 90.0
+        live_bonus += 150.0
     score += live_bonus
     change = _change_pct(row)
+    if live_bonus > 0 and 1.25 <= change <= 9.5:
+        score += 95.0
+    elif live_bonus > 0 and 9.5 < change < V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT:
+        score += 30.0
     price = _price(row)
     trigger = _entry(row)
     if trigger > 0 and price > 0:
@@ -5186,7 +5194,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "display_limit_per_section": max(1, int(limit or DEFAULT_SECTION_LIMIT)),
         "dynamic_pool_version_v2w11": V2W11_DYNAMIC_POOL_VERSION,
         "dynamic_pool_debug_v2w11": dynamic_pool_debug_v2w11,
-        "dynamic_pool_rule_ar": "القوائم ليست 12 سهمًا ثابتًا: كل قسم يعرض أعلى N من pool أكبر، ويملأ الفراغ من الاحتياط بعد الشرعية/الخطة/التداول/التمدد، مع أولوية لمصادر Live Scan.",
+        "dynamic_pool_rule_ar": "القوائم ليست 12 سهمًا ثابتًا: كل قسم يعرض أعلى N من pool أكبر، ويملأ الفراغ من الاحتياط بعد الشرعية/الخطة/التداول/التمدد. في أثناء السوق، مرشح live scan الأقوى يتقدم على الاحتياط وقائمة أمس.",
         "rule_ar": "Strong يبقى صارمًا؛ أثناء الإغلاق/قبل الافتتاح تظهر أقسام تحضيرية لمراجعة الفرص والمقاومة والدعم بدون تحويلها إلى BUY_NOW.",
         "counts_by_stage": raw_counts,
         "suppressed_high_price_count": len(set(suppressed_high_price)),
