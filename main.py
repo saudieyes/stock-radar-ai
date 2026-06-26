@@ -4576,6 +4576,7 @@ def diagnostics_list_freshness():
             bridge_debug["preview_merge"] = merge_debug
             bridge_debug["preview_display_limit_per_section"] = int(opp_preview.get("display_limit_per_section", 0) or 0)
             bridge_debug["preview_section_bridge_debug_v2w9g"] = opp_preview.get("tomorrow_prep_section_bridge_debug_v2w9g", {})
+            bridge_debug["preview_dynamic_pool_debug_v2w11"] = opp_preview.get("dynamic_pool_debug_v2w11", {})
     except Exception as exc:
         displayed_error = f"{type(exc).__name__}: {str(exc)[:160]}"
 
@@ -4613,8 +4614,9 @@ def diagnostics_list_freshness():
             "fresh": bool(bridge_debug.get("used") and len(syms_low) > 0),
             **low_display,
         },
+        "dynamic_pool_v2w11": bridge_debug.get("preview_dynamic_pool_debug_v2w11", {}),
         "display_preview_error": displayed_error,
-        "rule_ar": "V2W9g: fresh لا يعني فقط أن الجسر موجود؛ التشخيص يعرض أيضًا كم سهم ظهر فعليًا من الجسر داخل كل قائمة بعد الترتيب والحدّ المرئي.",
+        "rule_ar": "V2W11: fresh لا يعني فقط أن الجسر موجود؛ التشخيص يعرض أيضًا pool/reserve/backfill حتى لا تبقى القوائم ثابتة.",
     }
 
 
