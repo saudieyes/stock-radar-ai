@@ -71,6 +71,14 @@
     "symbol": "ACRE",
     "updated_at": "2026-06-25 11:00:28"
   },
+  "ACTG": {
+    "excluded_at": "2026-06-26 11:33:41",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ACTG",
+    "updated_at": "2026-06-26 11:36:50"
+  },
   "ADAG": {
     "excluded_at": "2026-06-24 17:46:47",
     "note": "استبعاد يدوي شرعي",
@@ -2790,6 +2798,14 @@
     "source": "manual",
     "symbol": "ODV",
     "updated_at": "2026-06-26 04:43:55"
+  },
+  "OEC": {
+    "excluded_at": "2026-06-26 11:34:10",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "OEC",
+    "updated_at": "2026-06-26 11:34:10"
   },
   "OLMA": {
     "excluded_at": "2026-06-23 14:29:13",
