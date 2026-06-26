@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Body, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, PlainTextResponse
 import requests
 import os
@@ -287,6 +288,8 @@ from app.tomorrow_prep_session_builder import (
 )
 
 app = FastAPI()
+# V2W12b: compress JSON payloads so dynamic snapshots/diffs do not burn Railway egress.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 try:
     init_db()
@@ -4617,6 +4620,445 @@ def diagnostics_list_freshness():
         "dynamic_pool_v2w11": bridge_debug.get("preview_dynamic_pool_debug_v2w11", {}),
         "display_preview_error": displayed_error,
         "rule_ar": "V2W11: fresh لا يعني فقط أن الجسر موجود؛ التشخيص يعرض أيضًا pool/reserve/backfill حتى لا تبقى القوائم ثابتة.",
+    }
+
+
+
+# ---------------------------------------------------------------------------
+# V2W12b — Dynamic Snapshot Diff Engine
+# ---------------------------------------------------------------------------
+# Permanent display layer: do not rerun a heavy scan on every page load, do not
+# show a misleading hidden cache, and do not reload a 20MB radar payload for every
+# background scan.  The page opens the latest ready dynamic snapshot, prices are
+# patched separately, and membership changes are delivered as section diffs.
+V2W12B_DISPLAY_VERSION = "dynamic_snapshot_diff_engine_v2w12b_2026_06_26"
+V2W12B_SNAPSHOT_KEY = "dynamic_display_snapshot_v2w12b"
+V2W12B_HISTORY_KEY = "dynamic_display_snapshot_history_v2w12b"
+V2W12B_BUILD_LOCK = threading.Lock()
+
+V2W12B_SECTION_KEYS = [
+    "strong_entries",
+    "cautious_entries",
+    "live_tight_monitoring_candidates",
+    "critical_pre_explosion_watch",
+    "promotion_bridge_candidates",
+    "learning_opportunity_candidates",
+    "pre_trigger_candidates",
+    "support_bounce_candidates",
+    "reclaim_candidates",
+    "continuation_pullback_candidates",
+    "small_stock_classic_radar",
+    "early_movement_watchlist",
+    "low_float_premarket_radar",
+    "low_float_fast_lane_raw_watch",
+    "high_risk_day_trades",
+    "gap_fill_watch",
+    "catalyst_watch",
+    "premarket_setups",
+    "gray_strong",
+    "watchlist",
+]
+
+V2W12B_SECTION_LABELS = {
+    "strong_entries": "دخول قوي",
+    "cautious_entries": "دخول بحذر",
+    "live_tight_monitoring_candidates": "تأكيد حي سريع / V2V",
+    "critical_pre_explosion_watch": "مرشحو انفجار حرجة قبل السوق",
+    "promotion_bridge_candidates": "جسر الترقية",
+    "learning_opportunity_candidates": "طبقة التعلم / تحضير",
+    "pre_trigger_candidates": "قريب من التفعيل / Pre-Trigger",
+    "support_bounce_candidates": "ارتداد من دعم",
+    "reclaim_candidates": "Reclaim",
+    "continuation_pullback_candidates": "Continuation Pullback",
+    "small_stock_classic_radar": "الأسهم الصغيرة الكلاسيكية",
+    "early_movement_watchlist": "الحركة المبكرة",
+    "low_float_premarket_radar": "Low-Float / Pre-Market Radar",
+    "low_float_fast_lane_raw_watch": "Fast Lane الخام",
+    "high_risk_day_trades": "مضاربة عالية المخاطرة",
+    "gap_fill_watch": "Gap Fill Watch",
+    "catalyst_watch": "Catalyst / News Watch",
+    "premarket_setups": "تهيئة قوية قبل الافتتاح",
+    "gray_strong": "قوي غير محسوم شرعيًا",
+    "watchlist": "المراقبة",
+}
+
+
+def _v2w12b_now_label() -> str:
+    return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _v2w12b_row_key(row: dict) -> str:
+    return normalize_symbol_text((row or {}).get("symbol", ""))
+
+
+def _v2w12b_section_items(payload: dict, key: str) -> list[dict]:
+    rows = (payload or {}).get(key, [])
+    if isinstance(rows, list):
+        return [x for x in rows if isinstance(x, dict)]
+    opp = (payload or {}).get("opportunity_radar")
+    if isinstance(opp, dict) and isinstance(opp.get(key), list):
+        return [x for x in opp.get(key, []) if isinstance(x, dict)]
+    return []
+
+
+def _v2w12b_section_signature(payload: dict) -> dict:
+    sig = {}
+    for key in V2W12B_SECTION_KEYS:
+        rows = _v2w12b_section_items(payload, key)
+        sig[key] = [
+            _v2w12b_row_key(x) for x in rows
+            if isinstance(x, dict) and _v2w12b_row_key(x)
+        ]
+    return sig
+
+
+def _v2w12b_scan_id(source_updated_at: str, payload: dict) -> str:
+    try:
+        sig = _v2w12b_section_signature(payload)
+        raw = json.dumps({"source_updated_at": source_updated_at, "sig": sig}, sort_keys=True, ensure_ascii=False)
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+        base = re.sub(r"[^0-9A-Za-z]+", "", str(source_updated_at or "snapshot"))[-12:]
+        return f"v2w12b_{base}_{digest}"
+    except Exception:
+        return f"v2w12b_{int(time.time())}"
+
+
+def _v2w12b_count_live_source_rows(payload: dict) -> int:
+    try:
+        count = 0
+        seen: set[str] = set()
+        live_keys = {
+            "live_tight_monitoring_v2v", "intraday_early_ramp", "dip_reclaim_radar",
+            "quiet_accumulation_radar", "live_ignition_hot_lane", "fmp_live_confirmed",
+            "big_explosion_live_lane_v2u", "big_explosion_live_lane_v2t",
+            "low_float_fast_lane_v1", "micro_explosion_capture", "micro_explosion_capture_v2r",
+        }
+        for key in V2W12B_SECTION_KEYS:
+            for row in _v2w12b_section_items(payload, key):
+                sym = _v2w12b_row_key(row)
+                if not sym or sym in seen:
+                    continue
+                hay = " ".join(str(row.get(k, "") or "") for k in ["source_layer", "first_source_layer", "source_origin", "source_priority_lane", "source_reason", "first_source_reason"])
+                tags = row.get("source_reason_tags") or row.get("source_tags") or []
+                if isinstance(tags, list):
+                    hay += " " + " ".join(str(x or "") for x in tags)
+                if row.get("live_tight_monitoring_v2v") or row.get("live_tight_memory_v2v") or any(k in hay for k in live_keys):
+                    seen.add(sym)
+                    count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def _v2w12b_sanitize_payload(payload: dict, *, limit_per_section: int = 30) -> dict:
+    """Return a UI-compatible payload without duplicate/heavy debug arrays.
+
+    Top-level visible sections remain intact for the current index.html renderer.
+    Duplicate lists inside opportunity_radar/groups/all_results are removed to cut
+    mobile JSON parse time and Railway egress, while diagnostics/counts remain.
+    """
+    out = dict(payload or {})
+    lim = max(1, min(int(limit_per_section or 30), 60))
+    for key in V2W12B_SECTION_KEYS:
+        rows = out.get(key)
+        if isinstance(rows, list):
+            out[key] = rows[:lim]
+            out[f"{key}_count"] = int(out.get(f"{key}_count", len(rows)) or len(rows))
+    out["all_results"] = []
+    out["all_results_omitted"] = int((payload or {}).get("all_results_omitted", 0) or 0)
+    if "groups" in out:
+        out.pop("groups", None)
+    opp = out.get("opportunity_radar")
+    if isinstance(opp, dict):
+        clean_opp = {}
+        for k, v in opp.items():
+            # top-level sections carry rows. Keep nested summaries/debug only.
+            if isinstance(v, list) and k in V2W12B_SECTION_KEYS:
+                clean_opp[f"{k}_count"] = len(v)
+                continue
+            clean_opp[k] = v
+        out["opportunity_radar"] = clean_opp
+    out["payload_mode"] = "v2w12b_dynamic_snapshot_compact_sections"
+    return out
+
+
+def _v2w12b_snapshot_summary(payload: dict) -> dict:
+    sections = {}
+    total_visible = 0
+    for key in V2W12B_SECTION_KEYS:
+        rows = _v2w12b_section_items(payload, key)
+        syms = [_v2w12b_row_key(x) for x in rows if _v2w12b_row_key(x)]
+        sections[key] = {
+            "label_ar": V2W12B_SECTION_LABELS.get(key, key),
+            "count": len(rows),
+            "symbols": syms[:20],
+            "preview_symbols": syms[:4],
+        }
+        total_visible += len(rows)
+    return {
+        "total_visible_cards": total_visible,
+        "sections": sections,
+        "live_source_visible_count": _v2w12b_count_live_source_rows(payload),
+    }
+
+
+def _v2w12b_store_history(snapshot: dict) -> None:
+    try:
+        hist = get_json(V2W12B_HISTORY_KEY, {}) or {}
+        items = hist.get("items", []) if isinstance(hist, dict) else []
+        items = [x for x in items if isinstance(x, dict) and x.get("scan_id") != snapshot.get("scan_id")]
+        items.append({
+            "scan_id": snapshot.get("scan_id"),
+            "source_snapshot_at": snapshot.get("source_snapshot_at"),
+            "built_at": snapshot.get("built_at"),
+            "summary": snapshot.get("summary", {}),
+            "payload": snapshot.get("payload", {}),
+        })
+        items = items[-4:]
+        set_json(V2W12B_HISTORY_KEY, {"version": V2W12B_DISPLAY_VERSION, "items": items})
+    except Exception:
+        pass
+
+
+def _v2w12b_find_history_snapshot(scan_id: str) -> dict | None:
+    try:
+        hist = get_json(V2W12B_HISTORY_KEY, {}) or {}
+        for item in hist.get("items", []) if isinstance(hist, dict) else []:
+            if isinstance(item, dict) and str(item.get("scan_id", "")) == str(scan_id or ""):
+                return item
+    except Exception:
+        return None
+    return None
+
+
+def _v2w12b_get_or_build_display_snapshot(force: bool = False, limit_per_section: int = 30) -> dict:
+    phase = get_market_phase()
+    saved = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = saved.get("rows", []) if isinstance(saved, dict) else []
+    source_updated_at = str((saved or {}).get("updated_at", "") or "") if isinstance(saved, dict) else ""
+    if not isinstance(rows, list) or not rows:
+        return {
+            "ok": False,
+            "version": V2W12B_DISPLAY_VERSION,
+            "error": "no_saved_scan_snapshot",
+            "message_ar": "لا توجد لقطة فحص محفوظة بعد.",
+            "market_phase": phase,
+            "market_phase_label": market_phase_label(phase),
+        }
+
+    cached = get_json(V2W12B_SNAPSHOT_KEY, {}) or {}
+    if (not force) and isinstance(cached, dict) and cached.get("ok") and str(cached.get("source_snapshot_at", "")) == source_updated_at:
+        return cached
+
+    if not V2W12B_BUILD_LOCK.acquire(blocking=False):
+        if isinstance(cached, dict) and cached.get("ok"):
+            out = dict(cached)
+            out["build_in_progress"] = True
+            return out
+        V2W12B_BUILD_LOCK.acquire()
+    try:
+        # Re-check after acquiring the lock; another request may have built it.
+        cached = get_json(V2W12B_SNAPSHOT_KEY, {}) or {}
+        if (not force) and isinstance(cached, dict) and cached.get("ok") and str(cached.get("source_snapshot_at", "")) == source_updated_at:
+            return cached
+        diag = dict((saved or {}).get("diagnostics", {}) or {})
+        age_sec = _parse_scan_snapshot_age_sec(saved) if isinstance(saved, dict) else None
+        payload = _build_trade_scan_response(
+            rows,
+            diag,
+            include_all=False,
+            cache_hit=True,
+            cache_age_sec=age_sec,
+            payload_note="V2W12b: لقطة ديناميكية جاهزة للعرض؛ العضوية من آخر مسح كامل والأسعار تُحدث عبر price patch.",
+        )
+        payload = _v2w12b_sanitize_payload(payload, limit_per_section=limit_per_section)
+        scan_id = _v2w12b_scan_id(source_updated_at, payload)
+        payload["display_snapshot_id"] = scan_id
+        payload["dynamic_display_v2w12b"] = {
+            "version": V2W12B_DISPLAY_VERSION,
+            "scan_id": scan_id,
+            "source_snapshot_at": source_updated_at,
+            "built_at": _v2w12b_now_label(),
+            "membership_updated_at": source_updated_at,
+            "price_policy_ar": "العضوية من آخر مسح كامل؛ الأسعار تتحدث منفصلة للرموز الظاهرة فقط.",
+            "live_scan_rule_ar": "إذا كان مرشح live scan أقوى من الاحتياط أو من مرشح أمس، يظهر الأعلى ترتيبًا في Top-N.",
+        }
+        snap = {
+            "ok": True,
+            "version": V2W12B_DISPLAY_VERSION,
+            "scan_id": scan_id,
+            "source_snapshot_at": source_updated_at,
+            "built_at": payload["dynamic_display_v2w12b"]["built_at"],
+            "market_phase": phase,
+            "market_phase_label": market_phase_label(phase),
+            "summary": _v2w12b_snapshot_summary(payload),
+            "payload": payload,
+            "rule_ar": "V2W12b: تعرض الصفحة آخر snapshot جاهز بوضوح، ثم تطبق فروقات القوائم والأسعار بدل إعادة تحميل ثقيل متكرر.",
+        }
+        set_json(V2W12B_SNAPSHOT_KEY, snap)
+        _v2w12b_store_history(snap)
+        return snap
+    finally:
+        try:
+            V2W12B_BUILD_LOCK.release()
+        except Exception:
+            pass
+
+
+def _v2w12b_diff_snapshots(old_payload: dict, new_payload: dict) -> dict:
+    old_symbol_to_section = {}
+    new_symbol_to_section = {}
+    for key in V2W12B_SECTION_KEYS:
+        for row in _v2w12b_section_items(old_payload, key):
+            sym = _v2w12b_row_key(row)
+            if sym:
+                old_symbol_to_section.setdefault(sym, key)
+        for row in _v2w12b_section_items(new_payload, key):
+            sym = _v2w12b_row_key(row)
+            if sym:
+                new_symbol_to_section.setdefault(sym, key)
+
+    changed_sections = {}
+    total_added = total_removed = total_moved = 0
+    for key in V2W12B_SECTION_KEYS:
+        old_rows = _v2w12b_section_items(old_payload, key)
+        new_rows = _v2w12b_section_items(new_payload, key)
+        old_map = {_v2w12b_row_key(x): x for x in old_rows if _v2w12b_row_key(x)}
+        new_map = {_v2w12b_row_key(x): x for x in new_rows if _v2w12b_row_key(x)}
+        old_syms = list(old_map.keys())
+        new_syms = list(new_map.keys())
+        if old_syms == new_syms:
+            continue
+        added = [s for s in new_syms if s not in old_map]
+        removed = [s for s in old_syms if s not in new_map]
+        moved_in = [s for s in added if old_symbol_to_section.get(s) and old_symbol_to_section.get(s) != key]
+        moved_out = [s for s in removed if new_symbol_to_section.get(s) and new_symbol_to_section.get(s) != key]
+        total_added += len([s for s in added if s not in moved_in])
+        total_removed += len([s for s in removed if s not in moved_out])
+        total_moved += len(moved_in) + len(moved_out)
+        changed_sections[key] = {
+            "data_key": key,
+            "label_ar": V2W12B_SECTION_LABELS.get(key, key),
+            "count": len(new_rows),
+            "items": new_rows,
+            "added_symbols": added[:30],
+            "removed_symbols": removed[:30],
+            "moved_in": [{"symbol": s, "from": old_symbol_to_section.get(s)} for s in moved_in[:30]],
+            "moved_out": [{"symbol": s, "to": new_symbol_to_section.get(s)} for s in moved_out[:30]],
+            "old_symbols": old_syms[:40],
+            "new_symbols": new_syms[:40],
+        }
+    return {
+        "changed_section_count": len(changed_sections),
+        "changed_sections": changed_sections,
+        "summary": {
+            "added_symbols_count": total_added,
+            "removed_symbols_count": total_removed,
+            "moved_symbols_count": total_moved,
+        },
+    }
+
+
+@app.get("/ui/dynamic-snapshot")
+def ui_dynamic_snapshot(force: bool = False, limit_per_section: int = 30):
+    snap = _v2w12b_get_or_build_display_snapshot(force=bool(force), limit_per_section=int(limit_per_section or 30))
+    if not snap.get("ok"):
+        return snap
+    payload = dict(snap.get("payload") or {})
+    payload["ok"] = True
+    payload["display_snapshot_id"] = snap.get("scan_id")
+    payload["dynamic_display_v2w12b"] = payload.get("dynamic_display_v2w12b", {})
+    payload["dynamic_display_v2w12b"].update({
+        "version": V2W12B_DISPLAY_VERSION,
+        "scan_id": snap.get("scan_id"),
+        "source_snapshot_at": snap.get("source_snapshot_at"),
+        "built_at": snap.get("built_at"),
+        "summary": snap.get("summary", {}),
+    })
+    return payload
+
+
+@app.get("/ui/dynamic-status")
+def ui_dynamic_status(client_scan_id: str = "", client_updated_at: str = ""):
+    snap = _v2w12b_get_or_build_display_snapshot(force=False, limit_per_section=30)
+    phase = get_market_phase()
+    if not snap.get("ok"):
+        return snap
+    latest_id = str(snap.get("scan_id", "") or "")
+    client_id = str(client_scan_id or "").strip()
+    new_available = bool(client_id and latest_id and client_id != latest_id)
+    return {
+        "ok": True,
+        "version": V2W12B_DISPLAY_VERSION,
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "latest_scan_id": latest_id,
+        "client_scan_id": client_id,
+        "source_snapshot_at": snap.get("source_snapshot_at"),
+        "built_at": snap.get("built_at"),
+        "new_snapshot_available": new_available,
+        "build_in_progress": bool(snap.get("build_in_progress")),
+        "summary": snap.get("summary", {}),
+        "rule_ar": "يفحص هذا المسار وجود snapshot جديد فقط؛ لا يعيد تحميل القوائم الثقيلة ولا يغير مكانك في الصفحة.",
+    }
+
+
+@app.get("/ui/dynamic-diff")
+def ui_dynamic_diff(client_scan_id: str = "", limit_per_section: int = 30):
+    latest = _v2w12b_get_or_build_display_snapshot(force=False, limit_per_section=int(limit_per_section or 30))
+    if not latest.get("ok"):
+        return latest
+    latest_id = str(latest.get("scan_id", "") or "")
+    client_id = str(client_scan_id or "").strip()
+    if not client_id or client_id == latest_id:
+        return {
+            "ok": True,
+            "version": V2W12B_DISPLAY_VERSION,
+            "latest_scan_id": latest_id,
+            "client_scan_id": client_id,
+            "has_changes": False,
+            "changed_section_count": 0,
+            "changed_sections": {},
+            "summary": {"added_symbols_count": 0, "removed_symbols_count": 0, "moved_symbols_count": 0},
+        }
+    old = _v2w12b_find_history_snapshot(client_id)
+    if not old:
+        return {
+            "ok": True,
+            "version": V2W12B_DISPLAY_VERSION,
+            "latest_scan_id": latest_id,
+            "client_scan_id": client_id,
+            "full_snapshot_required": True,
+            "reason": "client_snapshot_not_in_recent_history",
+            "snapshot": latest.get("payload", {}),
+            "summary": latest.get("summary", {}),
+            "rule_ar": "إذا كانت لقطة العميل قديمة جدًا وغير موجودة في التاريخ المختصر، ترجع نسخة كاملة واحدة بدل diff غير موثوق.",
+        }
+    diff = _v2w12b_diff_snapshots(old.get("payload", {}), latest.get("payload", {}))
+    return {
+        "ok": True,
+        "version": V2W12B_DISPLAY_VERSION,
+        "latest_scan_id": latest_id,
+        "client_scan_id": client_id,
+        "source_snapshot_at": latest.get("source_snapshot_at"),
+        "built_at": latest.get("built_at"),
+        "has_changes": bool(diff.get("changed_section_count", 0)),
+        **diff,
+        "price_only_note_ar": "الرموز التي لم تتغير عضويتها لا تُعاد بطاقتها؛ السعر يتحدث عبر /ui/price-patch أو /live-quotes.",
+    }
+
+
+@app.get("/diagnostics/dynamic-display-v2w12b")
+def diagnostics_dynamic_display_v2w12b():
+    snap = _v2w12b_get_or_build_display_snapshot(force=False, limit_per_section=30)
+    hist = get_json(V2W12B_HISTORY_KEY, {}) or {}
+    return {
+        "ok": bool(snap.get("ok")),
+        "version": V2W12B_DISPLAY_VERSION,
+        "snapshot": {k: v for k, v in snap.items() if k != "payload"},
+        "history_count": len((hist or {}).get("items", [])) if isinstance(hist, dict) else 0,
+        "history_ids": [x.get("scan_id") for x in ((hist or {}).get("items", []) if isinstance(hist, dict) else []) if isinstance(x, dict)],
+        "rule_ar": "V2W12b يوازن بين ديناميكية live scan، سرعة العرض، وتقليل ضغط Railway عبر snapshot واضح + diff + price patch.",
     }
 
 

@@ -4617,6 +4617,158 @@
       if (fromStatus) window.__sourceDiscoveryStatus = normalizeSourceDiscoveryStatus(status);
     }
 
+
+    // V2W12b — Dynamic Snapshot Diff display layer.
+    // This keeps the visible page honest: last ready membership is shown with a
+    // scan_id, prices update separately, and completed background scans are applied
+    // as changed sections instead of repeatedly pulling the heavy radar payload.
+    function currentDynamicSnapshotId() {
+      return String(window.__displaySnapshotId || window.__scanData?.display_snapshot_id || window.__scanData?.dynamic_display_v2w12b?.scan_id || '').trim();
+    }
+
+    function summarizeDynamicDiff(diff={}) {
+      const s = diff.summary || {};
+      const changed = Number(diff.changed_section_count || Object.keys(diff.changed_sections || {}).length || 0);
+      const added = Number(s.added_symbols_count || 0);
+      const removed = Number(s.removed_symbols_count || 0);
+      const moved = Number(s.moved_symbols_count || 0);
+      if (!changed && !added && !removed && !moved) return 'لا توجد تغييرات عضوية؛ الأسعار فقط تتحدث.';
+      const parts = [];
+      if (changed) parts.push(`${formatNumber(changed)} قوائم تغيرت`);
+      if (added) parts.push(`${formatNumber(added)} دخول جديد`);
+      if (removed) parts.push(`${formatNumber(removed)} خروج`);
+      if (moved) parts.push(`${formatNumber(moved)} ترقية/نقل`);
+      return parts.join(' • ');
+    }
+
+    function ensureDynamicDisplayNotice() {
+      let el = document.getElementById('dynamicDisplayNotice');
+      if (el) return el;
+      el = document.createElement('div');
+      el.id = 'dynamicDisplayNotice';
+      el.style.cssText = 'position:fixed;left:14px;right:14px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:12020;display:none;max-width:560px;margin:0 auto;background:var(--panel-bg);border:1px solid var(--detail-btn-border);border-radius:18px;box-shadow:0 14px 36px rgba(0,0,0,.22);padding:12px;direction:rtl;color:var(--text-main);';
+      document.body.appendChild(el);
+      return el;
+    }
+
+    function hideDynamicDisplayNotice(scanId='') {
+      const el = document.getElementById('dynamicDisplayNotice');
+      if (scanId) window.__dynamicDisplayNoticeDismissedId = scanId;
+      if (el) el.style.display = 'none';
+    }
+
+    function showDynamicDisplayNotice(status={}) {
+      const latestId = String(status.latest_scan_id || '').trim();
+      if (!latestId || latestId === currentDynamicSnapshotId() || window.__dynamicDisplayNoticeDismissedId === latestId) return;
+      const el = ensureDynamicDisplayNotice();
+      const summary = status.summary || {};
+      const sections = summary.sections || {};
+      const changedHint = status.diff_summary_text || 'اكتمل snapshot جديد في الخلفية. سيتم تطبيق تغييرات القوائم فقط عند الضغط.';
+      const liveCount = Number(summary.live_source_visible_count || 0);
+      el.dataset.scanId = latestId;
+      el.innerHTML = `
+        <div style="font-weight:900;color:var(--text-strong);margin-bottom:6px;">✅ Snapshot ديناميكي جديد جاهز</div>
+        <div style="font-size:13px;line-height:1.75;color:var(--text-main);">
+          ${safeText(changedHint)}<br>
+          ${liveCount ? `مصادر Live Scan ظاهرة الآن: <b>${formatNumber(liveCount)}</b><br>` : ''}
+          العضوية من مسح: <b>${safeText(status.source_snapshot_at || status.built_at || '—')}</b>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <button class="primary" type="button" onclick="applyDynamicDisplayDiff()">تطبيق التغييرات</button>
+          <button class="ghost" type="button" onclick="hideDynamicDisplayNotice('${safeText(latestId)}')">لاحقًا</button>
+        </div>`;
+      el.style.display = 'block';
+    }
+
+    async function pollDynamicDisplayStatus(silent=true) {
+      try {
+        const client = encodeURIComponent(currentDynamicSnapshotId());
+        const res = await apiFetch(`/ui/dynamic-status?client_scan_id=${client}&_=${Date.now()}`);
+        const data = await res.json();
+        if (!data || data.ok === false) return;
+        window.__dynamicDisplayStatus = data;
+        if (data.new_snapshot_available) {
+          window.__pendingDynamicSnapshotId = data.latest_scan_id;
+          showDynamicDisplayNotice(data);
+        }
+      } catch(e) {
+        if (!silent) console.warn('dynamic status failed', e);
+      }
+    }
+
+    function applyDynamicDiffToScanData(diff={}) {
+      if (!window.__scanData || !diff || diff.ok === false) return false;
+      if (diff.full_snapshot_required && diff.snapshot) {
+        setScanData(diff.snapshot);
+        return true;
+      }
+      const changed = diff.changed_sections || {};
+      const keys = Object.keys(changed);
+      if (!keys.length) return false;
+      keys.forEach(key => {
+        const section = changed[key] || {};
+        const rows = Array.isArray(section.items) ? section.items : [];
+        window.__scanData[key] = rows;
+        window.__scanData[`${key}_count`] = Number(section.count ?? rows.length) || rows.length;
+      });
+      window.__scanData.display_snapshot_id = diff.latest_scan_id || window.__scanData.display_snapshot_id;
+      window.__scanData.dynamic_display_v2w12b = {
+        ...(window.__scanData.dynamic_display_v2w12b || {}),
+        version: diff.version || 'dynamic_snapshot_diff_engine_v2w12b_2026_06_26',
+        scan_id: diff.latest_scan_id || window.__scanData?.dynamic_display_v2w12b?.scan_id,
+        source_snapshot_at: diff.source_snapshot_at || window.__scanData?.dynamic_display_v2w12b?.source_snapshot_at,
+        built_at: diff.built_at || window.__scanData?.dynamic_display_v2w12b?.built_at,
+        last_diff_summary: diff.summary || {},
+        rule_ar: 'تم تطبيق تغييرات العضوية كـ diff؛ أما الأسهم الثابتة فتتحدث أسعارها فقط.'
+      };
+      window.__displaySnapshotId = String(diff.latest_scan_id || window.__displaySnapshotId || '').trim();
+      refreshScanCountsFromGroups(window.__scanData);
+      return true;
+    }
+
+    async function applyDynamicDisplayDiff() {
+      if (window.__dynamicDiffBusy) return;
+      window.__dynamicDiffBusy = true;
+      const oldId = currentDynamicSnapshotId();
+      const notice = document.getElementById('dynamicDisplayNotice');
+      const latestId = notice?.dataset?.scanId || window.__pendingDynamicSnapshotId || '';
+      try {
+        const uiState = preserveScanUiState();
+        const res = await apiFetch(`/ui/dynamic-diff?client_scan_id=${encodeURIComponent(oldId)}&_=${Date.now()}`);
+        const diff = await res.json();
+        let applied = applyDynamicDiffToScanData(diff);
+        if (!applied && diff.full_snapshot_required) {
+          const snapRes = await apiFetch(`/ui/dynamic-snapshot?_=${Date.now()}`);
+          const snap = await snapRes.json();
+          if (snap && snap.ok !== false) { setScanData(snap); applied = true; }
+        }
+        if (applied) {
+          hideDynamicDisplayNotice(latestId || diff.latest_scan_id || '');
+          renderScanData();
+          restoreScanUiState(uiState);
+          hydrateVisiblePricesAfterRender(160);
+        } else {
+          hideDynamicDisplayNotice(latestId || diff.latest_scan_id || '');
+          await refreshLiveQuotesForScan(true);
+        }
+      } catch(e) {
+        // Fallback: one compact snapshot, not a forced heavy market scan.
+        try {
+          const uiState = preserveScanUiState();
+          const snapRes = await apiFetch(`/ui/dynamic-snapshot?_=${Date.now()}`);
+          const snap = await snapRes.json();
+          if (snap && snap.ok !== false) {
+            setScanData(snap);
+            renderScanData();
+            restoreScanUiState(uiState);
+            hydrateVisiblePricesAfterRender(160);
+          }
+        } catch(_) {}
+      } finally {
+        window.__dynamicDiffBusy = false;
+      }
+    }
+
     async function pollSourceDiscoveryStatus(silent=true) {
       try {
         const client = encodeURIComponent(currentScanUpdatedAt());
@@ -4627,7 +4779,9 @@
           window.__sourceDiscoveryStatus = normalized;
           if (data.new_snapshot_available) {
             window.__pendingSourceSnapshotAt = String(data.latest_snapshot_at || '1');
-            prepareLatestScanDataFromCompletedScan(normalized, 'scan');
+            // V2W12b: do not pull a heavy /trade-scan payload here. The dynamic
+            // display layer will build/compare a compact snapshot and show a diff notice.
+            pollDynamicDisplayStatus(true);
           }
           renderSourceDiscoveryPanel({ sourceStatus: normalized });
         }
@@ -4641,11 +4795,8 @@
       const notice = document.getElementById('sourceDiscoveryNotice');
       const snap = notice?.dataset?.snapshotAt || window.__pendingSourceSnapshotAt || '';
       hideSourceDiscoveryNotice(snap);
-      if (window.__pendingScanData) {
-        await applyPendingScanData();
-      } else {
-        await loadScan(false, { applyImmediately: true });
-      }
+      // V2W12b: prefer section diff over full reload.
+      await applyDynamicDisplayDiff();
       window.__pendingSourceSnapshotAt = '';
       await pollSourceDiscoveryStatus(true);
     }
@@ -4856,6 +5007,8 @@
       window.__scanData.top_ranked = [...(data?.top_ranked || [])];
       window.__scanData.all_results = [...(data?.all_results || [])];
       refreshScanCountsFromGroups(window.__scanData);
+      window.__displaySnapshotId = String(data?.display_snapshot_id || data?.dynamic_display_v2w12b?.scan_id || window.__displaySnapshotId || '').trim();
+      window.__displaySnapshotSourceAt = String(data?.dynamic_display_v2w12b?.source_snapshot_at || data?.analysis_updated_at || data?.updated_at || '').trim();
     }
 
     function scanGroupSymbols(data, key) {
@@ -5378,7 +5531,14 @@
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
-        const res = await apiFetch(`/radar-live-refresh?limit=220&prefer_cache=false&_=${Date.now()}`);
+        if (silent) {
+          await refreshLiveQuotesForScan(true);
+          await pollDynamicDisplayStatus(true);
+          const updated = document.getElementById('heroUpdated');
+          if (updated) updated.textContent = `تحديث أسعار خفيف: ${new Date().toLocaleTimeString('ar-SA')}`;
+          return;
+        }
+        const res = await apiFetch(`/radar-live-refresh?limit=160&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
         const changed = data.ok && applyRadarLivePayload(data, { silent });
 
@@ -5800,9 +5960,20 @@
       const oldText = btn ? btn.textContent : '';
       if (btn) { btn.textContent = force ? '⏳ فحص كامل...' : '⏳ تحميل سريع...'; btn.classList.add('refreshing'); btn.disabled = true; }
       try {
-        const qs = force ? 'force=true' : 'prefer_cache=true';
-        const res = await apiFetch(`/trade-scan?${qs}&_=${Date.now()}`);
-        const data = await res.json();
+        let data;
+        if (!force) {
+          try {
+            const res = await apiFetch(`/ui/dynamic-snapshot?limit_per_section=30&_=${Date.now()}`);
+            data = await res.json();
+            if (!data || data.ok === false) throw new Error(data?.error || 'dynamic_snapshot_failed');
+          } catch(_) {
+            const res = await apiFetch(`/trade-scan?prefer_cache=true&_=${Date.now()}`);
+            data = await res.json();
+          }
+        } else {
+          const res = await apiFetch(`/trade-scan?force=true&_=${Date.now()}`);
+          data = await res.json();
+        }
         // V2W9e speed fix: do not block opening the page on fresh FMP price hydration.
         // Render saved scan immediately, then update extended/pre-market prices in the background.
         const oldSignature = scanListSignature(window.__scanData);
@@ -6770,10 +6941,12 @@
     window.__radarLiveTimer = window.setInterval(() => refreshRadarLiveFromSnapshot(true), 30000);
     window.__portfolioLiveTimer = window.setInterval(() => refreshPortfolioLiveQuotes(), 30000);
     window.__weeklyPriorityLiveTimer = window.setInterval(() => refreshWeeklyPriorityLiveQuotes(true), 60000);
-    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 8000);
+    window.__sourceDiscoveryTimer = window.setInterval(() => pollSourceDiscoveryStatus(true), 12000);
+    window.__dynamicDisplayTimer = window.setInterval(() => pollDynamicDisplayStatus(true), 15000);
     window.__sourceDiscoveryTickTimer = window.setInterval(() => tickSourceDiscoveryPanel(), 1000);
     loadAll();
     pollSourceDiscoveryStatus(true);
+    pollDynamicDisplayStatus(true);
   </script>
 
 
