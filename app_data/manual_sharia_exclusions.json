@@ -343,6 +343,14 @@
     "symbol": "APT",
     "updated_at": "2026-05-07 14:51:50"
   },
+  "APYX": {
+    "excluded_at": "2026-06-26 04:46:03",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "APYX",
+    "updated_at": "2026-06-26 04:46:03"
+  },
   "AREC": {
     "excluded_at": "2026-06-22 10:15:33",
     "note": "استبعاد يدوي شرعي",
@@ -406,6 +414,14 @@
     "source": "manual",
     "symbol": "ASX",
     "updated_at": "2026-04-27 05:58:01"
+  },
+  "ATAI": {
+    "excluded_at": "2026-06-26 04:46:18",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ATAI",
+    "updated_at": "2026-06-26 04:46:18"
   },
   "ATOM": {
     "excluded_at": "2026-04-20 21:42:34",
@@ -886,6 +902,14 @@
     "source": "manual",
     "symbol": "CI",
     "updated_at": "2026-06-06 17:28:42"
+  },
+  "CISS": {
+    "excluded_at": "2026-06-26 04:45:46",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CISS",
+    "updated_at": "2026-06-26 04:45:46"
   },
   "CLF": {
     "excluded_at": "2026-04-27 05:50:23",
@@ -1582,6 +1606,14 @@
     "source": "manual",
     "symbol": "FORR",
     "updated_at": "2026-06-24 12:36:23"
+  },
+  "FOSL": {
+    "excluded_at": "2026-06-26 09:36:06",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "FOSL",
+    "updated_at": "2026-06-26 09:36:06"
   },
   "FOUR": {
     "excluded_at": "2026-06-15 08:11:04",
@@ -2975,6 +3007,14 @@
     "symbol": "QNTM",
     "updated_at": "2026-06-23 12:28:52"
   },
+  "QTTB": {
+    "excluded_at": "2026-06-26 09:36:46",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "QTTB",
+    "updated_at": "2026-06-26 09:36:46"
+  },
   "RAIN": {
     "excluded_at": "2026-06-24 06:00:43",
     "note": "استبعاد يدوي شرعي",
@@ -3550,6 +3590,14 @@
     "source": "manual",
     "symbol": "UEIC",
     "updated_at": "2026-06-24 09:18:23"
+  },
+  "UGP": {
+    "excluded_at": "2026-06-26 09:37:31",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "UGP",
+    "updated_at": "2026-06-26 09:37:31"
   },
   "UIS": {
     "excluded_at": "2026-05-12 15:00:57",
