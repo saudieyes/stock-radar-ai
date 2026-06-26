@@ -2759,6 +2759,14 @@
     "symbol": "NVAX",
     "updated_at": "2026-05-20 10:12:32"
   },
+  "NVST": {
+    "excluded_at": "2026-06-26 11:46:19",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "NVST",
+    "updated_at": "2026-06-26 11:46:19"
+  },
   "NXTS": {
     "excluded_at": "2026-06-24 13:21:25",
     "note": "استبعاد يدوي شرعي",
@@ -3718,6 +3726,14 @@
     "source": "manual",
     "symbol": "TWI",
     "updated_at": "2026-06-25 04:47:25"
+  },
+  "UA": {
+    "excluded_at": "2026-06-26 11:44:16",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "UA",
+    "updated_at": "2026-06-26 11:44:16"
   },
   "UAVS": {
     "excluded_at": "2026-06-22 03:43:59",
