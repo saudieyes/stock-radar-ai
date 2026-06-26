@@ -1,0 +1,551 @@
+{
+  "archive_manifest": {
+    "compact_sync": true,
+    "evidence_json_original_bytes_estimate": 2881381,
+    "evidence_json_original_path": "app_data/evidence_archive/2026-06-22_2026-06-26/2026-06-25_evidence.json",
+    "evidence_json_parts": [
+      {
+        "bytes_estimate": 2342085,
+        "contains_daily_big_movers": true,
+        "label": "json_part_001",
+        "path": "app_data/evidence_archive/2026-06-22_2026-06-26/2026-06-25_evidence_part_001.json",
+        "snapshot_rows": 1500
+      }
+    ],
+    "evidence_json_split": true,
+    "evidence_json_split_target_bytes": 2550000,
+    "generated_at": "2026-06-25 22:45:48",
+    "local_counts_at_sync": {
+      "bar_symbols": 216,
+      "daily_big_movers": 188,
+      "evidence_intraday_bars": 12303,
+      "evidence_runs": 66,
+      "evidence_snapshots": 16835,
+      "evidence_winner_profiles": 80,
+      "snapshot_symbols": 513,
+      "winner_symbols": 80
+    },
+    "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync. Oversized evidence archives may be split into safe JSON parts.",
+    "ok": true,
+    "prune_allowed_after_verify": true,
+    "trade_date": "2026-06-25",
+    "version": "evidence_archive_manifest_v5d_split_safe",
+    "week_key": "2026-06-22_2026-06-26"
+  },
+  "intraday_bars": {
+    "c": 54452,
+    "symbols": 588
+  },
+  "market_fear": {
+    "badge": "🟡",
+    "cache_hit": true,
+    "captured_at": "2026-06-25 22:45:31",
+    "captured_ts": 1782441931.3909237,
+    "change_pct": 1.4,
+    "change_points": 0.26,
+    "confirmation_strictness": "elevated",
+    "enabled": true,
+    "execution_rules": {
+      "avoid_late_entries_when_stressed": true,
+      "breakout_requires_liquidity_confirmation": true,
+      "confirmation_strictness": "elevated",
+      "no_chase_strictness": "elevated",
+      "position_size_multiplier": 0.7,
+      "prefer_near_support_entries_when_stressed": true
+    },
+    "guidance_ar": [
+      "السوق يحتاج حذرًا إضافيًا؛ لا تطارد الحركة المتأخرة.",
+      "يفضل الدخول قرب الدعم أو بعد تأكيد السيولة.",
+      "خفض حجم الدخول قليلًا إذا كانت الخطة عالية المخاطرة."
+    ],
+    "history_points": 0,
+    "is_proxy": false,
+    "no_chase_strictness": "elevated",
+    "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
+    "ok": true,
+    "position_size_multiplier": 0.7,
+    "previous_close": 18.63,
+    "regime_key": "caution",
+    "regime_label": "حذر متوسط",
+    "requested_symbol": "^VIX",
+    "source": "FMP",
+    "source_symbol": "^VIX",
+    "stress_score": 58.0,
+    "summary_ar": "🟡 حذر متوسط | VIX 18.89 | التغير 1.4% | حجم الدخول المقترح ×0.7",
+    "tracking_fields": {
+      "market_fear_regime": "caution",
+      "market_fear_score": 58.0,
+      "vix": 18.89,
+      "vix_change_pct": 1.4,
+      "vix_trend_5d_pct": 0.0
+    },
+    "version": "market_fear_v4d_decision_support_no_scoring",
+    "vix": 18.89,
+    "vix_avg_5d": 0.0,
+    "vix_trend_5d_pct": 0.0
+  },
+  "notes": {
+    "next_weekend_use": "تحليل ما سبق الرابحين والخاسرين وتحديد الأنماط المتكررة.",
+    "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف."
+  },
+  "ok": true,
+  "sessions": [
+    {
+      "c": 32619,
+      "session": "pre_market",
+      "symbols": 596
+    },
+    {
+      "c": 26080,
+      "session": "regular",
+      "symbols": 962
+    },
+    {
+      "c": 8900,
+      "session": "after_hours",
+      "symbols": 592
+    }
+  ],
+  "summary": {
+    "avg_change_pct": 7.459142886729094,
+    "avg_dollar_volume": 168708881.3185698,
+    "big_mover_snapshots": 10340,
+    "no_chase_count": 3108,
+    "reconfirm_count": 43151,
+    "snapshots": 67599,
+    "symbols": 1096,
+    "tool_snapshots": 58300
+  },
+  "top_movers_observed": [
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 1928.78,
+      "observations": 29,
+      "symbol": "FSTB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 1763.7,
+      "observations": 33,
+      "symbol": "POM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 1146.67,
+      "observations": 30,
+      "symbol": "BMGL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 645.44,
+      "observations": 29,
+      "symbol": "WTO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 429.76,
+      "observations": 83,
+      "symbol": "BOXL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 410.99,
+      "observations": 26,
+      "symbol": "ILLR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 346.85,
+      "observations": 77,
+      "symbol": "NXTS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 344.88,
+      "observations": 69,
+      "symbol": "NITO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 279.25,
+      "observations": 78,
+      "symbol": "ORIS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 254.71,
+      "observations": 72,
+      "symbol": "ATLN"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 248.89,
+      "observations": 157,
+      "symbol": "EHGO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 213.2,
+      "observations": 50,
+      "symbol": "PLSM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 200.64,
+      "observations": 66,
+      "symbol": "FCUV"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 182.81,
+      "observations": 41,
+      "symbol": "SCAG"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 137.91,
+      "observations": 27,
+      "symbol": "WLDS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 131.37,
+      "observations": 69,
+      "symbol": "GETY"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 126.15,
+      "observations": 26,
+      "symbol": "VNTG"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 114.88,
+      "observations": 66,
+      "symbol": "ENTX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 110.89,
+      "observations": 85,
+      "symbol": "TNON"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 109.78,
+      "observations": 33,
+      "symbol": "NEXR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 96.15,
+      "observations": 31,
+      "symbol": "AREB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 93.57,
+      "observations": 43,
+      "symbol": "BOLD"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 89.74,
+      "observations": 123,
+      "symbol": "SKYQ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 85.88,
+      "observations": 62,
+      "symbol": "HSCS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 84.21,
+      "observations": 25,
+      "symbol": "AZI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 81.25,
+      "observations": 49,
+      "symbol": "XCH"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 81.18,
+      "observations": 47,
+      "symbol": "CIIT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 80.29,
+      "observations": 67,
+      "symbol": "RTB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 79.89,
+      "observations": 69,
+      "symbol": "VTAK"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 79.56,
+      "observations": 46,
+      "symbol": "RDGT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 69.76,
+      "observations": 97,
+      "symbol": "MGN"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 67.62,
+      "observations": 16,
+      "symbol": "KUST"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 67.5,
+      "observations": 31,
+      "symbol": "LNKS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 66.56,
+      "observations": 50,
+      "symbol": "FMFC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 63.73,
+      "observations": 100,
+      "symbol": "CDT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 62.14,
+      "observations": 80,
+      "symbol": "CUPR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 61.22,
+      "observations": 13,
+      "symbol": "KMRK"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 59.93,
+      "observations": 42,
+      "symbol": "FOFO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 56.7,
+      "observations": 75,
+      "symbol": "CAST"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 56.62,
+      "observations": 48,
+      "symbol": "GITS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 56.29,
+      "observations": 124,
+      "symbol": "DFTX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 55.96,
+      "observations": 101,
+      "symbol": "APGE"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 55.87,
+      "observations": 31,
+      "symbol": "BFLY"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 54.41,
+      "observations": 40,
+      "symbol": "NWGL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 52.31,
+      "observations": 33,
+      "symbol": "IQST"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 51.96,
+      "observations": 144,
+      "symbol": "ICCM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 51.95,
+      "observations": 73,
+      "symbol": "STFS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 50.51,
+      "observations": 109,
+      "symbol": "SAGT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 50.28,
+      "observations": 8,
+      "symbol": "FRTT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 50.02,
+      "observations": 10,
+      "symbol": "FRGT"
+    }
+  ],
+  "version": "evidence_collection_v2_passive",
+  "week_key": "2026-06-22_2026-06-26",
+  "winner_patterns": [
+    {
+      "avg_gain": 26.512162162162163,
+      "cases": 74,
+      "likely_pattern": "steady_liquidity_followthrough",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 50.64253731343284,
+      "cases": 67,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "gap_chase_risk"
+    },
+    {
+      "avg_gain": 51.155945945945945,
+      "cases": 37,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "gap_chase_risk"
+    },
+    {
+      "avg_gain": 27.6256,
+      "cases": 25,
+      "likely_pattern": "unclassified_winner",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 20.908333333333335,
+      "cases": 24,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 20.54888888888889,
+      "cases": 18,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "early_intraday_acceleration"
+    },
+    {
+      "avg_gain": 27.589411764705883,
+      "cases": 17,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 59.035,
+      "cases": 16,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 109.7625,
+      "cases": 8,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "gap_followthrough_candidate"
+    },
+    {
+      "avg_gain": 63.61375,
+      "cases": 8,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 19.3275,
+      "cases": 8,
+      "likely_pattern": "steady_liquidity_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 451.24,
+      "cases": 4,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "gap_followthrough_candidate"
+    }
+  ],
+  "winner_profiles": {
+    "c": 320,
+    "symbols": 293
+  }
+}
