@@ -3892,31 +3892,6 @@
       'all_results'
     ];
 
-    const FAST_UI_SECTION_CONFIG = [
-      { sectionKey:'live-tight', dataKey:'live_tight_monitoring_candidates', contentId:'live-tight-monitoring-section-content', sectionId:'live-tight-monitoring-section', title:'⚡ تأكيد حي سريع / مراقبة لصيقة V2V', tone:'cautious', orderedText:'مرشح من Prepared Watch أو مرشح جديد بدأ +3%/+5% مع حجم. مراقبة فقط حتى تكتمل شروط القرار.' },
-      { sectionKey:'critical-pre-explosion', dataKey:'critical_pre_explosion_watch', contentId:'critical-pre-explosion-section-content', sectionId:'critical-pre-explosion-section', title:'🚨 مرشحو انفجار حرجة قبل السوق', tone:'cautious', orderedText:'قائمة مراقبة حرجة قبل الانفجار: ليست شراء مباشر ولا تتجاوز فلتر الشرعية.' },
-      { sectionKey:'promotion-bridge', dataKey:'promotion_bridge_candidates', contentId:'promotion-bridge-section-content', sectionId:'promotion-bridge-section', title:'🧭 جسر الترقية قبل الافتتاح', tone:'open', orderedText:'جسر مراقبة وترقية إلى الأقسام المناسبة، وليس شراء مباشر.' },
-      { sectionKey:'learning-opportunity', dataKey:'learning_opportunity_candidates', contentId:'learning-opportunity-section-content', sectionId:'learning-opportunity-section', title:'🧠 مرشحو طبقة التعلم / تحضير مبكر', tone:'open', orderedText:'تحضير وتعلم مرئي، وليس Strong ولا Cautious.' },
-      { sectionKey:'strong', dataKey:'strong_entries', contentId:'strong-section-content', sectionId:'strong-section', title:'دخول قوي', tone:'strong', orderedText:'قرارات شراء قوية فقط بعد Decision Contract.' },
-      { sectionKey:'cautious', dataKey:'cautious_entries', contentId:'cautious-section-content', sectionId:'cautious-section', title:'دخول بحذر', tone:'cautious', orderedText:'دخول مشروط بحذر مع خطة واضحة.' },
-      { sectionKey:'pre-trigger', dataKey:'pre_trigger_candidates', contentId:'pre-trigger-section-content', sectionId:'pre-trigger-section', title:'⏳ قريب من التفعيل / Pre-Trigger', tone:'open', orderedText:'أسهم قريبة من التفعيل قبل أن تفوت الحركة؛ ليست BUY_NOW حتى تظهر شروط التنفيذ.' },
-      { sectionKey:'support-bounce', dataKey:'support_bounce_candidates', contentId:'support-bounce-section-content', sectionId:'support-bounce-section', title:'↩️ ارتداد من دعم / Support Bounce', tone:'open', orderedText:'فرص مبكرة قرب دعم حقيقي فقط.' },
-      { sectionKey:'reclaim', dataKey:'reclaim_candidates', contentId:'reclaim-section-content', sectionId:'reclaim-section', title:'🔁 Reclaim / استعادة مستوى', tone:'open', orderedText:'استعادة مستوى تحتاج ثبات وحجم.' },
-      { sectionKey:'continuation-pullback', dataKey:'continuation_pullback_candidates', contentId:'continuation-pullback-section-content', sectionId:'continuation-pullback-section', title:'📈 Continuation Pullback', tone:'cautious', orderedText:'استمرار مشروط: لا نطارد القمة.' },
-      { sectionKey:'small-stock-classic', dataKey:'small_stock_classic_radar', contentId:'small-stock-classic-section-content', sectionId:'small-stock-classic-section', title:'🎯 الأسهم الصغيرة الكلاسيكية', tone:'cautious', orderedText:'فلتر مضاربة للأسهم الصغيرة مع مناطق قرار صغيرة.' },
-      { sectionKey:'early-movement', dataKey:'early_movement_watchlist', contentId:'early-movement-section-content', sectionId:'early-movement-section', title:'🟣 مراقبة الحركة المبكرة', tone:'open', orderedText:'قائمة نظيفة للأسهم التي لم تنفجر بعد: Pre-Move أو تأكيد مبكر فقط.' },
-      { sectionKey:'low-float-premarket', dataKey:'low_float_premarket_radar', contentId:'low-float-premarket-section-content', sectionId:'low-float-premarket-section', title:'🚀 Low-Float / Pre-Market Radar', tone:'cautious', orderedText:'أسهم صغيرة أو نشطة مبكرًا؛ تحتاج متابعة لصيقة عند الحركة.' },
-      { sectionKey:'low-float-raw', dataKey:'low_float_fast_lane_raw_watch', contentId:'low-float-fast-lane-raw-section-content', sectionId:'low-float-fast-lane-raw-section', title:'🧪 مرشحو Fast Lane الخام — مراقبة عالية المخاطر', tone:'watch', orderedText:'مراقبة عالية المخاطر فقط.' },
-      { sectionKey:'high-risk-day', dataKey:'high_risk_day_trades', contentId:'high-risk-day-trades-section-content', sectionId:'high-risk-day-trades-section', title:'⚡ مضاربة عالية المخاطرة', tone:'cautious', orderedText:'فرص سريعة وصغيرة الحجم؛ منفصلة عن Strong/Cautious العادي.' },
-      { sectionKey:'gap-fill', dataKey:'gap_fill_watch', contentId:'gap-fill-section-content', sectionId:'gap-fill-section', title:'🕳️ Gap Fill Watch', tone:'watch', orderedText:'يراقب دخول السعر داخل الفجوة أو احترامها.' },
-      { sectionKey:'catalyst', dataKey:'catalyst_watch', contentId:'catalyst-watch-section-content', sectionId:'catalyst-watch-section', title:'📰 Catalyst / News Watch', tone:'watch', orderedText:'الأخبار والمحفزات سياق مساعد وليست قرار شراء مباشر.' },
-      { sectionKey:'gray-strong', dataKey:'gray_strong', contentId:'gray-strong-section-content', sectionId:'gray-strong-section', title:'فرص قوية غير محسومة شرعيًا', tone:'gray', orderedText:'تحتاج حسمًا شرعيًا قبل التنفيذ.' },
-      { sectionKey:'watch', dataKey:'watchlist', contentId:'watch-section-content', sectionId:'watch-section', title:'المراقبة', tone:'watch', orderedText:'مراقبة عامة؛ ليست توصية شراء.' },
-      { sectionKey:'premarket', dataKey:'premarket_setups', contentId:'premarket-section-content', sectionId:'premarket-section', title:'تهيئة قوية قبل الافتتاح', tone:'open', orderedText:'فرص تهيئة مبكرة تظهر قبل الافتتاح وأول الجلسة.' }
-    ];
-    const FAST_UI_SECTION_BY_DATA_KEY = Object.fromEntries(FAST_UI_SECTION_CONFIG.map(x => [x.dataKey, x]));
-    const FAST_UI_SECTION_BY_CONTENT_ID = Object.fromEntries(FAST_UI_SECTION_CONFIG.map(x => [x.contentId, x]));
-
     function opportunityRadarVisibleCount(data) {
       if (!data) return 0;
       return OPPORTUNITY_RADAR_GROUP_KEYS.reduce((total, key) => total + (Array.isArray(data[key]) ? data[key].length : Number(data[`${key}_count`] || 0) || 0), 0);
@@ -5403,26 +5378,24 @@
       const old = btn ? btn.textContent : '';
       if (btn && !silent) { btn.textContent = 'جارٍ التحديث...'; btn.disabled = true; }
       try {
-        if (silent) {
-          // V2W10a: silent refresh must be tiny and non-layout. Update visible prices only.
-          await refreshLiveQuotesForScan(true);
-          const updated = document.getElementById('heroUpdated');
-          if (updated) updated.textContent = `تحديث سعر صامت: ${new Date().toLocaleTimeString('ar-SA')}`;
-          return;
-        }
         const res = await apiFetch(`/radar-live-refresh?limit=220&prefer_cache=false&_=${Date.now()}`);
         const data = await res.json();
         const changed = data.ok && applyRadarLivePayload(data, { silent });
 
         if (changed) {
+          // V2W9h: في التحديث الصامت نحدّث السعر/النسبة داخل البطاقات فقط.
+          // إذا تغيرت عضوية القوائم أثناء القراءة تُحفظ كتحديث جاهز خلف زر، ولا نعيد رسم الصفحة تلقائيًا.
           updateVisibleLivePriceDomFromScanData();
+
           const updated = document.getElementById('heroUpdated');
           if (updated) updated.textContent = `تحديث حي: ${safeText(data.live_updated_at || 'الآن')} • ${formatNumber(data.quotes_available || 0)} سعر`;
         } else {
+          // احتياط: إذا لم يرجع الرادار الحي مجموعات محدثة، نحدث الأسعار مباشرة من /live-quotes.
           await refreshLiveQuotesForScan(true);
-          alert(data.message || data.error || 'لا توجد لقطة رادار محفوظة بعد. شغّل تحديث الكل أولًا.');
+          if (!silent) alert(data.message || data.error || 'لا توجد لقطة رادار محفوظة بعد. شغّل تحديث الكل أولًا.');
         }
       } catch(e) {
+        // احتياط ثانٍ: لا نترك الأسعار ثابتة إذا تعثر radar-live-refresh.
         try { await refreshLiveQuotesForScan(true); } catch(_) {}
         if (!silent) alert('تعذر التحديث الحي الآن');
       } finally {
@@ -5794,127 +5767,6 @@
         .finally(() => { window.__fastHydrateBusy = false; });
     }
 
-
-    function fastUiEnabled() {
-      const p = new URLSearchParams(window.location.search || '');
-      return p.get('fastui') !== '0' && p.get('nofastui') !== '1';
-    }
-
-    function buildFastUiScanSkeleton(summary) {
-      const data = {
-        ok: true,
-        fast_ui_mode_v2w10a: true,
-        market_phase: summary?.market_phase || '',
-        market_phase_label: summary?.market_phase_label || '',
-        updated_at: summary?.built_at || summary?.snapshot_updated_at || '',
-        analysis_updated_at: summary?.snapshot_updated_at || '',
-        snapshot_updated_at: summary?.snapshot_updated_at || '',
-        payload_note: 'V2W10a: عرض سريع من snapshot مقسم؛ يتم تحميل كل قائمة على حدة.',
-        opening_focus: summary?.opening_focus || [],
-        all_results: []
-      };
-      ALL_SCAN_GROUP_KEYS.forEach(key => { if (!Array.isArray(data[key])) data[key] = []; });
-      (summary?.sections || []).forEach(sec => {
-        const key = sec?.data_key;
-        if (!key) return;
-        data[key] = [];
-        data[`${key}_count`] = Number(sec?.count || 0);
-      });
-      return data;
-    }
-
-    function renderFastUiSummaryShell(summary) {
-      const data = buildFastUiScanSkeleton(summary);
-      window.__scanData = data;
-      window.__sectionCursor = {};
-      window.__sectionItems = {};
-      window.__fastUiSummary = summary || {};
-      renderStatusbar(data);
-      renderSourceDiscoveryPanel(data);
-      const bySection = {};
-      (summary?.sections || []).forEach(sec => { bySection[sec.section_key] = sec; });
-      document.getElementById('content').innerHTML = FAST_UI_SECTION_CONFIG.map(cfg => {
-        const sec = bySection[cfg.sectionKey] || {};
-        const count = Number(sec.count || 0);
-        return renderSection(cfg.title, count, cfg.contentId, cfg.sectionId, [], { tone: cfg.tone || 'open', orderedText: cfg.orderedText || '', defaultOpen:false });
-      }).join('');
-      FAST_UI_SECTION_CONFIG.forEach(cfg => {
-        const sec = bySection[cfg.sectionKey] || {};
-        updateFastSectionHeader(cfg.contentId, Number(sec.count || 0), [], sec.preview_symbols || [], true);
-      });
-      renderOpeningFocus(data);
-      const updated = document.getElementById('heroUpdated');
-      if (updated) updated.textContent = `عرض سريع: ${safeText(summary?.snapshot_updated_at || summary?.built_at || 'آخر لقطة')} • تحميل القوائم تدريجيًا`;
-    }
-
-    function updateFastSectionHeader(contentId, count, items=[], previewSymbols=[], loading=false) {
-      const el = document.getElementById(contentId);
-      const section = el ? el.closest('.section') : null;
-      if (!section) return;
-      const countEl = section.querySelector('.section-count-pill');
-      if (countEl) countEl.textContent = formatNumber(count || 0);
-      const previewEl = section.querySelector('.section-preview');
-      const syms = (previewSymbols && previewSymbols.length ? previewSymbols : (items || []).slice(0, 3).map(x => x?.symbol)).map(x => String(x || '').toUpperCase()).filter(Boolean);
-      if (previewEl) {
-        if (syms.length) previewEl.textContent = `أعلى الأسهم: ${syms.join(' • ')}${Number(count || 0) > 3 ? ' ...' : ''}${loading ? ' • جاري التحميل' : ''}`;
-        else previewEl.textContent = loading ? 'القائمة محفوظة، جاري تحميل بطاقاتها...' : 'لا توجد أسهم في هذا القسم الآن';
-      }
-    }
-
-    function mergeFastUiSectionPayload(payload) {
-      if (!payload || payload.ok === false) return false;
-      const dataKey = payload.data_key;
-      const contentId = payload.content_id;
-      if (!dataKey || !contentId) return false;
-      const items = sortDisplayItems((payload.items || []).map(applyClientOpportunityGuard));
-      if (!window.__scanData) window.__scanData = { ok:true };
-      window.__scanData[dataKey] = items;
-      window.__scanData[`${dataKey}_count`] = Number(payload.count || items.length || 0);
-      if (!window.__sectionItems) window.__sectionItems = {};
-      window.__sectionItems[contentId] = items;
-      updateFastSectionHeader(contentId, Number(payload.count || items.length || 0), items, payload.preview_symbols || [], false);
-      const el = document.getElementById(contentId);
-      if (el && !el.classList.contains('hidden-section') && el.dataset.rendered === '1') {
-        renderSectionItems(contentId, el.dataset.showAll === '1');
-      }
-      return true;
-    }
-
-    async function loadFastUiSectionsSequential(summary, limit=25) {
-      if (!summary || !Array.isArray(summary.sections)) return;
-      const snapshotToken = String(summary.snapshot_updated_at || summary.built_at || Date.now());
-      window.__activeFastUiSnapshotToken = snapshotToken;
-      for (const cfg of FAST_UI_SECTION_CONFIG) {
-        if (window.__activeFastUiSnapshotToken !== snapshotToken) break;
-        try {
-          const res = await apiFetch(`/ui/section/${encodeURIComponent(cfg.sectionKey)}?limit=${encodeURIComponent(limit)}&_=${Date.now()}`);
-          const payload = await res.json();
-          mergeFastUiSectionPayload(payload);
-          // Give the browser a small breath on mobile so rendering stays smooth.
-          await new Promise(resolve => setTimeout(resolve, 35));
-        } catch (_) {}
-      }
-      // Keep server summary counts intact; section endpoints may return only first 25 cards.
-      hydrateVisiblePricesAfterRender(160);
-    }
-
-    async function loadFastUiSnapshot(force=false) {
-      const btn = document.getElementById('refreshScanBtn');
-      const oldText = btn ? btn.textContent : '';
-      if (btn) { btn.textContent = force ? '⏳ تجهيز العرض...' : '⏳ عرض سريع...'; btn.classList.add('refreshing'); btn.disabled = true; }
-      try {
-        const res = await apiFetch(`/ui/snapshot-summary${force ? '?force=true' : '?'}&_=${Date.now()}`);
-        const summary = await res.json();
-        if (!summary || summary.ok === false) throw new Error(summary?.error || 'fast_ui_summary_failed');
-        hideRadarPendingNotice();
-        renderFastUiSummaryShell(summary);
-        loadFastUiSectionsSequential(summary, 25).catch(() => {});
-        return true;
-      } finally {
-        if (btn) { btn.textContent = oldText || '🔄 تحديث النتائج'; btn.classList.remove('refreshing'); btn.disabled = false; }
-      }
-    }
-
     async function refreshLiveQuotesForScan(silent=false) {
       const symbols = collectVisibleScanSymbols();
       if (!symbols.length) return;
@@ -5937,14 +5789,6 @@
     async function loadScan(force=false, options={}) {
       const hadScan = !!window.__scanData;
       const explicitApply = Boolean(options && options.applyImmediately);
-      if (!force && !explicitApply && fastUiEnabled()) {
-        try {
-          await loadFastUiSnapshot(false);
-          return;
-        } catch (_) {
-          // Fallback to the legacy payload if the fast UI endpoints are not deployed yet.
-        }
-      }
       const uiState = hadScan ? preserveScanUiState() : null;
       // إذا كانت هناك نتائج على الشاشة، لا نختصر ارتفاع الصفحة إلى صندوق تحميل.
       if (!hadScan) {
