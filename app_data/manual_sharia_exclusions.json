@@ -1255,6 +1255,14 @@
     "symbol": "DGXX",
     "updated_at": "2026-05-26 10:26:27"
   },
+  "DIBS": {
+    "excluded_at": "2026-06-26 11:31:36",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DIBS",
+    "updated_at": "2026-06-26 11:31:36"
+  },
   "DINO": {
     "excluded_at": "2026-04-29 22:01:29",
     "note": "استبعاد يدوي شرعي",
@@ -2750,6 +2758,14 @@
     "source": "manual",
     "symbol": "NXTS",
     "updated_at": "2026-06-24 13:21:25"
+  },
+  "OBIO": {
+    "excluded_at": "2026-06-26 11:31:11",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "OBIO",
+    "updated_at": "2026-06-26 11:31:11"
   },
   "OCS": {
     "excluded_at": "2026-06-23 13:32:25",
