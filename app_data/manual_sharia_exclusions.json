@@ -4150,5 +4150,13 @@
     "source": "manual",
     "symbol": "ZETX",
     "updated_at": "2026-05-18 10:22:54"
+  },
+  "ZNTL": {
+    "excluded_at": "2026-06-26 15:58:51",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ZNTL",
+    "updated_at": "2026-06-26 15:58:51"
   }
 }
