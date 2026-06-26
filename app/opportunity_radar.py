@@ -10,6 +10,7 @@ Backend-only enrichment layer for the user's new opportunity philosophy:
 from __future__ import annotations
 
 import math
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -36,7 +37,7 @@ except Exception:  # pragma: no cover
     def get_manual_sharia_exclusions_map():
         return {}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w9d_opportunity_radar_runtime_fix_2026_06_24"
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w11_dynamic_pool_live_scan_backfill_2026_06_26"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -72,6 +73,24 @@ V2U5_SHARIA_REPLACEMENT_VERSION = "sharia_replacement_engine_v2w9_manual_exclusi
 V2W9_LIVE_TIGHT_ACTIVE_MAX_AGE_MIN = 45.0
 V2W9_PREPARED_VISIBLE_PHASES = {"pre_market", "premarket"}
 V2W9_HARD_HARAM_REASON_KEYWORDS = {"casino", "gambling", "betting", "tobacco", "alcohol", "brewery", "distillery", "sportsbook"}
+V2W11_DYNAMIC_POOL_VERSION = "dynamic_pool_reserve_promotion_v2w11_2026_06_26"
+V2W11_INACTIVE_SYMBOLS_DEFAULT = {"LTHM", "ALTM"}
+V2W11_INACTIVE_SYMBOLS_ENV = {
+    x.strip().upper() for x in str(os.getenv("INACTIVE_TRADABILITY_SYMBOLS", "") or "").split(",") if x.strip()
+}
+V2W11_INACTIVE_SYMBOLS = set(V2W11_INACTIVE_SYMBOLS_DEFAULT) | set(V2W11_INACTIVE_SYMBOLS_ENV)
+V2W11_INVALID_PLAN_STATUSES = {
+    "invalid_stop_broken", "target_reached", "strong_failed_below_entry",
+    "cautious_failed_below_entry", "sharia_blocked", "plan_broken",
+}
+V2W11_LIVE_SOURCE_KEYS = {
+    "live_tight_monitoring_v2v", "fmp_live_confirmed", "fmp_movers",
+    "live_mover", "live_ignition_hot_lane", "intraday_early_ramp",
+    "dip_reclaim_radar", "quiet_accumulation_radar", "high_risk_live_mover",
+    "big_explosion_live_lane_v2t", "big_explosion_live_lane_v2u",
+    "micro_explosion_capture_v2r", "micro_explosion_capture_v2r1",
+    "low_float_fast_lane_v1",
+}
 
 
 # Learning Overlay V1
@@ -393,6 +412,7 @@ def _final_visible_guard_v2w9(final_map: dict[str, list[dict]], *, market_phase:
         "version": "visible_stock_guard_v2w9_2026_06_24",
         "manual_excluded_hidden": [],
         "auto_hard_haram_hidden": [],
+        "inactive_tradability_hidden": [],
         "missing_plan_hidden": [],
         "plans_added": 0,
         "critical_premarket_hidden_outside_premarket": 0,
@@ -407,6 +427,11 @@ def _final_visible_guard_v2w9(final_map: dict[str, list[dict]], *, market_phase:
                 continue
             sym = _u(row.get("symbol"))
             if not sym or sym in seen:
+                continue
+            inactive_reason = _inactive_tradability_reason_v2w11(row)
+            if inactive_reason:
+                debug["inactive_tradability_hidden"].append(sym)
+                row["inactive_tradability_reason_v2w11"] = inactive_reason
                 continue
             if sym in active_manual or _manual_excluded_v2w9(row):
                 debug["manual_excluded_hidden"].append(sym)
@@ -430,9 +455,143 @@ def _final_visible_guard_v2w9(final_map: dict[str, list[dict]], *, market_phase:
             if len(clean) >= max(1, int(limit or DEFAULT_SECTION_LIMIT)):
                 break
         final_map[section] = clean
-    for k in ["manual_excluded_hidden", "auto_hard_haram_hidden", "missing_plan_hidden"]:
+    for k in ["manual_excluded_hidden", "auto_hard_haram_hidden", "inactive_tradability_hidden", "missing_plan_hidden"]:
         debug[k] = _dedupe(debug.get(k, []), 80)
         debug[f"{k}_count"] = len(debug[k])
+    return debug
+
+
+def _visible_candidate_allowed_v2w11(row: dict, section: str, *, market_phase: str = "", require_plan: bool = True) -> tuple[bool, str, dict]:
+    if not isinstance(row, dict):
+        return False, "not_a_row", row
+    item = dict(row)
+    sym = _u(item.get("symbol"))
+    if not sym:
+        return False, "missing_symbol", item
+    inactive_reason = _inactive_tradability_reason_v2w11(item)
+    if inactive_reason:
+        item["inactive_tradability_reason_v2w11"] = inactive_reason
+        return False, inactive_reason, item
+    active_manual = _manual_exclusion_symbols_v2w9()
+    if sym in active_manual or _manual_excluded_v2w9(item):
+        return False, "manual_sharia_excluded", item
+    if _s(item.get("sharia_status")).lower() in {"non_compliant", "haram", "excluded", "blocked"} and _hard_haram_auto_reason_v2w9(item):
+        return False, "auto_hard_haram", item
+    if section == "critical_pre_explosion_watch" and not _market_is_premarket_v2w9(market_phase):
+        return False, "critical_hidden_outside_premarket", item
+    status = _s(item.get("live_plan_status")).lower()
+    if status in V2W11_INVALID_PLAN_STATUSES and section not in {"continuation_pullback_candidates", "learning_opportunity_candidates"}:
+        return False, f"live_plan_{status}", item
+    # Names that already reached the trigger should not keep occupying Pre-Trigger.
+    price = _price(item)
+    trigger = _entry(item)
+    if section == "pre_trigger_candidates" and price > 0 and trigger > 0 and price >= trigger * 1.002:
+        return False, "trigger_already_hit_promote_out_of_pre_trigger", item
+    if section in {"pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates", "low_float_premarket_radar"}:
+        change = _change_pct(item)
+        if change >= V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT:
+            return False, "extreme_extension_no_chase", item
+    if require_plan:
+        before = bool(item.get("visible_monitoring_plan_v2w9"))
+        if not _ensure_visible_monitoring_plan_v2w9(item, section):
+            return False, "missing_visible_plan", item
+        if item.get("visible_monitoring_plan_v2w9") and not before:
+            item["visible_plan_added_by_dynamic_pool_v2w11"] = True
+    return True, "ok", item
+
+
+def _tomorrow_prep_section_candidates_v2w11(rows: list[dict]) -> dict[str, list[dict]]:
+    target_sections = {"pre_trigger": "pre_trigger_candidates", "low_float_premarket": "low_float_premarket_radar"}
+    candidates: dict[str, list[dict]] = {v: [] for v in target_sections.values()}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if not (row.get("tomorrow_prep_bridge_v2w9g") or row.get("tomorrow_prep_bridge_v2w9f") or row.get("source_origin") == "tomorrow_prep_final_sweep_v2w9e"):
+            continue
+        bucket = _s(row.get("tomorrow_prep_target_bucket_v2w9g") or row.get("opportunity_bucket"))
+        section = _s(row.get("tomorrow_prep_target_section_v2w9g") or target_sections.get(bucket, ""))
+        if section not in candidates:
+            continue
+        item = dict(row)
+        item["tomorrow_prep_section_bridge_v2w9g"] = True
+        item["source_layer"] = item.get("source_layer") or "tomorrow_prep_section_specific_bridge_v2w9g"
+        item["opportunity_bucket"] = bucket
+        if bucket == "pre_trigger":
+            item["opportunity_stage"] = "pre_trigger"
+        elif bucket == "low_float_premarket":
+            item["opportunity_stage"] = "low_float_premarket"
+        candidates[section].append(item)
+    return candidates
+
+
+def _dynamic_pool_backfill_v2w11(final_map: dict[str, list[dict]], section_pools: dict[str, list[dict]], *, market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
+    """Treat each visible list as a top-N view over a larger live candidate pool.
+
+    This fills holes created by Sharia/tradability/plan guards and lets live-scan
+    candidates replace stale previous-session cards when their live score is higher.
+    """
+    lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
+    debug: dict[str, Any] = {
+        "version": V2W11_DYNAMIC_POOL_VERSION,
+        "enabled": True,
+        "sections": {},
+        "rule_ar": "كل قائمة أصبحت نافذة Top-N فوق pool أكبر: إذا خرج سهم بسبب الشرعية/الخطة/السعر/التمدد يدخل الاحتياط الأعلى ترتيبًا، ومصادر live scan تأخذ أولوية في الترتيب.",
+    }
+    for section, pool in (section_pools or {}).items():
+        if section not in final_map:
+            continue
+        existing = list(final_map.get(section, []) or [])
+        candidates = list(pool or [])
+        # Include current visible rows too, because bridges/memory lanes may be added after the initial bucket map.
+        candidates.extend(existing)
+        sorted_candidates = _sort_bucket(candidates, section=section)
+        out: list[dict] = []
+        seen: set[str] = set()
+        removed_reasons: dict[str, int] = {}
+        live_source_candidates = 0
+        bridge_candidates = 0
+        for cand in sorted_candidates:
+            if not isinstance(cand, dict):
+                continue
+            if _row_source_tags_v2w11(cand) & V2W11_LIVE_SOURCE_KEYS or cand.get("live_tight_monitoring_v2v"):
+                live_source_candidates += 1
+            if cand.get("tomorrow_prep_section_bridge_v2w9g") or cand.get("tomorrow_prep_bridge_v2w9g") or cand.get("source_origin") == "tomorrow_prep_final_sweep_v2w9e":
+                bridge_candidates += 1
+            sym = _u(cand.get("symbol"))
+            if not sym or sym in seen:
+                continue
+            allowed, reason, item = _visible_candidate_allowed_v2w11(cand, section, market_phase=market_phase, require_plan=True)
+            if not allowed:
+                removed_reasons[reason] = int(removed_reasons.get(reason, 0) or 0) + 1
+                continue
+            item = dict(item)
+            item["dynamic_pool_v2w11"] = {
+                "section": section,
+                "rank_score": round(_dynamic_rank_score_v2w11(item, section=section), 3),
+                "pool_version": V2W11_DYNAMIC_POOL_VERSION,
+                "source_is_live_scan": bool(_row_source_tags_v2w11(item) & V2W11_LIVE_SOURCE_KEYS or item.get("live_tight_monitoring_v2v")),
+            }
+            out.append(item)
+            seen.add(sym)
+            if len(out) >= lim:
+                break
+        old_syms = [_u((x or {}).get("symbol")) for x in existing if isinstance(x, dict)]
+        new_syms = [_u((x or {}).get("symbol")) for x in out if isinstance(x, dict)]
+        promoted = [s for s in new_syms if s and s not in set(old_syms)]
+        dropped = [s for s in old_syms if s and s not in set(new_syms)]
+        final_map[section] = out
+        debug["sections"][section] = {
+            "pool_count": len(sorted_candidates),
+            "visible_count": len(out),
+            "reserve_count": max(0, len(sorted_candidates) - len(out)),
+            "live_source_candidate_count": live_source_candidates,
+            "tomorrow_prep_bridge_candidate_count": bridge_candidates,
+            "promoted_from_reserve_count": len(promoted),
+            "promoted_from_reserve_symbols": promoted[:20],
+            "dropped_or_reordered_symbols": dropped[:20],
+            "removed_reasons": removed_reasons,
+            "top_symbols": new_syms[:15],
+        }
     return debug
 
 
@@ -3185,10 +3344,40 @@ OPPORTUNITY_BUCKET_KEYS = [
 ]
 
 
+def _inactive_tradability_reason_v2w11(row: dict) -> str:
+    """Block dead/stale tickers before they can be analyzed or displayed as opportunities."""
+    if not isinstance(row, dict):
+        return "not_a_row"
+    sym = _u(row.get("symbol"))
+    if sym in V2W11_INACTIVE_SYMBOLS:
+        return "inactive_symbol_denylist"
+    name = _s(row.get("company_name") or row.get("name") or row.get("companyName")).lower()
+    if sym == "LTHM" or ("livent" in name and sym in {"LTHM", "ALTM"}):
+        return "old_livent_arcadium_ticker"
+    active_fields = [
+        row.get("is_active"), row.get("active"), row.get("tradable"), row.get("isTradable"), row.get("isActivelyTrading"),
+    ]
+    for val in active_fields:
+        if isinstance(val, bool) and val is False:
+            return "inactive_tradability_flag"
+        if isinstance(val, str) and val.strip().lower() in {"false", "no", "inactive", "delisted", "acquired", "halted_permanent"}:
+            return "inactive_tradability_flag"
+    status_text = " ".join([
+        _s(row.get("status")), _s(row.get("quote_status")), _s(row.get("listing_status")),
+        _s(row.get("market_status")), _s(row.get("security_status")),
+    ]).lower()
+    if any(x in status_text for x in ["delisted", "inactive", "acquired", "merged", "no longer trading"]):
+        return "inactive_status_text"
+    return ""
+
+
 def _is_blocked(row: dict) -> bool:
     # V2W9: manual exclusion is absolute. Auto Sharia caution/sector mismatch
     # should not erase monitoring lists; it only blocks execution/Strong until reviewed.
+    # V2W11: tradability is also absolute for visible/actionable monitoring lists.
     sharia = _s(row.get("sharia_status")).lower()
+    if _inactive_tradability_reason_v2w11(row):
+        return True
     if _manual_excluded_v2w9(row):
         return True
     if sharia in {"non_compliant", "haram", "excluded", "blocked", "learning_only"} and _hard_haram_auto_reason_v2w9(row):
@@ -3219,8 +3408,81 @@ def _high_price_suppression_reason(row: dict) -> str:
     return ""
 
 
-def _sort_bucket(rows: list[dict]) -> list[dict]:
-    return sorted(rows or [], key=lambda r: _num(r.get("opportunity_rank_score", r.get("display_rank_score", 0)), 0.0), reverse=True)
+def _row_source_tags_v2w11(row: dict) -> set[str]:
+    tags: set[str] = set()
+    for key in ["source_layer", "first_source_layer", "source_origin", "source_priority_lane", "source_reason", "first_source_reason"]:
+        val = _s(row.get(key))
+        if val:
+            tags.add(val)
+    raw_tags = row.get("source_reason_tags") or row.get("source_tags") or []
+    if isinstance(raw_tags, list):
+        for item in raw_tags:
+            val = _s(item)
+            if val:
+                tags.add(val)
+    return tags
+
+
+def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
+    """Rank a candidate with live-state and source freshness, not only the old snapshot score."""
+    if not isinstance(row, dict):
+        return 0.0
+    base = max(
+        _num(row.get("live_rank_score"), 0.0),
+        _num(row.get("display_rank_score"), 0.0),
+        _num(row.get("opportunity_rank_score"), 0.0),
+        _num(row.get("quality_score"), 0.0) * 10.0,
+    )
+    score = base
+    status = _s(row.get("live_plan_status")).lower()
+    if status in V2W11_INVALID_PLAN_STATUSES:
+        score -= 900.0
+    elif status in {"promoted_to_strong", "promoted_to_cautious"}:
+        score += 180.0
+    elif status in {"valid", "snapshot_far_from_live"}:
+        score += 18.0
+    tags = _row_source_tags_v2w11(row)
+    live_bonus = 0.0
+    if tags & V2W11_LIVE_SOURCE_KEYS:
+        live_bonus += 140.0
+    if row.get("live_tight_monitoring_v2v") or row.get("live_tight_memory_v2v"):
+        live_bonus += 180.0
+    if row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2u"):
+        live_bonus += 160.0
+    if row.get("micro_explosion_capture_v2r") or row.get("micro_explosion_capture_v2r1"):
+        live_bonus += 120.0
+    if row.get("low_float_fast_lane") or row.get("low_float_fast_lane_v1"):
+        live_bonus += 90.0
+    score += live_bonus
+    change = _change_pct(row)
+    price = _price(row)
+    trigger = _entry(row)
+    if trigger > 0 and price > 0:
+        dist = ((trigger - price) / price) * 100.0
+        if section == "pre_trigger_candidates":
+            if -0.25 <= dist <= 2.25:
+                score += 120.0
+            elif 2.25 < dist <= 5.0:
+                score += 40.0
+            elif dist < -0.25:
+                score -= 120.0
+        elif section == "low_float_premarket_radar" and -1.0 <= dist <= 4.5:
+            score += 45.0
+    if change >= V2V1_EXTREME_EXTENSION_MIN_CHANGE_PCT:
+        if section in {"pre_trigger_candidates", "low_float_premarket_radar", "support_bounce_candidates", "reclaim_candidates"}:
+            score -= 240.0
+        elif section == "continuation_pullback_candidates":
+            score += 80.0
+    elif change >= V2V1_EXTENDED_CONTINUATION_MIN_CHANGE_PCT:
+        if section in {"pre_trigger_candidates", "support_bounce_candidates"}:
+            score -= 160.0
+        elif section == "continuation_pullback_candidates":
+            score += 60.0
+    return score
+
+
+def _sort_bucket(rows: list[dict], section: str = "") -> list[dict]:
+    return sorted(rows or [], key=lambda r: _dynamic_rank_score_v2w11(r, section=section), reverse=True)
 
 
 # V2L: Closed-market / pre-open planning sections
@@ -4598,33 +4860,9 @@ def _inject_tomorrow_prep_section_bridge_v2w9g(final_map: dict[str, list[dict]],
         "overlap_symbols_sample": [],
         "rule_ar": "V2W9g: يعيد إدخال مرشحي V2W9e داخل القسم المقصود نفسه، ولا يحذف Pre-Trigger لمجرد أن الرمز موجود أيضًا في Low-Float.",
     }
-    target_sections = {
-        "pre_trigger": "pre_trigger_candidates",
-        "low_float_premarket": "low_float_premarket_radar",
-    }
-    candidates: dict[str, list[dict]] = {v: [] for v in target_sections.values()}
-    low_syms: set[str] = set()
-    pre_syms: set[str] = set()
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        if not (row.get("tomorrow_prep_bridge_v2w9g") or row.get("tomorrow_prep_bridge_v2w9f") or row.get("source_origin") == "tomorrow_prep_final_sweep_v2w9e"):
-            continue
-        bucket = _s(row.get("tomorrow_prep_target_bucket_v2w9g") or row.get("opportunity_bucket"))
-        section = _s(row.get("tomorrow_prep_target_section_v2w9g") or target_sections.get(bucket, ""))
-        if section not in candidates:
-            continue
-        item = dict(row)
-        item["tomorrow_prep_section_bridge_v2w9g"] = True
-        item["source_layer"] = item.get("source_layer") or "tomorrow_prep_section_specific_bridge_v2w9g"
-        item["opportunity_bucket"] = bucket
-        if bucket == "pre_trigger":
-            item["opportunity_stage"] = "pre_trigger"
-            pre_syms.add(_u(item.get("symbol")))
-        elif bucket == "low_float_premarket":
-            item["opportunity_stage"] = "low_float_premarket"
-            low_syms.add(_u(item.get("symbol")))
-        candidates[section].append(item)
+    candidates = _tomorrow_prep_section_candidates_v2w11(rows or [])
+    low_syms = {_u(item.get("symbol")) for item in candidates.get("low_float_premarket_radar", []) if isinstance(item, dict)}
+    pre_syms = {_u(item.get("symbol")) for item in candidates.get("pre_trigger_candidates", []) if isinstance(item, dict)}
 
     overlap = sorted([s for s in (low_syms & pre_syms) if s])
     debug["overlap_symbols_count"] = len(overlap)
@@ -4632,7 +4870,7 @@ def _inject_tomorrow_prep_section_bridge_v2w9g(final_map: dict[str, list[dict]],
 
     lim = max(1, int(limit or DEFAULT_SECTION_LIMIT))
     for section, vals in candidates.items():
-        vals = _sort_bucket(vals)
+        vals = _sort_bucket(vals, section=section)
         debug["candidate_counts_by_section"][section] = len(vals)
         if not vals:
             debug["added_by_section"][section] = 0
@@ -4759,11 +4997,21 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "gap_fill_watch",
         "catalyst_watch",
     ]
+    section_candidate_pools_v2w11: dict[str, list[dict]] = {
+        key: _sort_bucket(list(bucket_map.get(key, []) or []), section=key)
+        for key in ordered_keys
+    }
+    # Add Tomorrow Prep reserve rows to their intended section pool, not just to
+    # the first visible 12, so V2W11 can backfill from the prepared reserve.
+    for _sec, _vals in _tomorrow_prep_section_candidates_v2w11(rows or []).items():
+        if _sec in section_candidate_pools_v2w11:
+            section_candidate_pools_v2w11[_sec] = _sort_bucket(list(_vals or []) + list(section_candidate_pools_v2w11.get(_sec, []) or []), section=_sec)
+
     seen: set[str] = set()
     final_map: dict[str, list[dict]] = {}
     for key in ordered_keys:
         items = []
-        for row in _sort_bucket(bucket_map.get(key, [])):
+        for row in _sort_bucket(bucket_map.get(key, []), section=key):
             sym = _u(row.get("symbol"))
             if not sym or sym in seen:
                 continue
@@ -4926,6 +5174,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
     v2v1_priority_router_debug["tight_monitoring_recommended_symbols"] = _dedupe(v2v1_priority_router_debug.get("tight_monitoring_recommended_symbols", []), 80)
 
     visible_guard_debug = _final_visible_guard_v2w9(final_map, market_phase=market_phase, limit=limit)
+    dynamic_pool_debug_v2w11 = _dynamic_pool_backfill_v2w11(final_map, section_candidate_pools_v2w11, market_phase=market_phase, limit=limit)
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
@@ -4935,6 +5184,9 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "version": OPPORTUNITY_RADAR_VERSION,
         "market_phase": market_phase,
         "display_limit_per_section": max(1, int(limit or DEFAULT_SECTION_LIMIT)),
+        "dynamic_pool_version_v2w11": V2W11_DYNAMIC_POOL_VERSION,
+        "dynamic_pool_debug_v2w11": dynamic_pool_debug_v2w11,
+        "dynamic_pool_rule_ar": "القوائم ليست 12 سهمًا ثابتًا: كل قسم يعرض أعلى N من pool أكبر، ويملأ الفراغ من الاحتياط بعد الشرعية/الخطة/التداول/التمدد، مع أولوية لمصادر Live Scan.",
         "rule_ar": "Strong يبقى صارمًا؛ أثناء الإغلاق/قبل الافتتاح تظهر أقسام تحضيرية لمراجعة الفرص والمقاومة والدعم بدون تحويلها إلى BUY_NOW.",
         "counts_by_stage": raw_counts,
         "suppressed_high_price_count": len(set(suppressed_high_price)),

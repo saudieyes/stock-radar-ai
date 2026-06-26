@@ -59,7 +59,7 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v4a_v2w9b_rescue_build_dynamic_lists_2026_06_24"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v4b_v2w11_live_scan_first_dynamic_lists_2026_06_26"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
@@ -2888,31 +2888,31 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
     # Balanced order: V2a gives known weekly-priority names a front-row seat,
     # then today's live/new movers, with the old baseline as support only.
     selected_order = []
+    # V2W11: live discovery must feed the deep scan before yesterday/prepared pools
+    # can crowd it out.  Prepared/Tomorrow lists remain important, but active-market
+    # candidates detected right now get a front-row source position.
     selected_order += from_source("live_tight_monitoring_v2v", min(LIVE_TIGHT_MONITORING_LIMIT, max_symbols))
-    selected_order += from_source("big_explosion_prepared_watch_v2u", min(BIG_EXPLOSION_PREPARED_WATCH_LIMIT, max_symbols))
-    selected_order += from_source("big_explosion_live_lane_v2u", min(120, max_symbols))
-    selected_order += from_source("big_explosion_live_lane_v2t", min(90, max_symbols))
-    # Official launch source order: early/prepared lanes first, then live ignition,
-    # then constructive liquidity.  Late movers stay visible for review, but they
-    # must never crowd out early builders or weekly-priority names.
+    selected_order += from_source("intraday_early_ramp", min(170, max_symbols))
+    selected_order += from_source("dip_reclaim_radar", min(150, max_symbols))
+    selected_order += from_source("quiet_accumulation_radar", min(120, max_symbols))
+    selected_order += from_source("live_ignition_hot_lane", min(150, max_symbols))
+    selected_order += from_source("fmp_live_confirmed", min(160, max_symbols))
+    selected_order += from_source("big_explosion_live_lane_v2u", min(150, max_symbols))
+    selected_order += from_source("big_explosion_live_lane_v2t", min(120, max_symbols))
+    selected_order += from_source("low_float_fast_lane_v1", min(190, max_symbols))
     selected_order += from_source("micro_explosion_capture_v2r1", min(MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT, max_symbols))
     selected_order += from_source("micro_explosion_capture_v2r", min(MICRO_EXPLOSION_CAPTURE_INJECT_LIMIT, max_symbols))
     selected_order += from_source("micro_explosion_close_watch_v2r1", min(MICRO_EXPLOSION_CLOSE_WATCH_LIMIT, max_symbols))
-    selected_order += from_source("low_float_fast_lane_v1", min(160, max_symbols))
+    selected_order += from_source("big_explosion_prepared_watch_v2u", min(BIG_EXPLOSION_PREPARED_WATCH_LIMIT, max_symbols))
     selected_order += from_source("weekly_priority_watchlist", min(110, max_symbols))
     selected_order += from_source("polygon_weekly_builder", min(90, max_symbols))
     selected_order += from_source("polygon_next_day_builder", min(140, max_symbols))
-    selected_order += from_source("intraday_early_ramp", min(140, max_symbols))
-    selected_order += from_source("dip_reclaim_radar", min(120, max_symbols))
-    selected_order += from_source("quiet_accumulation_radar", min(90, max_symbols))
     selected_order += from_source("pre_move_engine_v2", min(120, max_symbols))
     selected_order += from_source("pre_move_watch", min(70, max_symbols))
-    selected_order += from_source("live_ignition_hot_lane", min(120, max_symbols))
     selected_order += from_source("constructive", min(120, max_symbols))
     selected_order += from_source("near_high", min(100, max_symbols))
     selected_order += from_source("volume_spike", min(110, max_symbols))
     selected_order += from_source("runner", min(90, max_symbols))
-    selected_order += from_source("fmp_live_confirmed", min(120, max_symbols))
     selected_order += from_source("fmp_movers", min(80, max_symbols))
     selected_order += from_source("continuation_watch", min(35, max_symbols))
     selected_order += from_source("weekly_high_risk_manual", min(15, max_symbols))
@@ -2954,9 +2954,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v3w_v2w8b_live_price_persistence_2026_06_23",
+        "engine_version": "dynamic_discovery_v4b_v2w11_live_scan_first_dynamic_lists_2026_06_26",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w8b_live_price_persistence_fast_promotion",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w11_live_scan_first_dynamic_list_pools",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -3026,6 +3026,12 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         "intraday_early_source_radar_sample": (intraday_early_radar_status or {}).get("candidates", [])[:20],
         "fmp_quote_diagnostics": fmp_diag,
         "source_bucket_counts": source_bucket_counts,
+        "live_scan_first_v2w11": {
+            "enabled": True,
+            "rule_ar": "V2W11: مصادر المسح الحي داخل التداول تدخل قبل قوائم الأمس/التحضير حتى لا تبقى القوائم ثابتة ولا تفوت الأسهم النشطة.",
+            "front_sources": ["live_tight_monitoring_v2v", "intraday_early_ramp", "dip_reclaim_radar", "quiet_accumulation_radar", "live_ignition_hot_lane", "fmp_live_confirmed", "big_explosion_live_lane_v2u", "low_float_fast_lane_v1"],
+            "front_source_counts": {k: int(source_bucket_counts.get(k, 0) or 0) for k in ["live_tight_monitoring_v2v", "intraday_early_ramp", "dip_reclaim_radar", "quiet_accumulation_radar", "live_ignition_hot_lane", "fmp_live_confirmed", "big_explosion_live_lane_v2u", "low_float_fast_lane_v1"]},
+        },
         "price_under_2_deprioritized": price_flags.get("under_2_deprioritized", 0),
         "price_under_2_exception": price_flags.get("under_2_exception", 0),
         "price_over_300_deprioritized": price_flags.get("over_300_deprioritized", 0),
