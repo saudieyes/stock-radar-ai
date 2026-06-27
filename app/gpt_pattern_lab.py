@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w16_second_wave_silent_compression_calibration_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w16_second_wave_silent_compression_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w16b_compression_break_priority_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w16b_compression_break_priority_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -119,14 +119,14 @@ _PATTERN_CALIBRATION = {
         "role": "bullish_setup",
         "recommended_bucket": "continuation_pullback",
         "promotion_hint": "second_wave_stage_confirmed_required",
-        "score_bonus": 6.0,
-        "min_live_score": 70.0,
-        "replay_win_rate_proxy": 51.92,
-        "replay_avg_gain_proxy": 5.48,
-        "replay_avg_drawdown_proxy": -3.79,
+        "score_bonus": 2.0,
+        "min_live_score": 72.0,
+        "replay_win_rate_proxy": 51.85,
+        "replay_avg_gain_proxy": 3.90,
+        "replay_avg_drawdown_proxy": -2.91,
         "requires_confirmation": True,
-        "activation_rule_ar": "موجة ثانية مشروطة: لا نطارد الموجة الأولى؛ ننتظر Pullback منضبط ثم قرب trigger أو تأكيد فوق trigger، مع وقف قريب.",
-        "leaderboard_note_ar": "V2W16 يفصل Second Wave إلى confirmed / trigger_ready / watch حتى لا تزاحم الموجة غير المؤكدة إشارات الارتكاز أو الملقاط.",
+        "activation_rule_ar": "موجة ثانية مشروطة: confirmed فقط يصلح لـ Continuation Pullback متوسط؛ trigger_ready يبقى Pre-Trigger لأن نتائج العينة أضعف.",
+        "leaderboard_note_ar": "V2W16b خفّض وزن Second Wave بعد التقرير: confirmed 51.85% ومتوسط صعود 3.9%، بينما trigger_ready 38.89% وDrawdown -5.09%؛ لذلك لا تزاحم Compression Confirmed أو Pivot Confirmed.",
     },
     "gpt_smart_pivot_reset": {
         "role": "bullish_setup_needs_confirmation",
@@ -158,14 +158,14 @@ _PATTERN_CALIBRATION = {
         "role": "early_watch",
         "recommended_bucket": "pre_trigger",
         "promotion_hint": "compression_break_confirmation_required",
-        "score_bonus": -4.0,
-        "min_live_score": 76.0,
-        "replay_win_rate_proxy": 41.82,
-        "replay_avg_gain_proxy": 6.14,
-        "replay_avg_drawdown_proxy": -2.48,
+        "score_bonus": 2.0,
+        "min_live_score": 68.0,
+        "replay_win_rate_proxy": 58.82,
+        "replay_avg_gain_proxy": 11.79,
+        "replay_avg_drawdown_proxy": -2.49,
         "requires_confirmation": True,
-        "activation_rule_ar": "ضغط صامت مبكر: لا يترقى إلا إذا اقترب من أعلى نطاق الضغط مع حجم جديد أو كسر النطاق بوضوح؛ Watch لا يساوي دخول.",
-        "leaderboard_note_ar": "V2W16 يخفض ضجيج Silent Compression: confirmed فقط يأخذ وزنًا مفيدًا، trigger_ready يبقى Pre-Trigger، والـ watch يبقى تعليم/مراقبة.",
+        "activation_rule_ar": "ضغط صامت مبكر: break_confirmed يستحق Pre-Trigger عالي الأولوية مع خطة trigger/stop؛ trigger_ready يبقى ضعيفًا حتى يكسر النطاق فعليًا.",
+        "leaderboard_note_ar": "V2W16b رفع أولوية Compression Confirmed بعد التقرير: 58.82% نجاح ومتوسط صعود 11.79% وDrawdown -2.49%، وخفّض trigger_ready لأنه 30.56% فقط.",
     },
     "gpt_liquidity_coil_reclaim": {
         "role": "bullish_setup_needs_confirmation",
@@ -341,12 +341,12 @@ def _apply_match_calibration(match: dict) -> dict:
         if stage == "second_wave_confirmed" and action == "second_wave_confirmed_watch":
             out["recommended_bucket"] = "continuation_pullback"
             if risk_pct <= 6.5:
-                stage_adjusted_score = min(94.0, calibrated_score + 4.0)
-                out["second_wave_stage_quality"] = "confirmed_clean"
+                stage_adjusted_score = min(86.0, calibrated_score + 2.0)
+                out["second_wave_stage_quality"] = "confirmed_medium"
                 out["promotion_hint"] = "second_wave_confirmed_clean_continuation"
-                out["second_wave_score_rule_ar"] = "موجة ثانية مؤكدة ووقفها قريب؛ تصلح لـ Continuation Pullback مراقبة مشروطة."
+                out["second_wave_score_rule_ar"] = "موجة ثانية مؤكدة لكن نتائج العينة متوسطة؛ تصلح لـ Continuation Pullback مراقبة مشروطة لا أولوية عالية."
             elif risk_pct <= 8.5:
-                stage_adjusted_score = min(86.0, calibrated_score)
+                stage_adjusted_score = min(80.0, calibrated_score)
                 out["second_wave_stage_quality"] = "confirmed_acceptable"
                 out["promotion_hint"] = "second_wave_confirmed_acceptable_continuation"
                 out["second_wave_score_rule_ar"] = "موجة ثانية مؤكدة لكن وقفها متوسط؛ لا تصبح قوية دون تأكيد حي."
@@ -359,13 +359,13 @@ def _apply_match_calibration(match: dict) -> dict:
         elif stage == "second_wave_trigger_ready" and action == "second_wave_trigger_ready":
             out["recommended_bucket"] = "pre_trigger"
             if risk_pct <= 6.5:
-                stage_adjusted_score = min(80.0, calibrated_score)
-                out["second_wave_stage_quality"] = "trigger_ready_tight"
+                stage_adjusted_score = min(66.0, calibrated_score)
+                out["second_wave_stage_quality"] = "trigger_ready_watch"
                 out["promotion_hint"] = "second_wave_trigger_ready_tight_pre_trigger"
                 out["second_wave_score_rule_ar"] = "قريبة من التفعيل ووقفها مقبول؛ Pre-Trigger مراقبة لصيقة."
             else:
-                stage_adjusted_score = min(72.0, calibrated_score)
-                out["second_wave_stage_quality"] = "trigger_ready_loose"
+                stage_adjusted_score = min(58.0, calibrated_score)
+                out["second_wave_stage_quality"] = "trigger_ready_weak"
                 out["promotion_hint"] = "second_wave_trigger_ready_loose_watch"
                 out["second_wave_score_rule_ar"] = "قريبة من التفعيل لكن لا تزاحم المؤكد بسبب المخاطرة/عدم الكسر."
         else:
@@ -389,22 +389,22 @@ def _apply_match_calibration(match: dict) -> dict:
         out["recommended_bucket"] = "pre_trigger"
         if stage == "compression_break_confirmed" and action == "silent_compression_break_confirmed":
             if range_risk_pct <= 7.5 and vol_slope >= 1.35:
-                stage_adjusted_score = min(84.0, calibrated_score + 3.0)
-                out["compression_stage_quality"] = "break_confirmed_clean"
-                out["promotion_hint"] = "silent_compression_break_confirmed_pre_trigger"
-                out["compression_score_rule_ar"] = "كسر ضغط مؤكد بحجم ومخاطرة نطاق مقبولة؛ يبقى Pre-Trigger حتى خطة trigger/stop."
+                stage_adjusted_score = min(92.0, calibrated_score + 8.0)
+                out["compression_stage_quality"] = "break_confirmed_priority"
+                out["promotion_hint"] = "silent_compression_break_confirmed_priority_pre_trigger"
+                out["compression_score_rule_ar"] = "كسر ضغط مؤكد هو أفضل نتيجة في تقرير V2W16؛ Pre-Trigger عالي الأولوية مع trigger/stop، وليس BUY_NOW."
             else:
-                stage_adjusted_score = min(76.0, calibrated_score)
-                out["compression_stage_quality"] = "break_confirmed_needs_filter"
+                stage_adjusted_score = min(82.0, calibrated_score + 2.0)
+                out["compression_stage_quality"] = "break_confirmed_filtered"
                 out["promotion_hint"] = "silent_compression_break_confirmed_filtered"
                 out["compression_score_rule_ar"] = "كسر ضغط موجود لكن الحجم/المخاطرة ليست مثالية؛ لا يترقى وحده."
         elif stage == "compression_trigger_ready" and action == "silent_compression_trigger_ready":
-            stage_adjusted_score = min(70.0, calibrated_score)
-            out["compression_stage_quality"] = "trigger_ready_pre_trigger"
-            out["promotion_hint"] = "silent_compression_trigger_ready_pre_trigger"
-            out["compression_score_rule_ar"] = "قريب من أعلى نطاق الضغط؛ يحتاج كسر فعلي أو حجم جديد."
-        else:
             stage_adjusted_score = min(58.0, calibrated_score)
+            out["compression_stage_quality"] = "trigger_ready_weak"
+            out["promotion_hint"] = "silent_compression_trigger_ready_watch_only"
+            out["compression_score_rule_ar"] = "قريب من أعلى نطاق الضغط لكنه ضعيف في التقرير؛ لا يزاحم الكسر المؤكد حتى يحدث كسر فعلي/حجم جديد."
+        else:
+            stage_adjusted_score = min(52.0, calibrated_score)
             out["promotion_hint"] = "silent_compression_watch_only"
         out["compression_stage_adjusted_score"] = _round(stage_adjusted_score, 2)
         out["calibrated_score"] = _round(stage_adjusted_score, 2)
@@ -1506,16 +1506,16 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
                 ss["avg_trigger_bar_offset"] = _round(_f(ss.get("avg_trigger_bar_offset")) / n, 2)
                 if pattern_id == "gpt_second_wave_controlled_pullback":
                     if ss.get("stage") == "second_wave_confirmed":
-                        ss["routing_rule_ar"] = "موجة ثانية مؤكدة: Continuation Pullback مشروط مع وقف قريب."
+                        ss["routing_rule_ar"] = "موجة ثانية مؤكدة: Continuation Pullback متوسط، لا يزاحم Compression/Pivot المؤكد."
                     elif ss.get("stage") == "second_wave_trigger_ready":
-                        ss["routing_rule_ar"] = "قريبة من التفعيل: Pre-Trigger حتى كسر/ثبات حي."
+                        ss["routing_rule_ar"] = "قريبة من التفعيل لكن نتائجها ضعيفة؛ Watch/Pre-Trigger منخفض الأولوية حتى تأكيد حي."
                     else:
                         ss["routing_rule_ar"] = "مراقبة فقط؛ لا تترقى قبل trigger."
                 elif pattern_id == "gpt_silent_compression_break":
                     if ss.get("stage") == "compression_break_confirmed":
-                        ss["routing_rule_ar"] = "كسر ضغط مؤكد: Pre-Trigger عالي المراقبة لكن ليس دخولًا مباشرًا."
+                        ss["routing_rule_ar"] = "كسر ضغط مؤكد: Pre-Trigger عالي الأولوية بعد V2W16b، لكن ليس دخولًا مباشرًا."
                     elif ss.get("stage") == "compression_trigger_ready":
-                        ss["routing_rule_ar"] = "قريب من كسر نطاق الضغط: Pre-Trigger فقط."
+                        ss["routing_rule_ar"] = "قريب من كسر نطاق الضغط لكنه ضعيف؛ مراقبة منخفضة حتى كسر فعلي."
                     else:
                         ss["routing_rule_ar"] = "ضغط مبكر/ضجيج محتمل؛ مراقبة فقط."
             return sorted(stage_summary.values(), key=lambda x: (_f(x.get("win_rate_proxy")), _f(x.get("avg_gain")), -_f(x.get("avg_drawdown"))), reverse=True)
@@ -1539,7 +1539,7 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             "summary_by_compression_stage": compression_stage_summary_sorted,
             "leaderboard_top": summary_sorted[:8],
             "signals": sorted(signals, key=lambda x: (_f(x.get("calibrated_score", x.get("score"))), _f(x.get("max_gain_pct_next_horizon"))), reverse=True)[:300],
-            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط. V2W16 يضيف معايرة مراحل Second Wave وSilent Compression مع بقاء كل الأنماط مشروطة بالـ trigger/stop.",
+            "rule_ar": "محاكاة no-lookahead خفيفة: V2W16b يرفع Compression Break Confirmed لأنه الأفضل في التقرير، ويخفض Second Wave Trigger Ready وCompression Trigger Ready بسبب ضعفهما؛ كل الأنماط تبقى مشروطة بالـ trigger/stop ولا تعطي BUY_NOW وحدها.",
         }
     finally:
         try:
