@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15b_smart_pivot_trigger_tightening_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15b_pivot_trigger_quality_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15c_pivot_stage_routing_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15c_pivot_stage_routing_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -139,7 +139,7 @@ _PATTERN_CALIBRATION = {
         "replay_avg_drawdown_proxy": -3.83,
         "requires_confirmation": True,
         "activation_rule_ar": "نمط ارتكاز ذكي مشروط: اندفاع سابق ثم Reset وقاع أعلى، لكن لا يترقى عمليًا إلا إذا كان قريبًا من trigger، ومخاطرة الوقف معقولة، أو حدث كسر/ثبات فوق trigger الارتكاز.",
-        "leaderboard_note_ar": "V2W15 replay أظهر 55 إشارة بنسبة نجاح 47.27%؛ لذلك شددنا التفعيل وفصلنا Pivot Watch عن Trigger Ready حتى لا يدخل مبكرًا قبل الارتكاز النظيف.",
+        "leaderboard_note_ar": "V2W15b replay أظهر أن Confirmed أفضل من Trigger Ready؛ لذلك صار Confirmed فقط يذهب إلى Support Bounce، بينما Trigger Ready يبقى Pre-Trigger مراقبة لصيقة.",
     },
     "strong_bos_bullish": {
         "role": "bullish_setup_needs_confirmation",
@@ -265,6 +265,20 @@ def _apply_match_calibration(match: dict) -> dict:
     out["replay_avg_gain_proxy"] = _round(cal.get("replay_avg_gain_proxy"), 2)
     out["replay_avg_drawdown_proxy"] = _round(cal.get("replay_avg_drawdown_proxy"), 2)
     out["calibrated_score"] = _round(calibrated_score, 2)
+    # V2W15c: Smart Pivot is stage-routed. Trigger Ready is not Support Bounce yet.
+    if pid == "gpt_smart_pivot_reset":
+        stage = _s(out.get("pivot_stage"))
+        action = _s(out.get("action"))
+        risk_pct = _f(out.get("risk_pct"), 99.0)
+        if stage == "pivot_confirmed" and action == "smart_pivot_confirmed_watch" and risk_pct <= 8.0:
+            out["recommended_bucket"] = "support_bounce"
+            out["promotion_hint"] = "smart_pivot_confirmed_support_bounce"
+        elif stage == "pivot_trigger_ready" and action == "smart_pivot_trigger_ready" and risk_pct <= 7.0:
+            out["recommended_bucket"] = "pre_trigger"
+            out["promotion_hint"] = "smart_pivot_trigger_ready_pre_trigger"
+        else:
+            out["recommended_bucket"] = "pre_trigger"
+            out["promotion_hint"] = "smart_pivot_watch_pre_trigger_only"
     if out.get("lab_role") == "risk_guard" or pid in _BEARISH_PATTERN_IDS:
         out["risk_guard_strength"] = _round(max(calibrated_score, base_score), 2)
     else:
@@ -902,10 +916,15 @@ def enrich_rows_with_gpt_pattern_lab(rows: list[dict], *, apply_bucket_hints: bo
             pivot_stage = _s(best_bullish.get("pivot_stage"))
             pivot_risk = _f(best_bullish.get("risk_pct"), 99.0)
             if _s(best_bullish.get("pattern_id")) == "gpt_smart_pivot_reset":
-                pivot_action_ok = action in {"smart_pivot_trigger_ready", "smart_pivot_confirmed_watch"} and pivot_risk <= 9.5
-                if not pivot_action_ok:
-                    should_route = bullish_score >= min_score and cur_bucket in {"", "watch", "early_movement", "learning_opportunity", "small_stock_classic", "raw_fast_lane"}
+                # V2W15c: confirmed pivots may route to Support Bounce;
+                # trigger-ready pivots stay Pre-Trigger until live confirmation.
+                if action == "smart_pivot_confirmed_watch" and pivot_risk <= 8.0:
+                    recommended = "support_bounce"
+                elif action == "smart_pivot_trigger_ready" and pivot_risk <= 7.0:
                     recommended = "pre_trigger"
+                else:
+                    recommended = "pre_trigger"
+                    should_route = bullish_score >= min_score and cur_bucket in {"", "watch", "early_movement", "learning_opportunity", "small_stock_classic", "raw_fast_lane"}
             # Allow important calibrated patterns to improve a nearby bucket even if already classified.
             should_label_existing = bullish_score >= min_score and cur_bucket in {"pre_trigger", "support_bounce", "reclaim", "continuation_pullback", "low_float_premarket"}
             if should_route:

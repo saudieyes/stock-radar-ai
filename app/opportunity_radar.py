@@ -3496,12 +3496,14 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
         elif gpt_bullish_pid == "gpt_liquidity_coil_reclaim" and section == "reclaim_candidates":
             score += 105.0
         elif gpt_bullish_pid == "gpt_smart_pivot_reset" and section in {"support_bounce_candidates", "reclaim_candidates", "pre_trigger_candidates"}:
-            # V2W15b: Smart Pivot broad watch is not enough.  Give the large boost
-            # only when the pivot is trigger-ready/confirmed and stop risk is acceptable.
-            if gpt_bullish_action in {"smart_pivot_confirmed_watch", "smart_pivot_trigger_ready"} and gpt_pivot_risk <= 9.5:
-                score += 185.0 if section in {"support_bounce_candidates", "reclaim_candidates"} else 135.0
+            # V2W15c: Stage routing from replay. Confirmed pivots can boost
+            # Support Bounce/Reclaim; Trigger Ready stays mainly in Pre-Trigger.
+            if gpt_bullish_action == "smart_pivot_confirmed_watch" and gpt_pivot_risk <= 8.0:
+                score += 205.0 if section in {"support_bounce_candidates", "reclaim_candidates"} else 135.0
+            elif gpt_bullish_action == "smart_pivot_trigger_ready" and gpt_pivot_risk <= 7.0:
+                score += 130.0 if section == "pre_trigger_candidates" else 35.0
             elif section == "pre_trigger_candidates":
-                score += 45.0
+                score += 35.0
         elif gpt_bullish_pid == "gpt_silent_compression_break" and section in {"pre_trigger_candidates", "low_float_premarket_radar"}:
             score += 70.0
         elif gpt_role in {"bullish_setup", "bullish_setup_needs_confirmation", "continuation_setup"}:
