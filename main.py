@@ -237,6 +237,12 @@ from app.gpt_pattern_lab import (
     run_pattern_replay_from_evidence as run_gpt_pattern_replay_from_evidence,
     summarize_current_rows as summarize_gpt_pattern_current_rows,
 )
+from app.active_tradability_gate import (
+    ACTIVE_TRADABILITY_GATE_VERSION,
+    audit_row as active_tradability_audit_row,
+    enrich_rows as enrich_rows_with_active_tradability_gate,
+    summarize_rows as summarize_active_tradability_rows,
+)
 from app.paper_trading_engine import PAPER_TRADING_VERSION, paper_trading_status, process_paper_trading_scan
 from app.breakout_quality_engine import BREAKOUT_QUALITY_VERSION, enrich_breakout_quality_rows, breakout_quality_status
 from app.weekly_plan_lifecycle import WEEKLY_PLAN_LIFECYCLE_VERSION, evaluate_weekly_rows, weekly_plan_lifecycle_status
@@ -1914,6 +1920,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception:
         pass
     try:
+        overlaid = enrich_rows_with_active_tradability_gate(overlaid, market_phase=phase)
+    except Exception:
+        pass
+    try:
         overlaid = enrich_rows_opportunity_radar(overlaid, market_phase=phase)
     except Exception:
         pass
@@ -1926,7 +1936,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
     except Exception as exc:
         opportunity_radar_payload = {"ok": False, "version": OPPORTUNITY_RADAR_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
-    strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)]
+    strong = [x for x in overlaid if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x) and _active_tradability_actionable_ok(x, market_phase=phase)]
     gray_strong, premarket_setups, watch = _build_special_buckets(overlaid, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
     cautious = [
@@ -1935,6 +1945,7 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         and normalize_symbol_text(x.get("symbol", "")) not in special_symbols
         and not _is_blocked_sharia(x)
         and not _is_gray_sharia(x)
+        and _active_tradability_actionable_ok(x, market_phase=phase)
     ]
     if not include_watch:
         watch = []
@@ -2031,6 +2042,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         "early_movement_fast_lane_count": len([x for x in overlaid if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "opportunity_radar": opportunity_radar_payload,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "active_tradability_gate_version": ACTIVE_TRADABILITY_GATE_VERSION,
+        "active_tradability_gate_summary": summarize_active_tradability_rows(overlaid, market_phase=phase, limit=40),
         "tomorrow_prep_final_bridge_v2w9f": tomorrow_prep_bridge_debug if 'tomorrow_prep_bridge_debug' in locals() else {},
         "promotion_bridge_debug": opportunity_radar_payload.get("promotion_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
@@ -3018,6 +3031,32 @@ def _is_blocked_sharia(stock: dict) -> bool:
     return bool(stock.get("sharia_manual_excluded")) or status in {"non_compliant", "manual_excluded"} or decision in {"مرفوض شرعياً", "مستبعد يدويًا"}
 
 
+
+def _active_tradability_visible_ok(stock: dict, *, market_phase: str = "") -> bool:
+    if not isinstance(stock, dict):
+        return False
+    audit = stock.get("active_tradability_gate_v2w14") if isinstance(stock.get("active_tradability_gate_v2w14"), dict) else None
+    if not audit:
+        try:
+            audit = active_tradability_audit_row(stock, market_phase=market_phase or get_market_phase())
+            stock["active_tradability_gate_v2w14"] = audit
+        except Exception:
+            return True
+    return bool(audit.get("visible_allowed", True))
+
+
+def _active_tradability_actionable_ok(stock: dict, *, market_phase: str = "") -> bool:
+    if not isinstance(stock, dict):
+        return False
+    audit = stock.get("active_tradability_gate_v2w14") if isinstance(stock.get("active_tradability_gate_v2w14"), dict) else None
+    if not audit:
+        try:
+            audit = active_tradability_audit_row(stock, market_phase=market_phase or get_market_phase())
+            stock["active_tradability_gate_v2w14"] = audit
+        except Exception:
+            return True
+    return bool(audit.get("visible_allowed", True)) and bool(audit.get("actionable_allowed", True))
+
 def _is_gray_sharia(stock: dict) -> bool:
     status = str(stock.get("sharia_status", "") or "").lower()
     return bool(stock.get("sharia_is_gray")) or status == "gray"
@@ -3649,6 +3688,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     except Exception:
         pass
     try:
+        results = enrich_rows_with_active_tradability_gate(results, market_phase=phase)
+    except Exception:
+        pass
+    try:
         results = enrich_rows_opportunity_radar(results, market_phase=phase)
     except Exception:
         pass
@@ -3659,7 +3702,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         opportunity_radar_payload = {"ok": False, "version": OPPORTUNITY_RADAR_VERSION, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
     scan_debug = dict(scan_debug or {})
     scan_debug["tomorrow_prep_final_bridge_v2w9f"] = tomorrow_prep_bridge_debug if 'tomorrow_prep_bridge_debug' in locals() else {}
-    strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x)])
+    strong = sort_display_bucket([x for x in results if x.get("decision") == "دخول قوي" and not _is_blocked_sharia(x) and not _is_gray_sharia(x) and _active_tradability_actionable_ok(x, market_phase=phase)])
     gray_strong, premarket_setups, watch = _build_special_buckets(results, phase)
     special_symbols = {normalize_symbol_text(x.get("symbol", "")) for x in (gray_strong + premarket_setups)}
     cautious = sort_display_bucket([
@@ -3668,6 +3711,7 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         and normalize_symbol_text(x.get("symbol", "")) not in special_symbols
         and not _is_blocked_sharia(x)
         and not _is_gray_sharia(x)
+        and _active_tradability_actionable_ok(x, market_phase=phase)
     ])
     early_movement_watchlist = early_movement_payload.get("early_movement_watchlist", [])
     support_bounce_candidates = opportunity_radar_payload.get("support_bounce_candidates", []) if isinstance(opportunity_radar_payload, dict) else []
@@ -3725,6 +3769,8 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
         "early_movement_fast_lane_count": len([x for x in results if isinstance(x, dict) and x.get("early_movement_fast_lane_applied")]),
         "opportunity_radar": opportunity_radar_payload,
         "opportunity_radar_version": OPPORTUNITY_RADAR_VERSION,
+        "active_tradability_gate_version": ACTIVE_TRADABILITY_GATE_VERSION,
+        "active_tradability_gate_summary": summarize_active_tradability_rows(results, market_phase=phase, limit=40),
         "tomorrow_prep_final_bridge_v2w9f": tomorrow_prep_bridge_debug if 'tomorrow_prep_bridge_debug' in locals() else {},
         "promotion_bridge_debug": opportunity_radar_payload.get("promotion_bridge_debug", {}) if isinstance(opportunity_radar_payload, dict) else {},
         "promotion_bridge_rule_ar": opportunity_radar_payload.get("promotion_bridge_rule_ar", "") if isinstance(opportunity_radar_payload, dict) else "",
@@ -5106,6 +5152,51 @@ def pattern_lab_gpt_leaderboard_endpoint(trade_date: str = "", limit_symbols: in
         limit_symbols=max(1, min(250, int(limit_symbols or 80))),
         horizon_bars=max(2, min(48, int(horizon_bars or 12))),
     )
+
+
+@app.get("/diagnostics/active-tradability-gate")
+def diagnostics_active_tradability_gate(limit: int = 80):
+    phase = get_market_phase()
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    rows = rows if isinstance(rows, list) else []
+    try:
+        enriched = enrich_rows_with_active_tradability_gate(rows, market_phase=phase)
+    except Exception:
+        enriched = rows
+    summary = summarize_active_tradability_rows(enriched, market_phase=phase, limit=max(10, min(200, int(limit or 80))))
+    summary.update({
+        "market_phase": phase,
+        "market_phase_label": market_phase_label(phase),
+        "snapshot_updated_at": snapshot.get("updated_at", "") if isinstance(snapshot, dict) else "",
+        "rule_ar": "يفحص آخر snapshot محفوظ ويكشف الرموز التي ستُحجب من القوائم العملية بسبب inactive/delisted/stale/bad mapping، والرموز التي تبقى مراقبة فقط بسبب تحذير سعر/جلسة.",
+    })
+    return summary
+
+
+@app.get("/active-tradability/audit")
+def active_tradability_audit_endpoint(symbol: str = ""):
+    phase = get_market_phase()
+    sym = normalize_symbol_text(symbol or "")
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    row = None
+    if sym and isinstance(rows, list):
+        for r in rows:
+            if isinstance(r, dict) and normalize_symbol_text(r.get("symbol", "")) == sym:
+                row = r
+                break
+    if row is None:
+        row = {"symbol": sym}
+    audit = active_tradability_audit_row(row, market_phase=phase, strict=False)
+    return {
+        "ok": True,
+        "version": ACTIVE_TRADABILITY_GATE_VERSION,
+        "market_phase": phase,
+        "snapshot_updated_at": snapshot.get("updated_at", "") if isinstance(snapshot, dict) else "",
+        "found_in_snapshot": bool(row and isinstance(rows, list) and any(isinstance(r, dict) and normalize_symbol_text(r.get("symbol", "")) == sym for r in rows)),
+        "audit": audit,
+    }
 
 
 @app.get("/diagnostics/dynamic-display-v2w12b")
