@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w13b_scoring_calibration_leaderboard_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w13b_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15_smart_pivot_reset_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15_smart_pivot_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -48,6 +48,7 @@ GPT_ALPHA_PATTERN_IDS = {
     "gpt_liquidity_coil_reclaim",
     "gpt_silent_compression_break",
     "gpt_second_wave_controlled_pullback",
+    "gpt_smart_pivot_reset",
 }
 
 _PATTERN_AR = {
@@ -63,6 +64,7 @@ _PATTERN_AR = {
     "gpt_liquidity_coil_reclaim": "GPT Alpha: مصيدة سيولة + ضغط صامت + استرداد",
     "gpt_silent_compression_break": "GPT Alpha: ضغط صامت قبل الانفجار",
     "gpt_second_wave_controlled_pullback": "GPT Alpha: موجة ثانية بعد Pullback منضبط",
+    "gpt_smart_pivot_reset": "GPT Alpha: الارتكاز الذكي — Reset + قاع أعلى + استرداد",
 }
 
 _BEARISH_PATTERN_IDS = {"elephant_trunk_drop", "strong_bos_bearish", "weak_bos_bearish", "tasuki_gap_bearish", "tweezer_top"}
@@ -125,6 +127,19 @@ _PATTERN_CALIBRATION = {
         "requires_confirmation": True,
         "activation_rule_ar": "لا نطارد الموجة الأولى؛ نراقب Pullback منضبط ثم تفعيل فوق قمة صغيرة/استرداد VWAP أو متوسط قريب.",
         "leaderboard_note_ar": "أفضل نمط GPT Alpha مبدئيًا للتداول العملي لأنه ينتظر موجة ثانية بدل المطاردة.",
+    },
+    "gpt_smart_pivot_reset": {
+        "role": "bullish_setup_needs_confirmation",
+        "recommended_bucket": "support_bounce",
+        "promotion_hint": "smart_pivot_reset_watch",
+        "score_bonus": 7.0,
+        "min_live_score": 68.0,
+        "replay_win_rate_proxy": 0.0,
+        "replay_avg_gain_proxy": 0.0,
+        "replay_avg_drawdown_proxy": 0.0,
+        "requires_confirmation": True,
+        "activation_rule_ar": "نمط ارتكاز ذكي: حركة قوية سابقة ثم Reset/Pullback، قاع أعلى، ضغط قرب دعم/متوسط، واسترداد. لا يترقى إلا فوق trigger الارتكاز أو بثبات فوق القاع الأعلى.",
+        "leaderboard_note_ar": "أضفناه لأن المستخدم طلب نمط سهم الارتكاز؛ يبدأ كمراقبة مشروطة حتى نجمع نتائج replay/Polygon أكثر.",
     },
     "strong_bos_bullish": {
         "role": "bullish_setup_needs_confirmation",
@@ -373,6 +388,29 @@ def _recent_trend_pct(bars: list[dict], lookback: int = 6) -> float:
     return _pct(_f(part[-1].get("close")), _f(part[0].get("open")) or _f(part[0].get("close")))
 
 
+def _ema_like(values: list[float], span: int = 8) -> float:
+    """Small EMA-like helper without pandas; used for pivot reset context."""
+    vals = [float(x) for x in values if x and x > 0]
+    if not vals:
+        return 0.0
+    alpha = 2.0 / (max(2, int(span)) + 1.0)
+    ema = vals[0]
+    for v in vals[1:]:
+        ema = alpha * v + (1 - alpha) * ema
+    return ema
+
+
+def _highest_before_tail(bars: list[dict], exclude_tail: int = 4) -> float:
+    part = bars[:-max(1, int(exclude_tail))] if len(bars) > exclude_tail else bars[:-1]
+    return max([_f(b.get("high")) for b in part] or [0.0])
+
+
+def _lowest_before_tail(bars: list[dict], exclude_tail: int = 4) -> float:
+    part = bars[:-max(1, int(exclude_tail))] if len(bars) > exclude_tail else bars[:-1]
+    lows = [_f(b.get("low")) for b in part if _f(b.get("low")) > 0]
+    return min(lows) if lows else 0.0
+
+
 def _add(matches: list[dict], pattern_id: str, score: float, direction: str, reasons: list[str], *, action: str = "monitor", trigger: float = 0.0, stop: float = 0.0, target: float = 0.0, confidence: str = "medium") -> None:
     match = {
         "pattern_id": pattern_id,
@@ -552,6 +590,60 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
                     "إغلاق قريب من أعلى الشمعة يدل أن الارتداد لم يكن وهميًا بالكامل.",
                     "هذا نمط GPT Alpha يجمع مصيدة سيولة + استرداد + بداية ضغط إيجابي.",
                 ], action="reclaim_watch", trigger=max(_f(last.get("high")), prev_floor), stop=min(_f(prev.get("low")), _f(last.get("low"))), target=price + max(avg_range * 1.8, price * 0.04), confidence="high" if score >= 78 else "medium")
+
+    # GPT Alpha: Smart Pivot Reset / سهم الارتكاز الذكي.
+    # Idea from the user's analyst lessons, translated into measurable no-lookahead rules:
+    # prior impulse -> controlled reset/pullback -> higher low -> compression/support hold -> reclaim.
+    # This is not a BUY_NOW pattern.  It is a watch/trigger pattern for Support Bounce/Reclaim.
+    if len(bars) >= 18 and price > 0:
+        look = bars[-min(34, len(bars)):]
+        older = look[:-5]
+        tail = look[-6:]
+        prior_low = _lowest_before_tail(look, exclude_tail=6)
+        prior_high = _highest_before_tail(look, exclude_tail=5)
+        tail_lows = [_f(b.get("low")) for b in tail if _f(b.get("low")) > 0]
+        reset_low = min(tail_lows) if tail_lows else 0.0
+        tail_high = max([_f(b.get("high")) for b in tail] or [0.0])
+        first_base = _f(older[0].get("open")) if older else prior_low
+        impulse_pct = _pct(prior_high, min(first_base or prior_low, prior_low) or first_base) if prior_high else 0.0
+        pullback_pct = _pct(prior_high, reset_low) if prior_high and reset_low else 0.0
+        higher_low_pct = _pct(reset_low, prior_low) if prior_low and reset_low else 0.0
+        recent_closes = [_f(b.get("close")) for b in tail if _f(b.get("close")) > 0]
+        ema_fast = _ema_like([_f(b.get("close")) for b in look], span=8)
+        reclaim_fast = bool(ema_fast and price >= ema_fast * 0.997)
+        recent_ranges = [_range(b) for b in tail[:-1]]
+        earlier_ranges = [_range(b) for b in look[-14:-7]] if len(look) >= 14 else [_range(b) for b in older[-6:]]
+        compression_ratio = (_avg(recent_ranges) / max(_avg(earlier_ranges), 0.01)) if earlier_ranges and recent_ranges else 1.0
+        avg_tail_vol = _avg([_f(b.get("volume")) for b in tail[:-1] if _f(b.get("volume")) > 0])
+        vol_reclaim = (not avg_tail_vol) or _f(last.get("volume")) >= avg_tail_vol * 0.95
+        reclaimed_micro_high = price >= max([_f(b.get("close")) for b in tail[:-1]] or [price]) * 0.998
+        close_position = (price - reset_low) / max(tail_high - reset_low, 0.01) if tail_high > reset_low else 0.0
+        # Intraday version uses a lower pullback bound than the daily 30-60% pivot lesson;
+        # daily/weekly replay can later use larger lookbacks.  The structural principle is the same.
+        if (
+            impulse_pct >= 9.0
+            and 3.0 <= pullback_pct <= 38.0
+            and higher_low_pct >= 0.7
+            and close_position >= 0.48
+            and (reclaim_fast or reclaimed_micro_high)
+            and compression_ratio <= 1.15
+            and vol_reclaim
+        ):
+            score = 58.0
+            score += min(16.0, impulse_pct * 0.45)
+            score += min(12.0, max(0.0, higher_low_pct) * 2.4)
+            score += min(10.0, max(0.0, 1.15 - compression_ratio) * 22.0)
+            score += 8.0 if reclaim_fast and reclaimed_micro_high else 3.0
+            if avg_tail_vol and _f(last.get("volume")) >= avg_tail_vol * 1.25:
+                score += 5.0
+            trigger_level = max(tail_high, price * 1.004)
+            stop_level = reset_low
+            target_level = trigger_level + max((prior_high - reset_low) * 0.45, price * 0.045, avg_range * 1.6)
+            _add(matches, "gpt_smart_pivot_reset", score, "bullish", [
+                f"اندفاع سابق بنحو {round(impulse_pct,1)}% ثم Reset/Pullback بنحو {round(pullback_pct,1)}%.",
+                f"القاع الأخير أعلى من القاع السابق بنحو {round(higher_low_pct,1)}% مع ضغط/تهدئة قبل الاسترداد.",
+                "هذا نمط ارتكاز ذكي: لا يشتري أول قاع؛ ينتظر قاعًا أعلى واستردادًا ثم trigger واضح.",
+            ], action="smart_pivot_reset_watch", trigger=trigger_level, stop=stop_level, target=target_level, confidence="high" if score >= 78 else "medium")
 
     # GPT Alpha: Second Wave Controlled Pullback.
     if len(bars) >= 10 and price > 0:
@@ -781,6 +873,7 @@ def pattern_lab_status() -> dict:
             "Tweezer Bottom أصبح Support Bounce/Reclaim قويًا لكن بشرط الدعم والتأكيد.",
             "Elephant Trunk Drop وTweezer Top أصبحا Risk Guards لا إشارات شراء.",
             "GPT Second Wave هو أفضل نمط GPT Alpha مبدئيًا للمراقبة العملية.",
+            "Smart Pivot Reset يترجم سهم الارتكاز: اندفاع سابق + Reset + قاع أعلى + استرداد مشروط.",
             "Strong BOS Bullish يحتاج hold/retest أو حجم استمرار ولا يدخل وحده.",
         ],
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",

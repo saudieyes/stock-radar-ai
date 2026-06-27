@@ -3492,6 +3492,8 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
             score += 120.0
         elif gpt_bullish_pid == "gpt_liquidity_coil_reclaim" and section == "reclaim_candidates":
             score += 105.0
+        elif gpt_bullish_pid == "gpt_smart_pivot_reset" and section in {"support_bounce_candidates", "reclaim_candidates", "pre_trigger_candidates"}:
+            score += 185.0
         elif gpt_bullish_pid == "gpt_silent_compression_break" and section in {"pre_trigger_candidates", "low_float_premarket_radar"}:
             score += 70.0
         elif gpt_role in {"bullish_setup", "bullish_setup_needs_confirmation", "continuation_setup"}:
