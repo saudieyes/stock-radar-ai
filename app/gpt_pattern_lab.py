@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15e_pivot_stage_score_calibration_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15e_pivot_stage_score_calibration_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w16_second_wave_silent_compression_calibration_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w16_second_wave_silent_compression_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -118,15 +118,15 @@ _PATTERN_CALIBRATION = {
     "gpt_second_wave_controlled_pullback": {
         "role": "bullish_setup",
         "recommended_bucket": "continuation_pullback",
-        "promotion_hint": "second_wave_watch",
-        "score_bonus": 10.0,
-        "min_live_score": 66.0,
-        "replay_win_rate_proxy": 52.94,
-        "replay_avg_gain_proxy": 5.38,
+        "promotion_hint": "second_wave_stage_confirmed_required",
+        "score_bonus": 6.0,
+        "min_live_score": 70.0,
+        "replay_win_rate_proxy": 51.92,
+        "replay_avg_gain_proxy": 5.48,
         "replay_avg_drawdown_proxy": -3.79,
         "requires_confirmation": True,
-        "activation_rule_ar": "لا نطارد الموجة الأولى؛ نراقب Pullback منضبط ثم تفعيل فوق قمة صغيرة/استرداد VWAP أو متوسط قريب.",
-        "leaderboard_note_ar": "أفضل نمط GPT Alpha مبدئيًا للتداول العملي لأنه ينتظر موجة ثانية بدل المطاردة.",
+        "activation_rule_ar": "موجة ثانية مشروطة: لا نطارد الموجة الأولى؛ ننتظر Pullback منضبط ثم قرب trigger أو تأكيد فوق trigger، مع وقف قريب.",
+        "leaderboard_note_ar": "V2W16 يفصل Second Wave إلى confirmed / trigger_ready / watch حتى لا تزاحم الموجة غير المؤكدة إشارات الارتكاز أو الملقاط.",
     },
     "gpt_smart_pivot_reset": {
         "role": "bullish_setup_needs_confirmation",
@@ -157,15 +157,15 @@ _PATTERN_CALIBRATION = {
     "gpt_silent_compression_break": {
         "role": "early_watch",
         "recommended_bucket": "pre_trigger",
-        "promotion_hint": "early_compression_watch",
-        "score_bonus": -2.0,
-        "min_live_score": 74.0,
-        "replay_win_rate_proxy": 43.33,
-        "replay_avg_gain_proxy": 6.50,
-        "replay_avg_drawdown_proxy": -2.62,
+        "promotion_hint": "compression_break_confirmation_required",
+        "score_bonus": -4.0,
+        "min_live_score": 76.0,
+        "replay_win_rate_proxy": 41.82,
+        "replay_avg_gain_proxy": 6.14,
+        "replay_avg_drawdown_proxy": -2.48,
         "requires_confirmation": True,
-        "activation_rule_ar": "يراقب الضغط قبل الانفجار فقط؛ يحتاج اختراق نطاق الضغط أو دخول حجم جديد قبل الترقية.",
-        "leaderboard_note_ar": "يلتقط مبكرًا لكن يعطي ضجيجًا؛ يبقى Early Watch حتى تزيد جلسات المحاكاة.",
+        "activation_rule_ar": "ضغط صامت مبكر: لا يترقى إلا إذا اقترب من أعلى نطاق الضغط مع حجم جديد أو كسر النطاق بوضوح؛ Watch لا يساوي دخول.",
+        "leaderboard_note_ar": "V2W16 يخفض ضجيج Silent Compression: confirmed فقط يأخذ وزنًا مفيدًا، trigger_ready يبقى Pre-Trigger، والـ watch يبقى تعليم/مراقبة.",
     },
     "gpt_liquidity_coil_reclaim": {
         "role": "bullish_setup_needs_confirmation",
@@ -326,6 +326,90 @@ def _apply_match_calibration(match: dict) -> dict:
             out["promotion_hint"] = "smart_pivot_watch_only"
         out["pivot_stage_adjusted_score"] = _round(stage_adjusted_score, 2)
         out["calibrated_score"] = _round(stage_adjusted_score, 2)
+
+    # V2W16: Second Wave is also stage-aware.  A broad second-wave shape is useful
+    # for monitoring, but only a confirmed/near-trigger second wave should route
+    # into Continuation Pullback.  This prevents the pattern from becoming another
+    # noisy early label.
+    if pid == "gpt_second_wave_controlled_pullback":
+        stage = _s(out.get("second_wave_stage"))
+        action = _s(out.get("action"))
+        risk_pct = _f(out.get("risk_pct"), 99.0)
+        stage_adjusted_score = calibrated_score
+        out["second_wave_stage_quality"] = "watch_only"
+        out["second_wave_score_rule_ar"] = "موجة ثانية مراقبة فقط؛ تحتاج trigger ووقف قريب قبل الترقية."
+        if stage == "second_wave_confirmed" and action == "second_wave_confirmed_watch":
+            out["recommended_bucket"] = "continuation_pullback"
+            if risk_pct <= 6.5:
+                stage_adjusted_score = min(94.0, calibrated_score + 4.0)
+                out["second_wave_stage_quality"] = "confirmed_clean"
+                out["promotion_hint"] = "second_wave_confirmed_clean_continuation"
+                out["second_wave_score_rule_ar"] = "موجة ثانية مؤكدة ووقفها قريب؛ تصلح لـ Continuation Pullback مراقبة مشروطة."
+            elif risk_pct <= 8.5:
+                stage_adjusted_score = min(86.0, calibrated_score)
+                out["second_wave_stage_quality"] = "confirmed_acceptable"
+                out["promotion_hint"] = "second_wave_confirmed_acceptable_continuation"
+                out["second_wave_score_rule_ar"] = "موجة ثانية مؤكدة لكن وقفها متوسط؛ لا تصبح قوية دون تأكيد حي."
+            else:
+                stage_adjusted_score = min(74.0, calibrated_score)
+                out["recommended_bucket"] = "pre_trigger"
+                out["second_wave_stage_quality"] = "confirmed_high_risk"
+                out["promotion_hint"] = "second_wave_confirmed_high_risk_pre_trigger"
+                out["second_wave_score_rule_ar"] = "موجة ثانية مؤكدة شكليًا لكن وقفها بعيد؛ تبقى Pre-Trigger."
+        elif stage == "second_wave_trigger_ready" and action == "second_wave_trigger_ready":
+            out["recommended_bucket"] = "pre_trigger"
+            if risk_pct <= 6.5:
+                stage_adjusted_score = min(80.0, calibrated_score)
+                out["second_wave_stage_quality"] = "trigger_ready_tight"
+                out["promotion_hint"] = "second_wave_trigger_ready_tight_pre_trigger"
+                out["second_wave_score_rule_ar"] = "قريبة من التفعيل ووقفها مقبول؛ Pre-Trigger مراقبة لصيقة."
+            else:
+                stage_adjusted_score = min(72.0, calibrated_score)
+                out["second_wave_stage_quality"] = "trigger_ready_loose"
+                out["promotion_hint"] = "second_wave_trigger_ready_loose_watch"
+                out["second_wave_score_rule_ar"] = "قريبة من التفعيل لكن لا تزاحم المؤكد بسبب المخاطرة/عدم الكسر."
+        else:
+            stage_adjusted_score = min(64.0, calibrated_score)
+            out["recommended_bucket"] = "pre_trigger"
+            out["promotion_hint"] = "second_wave_watch_only"
+        out["second_wave_stage_adjusted_score"] = _round(stage_adjusted_score, 2)
+        out["calibrated_score"] = _round(stage_adjusted_score, 2)
+
+    # V2W16: Silent Compression is an early-warning pattern.  Its replay profile is
+    # noisy, so confirmed breaks are useful, trigger-ready stays Pre-Trigger, and
+    # any watch-only compression is capped very low.
+    if pid == "gpt_silent_compression_break":
+        stage = _s(out.get("compression_stage"))
+        action = _s(out.get("action"))
+        range_risk_pct = _f(out.get("range_risk_pct"), 99.0)
+        vol_slope = _f(out.get("vol_slope"), 1.0)
+        stage_adjusted_score = calibrated_score
+        out["compression_stage_quality"] = "watch_only"
+        out["compression_score_rule_ar"] = "ضغط صامت للمراقبة فقط؛ يحتاج كسر نطاق وحجم جديد."
+        out["recommended_bucket"] = "pre_trigger"
+        if stage == "compression_break_confirmed" and action == "silent_compression_break_confirmed":
+            if range_risk_pct <= 7.5 and vol_slope >= 1.35:
+                stage_adjusted_score = min(84.0, calibrated_score + 3.0)
+                out["compression_stage_quality"] = "break_confirmed_clean"
+                out["promotion_hint"] = "silent_compression_break_confirmed_pre_trigger"
+                out["compression_score_rule_ar"] = "كسر ضغط مؤكد بحجم ومخاطرة نطاق مقبولة؛ يبقى Pre-Trigger حتى خطة trigger/stop."
+            else:
+                stage_adjusted_score = min(76.0, calibrated_score)
+                out["compression_stage_quality"] = "break_confirmed_needs_filter"
+                out["promotion_hint"] = "silent_compression_break_confirmed_filtered"
+                out["compression_score_rule_ar"] = "كسر ضغط موجود لكن الحجم/المخاطرة ليست مثالية؛ لا يترقى وحده."
+        elif stage == "compression_trigger_ready" and action == "silent_compression_trigger_ready":
+            stage_adjusted_score = min(70.0, calibrated_score)
+            out["compression_stage_quality"] = "trigger_ready_pre_trigger"
+            out["promotion_hint"] = "silent_compression_trigger_ready_pre_trigger"
+            out["compression_score_rule_ar"] = "قريب من أعلى نطاق الضغط؛ يحتاج كسر فعلي أو حجم جديد."
+        else:
+            stage_adjusted_score = min(58.0, calibrated_score)
+            out["promotion_hint"] = "silent_compression_watch_only"
+        out["compression_stage_adjusted_score"] = _round(stage_adjusted_score, 2)
+        out["calibrated_score"] = _round(stage_adjusted_score, 2)
+
+    calibrated_score = _f(out.get("calibrated_score"), calibrated_score)
     if out.get("lab_role") == "risk_guard" or pid in _BEARISH_PATTERN_IDS:
         out["risk_guard_strength"] = _round(max(calibrated_score, base_score), 2)
     else:
@@ -338,7 +422,12 @@ def _apply_match_calibration(match: dict) -> dict:
 def _calibrated_score(match: dict) -> float:
     if not isinstance(match, dict):
         return 0.0
-    return max(_f(match.get("calibrated_score")), _f(match.get("score")))
+    # Stage caps are intentional (Smart Pivot / Second Wave / Compression).  When
+    # calibrated_score exists, prefer it over raw score so early/watch stages do
+    # not crowd out confirmed setups.
+    if "calibrated_score" in match:
+        return _f(match.get("calibrated_score"))
+    return _f(match.get("score"))
 
 
 def _match_is_bullish_setup(match: dict) -> bool:
@@ -619,7 +708,7 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
                 "فشل الاختراق مع شمعة حمراء يعطي تحذير انعكاس/تصريف.",
             ], action="risk_guard_no_chase", trigger=min(_f(prev.get("low")), _f(last.get("low"))), stop=max(_f(prev.get("high")), _f(last.get("high"))), target=price - max(avg_range * 1.4, price * 0.025), confidence="medium")
 
-    # GPT Alpha: Silent Compression Break.
+    # GPT Alpha: Silent Compression Break — V2W16 stage-aware.
     if len(bars) >= 10 and price > 0:
         comp = bars[-8:-1]
         early_ranges = [_range(b) for b in bars[-14:-8]] if len(bars) >= 14 else [_range(b) for b in bars[:-8]]
@@ -630,13 +719,36 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
         comp_high = max(_f(b.get("high")) for b in comp)
         comp_low = min(_f(b.get("low")) for b in comp if _f(b.get("low")) > 0)
         vol_slope = (_avg([_f(b.get("volume")) for b in comp[-3:]]) / max(_avg([_f(b.get("volume")) for b in comp[:3]]), 1.0)) if comp else 1.0
-        if 0 < compression <= 0.72 and price >= comp_high * 0.995 and vol_slope >= 1.12:
-            score = 60 + min(18, (0.72 - compression) * 45) + min(14, (vol_slope - 1.0) * 20)
+        range_risk_pct = _pct(comp_high, comp_low) if comp_high and comp_low else 99.0
+        break_confirmed = price >= comp_high * 1.002 and vol_slope >= 1.28
+        trigger_ready = price >= comp_high * 0.995 and vol_slope >= 1.12
+        # Keep this pattern selective; it is early by design and should not flood the lab.
+        if 0 < compression <= 0.72 and trigger_ready:
+            score = 56 + min(16, (0.72 - compression) * 42) + min(12, (vol_slope - 1.0) * 18)
+            if break_confirmed:
+                action = "silent_compression_break_confirmed"
+                stage = "compression_break_confirmed"
+                score += 8.0
+                rule_note = "كسر ضغط مؤكد: السعر تخطى أعلى النطاق مع تحسن حجم؛ يبقى Pre-Trigger حتى خطة واضحة."
+            else:
+                action = "silent_compression_trigger_ready"
+                stage = "compression_trigger_ready"
+                score = min(score, 72.0)
+                rule_note = "ضغط قريب من التفعيل: يحتاج كسر نطاق فعلي أو شمعة حجم جديدة."
+            if range_risk_pct > 8.5:
+                score -= min(10.0, (range_risk_pct - 8.5) * 0.8)
             _add(matches, "gpt_silent_compression_break", score, "bullish", [
                 "مدى الشموع ضاق بوضوح قبل اقتراب السعر من أعلى نطاق الضغط.",
-                f"ارتفاع تدريجي في الحجم داخل الضغط: ratio≈{round(vol_slope,2)}.",
-                "هدف النمط: التقاط الحركة قبل الشمعة الكبيرة لا بعدها.",
-            ], action="pre_trigger_candidate", trigger=comp_high, stop=comp_low, target=comp_high + max((comp_high - comp_low) * 1.2, price * 0.035), confidence="high" if score >= 78 else "medium")
+                f"ارتفاع تدريجي في الحجم داخل الضغط: ratio≈{round(vol_slope,2)}، range-risk≈{round(range_risk_pct,1)}%.",
+                rule_note,
+            ], action=action, trigger=comp_high, stop=comp_low, target=comp_high + max((comp_high - comp_low) * 1.2, price * 0.035), confidence="high" if break_confirmed and score >= 78 else "medium", extra={
+                "compression_stage": stage,
+                "compression_ratio": _round(compression, 3),
+                "vol_slope": _round(vol_slope, 3),
+                "range_risk_pct": _round(range_risk_pct, 2),
+                "break_confirmed": bool(break_confirmed),
+                "trigger_ready": bool(trigger_ready),
+            })
 
     # GPT Alpha: Liquidity Sweep + Reclaim + Compression.
     if len(bars) >= 8 and price > 0:
@@ -775,23 +887,54 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
                 "clean_structure": bool(clean_structure),
             })
 
-    # GPT Alpha: Second Wave Controlled Pullback.
+    # GPT Alpha: Second Wave Controlled Pullback — V2W16 stage-aware.
     if len(bars) >= 10 and price > 0:
         look = bars[-10:]
         start_price = _f(look[0].get("open")) or _f(look[0].get("close"))
         high_price = max(_f(b.get("high")) for b in look)
         impulse = _pct(high_price, start_price) if start_price else 0.0
-        pullback_low = min(_f(b.get("low")) for b in look[-4:] if _f(b.get("low")) > 0)
-        pullback_pct = _pct(high_price, pullback_low) if high_price else 0.0
+        recent_lows = [_f(b.get("low")) for b in look[-4:] if _f(b.get("low")) > 0]
+        pullback_low = min(recent_lows) if recent_lows else 0.0
+        pullback_pct = _pct(high_price, pullback_low) if high_price and pullback_low else 0.0
         held_mid = pullback_low >= start_price + (high_price - start_price) * 0.38 if start_price and high_price > start_price else False
         reclaim_last = price > _avg([_f(b.get("close")) for b in look[-4:-1]])
-        if 7.0 <= impulse <= 35.0 and 2.0 <= pullback_pct <= 12.0 and held_mid and reclaim_last:
-            score = 61 + min(18, impulse * 0.55) + min(12, (12.0 - pullback_pct) * 1.2)
+        trigger_level = max([_f(b.get("high")) for b in look[-4:-1]] or [0.0])
+        if not trigger_level:
+            trigger_level = max(_f(b.get("high")) for b in look[-4:])
+        triggered_now = price >= trigger_level * 0.998 if trigger_level else False
+        trigger_near = price >= trigger_level * 0.986 if trigger_level else False
+        risk_pct = _pct(trigger_level, pullback_low) if trigger_level and pullback_low else 99.0
+        clean_pullback = 7.0 <= impulse <= 35.0 and 2.0 <= pullback_pct <= 12.0 and held_mid and reclaim_last
+        if clean_pullback and trigger_near:
+            score = 58 + min(16, impulse * 0.48) + min(10, (12.0 - pullback_pct) * 1.0)
+            if triggered_now and risk_pct <= 8.5:
+                action = "second_wave_confirmed_watch"
+                stage = "second_wave_confirmed"
+                score += 8.0
+                rule_note = "موجة ثانية مؤكدة: السعر استرد trigger بعد Pullback منضبط؛ تنتقل إلى Continuation Pullback المشروط."
+            elif risk_pct <= 9.5:
+                action = "second_wave_trigger_ready"
+                stage = "second_wave_trigger_ready"
+                score = min(score + 2.0, 78.0)
+                rule_note = "موجة ثانية قريبة من trigger؛ تبقى Pre-Trigger حتى كسر/ثبات حي."
+            else:
+                action = "second_wave_watch"
+                stage = "second_wave_watch"
+                score = min(score, 64.0)
+                rule_note = "Pullback منضبط لكن الوقف بعيد؛ مراقبة فقط."
             _add(matches, "gpt_second_wave_controlled_pullback", score, "bullish", [
-                f"موجة أولى واضحة بنحو {round(impulse,1)}% ثم Pullback غير عميق.",
-                "التراجع حافظ على جزء كبير من الحركة ثم بدأ يسترد متوسط الإغلاقات الأخيرة.",
-                "مفيد لعدم مطاردة الشمعة الأولى وانتظار موجة ثانية محسوبة.",
-            ], action="continuation_watch", trigger=max(_f(b.get("high")) for b in look[-4:]), stop=pullback_low, target=price + max((high_price - pullback_low) * 0.75, price * 0.04), confidence="medium")
+                f"موجة أولى واضحة بنحو {round(impulse,1)}% ثم Pullback بنحو {round(pullback_pct,1)}%.",
+                f"حافظ على منتصف الحركة وبدأ يسترد؛ trigger≈{round(trigger_level,4)}، risk≈{round(risk_pct,1)}%.",
+                rule_note,
+            ], action=action, trigger=trigger_level, stop=pullback_low, target=price + max((high_price - pullback_low) * 0.75, price * 0.04), confidence="high" if stage == "second_wave_confirmed" and score >= 78 else "medium", extra={
+                "second_wave_stage": stage,
+                "impulse_pct": _round(impulse, 2),
+                "pullback_pct": _round(pullback_pct, 2),
+                "risk_pct": _round(risk_pct, 2),
+                "triggered_now": bool(triggered_now),
+                "trigger_near": bool(trigger_near),
+                "held_mid": bool(held_mid),
+            })
 
     matches = [_apply_match_calibration(m) for m in matches]
     matches = sorted(matches, key=lambda x: (_calibrated_score(x), _f(x.get("score"))), reverse=True)
@@ -972,6 +1115,18 @@ def enrich_rows_with_gpt_pattern_lab(rows: list[dict], *, apply_bucket_hints: bo
                 else:
                     recommended = "pre_trigger"
                     should_route = bullish_score >= min_score and cur_bucket in {"", "watch", "early_movement", "learning_opportunity", "small_stock_classic", "raw_fast_lane"}
+            elif _s(best_bullish.get("pattern_id")) == "gpt_second_wave_controlled_pullback":
+                # V2W16: confirmed second waves can go to Continuation Pullback;
+                # trigger-ready versions stay Pre-Trigger.
+                sw_stage = _s(best_bullish.get("second_wave_stage"))
+                sw_risk = _f(best_bullish.get("risk_pct"), 99.0)
+                if sw_stage == "second_wave_confirmed" and sw_risk <= 8.5:
+                    recommended = "continuation_pullback"
+                else:
+                    recommended = "pre_trigger"
+            elif _s(best_bullish.get("pattern_id")) == "gpt_silent_compression_break":
+                # V2W16: compression is early warning only; keep it Pre-Trigger.
+                recommended = "pre_trigger"
             # Allow important calibrated patterns to improve a nearby bucket even if already classified.
             should_label_existing = bullish_score >= min_score and cur_bucket in {"pre_trigger", "support_bounce", "reclaim", "continuation_pullback", "low_float_premarket"}
             if should_route:
@@ -1016,8 +1171,9 @@ def pattern_lab_status() -> dict:
         "top_calibrated_lessons_ar": [
             "Tweezer Bottom أصبح Support Bounce/Reclaim قويًا لكن بشرط الدعم والتأكيد.",
             "Elephant Trunk Drop وTweezer Top أصبحا Risk Guards لا إشارات شراء.",
-            "GPT Second Wave هو أفضل نمط GPT Alpha مبدئيًا للمراقبة العملية.",
-            "Smart Pivot Reset أصبح ثلاث مراحل: Pivot Watch ثم Trigger Ready ثم Confirmed؛ لا يترقى من مجرد قاع أعلى.",
+            "GPT Second Wave أصبح stage-aware: confirmed فقط يذهب إلى Continuation Pullback، وtrigger_ready يبقى Pre-Trigger.",
+            "Silent Compression أصبح إنذارًا مبكرًا مشروطًا: break_confirmed فقط يأخذ وزنًا مفيدًا، ولا يدخل وحده.",
+            "Smart Pivot Reset أصبح baseline مؤقتًا بثلاث مراحل: Pivot Watch ثم Trigger Ready ثم Confirmed.",
             "Strong BOS Bullish يحتاج hold/retest أو حجم استمرار ولا يدخل وحده.",
         ],
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",
@@ -1038,7 +1194,7 @@ def pattern_lab_calibration_payload() -> dict:
         "version": GPT_PATTERN_LAB_VERSION,
         "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
         "items": sorted(items, key=lambda x: (_f(x.get("replay_win_rate_proxy")), _f(x.get("replay_avg_gain_proxy"))), reverse=True),
-        "rule_ar": "معايرة V2W15d: تضيف تقرير جودة مراحل الارتكاز؛ Confirmed فقط يذهب Support Bounce، وTrigger Ready يبقى Pre-Trigger.",
+        "rule_ar": "معايرة V2W16: تضيف مراحل Second Wave وSilent Compression فوق baseline الارتكاز؛ watch لا يساوي دخول، وكل ترقية تحتاج trigger/stop.",
     }
 
 
@@ -1190,6 +1346,11 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
                     "triggered_in_horizon": bool(triggered_in_horizon),
                     "trigger_bar_offset": int(trigger_bar_offset),
                     "pivot_stage": best.get("pivot_stage"),
+                    "second_wave_stage": best.get("second_wave_stage"),
+                    "compression_stage": best.get("compression_stage"),
+                    "pattern_stage": best.get("pivot_stage") or best.get("second_wave_stage") or best.get("compression_stage"),
+                    "stage_quality": best.get("pivot_stage_quality") or best.get("second_wave_stage_quality") or best.get("compression_stage_quality"),
+                    "stage_adjusted_score": best.get("pivot_stage_adjusted_score") or best.get("second_wave_stage_adjusted_score") or best.get("compression_stage_adjusted_score"),
                     "pattern_id": pid,
                     "pattern_name_ar": _PATTERN_AR.get(pid, pid),
                     "family": best.get("family"),
@@ -1304,6 +1465,64 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             reverse=True,
         )
 
+        # V2W16: stage summaries for Second Wave and Silent Compression, so we can
+        # tune them from evidence without reading hundreds of signals.
+        def _stage_summary_for(pattern_id: str, stage_key: str, label_key: str) -> list[dict]:
+            stage_summary: dict[str, dict] = {}
+            for s in signals:
+                if s.get("pattern_id") != pattern_id:
+                    continue
+                stage = _s(s.get(stage_key)) or f"{label_key}_watch"
+                ss = stage_summary.setdefault(stage, {
+                    "stage": stage,
+                    "signals": 0,
+                    "wins": 0,
+                    "avg_gain": 0.0,
+                    "avg_drawdown": 0.0,
+                    "avg_risk_pct": 0.0,
+                    "avg_trigger_bar_offset": 0.0,
+                    "recommended_buckets": {},
+                    "actions": {},
+                    "symbols": [],
+                })
+                ss["signals"] += 1
+                ss["wins"] += 1 if s.get("success_proxy") else 0
+                ss["avg_gain"] += _f(s.get("max_gain_pct_next_horizon"))
+                ss["avg_drawdown"] += _f(s.get("max_drawdown_pct_next_horizon"))
+                ss["avg_risk_pct"] += _f(s.get("risk_pct"))
+                ss["avg_trigger_bar_offset"] += _f(s.get("trigger_bar_offset"))
+                bucket = _s(s.get("recommended_bucket")) or "unknown"
+                action = _s(s.get("action")) or "unknown"
+                ss["recommended_buckets"][bucket] = int(ss["recommended_buckets"].get(bucket, 0)) + 1
+                ss["actions"][action] = int(ss["actions"].get(action, 0)) + 1
+                if len(ss["symbols"]) < 12:
+                    ss["symbols"].append(s.get("symbol"))
+            for ss in stage_summary.values():
+                n = max(1, int(ss.get("signals") or 0))
+                ss["win_rate_proxy"] = _round(_f(ss.get("wins")) / n * 100.0, 2)
+                ss["avg_gain"] = _round(_f(ss.get("avg_gain")) / n, 2)
+                ss["avg_drawdown"] = _round(_f(ss.get("avg_drawdown")) / n, 2)
+                ss["avg_risk_pct"] = _round(_f(ss.get("avg_risk_pct")) / n, 2)
+                ss["avg_trigger_bar_offset"] = _round(_f(ss.get("avg_trigger_bar_offset")) / n, 2)
+                if pattern_id == "gpt_second_wave_controlled_pullback":
+                    if ss.get("stage") == "second_wave_confirmed":
+                        ss["routing_rule_ar"] = "موجة ثانية مؤكدة: Continuation Pullback مشروط مع وقف قريب."
+                    elif ss.get("stage") == "second_wave_trigger_ready":
+                        ss["routing_rule_ar"] = "قريبة من التفعيل: Pre-Trigger حتى كسر/ثبات حي."
+                    else:
+                        ss["routing_rule_ar"] = "مراقبة فقط؛ لا تترقى قبل trigger."
+                elif pattern_id == "gpt_silent_compression_break":
+                    if ss.get("stage") == "compression_break_confirmed":
+                        ss["routing_rule_ar"] = "كسر ضغط مؤكد: Pre-Trigger عالي المراقبة لكن ليس دخولًا مباشرًا."
+                    elif ss.get("stage") == "compression_trigger_ready":
+                        ss["routing_rule_ar"] = "قريب من كسر نطاق الضغط: Pre-Trigger فقط."
+                    else:
+                        ss["routing_rule_ar"] = "ضغط مبكر/ضجيج محتمل؛ مراقبة فقط."
+            return sorted(stage_summary.values(), key=lambda x: (_f(x.get("win_rate_proxy")), _f(x.get("avg_gain")), -_f(x.get("avg_drawdown"))), reverse=True)
+
+        second_wave_stage_summary_sorted = _stage_summary_for("gpt_second_wave_controlled_pullback", "second_wave_stage", "second_wave")
+        compression_stage_summary_sorted = _stage_summary_for("gpt_silent_compression_break", "compression_stage", "compression")
+
         summary_sorted = sorted(agg.values(), key=lambda x: (_f(x.get("leaderboard_score")), _f(x.get("win_rate_proxy")), int(x.get("signals") or 0)), reverse=True)
         return {
             "ok": True,
@@ -1316,9 +1535,11 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             "summary_by_pattern": summary_sorted,
             "summary_by_role": sorted(role_summary.values(), key=lambda x: int(x.get("signals") or 0), reverse=True),
             "summary_by_pivot_stage": pivot_stage_summary_sorted,
+            "summary_by_second_wave_stage": second_wave_stage_summary_sorted,
+            "summary_by_compression_stage": compression_stage_summary_sorted,
             "leaderboard_top": summary_sorted[:8],
             "signals": sorted(signals, key=lambda x: (_f(x.get("calibrated_score", x.get("score"))), _f(x.get("max_gain_pct_next_horizon"))), reverse=True)[:300],
-            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط. V2W15d يضيف تقرير جودة مراحل Smart Pivot ويفصل Confirmed عن Trigger Ready.",
+            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط. V2W16 يضيف معايرة مراحل Second Wave وSilent Compression مع بقاء كل الأنماط مشروطة بالـ trigger/stop.",
         }
     finally:
         try:
@@ -1345,6 +1566,8 @@ def run_pattern_leaderboard_from_evidence(trade_date: str = "", limit_symbols: i
         "summary_by_pattern": payload.get("summary_by_pattern", []),
         "summary_by_role": payload.get("summary_by_role", []),
         "summary_by_pivot_stage": payload.get("summary_by_pivot_stage", []),
-        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل؛ تتضمن تقرير مراحل Smart Pivot ومعايرة V2W15e للدرجة حسب المرحلة.",
+        "summary_by_second_wave_stage": payload.get("summary_by_second_wave_stage", []),
+        "summary_by_compression_stage": payload.get("summary_by_compression_stage", []),
+        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل؛ تتضمن تقارير مراحل Smart Pivot وSecond Wave وSilent Compression.",
         "error": payload.get("error"),
     }
