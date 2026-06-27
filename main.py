@@ -5123,16 +5123,19 @@ def ui_dynamic_diff(client_scan_id: str = "", limit_per_section: int = 30):
 
 
 @app.get("/pattern-lab/gpt/status")
+@app.get("/pattern-lab/gpt/status/")
 def pattern_lab_gpt_status_endpoint():
     return gpt_pattern_lab_status_payload()
 
 
 @app.post("/pattern-lab/gpt/analyze-bars")
+@app.post("/pattern-lab/gpt/analyze-bars/")
 def pattern_lab_gpt_analyze_bars_endpoint(payload: dict = Body(...)):
     return gpt_pattern_analyze_bars_payload(payload or {})
 
 
 @app.get("/pattern-lab/gpt/current")
+@app.get("/pattern-lab/gpt/current/")
 def pattern_lab_gpt_current_endpoint(limit: int = 80):
     snapshot = get_json("last_trade_scan_snapshot", {}) or {}
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
@@ -5140,11 +5143,13 @@ def pattern_lab_gpt_current_endpoint(limit: int = 80):
 
 
 @app.get("/pattern-lab/gpt/calibration")
+@app.get("/pattern-lab/gpt/calibration/")
 def pattern_lab_gpt_calibration_endpoint():
     return gpt_pattern_calibration_payload()
 
 
 @app.get("/pattern-lab/gpt/replay")
+@app.get("/pattern-lab/gpt/replay/")
 def pattern_lab_gpt_replay_endpoint(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12):
     return run_gpt_pattern_replay_from_evidence(
         trade_date=trade_date or "",
@@ -5154,12 +5159,32 @@ def pattern_lab_gpt_replay_endpoint(trade_date: str = "", limit_symbols: int = 8
 
 
 @app.get("/pattern-lab/gpt/leaderboard")
+@app.get("/pattern-lab/gpt/leaderboard/")
 def pattern_lab_gpt_leaderboard_endpoint(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12):
     return run_gpt_pattern_leaderboard_from_evidence(
         trade_date=trade_date or "",
         limit_symbols=max(1, min(250, int(limit_symbols or 80))),
         horizon_bars=max(2, min(48, int(horizon_bars or 12))),
     )
+
+
+
+
+@app.get("/pattern-lab/gpt")
+@app.get("/pattern-lab/gpt/")
+def pattern_lab_gpt_index_endpoint():
+    return {
+        "ok": True,
+        "version": gpt_pattern_lab_status_payload().get("version", "unknown"),
+        "available_endpoints": [
+            "/pattern-lab/gpt/status",
+            "/pattern-lab/gpt/current",
+            "/pattern-lab/gpt/calibration",
+            "/pattern-lab/gpt/replay",
+            "/pattern-lab/gpt/leaderboard",
+        ],
+        "rule_ar": "فهرس سريع لتجنب خطأ Not Found عند فتح مسار Pattern Lab الأساسي."
+    }
 
 
 @app.get("/diagnostics/active-tradability-gate")
