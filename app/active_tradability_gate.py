@@ -17,7 +17,7 @@ from datetime import datetime, date, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-ACTIVE_TRADABILITY_GATE_VERSION = "active_tradability_gate_v2w14_full_visible_safety_2026_06_27"
+ACTIVE_TRADABILITY_GATE_VERSION = "active_tradability_gate_v2w14b_quote_session_timestamp_fix_2026_06_27"
 NY_TZ = ZoneInfo("America/New_York")
 
 # High-confidence known inactive/legacy mappings.  Env lets the user add symbols
@@ -57,11 +57,17 @@ _PRICE_KEYS = [
 _VOLUME_KEYS = ["volume", "regular_volume", "regularMarketVolume", "latestVolume"]
 _DOLLAR_VOLUME_KEYS = ["dollar_volume", "dollarVolume", "regular_dollar_volume"]
 _TIME_KEYS = [
-    "quote_time", "quoteTime", "quote_updated_at", "price_updated_at", "last_updated",
-    "lastUpdated", "updated_at", "updatedAt", "timestamp", "last_timestamp",
-    "latest_quote_time", "latestQuoteTime", "last_trade_time", "lastTradeTime",
-    "trade_time", "tradeTime", "as_of", "asOf", "datetime", "bar_time_text",
-    "source_snapshot_at", "scan_updated_at", "analysis_updated_at",
+    # Explicit live quote times first.
+    "live_quote_updated_at", "quote_timestamp", "quote_time", "quoteTime",
+    "quote_updated_at", "price_updated_at", "last_price_update_at",
+    "last_updated", "lastUpdated", "updated_at", "updatedAt",
+    "timestamp", "last_timestamp", "raw_timestamp", "quote_updated_epoch",
+    "live_quote_updated_epoch", "latest_quote_time", "latestQuoteTime",
+    "last_trade_time", "lastTradeTime", "trade_time", "tradeTime",
+    "as_of", "asOf", "datetime", "bar_time_text",
+    # Snapshot/display times are accepted as context when explicit quote time is absent.
+    "snapshot_updated_at", "source_snapshot_at", "display_snapshot_at",
+    "dynamic_snapshot_at", "scan_updated_at", "analysis_updated_at",
 ]
 _STATUS_KEYS = [
     "status", "quote_status", "listing_status", "market_status", "security_status",
@@ -73,6 +79,88 @@ _ACTIVE_FLAG_KEYS = [
 ]
 _EXCHANGE_KEYS = ["exchange", "exchangeShortName", "primaryExchange", "market", "mic", "venue"]
 _NAME_KEYS = ["company_name", "companyName", "name", "security_name", "description"]
+
+_SESSION_KEYS = [
+    "price_session", "quote_session", "volume_session", "market_phase", "source_market_phase",
+    "display_price_source", "price_source", "price_source_label", "extended_session_label_ar",
+]
+_SESSION_AR = {
+    "regular": "جلسة السوق العادية",
+    "open": "جلسة السوق العادية",
+    "premarket": "قبل الافتتاح",
+    "pre_market": "قبل الافتتاح",
+    "afterhours": "بعد الإغلاق",
+    "after_hours": "بعد الإغلاق",
+    "extended": "خارج السوق",
+    "closed": "آخر لقطة محفوظة",
+    "snapshot": "آخر لقطة محفوظة",
+    "unknown": "غير محدد",
+}
+
+
+def _phase_key(value: Any) -> str:
+    txt = _s(value).lower().replace("-", "_").replace(" ", "_")
+    if txt in {"pre", "pre_market", "premarket", "before_open", "قبل_الافتتاح"}:
+        return "premarket"
+    if txt in {"after", "after_hours", "afterhours", "postmarket", "post_market", "بعد_الإغلاق"}:
+        return "afterhours"
+    if txt in {"regular", "open", "market", "live", "intraday"}:
+        return "regular"
+    if "extended" in txt or "خارج" in txt:
+        return "extended"
+    if txt in {"closed", "weekend", "holiday", "snapshot"}:
+        return "closed"
+    return txt or "unknown"
+
+
+def _session_label_ar(session_key: str) -> str:
+    key = _phase_key(session_key)
+    return _SESSION_AR.get(key, session_key or "غير محدد")
+
+
+def _infer_price_session(row: dict, market_phase: str = "") -> str:
+    if not isinstance(row, dict):
+        return _phase_key(market_phase)
+    explicit = _first(row, _SESSION_KEYS, "")
+    if explicit:
+        txt = _s(explicit).lower()
+        if "extended" in txt or "after" in txt or "premarket" in txt or "pre" in txt:
+            return _phase_key(txt)
+        if "fmp_extended" in txt:
+            return "extended"
+        if "regular" in txt or "fmp_rest" in txt:
+            return "regular"
+        if "snapshot" in txt:
+            return "snapshot"
+        return _phase_key(explicit)
+    if row.get("extended_hours") or row.get("extended_hours_price_overlay_v2w6") or row.get("extended_price"):
+        return "extended"
+    return _phase_key(market_phase) or "unknown"
+
+
+def attach_quote_context(rows: list[dict] | None, *, snapshot_updated_at: str = "", market_phase: str = "", source: str = "last_trade_scan_snapshot") -> list[dict]:
+    """Add non-invasive timestamp/session context to rows before the gate.
+
+    This avoids misleading weekend diagnostics such as every row showing
+    missing_quote_timestamp when the row is simply from a known saved snapshot.
+    It does not create a fake live quote; it labels the row as snapshot context.
+    """
+    out: list[dict] = []
+    phase_key = _phase_key(market_phase)
+    for r in rows or []:
+        if not isinstance(r, dict):
+            out.append(r)
+            continue
+        item = dict(r)
+        if snapshot_updated_at and not any(item.get(k) for k in _TIME_KEYS):
+            item["snapshot_updated_at"] = snapshot_updated_at
+            item["quote_timestamp_fallback_source"] = source
+        if not item.get("price_session"):
+            item["price_session"] = _infer_price_session(item, phase_key)
+        if not item.get("volume_session"):
+            item["volume_session"] = "regular_or_snapshot" if phase_key in {"closed", "snapshot"} else item.get("price_session", phase_key)
+        out.append(item)
+    return out
 
 
 def _s(value: Any) -> str:
@@ -266,28 +354,50 @@ def audit_row(row: dict | None, *, market_phase: str = "", now: datetime | None 
     elif price <= 0:
         warn("missing_or_zero_price", "لا يوجد سعر صالح؛ لا يترقى قبل وصول quote حديث.")
 
-    # Explicit stale timestamp is high-confidence. Missing timestamp is warning
-    # only, because many upstream rows omit it while still carrying valid prices.
-    parsed_times: list[datetime] = []
+    # Session / timestamp context. Missing explicit quote time should not make a
+    # weekend/closed saved snapshot look broken if the snapshot itself is dated.
+    price_session = _infer_price_session(row, market_phase)
+    checks["price_session"] = price_session
+    checks["price_session_label_ar"] = _session_label_ar(price_session)
+    checks["volume_session"] = _s(row.get("volume_session") or ("regular_or_snapshot" if _phase_key(market_phase) == "closed" else price_session))
+
+    parsed_times: list[tuple[datetime, str]] = []
     for k in _TIME_KEYS:
         if not isinstance(row, dict) or row.get(k) in (None, ""):
             continue
         dt = _parse_time(row.get(k))
         if dt:
-            parsed_times.append(dt)
-    latest_dt = max(parsed_times) if parsed_times else None
+            parsed_times.append((dt, k))
+    latest_pair = max(parsed_times, key=lambda x: x[0]) if parsed_times else None
+    latest_dt = latest_pair[0] if latest_pair else None
+    latest_source = latest_pair[1] if latest_pair else ""
+    checks["timestamp_source"] = latest_source or "none"
+
     if latest_dt:
         age_min = max(0.0, (now - latest_dt).total_seconds() / 60.0)
         checks["latest_time"] = latest_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
         checks["age_minutes"] = round(age_min, 1)
         max_age = _max_quote_age_minutes(market_phase)
+        snapshot_context = latest_source in {"snapshot_updated_at", "source_snapshot_at", "display_snapshot_at", "dynamic_snapshot_at", "scan_updated_at", "analysis_updated_at"}
         if age_min > max_age:
             hard("stale_quote_timestamp", f"آخر وقت بيانات معروف قديم جدًا لهذه الجلسة ({round(age_min, 1)} دقيقة).")
         elif _market_is_activeish(market_phase) and age_min > max_age * 0.65:
             warn("aging_quote_timestamp", "الـ quote ليس حديثًا بما يكفي للتنفيذ؛ يحتاج تحديث سعر قبل الترقية.")
+        elif snapshot_context:
+            checks["timestamp_quality"] = "snapshot_context_not_live_quote"
+            checks["timestamp_note_ar"] = "وقت السعر من آخر لقطة محفوظة، وليس بالضرورة وقت آخر صفقة حية."
+        else:
+            checks["timestamp_quality"] = "explicit_quote_or_bar_time"
     else:
         checks["latest_time"] = "unknown"
-        warn("missing_quote_timestamp", "لا يوجد وقت واضح للسعر؛ يسمح بالمراقبة فقط ولا يترقى بدون تأكيد سعر حي.")
+        source_date_txt = _s(row.get("source_session_date") or row.get("target_trading_date") or row.get("trade_date")) if isinstance(row, dict) else ""
+        source_dt_for_context = _parse_time(source_date_txt) if source_date_txt else None
+        if source_dt_for_context and not _market_is_activeish(market_phase) and price > 0:
+            checks["latest_time"] = f"session_date_only:{source_dt_for_context.date().isoformat()}"
+            checks["timestamp_quality"] = "session_date_only_closed_fallback"
+            checks["timestamp_note_ar"] = "السوق مغلق؛ استخدمت تاريخ الجلسة كسياق فقط، وليس كوقت صفقة حية."
+        else:
+            warn("missing_quote_timestamp", "لا يوجد وقت واضح للسعر؛ يسمح بالمراقبة فقط ولا يترقى بدون تأكيد سعر حي.")
 
     # Very old source sessions are usually stale snapshots.  Do not block current
     # weekend planning that uses the prior trading day, but block old leftovers.
