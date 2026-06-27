@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w17b_async_walk_forward_guard_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w17b_async_walk_forward_guard_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w17c_shadow_confluence_test_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w17c_shadow_confluence_test_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -1179,7 +1179,7 @@ def pattern_lab_status() -> dict:
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",
         "weekend_use_ar": "مناسب للويكند: تحليل ومحاكاة بدون live polling ثقيل.",
         "walk_forward_endpoint": "/pattern-lab/gpt/walk-forward",
-        "walk_forward_rule_ar": "V2W17b يختبر الأنماط Walk-Forward عبر تشغيل خلفي لتجنب upstream timeout؛ فترة تعلم ثم نتائج أمامية، مع Polygon flat files مرة واحدة فقط أو SQLite cache.",
+        "walk_forward_rule_ar": "V2W17c يختبر توافق الأنماط مع تحليل الأداة في وضع Shadow فقط؛ لا يغير ترتيب أو قرار الأداة الأصلي، ويقيس pattern_only/tool_context/pattern_plus_tool بشكل أوضح.",
     }
 
 
@@ -1723,12 +1723,112 @@ def _bars_by_date_symbol_from_paths(paths: list[str], wanted_dates: set[str], li
     return out
 
 
-def _tool_bucket_for_signal(sym: str, hist: list[dict], best: dict) -> dict:
-    """Light confluence probe: run Opportunity Radar on the same no-lookahead row.
 
-    This is not a trading decision.  It only answers: did the pattern agree with
-    the tool's own bucket/flow at that historical moment?
+def _norm_bucket_name(value: Any) -> str:
+    return _s(value).strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _bucket_family(value: Any) -> str:
+    """Normalize noisy opportunity buckets into broad families for shadow confluence.
+
+    This deliberately does NOT modify the original tool bucket.  It is used only
+    for the Pattern Lab walk-forward report so patterns can be evaluated against
+    nearby tool contexts without letting them influence production ranking.
     """
+    b = _norm_bucket_name(value)
+    if not b:
+        return "unknown"
+    if "pre_trigger" in b or "before_trigger" in b or "trigger" in b:
+        return "pre_trigger"
+    if "low_float" in b or "premarket" in b or "pre_market" in b or "fast_lane" in b or "explosion" in b or "micro" in b:
+        return "early_momentum"
+    if "high_risk" in b or "day_trade" in b or "daytrade" in b:
+        return "high_risk_day_trade"
+    if "support" in b or "bounce" in b:
+        return "support_bounce"
+    if "reclaim" in b or "reclaimed" in b:
+        return "reclaim"
+    if "continuation" in b or "pullback" in b or "second_wave" in b:
+        return "continuation_pullback"
+    if "gap" in b and "fill" in b:
+        return "gap_fill"
+    if "small_stock" in b or "classic" in b:
+        return "small_stock_classic"
+    if "watch" in b:
+        return "watchlist"
+    return b
+
+
+_PATTERN_CONTEXT_FAMILY = {
+    "pre_trigger": "pre_trigger",
+    "support_bounce": "support_bounce",
+    "reclaim": "reclaim",
+    "continuation_pullback": "continuation_pullback",
+    "gap_fill": "gap_fill",
+}
+
+
+# Strong/medium/weak compatibility map for SHADOW testing only.
+# It intentionally keeps broad generic watchlist matches weak so the original
+# analysis is not polluted by pattern tags.
+_SHADOW_CONFLUENCE_RULES: dict[str, dict[str, tuple[str, str]]] = {
+    "pre_trigger": {
+        "pre_trigger": ("strong", "النمط ونظام الأداة كلاهما يشيران إلى Pre-Trigger."),
+        "early_momentum": ("medium", "النمط Pre-Trigger والسهم داخل سياق حركة مبكرة/Low-Float؛ توافق مراقبة لا شراء."),
+        "high_risk_day_trade": ("medium", "النمط Pre-Trigger والسهم داخل مضاربة عالية المخاطر؛ توافق يحتاج خطة ووقف."),
+        "small_stock_classic": ("weak", "النمط Pre-Trigger لكن قائمة الأداة عامة؛ وسم تحت الاختبار فقط."),
+        "watchlist": ("weak", "النمط Pre-Trigger مع Watchlist فقط؛ لا يرفع الأولوية."),
+    },
+    "support_bounce": {
+        "support_bounce": ("strong", "النمط يدعم ارتدادًا من دعم وتحليل الأداة يوافق Support Bounce."),
+        "reclaim": ("medium", "ارتداد/استرداد متقاربان؛ توافق متوسط تحت الاختبار."),
+        "small_stock_classic": ("weak", "نمط دعم داخل قائمة عامة؛ وسم فقط."),
+        "high_risk_day_trade": ("weak", "نمط دعم داخل مضاربة عالية المخاطر؛ يحتاج تأكيد حي."),
+        "early_momentum": ("weak", "نمط دعم مع حركة مبكرة؛ توافق ضعيف حتى تظهر منطقة الدعم في الأداة."),
+    },
+    "reclaim": {
+        "reclaim": ("strong", "النمط وتحليل الأداة يتفقان على Reclaim."),
+        "support_bounce": ("medium", "Reclaim وSupport Bounce متقاربان؛ توافق متوسط."),
+        "pre_trigger": ("medium", "Reclaim مبكر داخل Pre-Trigger؛ يحتاج ثبات حي."),
+        "small_stock_classic": ("weak", "Reclaim داخل قائمة عامة؛ وسم فقط."),
+    },
+    "continuation_pullback": {
+        "continuation_pullback": ("strong", "النمط وتحليل الأداة يتفقان على Continuation/Pullback."),
+        "high_risk_day_trade": ("weak", "Continuation داخل مضاربة عالية المخاطر؛ لا يرفع الأولوية وحده."),
+        "small_stock_classic": ("weak", "Continuation داخل قائمة عامة؛ وسم فقط."),
+        "watchlist": ("weak", "Continuation مع Watchlist فقط؛ لا يرفع الأولوية."),
+    },
+    "gap_fill": {
+        "gap_fill": ("strong", "النمط وتحليل الأداة يتفقان على Gap Fill."),
+        "pre_trigger": ("weak", "Gap/Pre-Trigger توافق ضعيف حتى يظهر مستوى واضح."),
+    },
+}
+
+
+def _shadow_confluence_score(level: str, pattern_stage: str, risk_pct: float, tool_family: str) -> int:
+    base = {"strong": 3, "medium": 2, "weak": 1, "none": 0}.get(_s(level), 0)
+    # Confirmed stages deserve a cleaner shadow label, but still never alter the tool decision.
+    if base and "confirmed" in _s(pattern_stage):
+        base += 1
+    if risk_pct and risk_pct > 9.5:
+        base = max(0, base - 1)
+    if tool_family == "watchlist":
+        base = min(base, 1)
+    return int(max(0, min(4, base)))
+
+
+def _tool_bucket_for_signal(sym: str, hist: list[dict], best: dict) -> dict:
+    """Shadow confluence probe.
+
+    It runs Opportunity Radar on the same no-lookahead row and compares the
+    pattern's recommended context with the tool's original bucket/stage.  This
+    is reporting-only: the returned fields are *pattern_lab_shadow_* fields and
+    must never feed BUY_NOW or production ranking.
+    """
+    pattern_bucket = _s(best.get("recommended_bucket"))
+    pattern_family = _PATTERN_CONTEXT_FAMILY.get(_bucket_family(pattern_bucket), _bucket_family(pattern_bucket))
+    pattern_stage = _s(best.get("pivot_stage") or best.get("second_wave_stage") or best.get("compression_stage") or best.get("action"))
+    risk_pct = _f(best.get("risk_pct"))
     try:
         from app.opportunity_radar import enrich_row_opportunity_radar
         last = hist[-1] if hist else {}
@@ -1756,22 +1856,53 @@ def _tool_bucket_for_signal(sym: str, hist: list[dict], best: dict) -> dict:
         enriched = enrich_row_opportunity_radar(row, market_phase="replay")
         bucket = _s(enriched.get("opportunity_bucket"))
         stage = _s(enriched.get("opportunity_stage"))
-        pattern_bucket = _s(best.get("recommended_bucket"))
-        matched = bool(bucket and pattern_bucket and bucket == pattern_bucket)
+        tool_family = _bucket_family(bucket or stage)
+        if tool_family == "unknown" and stage:
+            tool_family = _bucket_family(stage)
+        exact = bool(bucket and pattern_bucket and _norm_bucket_name(bucket) == _norm_bucket_name(pattern_bucket))
+        level = "strong" if exact else "none"
+        reason = "توافق مباشر بين bucket النمط وbucket الأداة."
+        if not exact:
+            mapped = _SHADOW_CONFLUENCE_RULES.get(pattern_family, {}).get(tool_family)
+            if mapped:
+                level, reason = mapped
+            else:
+                reason = "لا يوجد توافق منطقي كافٍ بين النمط وقائمة الأداة؛ يبقى وسمًا تحت الاختبار."
+        score = _shadow_confluence_score(level, pattern_stage, risk_pct, tool_family)
+        matched = level in {"strong", "medium"}
+        label = (
+            "توافق قوي نمط + أداة — تحت الاختبار وليس شراء" if level == "strong" else
+            "توافق متوسط نمط + أداة — تحت الاختبار ويحتاج تأكيد حي" if level == "medium" else
+            "توافق ضعيف — وسم تحت الاختبار فقط" if level == "weak" else
+            "النمط لا يوافق قائمة الأداة الأساسية بعد — وسم تحت الاختبار فقط"
+        )
         return {
             "tool_bucket": bucket,
             "tool_stage": stage,
+            "tool_context_family": tool_family,
             "pattern_recommended_bucket": pattern_bucket,
-            "pattern_tool_confluence": matched,
-            "confluence_label_ar": "توافق نمط + تحليل الأداة — تحت الاختبار" if matched else "النمط لا يوافق قائمة الأداة الأساسية بعد — وسم تحت الاختبار فقط",
+            "pattern_context_family": pattern_family,
+            "pattern_tool_confluence": bool(matched),
+            "pattern_tool_confluence_level": level,
+            "pattern_tool_confluence_score": score,
+            "pattern_tool_confluence_shadow_only": True,
+            "pattern_tool_confluence_reason_ar": reason,
+            "confluence_label_ar": label,
+            "pattern_influence_mode": "shadow_only_does_not_change_original_tool_analysis",
         }
     except Exception as exc:
         return {
             "tool_bucket": "unavailable",
             "tool_stage": "unavailable",
-            "pattern_recommended_bucket": _s(best.get("recommended_bucket")),
+            "tool_context_family": "unavailable",
+            "pattern_recommended_bucket": pattern_bucket,
+            "pattern_context_family": pattern_family,
             "pattern_tool_confluence": False,
+            "pattern_tool_confluence_level": "none",
+            "pattern_tool_confluence_score": 0,
+            "pattern_tool_confluence_shadow_only": True,
             "confluence_label_ar": "تعذر تشغيل تحليل الأداة في Replay؛ النمط يبقى تحت الاختبار فقط.",
+            "pattern_influence_mode": "shadow_only_does_not_change_original_tool_analysis",
             "tool_error": f"{type(exc).__name__}: {str(exc)[:120]}",
         }
 
@@ -1873,26 +2004,54 @@ def _summary_from_signal_list(signals: list[dict]) -> dict:
     by_pattern: dict[str, dict] = {}
     by_stage: dict[str, dict] = {}
     by_confluence: dict[str, dict] = {}
+    by_confluence_matrix: dict[str, dict] = {}
+    by_shadow_decision: dict[str, dict] = {}
+
+    def add(bucket: dict[str, dict], key: str, name_key: str, sig: dict, pid: str):
+        b = bucket.setdefault(key, {name_key: key, "signals": 0, "wins": 0, "avg_gain": 0.0, "avg_drawdown": 0.0, "avg_risk_pct": 0.0, "symbols": []})
+        if name_key == "pattern_id":
+            b["pattern_name_ar"] = _PATTERN_AR.get(pid, pid)
+        if name_key == "confluence_group":
+            b["shadow_only"] = True
+        if name_key == "confluence_matrix":
+            b["pattern_context_family"] = sig.get("pattern_context_family")
+            b["tool_context_family"] = sig.get("tool_context_family")
+            b["shadow_only"] = True
+        b["signals"] += 1
+        b["wins"] += 1 if sig.get("success_proxy") else 0
+        b["avg_gain"] += _f(sig.get("max_gain_pct_next_horizon"))
+        b["avg_drawdown"] += _f(sig.get("max_drawdown_pct_next_horizon"))
+        b["avg_risk_pct"] += _f(sig.get("risk_pct"))
+        if len(b["symbols"]) < 12:
+            b["symbols"].append(sig.get("symbol"))
+
     for s in signals:
         pid = _s(s.get("pattern_id"))
         stage = _s(s.get("pattern_stage")) or pid
-        conf_key = "pattern_plus_tool" if s.get("pattern_tool_confluence") else "pattern_without_tool_match"
-        for key, bucket, name_key in ((pid, by_pattern, "pattern_id"), (stage, by_stage, "stage"), (conf_key, by_confluence, "confluence_group")):
-            b = bucket.setdefault(key, {name_key: key, "signals": 0, "wins": 0, "avg_gain": 0.0, "avg_drawdown": 0.0, "avg_risk_pct": 0.0, "symbols": []})
-            if name_key == "pattern_id":
-                b["pattern_name_ar"] = _PATTERN_AR.get(pid, pid)
-            b["signals"] += 1
-            b["wins"] += 1 if s.get("success_proxy") else 0
-            b["avg_gain"] += _f(s.get("max_gain_pct_next_horizon"))
-            b["avg_drawdown"] += _f(s.get("max_drawdown_pct_next_horizon"))
-            b["avg_risk_pct"] += _f(s.get("risk_pct"))
-            if len(b["symbols"]) < 12:
-                b["symbols"].append(s.get("symbol"))
+        level = _s(s.get("pattern_tool_confluence_level") or "none")
+        if level not in {"strong", "medium", "weak", "none"}:
+            level = "none"
+        conf_key = f"pattern_plus_tool_{level}" if level != "none" else "pattern_without_tool_match"
+        matrix_key = f"{_s(s.get('pattern_context_family') or 'unknown')}__{_s(s.get('tool_context_family') or 'unknown')}__{level}"
+        if level in {"strong", "medium"}:
+            decision_key = "shadow_confluence_candidate_under_test"
+        elif level == "weak":
+            decision_key = "weak_shadow_tag_only"
+        else:
+            decision_key = "pattern_only_no_tool_context"
+        add(by_pattern, pid, "pattern_id", s, pid)
+        add(by_stage, stage, "stage", s, pid)
+        add(by_confluence, conf_key, "confluence_group", s, pid)
+        add(by_confluence_matrix, matrix_key, "confluence_matrix", s, pid)
+        add(by_shadow_decision, decision_key, "shadow_decision_group", s, pid)
     return {
         "signals_count": len(signals),
         "summary_by_pattern": finalize(by_pattern),
         "summary_by_stage": finalize(by_stage),
         "confluence_summary": finalize(by_confluence),
+        "confluence_matrix": finalize(by_confluence_matrix),
+        "shadow_decision_summary": finalize(by_shadow_decision),
+        "confluence_rule_ar": "V2W17c: التوافق Shadow فقط لا يغير تحليل الأداة الأصلي. strong/medium يعني مرشح وسم تحت الاختبار، weak يعني وسم فقط، none يعني لا توافق.",
     }
 
 
@@ -2012,7 +2171,7 @@ def run_pattern_walk_forward_replay(
         "ok": len(test_signals) > 0,
         "version": GPT_PATTERN_LAB_VERSION,
         "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
-        "walk_forward_version": "pattern_walk_forward_v2w17b_async_guard_2026_06_27",
+        "walk_forward_version": "pattern_walk_forward_v2w17c_shadow_confluence_test_2026_06_27",
         "start_date": learn_dates[0] if learn_dates else start_date,
         "learn_dates": learn_dates,
         "test_dates": test_dates,
@@ -2026,8 +2185,8 @@ def run_pattern_walk_forward_replay(
         "horizon_bars": max(2, int(horizon_bars or 12)),
         "learn_period": learn_summary,
         "forward_period": forward_summary,
-        "recommended_next_step_ar": "استخدم forward_period فقط لاتخاذ قرار الدمج. أي نمط يظهر في الأداة يجب أن يحمل وسم: تحت الاختبار. وإذا وافق تحليل الأداة يظهر كـ توافق نمط + أداة، لا كشراء مباشر.",
-        "rule_ar": "اختبار Walk-Forward مرة واحدة: أسبوعان تعلم ثم أسبوع نتائج أمامية، مع تخطي الويكند/العطل. لا يوجد live polling ولا BUY_NOW، وملفات Polygon الخام مؤقتة فقط إذا فُعل use_polygon_flatfiles.",
+        "recommended_next_step_ar": "استخدم forward_period وconfluence_summary فقط كاختبار Shadow. لا تغيّر تحليل الأداة الأصلي. أي نمط يظهر في الكرت يكون وسمًا تحت الاختبار، وإذا وافق تحليل الأداة يظهر كتوافق Shadow لا كشراء مباشر.",
+        "rule_ar": "V2W17c: اختبار Walk-Forward + Shadow Confluence. أسبوعان تعلم ثم أسبوع نتائج أمامية، مع تخطي الويكند/العطل. لا يوجد live polling ولا BUY_NOW ولا تأثير على تحليل الأداة الأصلي.",
         "sample_forward_signals": sorted(test_signals, key=lambda x: (_f(x.get("success_proxy")), _f(x.get("max_gain_pct_next_horizon")), _f(x.get("calibrated_score"))), reverse=True)[:120],
     }
 
