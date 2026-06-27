@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15c_pivot_stage_routing_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15c_pivot_stage_routing_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15d_pivot_stage_quality_report_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15d_pivot_stage_quality_report_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -991,7 +991,7 @@ def pattern_lab_calibration_payload() -> dict:
         "version": GPT_PATTERN_LAB_VERSION,
         "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
         "items": sorted(items, key=lambda x: (_f(x.get("replay_win_rate_proxy")), _f(x.get("replay_avg_gain_proxy"))), reverse=True),
-        "rule_ar": "معايرة V2W15b: نمط الارتكاز شدد trigger/risk بعد قراءة replay الكامل؛ Watch لا يساوي دخول.",
+        "rule_ar": "معايرة V2W15d: تضيف تقرير جودة مراحل الارتكاز؛ Confirmed فقط يذهب Support Bounce، وTrigger Ready يبقى Pre-Trigger.",
     }
 
 
@@ -1206,6 +1206,57 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             rs["win_rate_proxy"] = _round(_f(rs.get("wins")) / n * 100.0, 2)
             rs["avg_gain"] = _round(_f(rs.get("avg_gain")) / n, 2)
             rs["avg_drawdown"] = _round(_f(rs.get("avg_drawdown")) / n, 2)
+
+        # V2W15d: expose Smart Pivot quality by stage so the user can verify that
+        # routing is behaving as intended without reading the long signal payload.
+        pivot_stage_summary: dict[str, dict] = {}
+        for s in signals:
+            if s.get("pattern_id") != "gpt_smart_pivot_reset":
+                continue
+            stage = _s(s.get("pivot_stage")) or "pivot_watch"
+            ps = pivot_stage_summary.setdefault(stage, {
+                "pivot_stage": stage,
+                "signals": 0,
+                "wins": 0,
+                "avg_gain": 0.0,
+                "avg_drawdown": 0.0,
+                "avg_risk_pct": 0.0,
+                "avg_trigger_bar_offset": 0.0,
+                "recommended_buckets": {},
+                "actions": {},
+                "symbols": [],
+            })
+            ps["signals"] += 1
+            ps["wins"] += 1 if s.get("success_proxy") else 0
+            ps["avg_gain"] += _f(s.get("max_gain_pct_next_horizon"))
+            ps["avg_drawdown"] += _f(s.get("max_drawdown_pct_next_horizon"))
+            ps["avg_risk_pct"] += _f(s.get("risk_pct"))
+            ps["avg_trigger_bar_offset"] += _f(s.get("trigger_bar_offset"))
+            bucket = _s(s.get("recommended_bucket")) or "unknown"
+            action = _s(s.get("action")) or "unknown"
+            ps["recommended_buckets"][bucket] = int(ps["recommended_buckets"].get(bucket, 0)) + 1
+            ps["actions"][action] = int(ps["actions"].get(action, 0)) + 1
+            if len(ps["symbols"]) < 12:
+                ps["symbols"].append(s.get("symbol"))
+        for ps in pivot_stage_summary.values():
+            n = max(1, int(ps.get("signals") or 0))
+            ps["win_rate_proxy"] = _round(_f(ps.get("wins")) / n * 100.0, 2)
+            ps["avg_gain"] = _round(_f(ps.get("avg_gain")) / n, 2)
+            ps["avg_drawdown"] = _round(_f(ps.get("avg_drawdown")) / n, 2)
+            ps["avg_risk_pct"] = _round(_f(ps.get("avg_risk_pct")) / n, 2)
+            ps["avg_trigger_bar_offset"] = _round(_f(ps.get("avg_trigger_bar_offset")) / n, 2)
+            if ps.get("pivot_stage") == "pivot_confirmed":
+                ps["routing_rule_ar"] = "ارتكاز مؤكد: يسمح له بدخول Support Bounce/Reclaim إذا بقيت المخاطرة مقبولة."
+            elif ps.get("pivot_stage") == "pivot_trigger_ready":
+                ps["routing_rule_ar"] = "قريب من التفعيل: يبقى Pre-Trigger ومراقبة لصيقة حتى يؤكد حيًا."
+            else:
+                ps["routing_rule_ar"] = "ارتكاز مراقبة فقط: لا يترقى قبل trigger واضح."
+        pivot_stage_summary_sorted = sorted(
+            pivot_stage_summary.values(),
+            key=lambda x: (_f(x.get("win_rate_proxy")), _f(x.get("avg_gain")), -_f(x.get("avg_drawdown"))),
+            reverse=True,
+        )
+
         summary_sorted = sorted(agg.values(), key=lambda x: (_f(x.get("leaderboard_score")), _f(x.get("win_rate_proxy")), int(x.get("signals") or 0)), reverse=True)
         return {
             "ok": True,
@@ -1217,9 +1268,10 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             "horizon_bars": int(horizon_bars or 12),
             "summary_by_pattern": summary_sorted,
             "summary_by_role": sorted(role_summary.values(), key=lambda x: int(x.get("signals") or 0), reverse=True),
+            "summary_by_pivot_stage": pivot_stage_summary_sorted,
             "leaderboard_top": summary_sorted[:8],
             "signals": sorted(signals, key=lambda x: (_f(x.get("calibrated_score", x.get("score"))), _f(x.get("max_gain_pct_next_horizon"))), reverse=True)[:300],
-            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط، ثم تقيس الحركة اللاحقة. V2W15b يقيس Smart Pivot من trigger_price عند التفعيل لا من setup_price المبكر.",
+            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط. V2W15d يضيف تقرير جودة مراحل Smart Pivot ويفصل Confirmed عن Trigger Ready.",
         }
     finally:
         try:
@@ -1245,6 +1297,7 @@ def run_pattern_leaderboard_from_evidence(trade_date: str = "", limit_symbols: i
         "leaderboard_top": payload.get("leaderboard_top", []),
         "summary_by_pattern": payload.get("summary_by_pattern", []),
         "summary_by_role": payload.get("summary_by_role", []),
-        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل للإشارات.",
+        "summary_by_pivot_stage": payload.get("summary_by_pivot_stage", []),
+        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل؛ تتضمن تقرير مراحل Smart Pivot.",
         "error": payload.get("error"),
     }
