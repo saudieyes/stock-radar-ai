@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15d_pivot_stage_quality_report_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15d_pivot_stage_quality_report_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15e_pivot_stage_score_calibration_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15e_pivot_stage_score_calibration_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -134,12 +134,12 @@ _PATTERN_CALIBRATION = {
         "promotion_hint": "smart_pivot_trigger_required",
         "score_bonus": 3.0,
         "min_live_score": 72.0,
-        "replay_win_rate_proxy": 47.27,
-        "replay_avg_gain_proxy": 5.81,
-        "replay_avg_drawdown_proxy": -3.83,
+        "replay_win_rate_proxy": 51.16,
+        "replay_avg_gain_proxy": 7.57,
+        "replay_avg_drawdown_proxy": -3.99,
         "requires_confirmation": True,
         "activation_rule_ar": "نمط ارتكاز ذكي مشروط: اندفاع سابق ثم Reset وقاع أعلى، لكن لا يترقى عمليًا إلا إذا كان قريبًا من trigger، ومخاطرة الوقف معقولة، أو حدث كسر/ثبات فوق trigger الارتكاز.",
-        "leaderboard_note_ar": "V2W15b replay أظهر أن Confirmed أفضل من Trigger Ready؛ لذلك صار Confirmed فقط يذهب إلى Support Bounce، بينما Trigger Ready يبقى Pre-Trigger مراقبة لصيقة.",
+        "leaderboard_note_ar": "V2W15d كشف أن pivot_confirmed أفضل بوضوح: 58.33% نجاح وDrawdown -2.41%، بينما trigger_ready أضعف: 42.11% وDrawdown -5.98%؛ لذلك أصبحت الدرجة نفسها مرحلة-واعية وليست 100 للجميع.",
     },
     "strong_bos_bullish": {
         "role": "bullish_setup_needs_confirmation",
@@ -265,20 +265,67 @@ def _apply_match_calibration(match: dict) -> dict:
     out["replay_avg_gain_proxy"] = _round(cal.get("replay_avg_gain_proxy"), 2)
     out["replay_avg_drawdown_proxy"] = _round(cal.get("replay_avg_drawdown_proxy"), 2)
     out["calibrated_score"] = _round(calibrated_score, 2)
-    # V2W15c: Smart Pivot is stage-routed. Trigger Ready is not Support Bounce yet.
+    # V2W15e: Smart Pivot is score-calibrated by stage, not just routed by stage.
+    # Replay quality report showed: confirmed pivots are materially cleaner
+    # (58.33% win proxy, -2.41% avg drawdown) while trigger-ready pivots are
+    # noisy/early (42.11%, -5.98% drawdown).  Therefore only clean confirmed
+    # pivots keep high practical weight; trigger-ready stays Pre-Trigger and is
+    # capped so it cannot crowd out stronger confirmed patterns.
     if pid == "gpt_smart_pivot_reset":
         stage = _s(out.get("pivot_stage"))
         action = _s(out.get("action"))
         risk_pct = _f(out.get("risk_pct"), 99.0)
-        if stage == "pivot_confirmed" and action == "smart_pivot_confirmed_watch" and risk_pct <= 8.0:
-            out["recommended_bucket"] = "support_bounce"
-            out["promotion_hint"] = "smart_pivot_confirmed_support_bounce"
-        elif stage == "pivot_trigger_ready" and action == "smart_pivot_trigger_ready" and risk_pct <= 7.0:
+        stage_adjusted_score = calibrated_score
+        out["pivot_stage_quality"] = "watch_only"
+        out["pivot_stage_score_rule_ar"] = "ارتكاز مراقبة فقط؛ لا يرفع الدرجة قبل trigger ومخاطرة وقف مقبولة."
+        if stage == "pivot_confirmed" and action == "smart_pivot_confirmed_watch":
+            if risk_pct <= 4.5:
+                stage_adjusted_score = min(100.0, calibrated_score + 6.0)
+                out["pivot_stage_quality"] = "confirmed_clean"
+                out["recommended_bucket"] = "support_bounce"
+                out["promotion_hint"] = "smart_pivot_confirmed_clean_support_bounce"
+                out["pivot_stage_score_rule_ar"] = "ارتكاز مؤكد ونظيف: مخاطرة الوقف منخفضة، يسمح بوزن قوي في Support Bounce/Reclaim."
+            elif risk_pct <= 6.5:
+                stage_adjusted_score = min(100.0, calibrated_score + 3.0)
+                out["pivot_stage_quality"] = "confirmed_acceptable"
+                out["recommended_bucket"] = "support_bounce"
+                out["promotion_hint"] = "smart_pivot_confirmed_acceptable_support_bounce"
+                out["pivot_stage_score_rule_ar"] = "ارتكاز مؤكد بمخاطرة مقبولة: يظهر في Support Bounce لكن لا يصبح شراء مباشر."
+            elif risk_pct <= 8.0:
+                stage_adjusted_score = min(88.0, calibrated_score)
+                out["pivot_stage_quality"] = "confirmed_high_risk"
+                out["recommended_bucket"] = "pre_trigger"
+                out["promotion_hint"] = "smart_pivot_confirmed_high_risk_pre_trigger"
+                out["pivot_stage_score_rule_ar"] = "ارتكاز مؤكد لكن وقف بعيد؛ يبقى Pre-Trigger حتى يتحسن السعر/الوقف."
+            else:
+                stage_adjusted_score = min(76.0, calibrated_score)
+                out["pivot_stage_quality"] = "confirmed_rejected_risk"
+                out["recommended_bucket"] = "pre_trigger"
+                out["promotion_hint"] = "smart_pivot_confirmed_risk_guard"
+                out["pivot_stage_score_rule_ar"] = "ارتكاز مؤكد شكليًا لكن مخاطرة الوقف عالية؛ مراقبة فقط."
+        elif stage == "pivot_trigger_ready" and action == "smart_pivot_trigger_ready":
             out["recommended_bucket"] = "pre_trigger"
-            out["promotion_hint"] = "smart_pivot_trigger_ready_pre_trigger"
+            if risk_pct <= 5.0:
+                stage_adjusted_score = min(82.0, calibrated_score)
+                out["pivot_stage_quality"] = "trigger_ready_tight"
+                out["promotion_hint"] = "smart_pivot_trigger_ready_tight_pre_trigger"
+                out["pivot_stage_score_rule_ar"] = "قريب من التفعيل ومخاطرته مقبولة؛ Pre-Trigger مراقبة لصيقة فقط."
+            elif risk_pct <= 7.0:
+                stage_adjusted_score = min(76.0, calibrated_score)
+                out["pivot_stage_quality"] = "trigger_ready_loose"
+                out["promotion_hint"] = "smart_pivot_trigger_ready_loose_pre_trigger"
+                out["pivot_stage_score_rule_ar"] = "قريب من التفعيل لكن Drawdown العينة كان عاليًا؛ لا يزاحم المؤكد."
+            else:
+                stage_adjusted_score = min(68.0, calibrated_score)
+                out["pivot_stage_quality"] = "trigger_ready_high_risk"
+                out["promotion_hint"] = "smart_pivot_trigger_ready_high_risk_watch"
+                out["pivot_stage_score_rule_ar"] = "قريب من التفعيل لكن الوقف بعيد؛ مراقبة فقط."
         else:
+            stage_adjusted_score = min(64.0, calibrated_score)
             out["recommended_bucket"] = "pre_trigger"
-            out["promotion_hint"] = "smart_pivot_watch_pre_trigger_only"
+            out["promotion_hint"] = "smart_pivot_watch_only"
+        out["pivot_stage_adjusted_score"] = _round(stage_adjusted_score, 2)
+        out["calibrated_score"] = _round(stage_adjusted_score, 2)
     if out.get("lab_role") == "risk_guard" or pid in _BEARISH_PATTERN_IDS:
         out["risk_guard_strength"] = _round(max(calibrated_score, base_score), 2)
     else:
@@ -1298,6 +1345,6 @@ def run_pattern_leaderboard_from_evidence(trade_date: str = "", limit_symbols: i
         "summary_by_pattern": payload.get("summary_by_pattern", []),
         "summary_by_role": payload.get("summary_by_role", []),
         "summary_by_pivot_stage": payload.get("summary_by_pivot_stage", []),
-        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل؛ تتضمن تقرير مراحل Smart Pivot.",
+        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل؛ تتضمن تقرير مراحل Smart Pivot ومعايرة V2W15e للدرجة حسب المرحلة.",
         "error": payload.get("error"),
     }
