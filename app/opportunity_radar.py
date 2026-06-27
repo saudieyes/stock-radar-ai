@@ -3427,11 +3427,15 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
     """Rank a candidate with live-state and source freshness, not only the old snapshot score."""
     if not isinstance(row, dict):
         return 0.0
+    gpt_lab = row.get("gpt_pattern_lab_v2w13") if isinstance(row.get("gpt_pattern_lab_v2w13"), dict) else {}
+    gpt_best = gpt_lab.get("best_pattern") if isinstance(gpt_lab.get("best_pattern"), dict) else {}
+    gpt_score = max(_num(row.get("gpt_pattern_score"), 0.0), _num(gpt_lab.get("bullish_score"), 0.0))
     base = max(
         _num(row.get("live_rank_score"), 0.0),
         _num(row.get("display_rank_score"), 0.0),
         _num(row.get("opportunity_rank_score"), 0.0),
         _num(row.get("quality_score"), 0.0) * 10.0,
+        gpt_score * 12.0,
     )
     score = base
     status = _s(row.get("live_plan_status")).lower()
@@ -3449,6 +3453,20 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
     # unchanged.
     if tags & V2W11_LIVE_SOURCE_KEYS:
         live_bonus += 260.0
+    # V2W13: if a live-scan row also has a strong GPT Pattern Lab match, it
+    # should outrank reserve/Tomorrow Prep candidates.  Bearish GPT patterns are
+    # treated as risk guards and are not boosted here.
+    gpt_pid = _s(gpt_best.get("pattern_id"))
+    gpt_direction = _s(gpt_best.get("direction")).lower()
+    if gpt_score >= 72 and gpt_direction == "bullish":
+        score += 140.0
+        if tags & V2W11_LIVE_SOURCE_KEYS:
+            score += 120.0
+    elif gpt_pid in {"elephant_trunk_drop", "strong_bos_bearish", "tasuki_gap_bearish", "tweezer_top"}:
+        if section in {"pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates", "low_float_premarket_radar"}:
+            score -= 260.0
+        elif section == "continuation_pullback_candidates":
+            score += 40.0
     if row.get("live_tight_monitoring_v2v") or row.get("live_tight_memory_v2v"):
         live_bonus += 320.0
     if row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2u"):
