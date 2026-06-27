@@ -3478,6 +3478,9 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
     gpt_bullish_pid = _s(gpt_bullish_best.get("pattern_id"))
     gpt_guard_pid = _s(gpt_guard_best.get("pattern_id"))
     gpt_role = _s(gpt_bullish_best.get("lab_role"))
+    gpt_bullish_action = _s(gpt_bullish_best.get("action"))
+    gpt_pivot_stage = _s(gpt_bullish_best.get("pivot_stage"))
+    gpt_pivot_risk = _num(gpt_bullish_best.get("risk_pct"), 99.0)
     if gpt_guard_score >= max(62.0, gpt_score + 6.0) or gpt_guard_pid in {"elephant_trunk_drop", "strong_bos_bearish", "tasuki_gap_bearish", "tweezer_top"}:
         if section in {"pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates", "low_float_premarket_radar"}:
             score -= 340.0
@@ -3493,7 +3496,12 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
         elif gpt_bullish_pid == "gpt_liquidity_coil_reclaim" and section == "reclaim_candidates":
             score += 105.0
         elif gpt_bullish_pid == "gpt_smart_pivot_reset" and section in {"support_bounce_candidates", "reclaim_candidates", "pre_trigger_candidates"}:
-            score += 185.0
+            # V2W15b: Smart Pivot broad watch is not enough.  Give the large boost
+            # only when the pivot is trigger-ready/confirmed and stop risk is acceptable.
+            if gpt_bullish_action in {"smart_pivot_confirmed_watch", "smart_pivot_trigger_ready"} and gpt_pivot_risk <= 9.5:
+                score += 185.0 if section in {"support_bounce_candidates", "reclaim_candidates"} else 135.0
+            elif section == "pre_trigger_candidates":
+                score += 45.0
         elif gpt_bullish_pid == "gpt_silent_compression_break" and section in {"pre_trigger_candidates", "low_float_premarket_radar"}:
             score += 70.0
         elif gpt_role in {"bullish_setup", "bullish_setup_needs_confirmation", "continuation_setup"}:

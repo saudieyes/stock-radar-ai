@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15_smart_pivot_reset_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15_smart_pivot_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w15b_smart_pivot_trigger_tightening_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w15b_pivot_trigger_quality_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -131,15 +131,15 @@ _PATTERN_CALIBRATION = {
     "gpt_smart_pivot_reset": {
         "role": "bullish_setup_needs_confirmation",
         "recommended_bucket": "support_bounce",
-        "promotion_hint": "smart_pivot_reset_watch",
-        "score_bonus": 7.0,
-        "min_live_score": 68.0,
-        "replay_win_rate_proxy": 0.0,
-        "replay_avg_gain_proxy": 0.0,
-        "replay_avg_drawdown_proxy": 0.0,
+        "promotion_hint": "smart_pivot_trigger_required",
+        "score_bonus": 3.0,
+        "min_live_score": 72.0,
+        "replay_win_rate_proxy": 47.27,
+        "replay_avg_gain_proxy": 5.81,
+        "replay_avg_drawdown_proxy": -3.83,
         "requires_confirmation": True,
-        "activation_rule_ar": "نمط ارتكاز ذكي: حركة قوية سابقة ثم Reset/Pullback، قاع أعلى، ضغط قرب دعم/متوسط، واسترداد. لا يترقى إلا فوق trigger الارتكاز أو بثبات فوق القاع الأعلى.",
-        "leaderboard_note_ar": "أضفناه لأن المستخدم طلب نمط سهم الارتكاز؛ يبدأ كمراقبة مشروطة حتى نجمع نتائج replay/Polygon أكثر.",
+        "activation_rule_ar": "نمط ارتكاز ذكي مشروط: اندفاع سابق ثم Reset وقاع أعلى، لكن لا يترقى عمليًا إلا إذا كان قريبًا من trigger، ومخاطرة الوقف معقولة، أو حدث كسر/ثبات فوق trigger الارتكاز.",
+        "leaderboard_note_ar": "V2W15 replay أظهر 55 إشارة بنسبة نجاح 47.27%؛ لذلك شددنا التفعيل وفصلنا Pivot Watch عن Trigger Ready حتى لا يدخل مبكرًا قبل الارتكاز النظيف.",
     },
     "strong_bos_bullish": {
         "role": "bullish_setup_needs_confirmation",
@@ -411,7 +411,7 @@ def _lowest_before_tail(bars: list[dict], exclude_tail: int = 4) -> float:
     return min(lows) if lows else 0.0
 
 
-def _add(matches: list[dict], pattern_id: str, score: float, direction: str, reasons: list[str], *, action: str = "monitor", trigger: float = 0.0, stop: float = 0.0, target: float = 0.0, confidence: str = "medium") -> None:
+def _add(matches: list[dict], pattern_id: str, score: float, direction: str, reasons: list[str], *, action: str = "monitor", trigger: float = 0.0, stop: float = 0.0, target: float = 0.0, confidence: str = "medium", extra: dict | None = None) -> None:
     match = {
         "pattern_id": pattern_id,
         "pattern_name_ar": _PATTERN_AR.get(pattern_id, pattern_id),
@@ -426,6 +426,10 @@ def _add(matches: list[dict], pattern_id: str, score: float, direction: str, rea
         "reasons_ar": [str(x) for x in reasons if x][:6],
         "execution_note_ar": "مختبر أنماط فقط؛ لا يتحول إلى BUY_NOW إلا بعد بوابات الشرعية/السيولة/الخطة/التأكيد.",
     }
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            if k not in match:
+                match[k] = v
     matches.append(_apply_match_calibration(match))
 
 
@@ -591,10 +595,10 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
                     "هذا نمط GPT Alpha يجمع مصيدة سيولة + استرداد + بداية ضغط إيجابي.",
                 ], action="reclaim_watch", trigger=max(_f(last.get("high")), prev_floor), stop=min(_f(prev.get("low")), _f(last.get("low"))), target=price + max(avg_range * 1.8, price * 0.04), confidence="high" if score >= 78 else "medium")
 
-    # GPT Alpha: Smart Pivot Reset / سهم الارتكاز الذكي.
-    # Idea from the user's analyst lessons, translated into measurable no-lookahead rules:
-    # prior impulse -> controlled reset/pullback -> higher low -> compression/support hold -> reclaim.
-    # This is not a BUY_NOW pattern.  It is a watch/trigger pattern for Support Bounce/Reclaim.
+    # GPT Alpha: Smart Pivot Reset / سهم الارتكاز الذكي — V2W15b tightened.
+    # V2W15 replay showed the idea works, but the broad version fired 55 times with
+    # only ~47% proxy success.  V2W15b separates: Pivot Watch -> Trigger Ready -> Confirmed.
+    # The broad setup can be annotated, but only trigger-ready/confirmed setups get high scores.
     if len(bars) >= 18 and price > 0:
         look = bars[-min(34, len(bars)):]
         older = look[:-5]
@@ -608,42 +612,107 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
         impulse_pct = _pct(prior_high, min(first_base or prior_low, prior_low) or first_base) if prior_high else 0.0
         pullback_pct = _pct(prior_high, reset_low) if prior_high and reset_low else 0.0
         higher_low_pct = _pct(reset_low, prior_low) if prior_low and reset_low else 0.0
-        recent_closes = [_f(b.get("close")) for b in tail if _f(b.get("close")) > 0]
         ema_fast = _ema_like([_f(b.get("close")) for b in look], span=8)
         reclaim_fast = bool(ema_fast and price >= ema_fast * 0.997)
         recent_ranges = [_range(b) for b in tail[:-1]]
         earlier_ranges = [_range(b) for b in look[-14:-7]] if len(look) >= 14 else [_range(b) for b in older[-6:]]
         compression_ratio = (_avg(recent_ranges) / max(_avg(earlier_ranges), 0.01)) if earlier_ranges and recent_ranges else 1.0
         avg_tail_vol = _avg([_f(b.get("volume")) for b in tail[:-1] if _f(b.get("volume")) > 0])
-        vol_reclaim = (not avg_tail_vol) or _f(last.get("volume")) >= avg_tail_vol * 0.95
-        reclaimed_micro_high = price >= max([_f(b.get("close")) for b in tail[:-1]] or [price]) * 0.998
+        vol_ratio = (_f(last.get("volume")) / max(avg_tail_vol, 1.0)) if avg_tail_vol else 1.0
+        vol_reclaim = (not avg_tail_vol) or vol_ratio >= 0.95
+        prior_tail = tail[:-1]
+        prior_tail_high = max([_f(b.get("high")) for b in prior_tail] or [0.0])
+        prior_tail_close_high = max([_f(b.get("close")) for b in prior_tail] or [0.0])
+        micro_trigger = max(prior_tail_high, prior_tail_close_high, ema_fast or 0.0)
+        if not micro_trigger or micro_trigger <= 0:
+            micro_trigger = max(tail_high, price * 1.004)
+        triggered_now = price >= micro_trigger * 0.998
+        trigger_near = price >= micro_trigger * 0.985
         close_position = (price - reset_low) / max(tail_high - reset_low, 0.01) if tail_high > reset_low else 0.0
-        # Intraday version uses a lower pullback bound than the daily 30-60% pivot lesson;
-        # daily/weekly replay can later use larger lookbacks.  The structural principle is the same.
-        if (
+        risk_pct = _pct(micro_trigger, reset_low) if micro_trigger and reset_low else 99.0
+        deep_pullback = pullback_pct > 28.0
+        very_deep_pullback = pullback_pct > 34.0
+        tiny_higher_low = higher_low_pct < 3.0
+        clean_structure = (
+            impulse_pct >= 12.0
+            and 4.0 <= pullback_pct <= 32.0
+            and higher_low_pct >= 3.0
+            and close_position >= 0.58
+            and compression_ratio <= 1.05
+            and vol_reclaim
+            and (reclaim_fast or triggered_now or trigger_near)
+        )
+        # Broad pivot watch is allowed, but kept below replay promotion unless close to trigger.
+        broad_watch = (
             impulse_pct >= 9.0
             and 3.0 <= pullback_pct <= 38.0
             and higher_low_pct >= 0.7
             and close_position >= 0.48
-            and (reclaim_fast or reclaimed_micro_high)
             and compression_ratio <= 1.15
             and vol_reclaim
-        ):
-            score = 58.0
-            score += min(16.0, impulse_pct * 0.45)
-            score += min(12.0, max(0.0, higher_low_pct) * 2.4)
-            score += min(10.0, max(0.0, 1.15 - compression_ratio) * 22.0)
-            score += 8.0 if reclaim_fast and reclaimed_micro_high else 3.0
-            if avg_tail_vol and _f(last.get("volume")) >= avg_tail_vol * 1.25:
-                score += 5.0
-            trigger_level = max(tail_high, price * 1.004)
-            stop_level = reset_low
-            target_level = trigger_level + max((prior_high - reset_low) * 0.45, price * 0.045, avg_range * 1.6)
+            and (reclaim_fast or price >= prior_tail_close_high * 0.998 if prior_tail_close_high else reclaim_fast)
+        )
+        if broad_watch:
+            score = 52.0
+            score += min(14.0, impulse_pct * 0.35)
+            score += min(12.0, max(0.0, higher_low_pct) * 1.8)
+            score += min(8.0, max(0.0, 1.10 - compression_ratio) * 18.0)
+            if triggered_now:
+                score += 9.0
+            elif trigger_near:
+                score += 4.0
+            if risk_pct <= 6.5:
+                score += 8.0
+            elif risk_pct <= 8.5:
+                score += 4.0
+            elif risk_pct > 10.0:
+                score -= min(16.0, (risk_pct - 10.0) * 1.5)
+            if deep_pullback:
+                score -= 5.0
+            if very_deep_pullback:
+                score -= 7.0
+            if tiny_higher_low:
+                score -= 7.0
+            if avg_tail_vol and vol_ratio >= 1.25:
+                score += 3.0
+            # Route stage: only confirmed/trigger-ready should meaningfully influence live ranking.
+            if clean_structure and triggered_now and risk_pct <= 8.0:
+                action = "smart_pivot_confirmed_watch"
+                stage = "pivot_confirmed"
+                confidence = "high"
+                score = max(score, 76.0)
+                rule_note = "ارتكاز مؤكد: السعر كسر/استرد trigger الارتكاز والمخاطرة إلى القاع الأعلى معقولة."
+            elif clean_structure and trigger_near and risk_pct <= 9.5:
+                action = "smart_pivot_trigger_ready"
+                stage = "pivot_trigger_ready"
+                confidence = "medium"
+                score = max(score, 70.0)
+                rule_note = "ارتكاز قريب من التفعيل: مراقبة لصيقة حتى كسر trigger أو ثبات فوقه."
+            else:
+                action = "smart_pivot_watch"
+                stage = "pivot_watch"
+                confidence = "low"
+                score = min(score, 66.0)
+                rule_note = "ارتكاز مبكر/واسع: مراقبة فقط ولا يترقى قبل trigger ومخاطرة وقف مقبولة."
+            target_level = micro_trigger + max((prior_high - reset_low) * 0.45, price * 0.045, avg_range * 1.6)
             _add(matches, "gpt_smart_pivot_reset", score, "bullish", [
                 f"اندفاع سابق بنحو {round(impulse_pct,1)}% ثم Reset/Pullback بنحو {round(pullback_pct,1)}%.",
-                f"القاع الأخير أعلى من القاع السابق بنحو {round(higher_low_pct,1)}% مع ضغط/تهدئة قبل الاسترداد.",
-                "هذا نمط ارتكاز ذكي: لا يشتري أول قاع؛ ينتظر قاعًا أعلى واستردادًا ثم trigger واضح.",
-            ], action="smart_pivot_reset_watch", trigger=trigger_level, stop=stop_level, target=target_level, confidence="high" if score >= 78 else "medium")
+                f"القاع الأخير أعلى من القاع السابق بنحو {round(higher_low_pct,1)}%، risk≈{round(risk_pct,1)}%، trigger≈{round(micro_trigger,4)}.",
+                rule_note,
+            ], action=action, trigger=micro_trigger, stop=reset_low, target=target_level, confidence=confidence, extra={
+                "pivot_stage": stage,
+                "setup_price": _round(price, 4),
+                "trigger_price": _round(micro_trigger, 4),
+                "stop_price": _round(reset_low, 4),
+                "risk_pct": _round(risk_pct, 2),
+                "impulse_pct": _round(impulse_pct, 2),
+                "pullback_pct": _round(pullback_pct, 2),
+                "higher_low_pct": _round(higher_low_pct, 2),
+                "compression_ratio": _round(compression_ratio, 3),
+                "triggered_now": bool(triggered_now),
+                "trigger_near": bool(trigger_near),
+                "clean_structure": bool(clean_structure),
+            })
 
     # GPT Alpha: Second Wave Controlled Pullback.
     if len(bars) >= 10 and price > 0:
@@ -828,6 +897,15 @@ def enrich_rows_with_gpt_pattern_lab(rows: list[dict], *, apply_bucket_hints: bo
             action = _s(best_bullish.get("action"))
             cur_bucket = _s(out.get("opportunity_bucket"))
             should_route = bullish_score >= min_score and cur_bucket in {"", "watch", "early_movement", "learning_opportunity", "small_stock_classic", "raw_fast_lane"}
+            # V2W15b: Smart Pivot Watch is only a setup. It may label/monitor, but
+            # should not route into Support Bounce/Reclaim until trigger-ready/confirmed.
+            pivot_stage = _s(best_bullish.get("pivot_stage"))
+            pivot_risk = _f(best_bullish.get("risk_pct"), 99.0)
+            if _s(best_bullish.get("pattern_id")) == "gpt_smart_pivot_reset":
+                pivot_action_ok = action in {"smart_pivot_trigger_ready", "smart_pivot_confirmed_watch"} and pivot_risk <= 9.5
+                if not pivot_action_ok:
+                    should_route = bullish_score >= min_score and cur_bucket in {"", "watch", "early_movement", "learning_opportunity", "small_stock_classic", "raw_fast_lane"}
+                    recommended = "pre_trigger"
             # Allow important calibrated patterns to improve a nearby bucket even if already classified.
             should_label_existing = bullish_score >= min_score and cur_bucket in {"pre_trigger", "support_bounce", "reclaim", "continuation_pullback", "low_float_premarket"}
             if should_route:
@@ -873,7 +951,7 @@ def pattern_lab_status() -> dict:
             "Tweezer Bottom أصبح Support Bounce/Reclaim قويًا لكن بشرط الدعم والتأكيد.",
             "Elephant Trunk Drop وTweezer Top أصبحا Risk Guards لا إشارات شراء.",
             "GPT Second Wave هو أفضل نمط GPT Alpha مبدئيًا للمراقبة العملية.",
-            "Smart Pivot Reset يترجم سهم الارتكاز: اندفاع سابق + Reset + قاع أعلى + استرداد مشروط.",
+            "Smart Pivot Reset أصبح ثلاث مراحل: Pivot Watch ثم Trigger Ready ثم Confirmed؛ لا يترقى من مجرد قاع أعلى.",
             "Strong BOS Bullish يحتاج hold/retest أو حجم استمرار ولا يدخل وحده.",
         ],
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",
@@ -894,7 +972,7 @@ def pattern_lab_calibration_payload() -> dict:
         "version": GPT_PATTERN_LAB_VERSION,
         "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
         "items": sorted(items, key=lambda x: (_f(x.get("replay_win_rate_proxy")), _f(x.get("replay_avg_gain_proxy"))), reverse=True),
-        "rule_ar": "هذه معايرة أولية من replay واحد؛ تزيد أو تنقص بعد اختبار Polygon على جلسات أكثر.",
+        "rule_ar": "معايرة V2W15b: نمط الارتكاز شدد trigger/risk بعد قراءة replay الكامل؛ Watch لا يساوي دخول.",
     }
 
 
@@ -1001,20 +1079,51 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
                 if key in seen_keys:
                     continue
                 seen_keys.add(key)
-                entry = _f(hist[-1].get("close"))
+                setup_entry = _f(hist[-1].get("close"))
+                trigger_px = _f(best.get("trigger_price") or best.get("trigger") or setup_entry)
+                stop_px = _f(best.get("stop_price") or best.get("stop"))
+                action = _s(best.get("action"))
+                pivot_stage = _s(best.get("pivot_stage"))
+                effective_entry = setup_entry
+                # For Smart Pivot, replay should judge the trigger, not the early setup candle.
+                # If trigger is not reached during the forward horizon, mark untriggered.
                 future = bars[idx + 1: idx + 1 + max(2, int(horizon_bars or 12))]
-                fut_high = max([_f(b.get("high")) for b in future] or [entry])
-                fut_low = min([_f(b.get("low")) for b in future if _f(b.get("low")) > 0] or [entry])
-                max_gain = _pct(fut_high, entry) if entry else 0.0
-                max_drawdown = _pct(fut_low, entry) if entry else 0.0
+                triggered_in_horizon = True
+                trigger_bar_offset = 0
+                if pid == "gpt_smart_pivot_reset" and trigger_px > 0 and action not in {"smart_pivot_confirmed_watch"}:
+                    triggered_in_horizon = False
+                    for off, fb in enumerate(future, start=1):
+                        if _f(fb.get("high")) >= trigger_px:
+                            triggered_in_horizon = True
+                            trigger_bar_offset = off
+                            effective_entry = trigger_px
+                            future = future[off - 1:]
+                            break
+                elif pid == "gpt_smart_pivot_reset":
+                    effective_entry = trigger_px if trigger_px > 0 and setup_entry >= trigger_px * 0.998 else setup_entry
+                fut_high = max([_f(b.get("high")) for b in future] or [effective_entry])
+                fut_low = min([_f(b.get("low")) for b in future if _f(b.get("low")) > 0] or [effective_entry])
+                max_gain = _pct(fut_high, effective_entry) if effective_entry else 0.0
+                max_drawdown = _pct(fut_low, effective_entry) if effective_entry else 0.0
                 bearish = pid in _BEARISH_PATTERN_IDS
-                success = (max_drawdown <= -2.0) if bearish else (max_gain >= 3.0 and max_drawdown > -8.0)
+                if pid == "gpt_smart_pivot_reset":
+                    risk_pct = _f(best.get("risk_pct")) or (_pct(trigger_px, stop_px) if trigger_px and stop_px else 99.0)
+                    success = bool(triggered_in_horizon and max_gain >= 3.0 and max_drawdown > -7.0 and risk_pct <= 9.5)
+                else:
+                    success = (max_drawdown <= -2.0) if bearish else (max_gain >= 3.0 and max_drawdown > -8.0)
                 signals.append({
                     "symbol": sym,
                     "trade_date": d,
                     "bar_index": idx,
                     "bar_time_text": _s(hist[-1].get("bar_time_text") or hist[-1].get("ts")),
-                    "entry_price": _round(entry, 4),
+                    "entry_price": _round(effective_entry, 4),
+                    "setup_price": _round(setup_entry, 4),
+                    "trigger_price": _round(trigger_px, 4),
+                    "stop_price": _round(stop_px, 4),
+                    "risk_pct": _round(best.get("risk_pct"), 2),
+                    "triggered_in_horizon": bool(triggered_in_horizon),
+                    "trigger_bar_offset": int(trigger_bar_offset),
+                    "pivot_stage": best.get("pivot_stage"),
                     "pattern_id": pid,
                     "pattern_name_ar": _PATTERN_AR.get(pid, pid),
                     "family": best.get("family"),
@@ -1091,7 +1200,7 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             "summary_by_role": sorted(role_summary.values(), key=lambda x: int(x.get("signals") or 0), reverse=True),
             "leaderboard_top": summary_sorted[:8],
             "signals": sorted(signals, key=lambda x: (_f(x.get("calibrated_score", x.get("score"))), _f(x.get("max_gain_pct_next_horizon"))), reverse=True)[:300],
-            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط، ثم تقيس الحركة اللاحقة. V2W13b يفصل نماذج الشراء عن حراس الخطر.",
+            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط، ثم تقيس الحركة اللاحقة. V2W15b يقيس Smart Pivot من trigger_price عند التفعيل لا من setup_price المبكر.",
         }
     finally:
         try:
