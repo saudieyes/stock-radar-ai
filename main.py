@@ -227,6 +227,14 @@ from app.opportunity_radar import (
     opportunity_radar_status_payload,
     record_opportunity_plans,
 )
+from app.gpt_pattern_lab import (
+    GPT_PATTERN_LAB_VERSION,
+    analyze_bars_payload as gpt_pattern_analyze_bars_payload,
+    enrich_rows_with_gpt_pattern_lab,
+    pattern_lab_status as gpt_pattern_lab_status_payload,
+    run_pattern_replay_from_evidence as run_gpt_pattern_replay_from_evidence,
+    summarize_current_rows as summarize_gpt_pattern_current_rows,
+)
 from app.paper_trading_engine import PAPER_TRADING_VERSION, paper_trading_status, process_paper_trading_scan
 from app.breakout_quality_engine import BREAKOUT_QUALITY_VERSION, enrich_breakout_quality_rows, breakout_quality_status
 from app.weekly_plan_lifecycle import WEEKLY_PLAN_LIFECYCLE_VERSION, evaluate_weekly_rows, weekly_plan_lifecycle_status
@@ -665,7 +673,8 @@ def opportunity_radar_status_endpoint():
     payload["snapshot_rows_count"] = len(rows)
     payload["status_note_ar"] = "status لا يعرض كل الفرص؛ الصفحة تعتمد على /trade-scan و /radar-live-refresh. V2L2 يصلح خطأ trade-scan الذي كان يمنع تحميل الأقسام."
     try:
-        enriched = enrich_rows_opportunity_radar(rows, market_phase=phase)
+        enriched = enrich_rows_with_gpt_pattern_lab(rows if isinstance(rows, list) else [], apply_bucket_hints=False)
+        enriched = enrich_rows_opportunity_radar(enriched, market_phase=phase)
         sections_preview = build_opportunity_radar_sections(enriched, market_phase=phase)
         payload["status_enriched_rows_current_version"] = len(enriched)
         payload["sections_preview_counts"] = {
@@ -695,7 +704,8 @@ def _small_stock_classic_radar_status_payload():
     snapshot = get_json("last_trade_scan_snapshot", {}) or {}
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
     market_phase = snapshot.get("market_phase", "") if isinstance(snapshot, dict) else ""
-    rows = enrich_rows_opportunity_radar(rows if isinstance(rows, list) else [], market_phase=market_phase)
+    rows = enrich_rows_with_gpt_pattern_lab(rows if isinstance(rows, list) else [], apply_bucket_hints=False)
+    rows = enrich_rows_opportunity_radar(rows, market_phase=market_phase)
     sections = build_opportunity_radar_sections(rows, market_phase=market_phase)
     items = sections.get("small_stock_classic_radar", []) or []
     return {
@@ -1895,6 +1905,10 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         pass
     try:
         overlaid = enrich_rows_with_opportunity_plan_memory(overlaid)
+    except Exception:
+        pass
+    try:
+        overlaid = enrich_rows_with_gpt_pattern_lab(overlaid)
     except Exception:
         pass
     try:
@@ -3629,6 +3643,10 @@ def _build_trade_scan_response(results, scan_debug, include_all: bool = False, c
     except Exception:
         pass
     try:
+        results = enrich_rows_with_gpt_pattern_lab(results)
+    except Exception:
+        pass
+    try:
         results = enrich_rows_opportunity_radar(results, market_phase=phase)
     except Exception:
         pass
@@ -5046,6 +5064,32 @@ def ui_dynamic_diff(client_scan_id: str = "", limit_per_section: int = 30):
         **diff,
         "price_only_note_ar": "الرموز التي لم تتغير عضويتها لا تُعاد بطاقتها؛ السعر يتحدث عبر /ui/price-patch أو /live-quotes.",
     }
+
+
+@app.get("/pattern-lab/gpt/status")
+def pattern_lab_gpt_status_endpoint():
+    return gpt_pattern_lab_status_payload()
+
+
+@app.post("/pattern-lab/gpt/analyze-bars")
+def pattern_lab_gpt_analyze_bars_endpoint(payload: dict = Body(...)):
+    return gpt_pattern_analyze_bars_payload(payload or {})
+
+
+@app.get("/pattern-lab/gpt/current")
+def pattern_lab_gpt_current_endpoint(limit: int = 80):
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    return summarize_gpt_pattern_current_rows(rows if isinstance(rows, list) else [], limit=max(1, min(240, int(limit or 80))))
+
+
+@app.get("/pattern-lab/gpt/replay")
+def pattern_lab_gpt_replay_endpoint(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12):
+    return run_gpt_pattern_replay_from_evidence(
+        trade_date=trade_date or "",
+        limit_symbols=max(1, min(250, int(limit_symbols or 80))),
+        horizon_bars=max(2, min(48, int(horizon_bars or 12))),
+    )
 
 
 @app.get("/diagnostics/dynamic-display-v2w12b")

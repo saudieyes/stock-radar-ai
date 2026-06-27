@@ -2180,6 +2180,41 @@
     .replacement-symbol:hover{background:rgba(34,197,94,.22);}
     .replacement-detail{margin-top:5px;color:var(--text-muted);}
 
+
+
+    /* V2W13 iPhone/Safari ticker safety: never let tickers wrap vertically. */
+    .symbol,
+    .compact-modern .symbol,
+    .portfolio-card-symbol,
+    .watchlist-card-symbol,
+    .sharia-card-symbol,
+    .weekly-symbol,
+    .replacement-symbol,
+    .modern-detail-symbol {
+      direction: ltr !important;
+      unicode-bidi: isolate !important;
+      writing-mode: horizontal-tb !important;
+      white-space: nowrap !important;
+      word-break: keep-all !important;
+      overflow-wrap: normal !important;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+      min-width: max-content;
+      max-width: 42vw;
+    }
+    .card-heading-line {
+      min-width: 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .card-heading-line > div { min-width: 0; }
+    @supports (-webkit-touch-callout: none) {
+      .card-top { grid-template-columns: minmax(88px, auto) minmax(0, 1fr) !important; }
+      .symbol, .compact-modern .symbol { min-width: 70px; max-width: 38vw; text-align: left; }
+    }
+
   </style>
 </head>
 <body>
@@ -4173,6 +4208,28 @@
       return `<div class="sharia-replacement-line"><b>بدائل شرعية/قابلة للمراجعة:</b> ${safeText(text)}${tags}${details}</div>`;
     }
 
+    function renderGptPatternLabBlock(stock) {
+      const lab = stock?.gpt_pattern_lab_v2w13 || {};
+      const matches = Array.isArray(lab.matches) ? lab.matches : [];
+      const best = lab.best_pattern || {};
+      if (!matches.length && !best.pattern_id) return '—';
+      const top = matches.slice(0, 5).map(m => {
+        const reasons = Array.isArray(m.reasons_ar) ? m.reasons_ar.slice(0, 3) : [];
+        const tag = m.family === 'gpt_alpha' ? 'GPT Alpha' : 'درس المحلل';
+        const dir = m.direction === 'bearish' ? '⚠️ هابط/حماية' : '🟢 صاعد/مراقبة';
+        return `<li><b>${safeText(m.pattern_name_ar || m.pattern_id || '')}</b> — ${safeText(tag)} — ${safeText(dir)} — ${formatNumber(m.score)} /100<br><small>${safeText(m.action || '')}${m.trigger ? ' | trigger: ' + formatNumber(m.trigger) : ''}${m.stop ? ' | stop: ' + formatNumber(m.stop) : ''}</small>${renderReasonsList(reasons)}</li>`;
+      }).join('');
+      return `
+        <div class="pattern-lab-box">
+          <b>V2W13 GPT Pattern Lab</b><br>
+          أفضل نمط: ${safeText(best.pattern_name_ar || best.pattern_id || '—')} — ${formatNumber(lab.score || best.score || 0)} /100<br>
+          الانحياز: ${safeText(lab.bias || '—')}<br>
+          مصدر الشموع: ${safeText(lab.bar_source || '—')}<br>
+          <small>هذه طبقة مراقبة ومحاكاة؛ لا تصنع BUY_NOW ولا تتجاوز الشرعية والسيولة والخطة.</small>
+          <ul class="flags">${top}</ul>
+        </div>`;
+    }
+
     function createCard(stock, sectionKey='', index=0) {
       stock = applyClientOpportunityGuard(stock);
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
@@ -4192,6 +4249,7 @@
       details.push(detailBox('نوع الفرصة', safeText(stock.trade_type_label_ar || stock.display_plan_family_label || stock.strategy_label || '')));
       details.push(detailBox('مرحلة Opportunity Radar', `${safeText(stock.opportunity_stage_label || '')}<br>${renderReasonsList(stock.opportunity_reasons || stock.technical_explainer_reasons)}`, true));
       details.push(detailBox('طبقة التعلم', `${safeText(stock.learning_overlay_label_ar || stock.learning_label_ar || '')}<br>${safeText(stock.learning_overlay_action_ar || stock.learning_action_ar || '')}<br>${safeText(stock.learning_risk_ar || '')}${stock.learning_pattern_key ? '<br><span style="direction:ltr;text-align:left;display:block;">' + safeText(stock.learning_pattern_key) + '</span>' : ''}`, true));
+      details.push(detailBox('GPT Pattern Lab V2W13', renderGptPatternLabBlock(stock), true, 'GPT Pattern Lab'));
       details.push(detailBox('مناطق الدعم/المقاومة V2', renderOpportunityZonesBlock(stock), true));
       details.push(detailBox('الخطة الأصلية وحالتها الآن', renderOriginalPlanBlock(stock), true));
       details.push(detailBox('فلتر السعر الشخصي', safeText(stock.personal_price_label || ''), false));
