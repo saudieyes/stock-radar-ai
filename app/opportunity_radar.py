@@ -37,7 +37,20 @@ except Exception:  # pragma: no cover
     def get_manual_sharia_exclusions_map():
         return {}
 
-OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w12b_dynamic_pool_live_scan_first_diff_ready_2026_06_26"
+try:
+    from app.active_tradability_gate import (
+        ACTIVE_TRADABILITY_GATE_VERSION,
+        audit_row as active_tradability_audit_row,
+        summarize_rows as summarize_active_tradability_rows,
+    )
+except Exception:  # pragma: no cover
+    ACTIVE_TRADABILITY_GATE_VERSION = "active_tradability_gate_unavailable"
+    def active_tradability_audit_row(row, *, market_phase="", **kwargs):
+        return {"ok": True, "visible_allowed": True, "actionable_allowed": True, "reason_code": "gate_unavailable", "reason_ar": "بوابة التداول النشط غير متاحة."}
+    def summarize_active_tradability_rows(rows, *, market_phase="", limit=80):
+        return {"ok": False, "version": ACTIVE_TRADABILITY_GATE_VERSION, "rows_checked": len(rows or []), "reason": "gate_unavailable"}
+
+OPPORTUNITY_RADAR_VERSION = "opportunity_radar_v2w14_active_tradability_gate_dynamic_pools_2026_06_27"
 NY_TZ = ZoneInfo("America/New_York")
 PLAN_MEMORY_KEY = "opportunity_radar:plan_memory_v1"
 PLAN_EVENTS_KEY = "opportunity_radar:plan_memory_events_v1"
@@ -409,14 +422,14 @@ def _ensure_visible_monitoring_plan_v2w9(row: dict, section_key: str = "") -> bo
 
 def _final_visible_guard_v2w9(final_map: dict[str, list[dict]], *, market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict[str, Any]:
     debug = {
-        "version": "visible_stock_guard_v2w9_2026_06_24",
+        "version": "visible_stock_guard_v2w14_active_tradability_2026_06_27",
         "manual_excluded_hidden": [],
         "auto_hard_haram_hidden": [],
         "inactive_tradability_hidden": [],
         "missing_plan_hidden": [],
         "plans_added": 0,
         "critical_premarket_hidden_outside_premarket": 0,
-        "rule_ar": "لا يظهر المستبعد يدويًا إطلاقًا، ولا تظهر أي بطاقة بلا دخول/إلغاء/هدف. الاشتباه الشرعي الآلي لا يساوي استبعادًا يدويًا.",
+        "rule_ar": "لا يظهر المستبعد يدويًا أو غير النشط/stale إطلاقًا في القوائم العملية، ولا تظهر أي بطاقة بلا دخول/إلغاء/هدف. الاشتباه الشرعي الآلي لا يساوي استبعادًا يدويًا.",
     }
     active_manual = _manual_exclusion_symbols_v2w9()
     for section, vals in list(final_map.items()):
@@ -428,7 +441,7 @@ def _final_visible_guard_v2w9(final_map: dict[str, list[dict]], *, market_phase:
             sym = _u(row.get("symbol"))
             if not sym or sym in seen:
                 continue
-            inactive_reason = _inactive_tradability_reason_v2w11(row)
+            inactive_reason = _inactive_tradability_reason_v2w11(row, market_phase=market_phase)
             if inactive_reason:
                 debug["inactive_tradability_hidden"].append(sym)
                 row["inactive_tradability_reason_v2w11"] = inactive_reason
@@ -468,7 +481,7 @@ def _visible_candidate_allowed_v2w11(row: dict, section: str, *, market_phase: s
     sym = _u(item.get("symbol"))
     if not sym:
         return False, "missing_symbol", item
-    inactive_reason = _inactive_tradability_reason_v2w11(item)
+    inactive_reason = _inactive_tradability_reason_v2w11(item, market_phase=market_phase)
     if inactive_reason:
         item["inactive_tradability_reason_v2w11"] = inactive_reason
         return False, inactive_reason, item
@@ -3344,30 +3357,32 @@ OPPORTUNITY_BUCKET_KEYS = [
 ]
 
 
-def _inactive_tradability_reason_v2w11(row: dict) -> str:
-    """Block dead/stale tickers before they can be analyzed or displayed as opportunities."""
+def _inactive_tradability_reason_v2w11(row: dict, market_phase: str = "") -> str:
+    """Block dead/stale tickers before they can be analyzed or displayed as opportunities.
+
+    V2W14 delegates the actual audit to the centralized Active Tradability Gate.
+    This keeps all visible sections, strong/cautious buckets, live scan bridges,
+    and diagnostics using the same safety vocabulary.
+    """
     if not isinstance(row, dict):
         return "not_a_row"
+    audit = row.get("active_tradability_gate_v2w14") if isinstance(row.get("active_tradability_gate_v2w14"), dict) else None
+    if not audit:
+        try:
+            audit = active_tradability_audit_row(row, market_phase=market_phase or "")
+            row["active_tradability_gate_v2w14"] = audit
+            row["active_tradability_ok"] = bool(audit.get("visible_allowed"))
+            row["active_tradability_actionable_ok"] = bool(audit.get("actionable_allowed"))
+        except Exception:
+            audit = {}
+    if audit and not bool(audit.get("visible_allowed", True)):
+        row["inactive_tradability_reason_v2w14"] = _s(audit.get("reason_code") or "active_tradability_blocked")
+        row["inactive_tradability_reason_ar_v2w14"] = _s(audit.get("reason_ar") or "فشل بوابة التداول النشط.")
+        return _s(audit.get("reason_code") or "active_tradability_blocked")
+    # Keep legacy explicit denylist as a fallback if the audit module was unavailable.
     sym = _u(row.get("symbol"))
     if sym in V2W11_INACTIVE_SYMBOLS:
         return "inactive_symbol_denylist"
-    name = _s(row.get("company_name") or row.get("name") or row.get("companyName")).lower()
-    if sym == "LTHM" or ("livent" in name and sym in {"LTHM", "ALTM"}):
-        return "old_livent_arcadium_ticker"
-    active_fields = [
-        row.get("is_active"), row.get("active"), row.get("tradable"), row.get("isTradable"), row.get("isActivelyTrading"),
-    ]
-    for val in active_fields:
-        if isinstance(val, bool) and val is False:
-            return "inactive_tradability_flag"
-        if isinstance(val, str) and val.strip().lower() in {"false", "no", "inactive", "delisted", "acquired", "halted_permanent"}:
-            return "inactive_tradability_flag"
-    status_text = " ".join([
-        _s(row.get("status")), _s(row.get("quote_status")), _s(row.get("listing_status")),
-        _s(row.get("market_status")), _s(row.get("security_status")),
-    ]).lower()
-    if any(x in status_text for x in ["delisted", "inactive", "acquired", "merged", "no longer trading"]):
-        return "inactive_status_text"
     return ""
 
 
@@ -4942,6 +4957,28 @@ def _inject_tomorrow_prep_section_bridge_v2w9g(final_map: dict[str, list[dict]],
     debug["total_added_visible"] = sum(debug["added_by_section"].values())
     return debug
 
+
+def _active_tradability_debug_v2w14(rows: list[dict], final_map: dict[str, list[dict]], *, market_phase: str = "") -> dict[str, Any]:
+    visible_rows: list[dict] = []
+    for vals in (final_map or {}).values():
+        if isinstance(vals, list):
+            visible_rows.extend([x for x in vals if isinstance(x, dict)])
+    try:
+        source_summary = summarize_active_tradability_rows([x for x in (rows or []) if isinstance(x, dict)], market_phase=market_phase, limit=60)
+    except Exception as exc:
+        source_summary = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+    try:
+        visible_summary = summarize_active_tradability_rows(visible_rows, market_phase=market_phase, limit=60)
+    except Exception as exc:
+        visible_summary = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+    return {
+        "version": ACTIVE_TRADABILITY_GATE_VERSION,
+        "source_rows": source_summary,
+        "visible_rows": visible_summary,
+        "visible_symbols": _dedupe([_u(x.get("symbol")) for x in visible_rows if isinstance(x, dict)], 120),
+        "rule_ar": "بوابة التداول النشط تعمل قبل عرض القوائم: الرموز delisted/inactive/stale/merged لا تظهر، والتحذيرات تمنع الترقية التنفيذية حتى يصل تأكيد حي.",
+    }
+
 def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", limit: int = DEFAULT_SECTION_LIMIT) -> dict:
     bucket_map = {key: [] for key in OPPORTUNITY_BUCKET_KEYS}
     raw_counts: dict[str, int] = {}
@@ -5217,6 +5254,7 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
 
     visible_guard_debug = _final_visible_guard_v2w9(final_map, market_phase=market_phase, limit=limit)
     dynamic_pool_debug_v2w11 = _dynamic_pool_backfill_v2w11(final_map, section_candidate_pools_v2w11, market_phase=market_phase, limit=limit)
+    active_tradability_debug_v2w14 = _active_tradability_debug_v2w14(rows or [], final_map, market_phase=market_phase)
 
     counts = {f"{key}_count": len(final_map.get(key, [])) for key in ordered_keys}
     next_week_analysis = _build_next_week_analysis(final_map, counts)
@@ -5228,7 +5266,9 @@ def build_opportunity_radar_sections(rows: list[dict], market_phase: str = "", l
         "display_limit_per_section": max(1, int(limit or DEFAULT_SECTION_LIMIT)),
         "dynamic_pool_version_v2w11": V2W11_DYNAMIC_POOL_VERSION,
         "dynamic_pool_debug_v2w11": dynamic_pool_debug_v2w11,
-        "dynamic_pool_rule_ar": "القوائم ليست 12 سهمًا ثابتًا: كل قسم يعرض أعلى N من pool أكبر، ويملأ الفراغ من الاحتياط بعد الشرعية/الخطة/التداول/التمدد. في أثناء السوق، مرشح live scan الأقوى يتقدم على الاحتياط وقائمة أمس.",
+        "active_tradability_gate_v2w14": active_tradability_debug_v2w14,
+        "active_tradability_gate_version": ACTIVE_TRADABILITY_GATE_VERSION,
+        "dynamic_pool_rule_ar": "القوائم ليست 12 سهمًا ثابتًا: كل قسم يعرض أعلى N من pool أكبر، ويملأ الفراغ من الاحتياط بعد الشرعية/الخطة/التداول/التمدد. في أثناء السوق، مرشح live scan الأقوى يتقدم على الاحتياط وقائمة أمس، لكن بوابة التداول النشط تمنع الرموز غير النشطة أو stale.",
         "rule_ar": "Strong يبقى صارمًا؛ أثناء الإغلاق/قبل الافتتاح تظهر أقسام تحضيرية لمراجعة الفرص والمقاومة والدعم بدون تحويلها إلى BUY_NOW.",
         "counts_by_stage": raw_counts,
         "suppressed_high_price_count": len(set(suppressed_high_price)),

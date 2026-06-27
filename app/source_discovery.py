@@ -27,6 +27,13 @@ from app.intraday_early_source_radar import (
     intraday_early_source_radar_enabled,
     scan_intraday_early_source_radar,
 )
+
+try:
+    from app.active_tradability_gate import ACTIVE_TRADABILITY_GATE_VERSION, symbol_candidate_allowed
+except Exception:  # pragma: no cover
+    ACTIVE_TRADABILITY_GATE_VERSION = "active_tradability_gate_unavailable"
+    def symbol_candidate_allowed(symbol):
+        return True
 try:
     from app.detection_journal import record_detection
 except Exception:  # keep source layer resilient if SQLite is unavailable during import
@@ -59,7 +66,7 @@ def _env_int(name: str, default: int, min_value: int | None = None, max_value: i
     return value
 
 
-SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v4b_v2w11_live_scan_first_dynamic_lists_2026_06_26"
+SOURCE_DISCOVERY_MODULE_VERSION = "dynamic_discovery_v4c_v2w14_live_scan_first_active_tradability_2026_06_27"
 
 DYNAMIC_DISCOVERY_ENABLED = _env_bool("DYNAMIC_DISCOVERY_ENABLED", True)
 DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION = _env_bool("DYNAMIC_DISCOVERY_USE_FMP_CONFIRMATION", True)
@@ -786,6 +793,8 @@ def _clean_symbol(symbol) -> str:
         if not s:
             return ""
         if not all(ch.isalnum() or ch in {".", "-"} for ch in s):
+            return ""
+        if not symbol_candidate_allowed(s):
             return ""
         return s
     except Exception:
@@ -2954,9 +2963,9 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
         pass
 
     diag = {
-        "engine_version": "dynamic_discovery_v4b_v2w11_live_scan_first_dynamic_lists_2026_06_26",
+        "engine_version": "dynamic_discovery_v4c_v2w14_live_scan_first_active_tradability_2026_06_27",
         "dynamic_discovery_enabled": True,
-        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w11_live_scan_first_dynamic_list_pools",
+        "dynamic_discovery_mode": "real_pre_explosion_capture_v2w14_live_scan_first_active_tradability",
         "requested_target": int(max_symbols),
         "target": int(max_symbols),
         "selected_count": len(final),
@@ -3031,6 +3040,8 @@ def build_dynamic_universe(max_symbols: int = 700) -> list[str]:
             "rule_ar": "V2W11: مصادر المسح الحي داخل التداول تدخل قبل قوائم الأمس/التحضير حتى لا تبقى القوائم ثابتة ولا تفوت الأسهم النشطة.",
             "front_sources": ["live_tight_monitoring_v2v", "intraday_early_ramp", "dip_reclaim_radar", "quiet_accumulation_radar", "live_ignition_hot_lane", "fmp_live_confirmed", "big_explosion_live_lane_v2u", "low_float_fast_lane_v1"],
             "front_source_counts": {k: int(source_bucket_counts.get(k, 0) or 0) for k in ["live_tight_monitoring_v2v", "intraday_early_ramp", "dip_reclaim_radar", "quiet_accumulation_radar", "live_ignition_hot_lane", "fmp_live_confirmed", "big_explosion_live_lane_v2u", "low_float_fast_lane_v1"]},
+            "active_tradability_gate_version": ACTIVE_TRADABILITY_GATE_VERSION,
+            "active_tradability_prefilter_rule_ar": "رموز denylist أو malformed تُزال قبل استهلاك ميزانية live scan، والبوابة الكاملة تعمل لاحقًا على السعر/الحالة/التوقيت.",
         },
         "price_under_2_deprioritized": price_flags.get("under_2_deprioritized", 0),
         "price_under_2_exception": price_flags.get("under_2_exception", 0),
