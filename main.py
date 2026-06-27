@@ -231,7 +231,9 @@ from app.gpt_pattern_lab import (
     GPT_PATTERN_LAB_VERSION,
     analyze_bars_payload as gpt_pattern_analyze_bars_payload,
     enrich_rows_with_gpt_pattern_lab,
+    pattern_lab_calibration_payload as gpt_pattern_calibration_payload,
     pattern_lab_status as gpt_pattern_lab_status_payload,
+    run_pattern_leaderboard_from_evidence as run_gpt_pattern_leaderboard_from_evidence,
     run_pattern_replay_from_evidence as run_gpt_pattern_replay_from_evidence,
     summarize_current_rows as summarize_gpt_pattern_current_rows,
 )
@@ -5083,9 +5085,23 @@ def pattern_lab_gpt_current_endpoint(limit: int = 80):
     return summarize_gpt_pattern_current_rows(rows if isinstance(rows, list) else [], limit=max(1, min(240, int(limit or 80))))
 
 
+@app.get("/pattern-lab/gpt/calibration")
+def pattern_lab_gpt_calibration_endpoint():
+    return gpt_pattern_calibration_payload()
+
+
 @app.get("/pattern-lab/gpt/replay")
 def pattern_lab_gpt_replay_endpoint(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12):
     return run_gpt_pattern_replay_from_evidence(
+        trade_date=trade_date or "",
+        limit_symbols=max(1, min(250, int(limit_symbols or 80))),
+        horizon_bars=max(2, min(48, int(horizon_bars or 12))),
+    )
+
+
+@app.get("/pattern-lab/gpt/leaderboard")
+def pattern_lab_gpt_leaderboard_endpoint(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12):
+    return run_gpt_pattern_leaderboard_from_evidence(
         trade_date=trade_date or "",
         limit_symbols=max(1, min(250, int(limit_symbols or 80))),
         horizon_bars=max(2, min(48, int(horizon_bars or 12))),
