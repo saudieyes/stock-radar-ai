@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w17_pattern_walk_forward_replay_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w17_walk_forward_replay_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w17b_async_walk_forward_guard_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w17b_async_walk_forward_guard_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -1179,7 +1179,7 @@ def pattern_lab_status() -> dict:
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",
         "weekend_use_ar": "مناسب للويكند: تحليل ومحاكاة بدون live polling ثقيل.",
         "walk_forward_endpoint": "/pattern-lab/gpt/walk-forward",
-        "walk_forward_rule_ar": "V2W17 يختبر الأنماط Walk-Forward: فترة تعلم ثم فترة نتائج أمامية، مع خيار Polygon flat files مرة واحدة فقط أو SQLite cache.",
+        "walk_forward_rule_ar": "V2W17b يختبر الأنماط Walk-Forward عبر تشغيل خلفي لتجنب upstream timeout؛ فترة تعلم ثم نتائج أمامية، مع Polygon flat files مرة واحدة فقط أو SQLite cache.",
     }
 
 
@@ -2012,7 +2012,7 @@ def run_pattern_walk_forward_replay(
         "ok": len(test_signals) > 0,
         "version": GPT_PATTERN_LAB_VERSION,
         "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
-        "walk_forward_version": "pattern_walk_forward_v2w17_2026_06_27",
+        "walk_forward_version": "pattern_walk_forward_v2w17b_async_guard_2026_06_27",
         "start_date": learn_dates[0] if learn_dates else start_date,
         "learn_dates": learn_dates,
         "test_dates": test_dates,
