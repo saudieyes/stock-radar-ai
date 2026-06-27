@@ -13,7 +13,7 @@ Promotion Engine audits.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import math
 import os
@@ -28,8 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w16b_compression_break_priority_2026_06_27"
-GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w16b_compression_break_priority_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w17_pattern_walk_forward_replay_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w17_walk_forward_replay_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -1178,6 +1178,8 @@ def pattern_lab_status() -> dict:
         ],
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",
         "weekend_use_ar": "مناسب للويكند: تحليل ومحاكاة بدون live polling ثقيل.",
+        "walk_forward_endpoint": "/pattern-lab/gpt/walk-forward",
+        "walk_forward_rule_ar": "V2W17 يختبر الأنماط Walk-Forward: فترة تعلم ثم فترة نتائج أمامية، مع خيار Polygon flat files مرة واحدة فقط أو SQLite cache.",
     }
 
 
@@ -1194,7 +1196,7 @@ def pattern_lab_calibration_payload() -> dict:
         "version": GPT_PATTERN_LAB_VERSION,
         "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
         "items": sorted(items, key=lambda x: (_f(x.get("replay_win_rate_proxy")), _f(x.get("replay_avg_gain_proxy"))), reverse=True),
-        "rule_ar": "معايرة V2W16: تضيف مراحل Second Wave وSilent Compression فوق baseline الارتكاز؛ watch لا يساوي دخول، وكل ترقية تحتاج trigger/stop.",
+        "rule_ar": "معايرة V2W17: لا تضيف الأنماط كقرار قوي قبل Walk-Forward؛ كل نمط يبقى تحت الاختبار، ويقوى فقط إذا وافق تحليل الأداة وثبت ذلك أماميًا.",
     }
 
 
@@ -1547,6 +1549,487 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
         except Exception:
             pass
 
+
+
+# -----------------------------
+# V2W17 — Pattern Walk-Forward Replay
+# -----------------------------
+
+def _parse_ymd(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = _s(value)[:10]
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _is_trading_day_local(d: date) -> bool:
+    try:
+        from app.polygon_flatfile_fetcher import is_us_market_trading_day
+        return bool(is_us_market_trading_day(d))
+    except Exception:
+        # Fallback only removes weekends.  Production should use the fetcher holiday calendar.
+        return d.weekday() < 5
+
+
+def _trading_days_from(start_date: str | date, total_days: int) -> list[str]:
+    start = _parse_ymd(start_date) or date(2026, 5, 4)
+    out: list[str] = []
+    d = start
+    guard = 0
+    while len(out) < max(1, int(total_days or 1)) and guard < 120:
+        if _is_trading_day_local(d):
+            out.append(d.strftime("%Y-%m-%d"))
+        d += timedelta(days=1)
+        guard += 1
+    return out
+
+
+def _sql_table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    try:
+        row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _bars_by_symbol_from_sqlite(conn: sqlite3.Connection, trade_date: str, limit_symbols: int = 120) -> dict[str, list[dict]]:
+    if not _sql_table_exists(conn, "evidence_intraday_bars"):
+        return {}
+    syms = [r[0] for r in conn.execute(
+        "SELECT symbol FROM evidence_intraday_bars WHERE trade_date=? GROUP BY symbol ORDER BY COUNT(*) DESC LIMIT ?",
+        (trade_date, max(1, int(limit_symbols or 120))),
+    ).fetchall()]
+    out: dict[str, list[dict]] = {}
+    for sym in syms:
+        rows = conn.execute(
+            "SELECT bar_ts, bar_time_text, open, high, low, close, volume, dollar_volume FROM evidence_intraday_bars WHERE trade_date=? AND symbol=? ORDER BY bar_ts ASC",
+            (trade_date, sym),
+        ).fetchall()
+        bars = [dict(r) for r in rows]
+        if len(bars) >= 16:
+            out[_u(sym)] = bars
+    return out
+
+
+def _flat_row_time(row: dict) -> tuple[str, str, str]:
+    raw = row.get("window_start") or row.get("timestamp") or row.get("t") or row.get("sip_timestamp") or row.get("bar_ts") or ""
+    try:
+        n = int(float(raw))
+        if n > 10**17:
+            sec = n / 1_000_000_000
+        elif n > 10**14:
+            sec = n / 1_000_000
+        elif n > 10**11:
+            sec = n / 1000
+        else:
+            sec = n
+        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M"), str(int(n))
+    except Exception:
+        txt = _s(raw)
+        if len(txt) >= 10 and txt[:4].isdigit():
+            return txt[:10], txt[11:16] if len(txt) >= 16 else "", txt
+    return "", "", _s(raw)
+
+
+def _flat_row_symbol(row: dict) -> str:
+    for k in ("ticker", "symbol", "T", "sym"):
+        sym = _u(row.get(k))
+        if sym and all(ch.isalnum() or ch in {".", "-"} for ch in sym):
+            return sym
+    return ""
+
+
+def _flat_row_to_bar(row: dict) -> tuple[str, str, dict] | None:
+    sym = _flat_row_symbol(row)
+    if not sym:
+        return None
+    d, hhmm, raw_ts = _flat_row_time(row)
+    if not d:
+        return None
+    o = _f(row.get("open", row.get("o")))
+    h = _f(row.get("high", row.get("h")))
+    l = _f(row.get("low", row.get("l")))
+    c = _f(row.get("close", row.get("c")))
+    v = _f(row.get("volume", row.get("v")))
+    if c <= 0:
+        return None
+    if o <= 0:
+        o = c
+    if h <= 0:
+        h = max(o, c)
+    if l <= 0:
+        l = min(o, c)
+    bar = {
+        "bar_ts": raw_ts,
+        "bar_time_text": f"{d} {hhmm}".strip(),
+        "open": o,
+        "high": h,
+        "low": l,
+        "close": c,
+        "volume": v,
+        "dollar_volume": v * c,
+    }
+    return d, sym, bar
+
+
+def _iter_polygon_rows_from_path(path: str, max_files: int = 20):
+    # Reuse the existing replay streaming reader so we do not duplicate ZIP/GZIP logic.
+    try:
+        from app.market_replay_lab import _iter_sources  # private but stable inside this app
+        for _name, reader in _iter_sources(path, max_files=max_files, kind="minute"):
+            for row in reader:
+                if isinstance(row, dict):
+                    yield row
+    except Exception:
+        return
+
+
+def _bars_by_date_symbol_from_paths(paths: list[str], wanted_dates: set[str], limit_symbols: int = 120, max_rows_per_day: int = 450_000) -> dict[str, dict[str, list[dict]]]:
+    raw: dict[str, dict[str, list[dict]]] = {d: {} for d in wanted_dates}
+    counts: dict[str, int] = {d: 0 for d in wanted_dates}
+    for fp in paths:
+        for row in _iter_polygon_rows_from_path(str(fp), max_files=1):
+            parsed = _flat_row_to_bar(row)
+            if not parsed:
+                continue
+            d, sym, bar = parsed
+            if d not in wanted_dates:
+                continue
+            if counts.get(d, 0) >= max(10_000, int(max_rows_per_day or 450_000)):
+                continue
+            counts[d] = counts.get(d, 0) + 1
+            raw.setdefault(d, {}).setdefault(sym, []).append(bar)
+    # Select most useful/liquid symbols per day after streaming, then sort their bars.
+    out: dict[str, dict[str, list[dict]]] = {}
+    for d, by_sym in raw.items():
+        ranked = sorted(
+            by_sym.items(),
+            key=lambda kv: sum(_f(b.get("dollar_volume")) for b in kv[1]),
+            reverse=True,
+        )[: max(1, int(limit_symbols or 120))]
+        out[d] = {}
+        for sym, bars in ranked:
+            bars = sorted(bars, key=lambda b: _s(b.get("bar_ts")))
+            if len(bars) >= 16:
+                out[d][sym] = bars
+    return out
+
+
+def _tool_bucket_for_signal(sym: str, hist: list[dict], best: dict) -> dict:
+    """Light confluence probe: run Opportunity Radar on the same no-lookahead row.
+
+    This is not a trading decision.  It only answers: did the pattern agree with
+    the tool's own bucket/flow at that historical moment?
+    """
+    try:
+        from app.opportunity_radar import enrich_row_opportunity_radar
+        last = hist[-1] if hist else {}
+        first = hist[0] if hist else {}
+        close = _f(last.get("close"))
+        open0 = _f(first.get("open") or first.get("close"))
+        day_high = max([_f(b.get("high")) for b in hist] or [close])
+        day_low = min([_f(b.get("low")) for b in hist if _f(b.get("low")) > 0] or [close])
+        vol = sum(_f(b.get("volume")) for b in hist)
+        row = {
+            "symbol": sym,
+            "price": close,
+            "current_price": close,
+            "last_price": close,
+            "open": open0,
+            "high": day_high,
+            "low": day_low,
+            "volume": vol,
+            "dollar_volume": vol * close,
+            "change_pct": _pct(close, open0) if open0 else 0.0,
+            "day_change_pct": _pct(close, open0) if open0 else 0.0,
+            "intraday_change_pct": _pct(close, open0) if open0 else 0.0,
+            "gpt_pattern_lab_v2w13": {"best_pattern": best, "score": best.get("calibrated_score", best.get("score"))},
+        }
+        enriched = enrich_row_opportunity_radar(row, market_phase="replay")
+        bucket = _s(enriched.get("opportunity_bucket"))
+        stage = _s(enriched.get("opportunity_stage"))
+        pattern_bucket = _s(best.get("recommended_bucket"))
+        matched = bool(bucket and pattern_bucket and bucket == pattern_bucket)
+        return {
+            "tool_bucket": bucket,
+            "tool_stage": stage,
+            "pattern_recommended_bucket": pattern_bucket,
+            "pattern_tool_confluence": matched,
+            "confluence_label_ar": "توافق نمط + تحليل الأداة — تحت الاختبار" if matched else "النمط لا يوافق قائمة الأداة الأساسية بعد — وسم تحت الاختبار فقط",
+        }
+    except Exception as exc:
+        return {
+            "tool_bucket": "unavailable",
+            "tool_stage": "unavailable",
+            "pattern_recommended_bucket": _s(best.get("recommended_bucket")),
+            "pattern_tool_confluence": False,
+            "confluence_label_ar": "تعذر تشغيل تحليل الأداة في Replay؛ النمط يبقى تحت الاختبار فقط.",
+            "tool_error": f"{type(exc).__name__}: {str(exc)[:120]}",
+        }
+
+
+def _signals_from_bars_by_symbol(trade_date: str, bars_by_symbol: dict[str, list[dict]], limit_symbols: int = 120, horizon_bars: int = 12) -> list[dict]:
+    signals: list[dict] = []
+    items = sorted(bars_by_symbol.items(), key=lambda kv: len(kv[1]), reverse=True)[: max(1, int(limit_symbols or 120))]
+    for sym, bars in items:
+        if len(bars) < 16:
+            continue
+        seen_keys: set[tuple[str, str, str]] = set()
+        for idx in range(10, max(10, len(bars) - max(2, int(horizon_bars or 12)))):
+            hist = bars[: idx + 1]
+            res = detect_patterns_from_bars(sym, hist, timeframe="walk_forward_5m")
+            best = res.get("best_pattern") if isinstance(res.get("best_pattern"), dict) else {}
+            pid = _s(best.get("pattern_id"))
+            if not pid or _f(best.get("calibrated_score", best.get("score"))) < 58:
+                continue
+            stage = _s(best.get("pivot_stage") or best.get("second_wave_stage") or best.get("compression_stage"))
+            key = (sym, pid, stage or _s(best.get("action")))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            setup_entry = _f(hist[-1].get("close"))
+            trigger_px = _f(best.get("trigger_price") or best.get("trigger") or setup_entry)
+            stop_px = _f(best.get("stop_price") or best.get("stop"))
+            action = _s(best.get("action"))
+            future = bars[idx + 1: idx + 1 + max(2, int(horizon_bars or 12))]
+            effective_entry = setup_entry
+            triggered_in_horizon = True
+            trigger_bar_offset = 0
+            if pid in {"gpt_smart_pivot_reset", "gpt_second_wave_controlled_pullback", "gpt_silent_compression_break"} and "confirmed" not in action and trigger_px > 0:
+                triggered_in_horizon = False
+                for off, fb in enumerate(future, start=1):
+                    if _f(fb.get("high")) >= trigger_px:
+                        triggered_in_horizon = True
+                        trigger_bar_offset = off
+                        effective_entry = trigger_px
+                        future = future[off - 1:]
+                        break
+            elif trigger_px > 0 and setup_entry >= trigger_px * 0.998 and "confirmed" in action:
+                effective_entry = setup_entry
+            fut_high = max([_f(b.get("high")) for b in future] or [effective_entry])
+            fut_low = min([_f(b.get("low")) for b in future if _f(b.get("low")) > 0] or [effective_entry])
+            max_gain = _pct(fut_high, effective_entry) if effective_entry else 0.0
+            max_drawdown = _pct(fut_low, effective_entry) if effective_entry else 0.0
+            bearish = pid in _BEARISH_PATTERN_IDS
+            risk_pct = _f(best.get("risk_pct")) or (_pct(trigger_px, stop_px) if trigger_px and stop_px else 0.0)
+            if pid in {"gpt_smart_pivot_reset", "gpt_second_wave_controlled_pullback", "gpt_silent_compression_break"}:
+                success = bool(triggered_in_horizon and max_gain >= 3.0 and max_drawdown > -8.0)
+            else:
+                success = (max_drawdown <= -2.0) if bearish else (max_gain >= 3.0 and max_drawdown > -8.0)
+            confluence = _tool_bucket_for_signal(sym, hist, best)
+            signals.append({
+                "symbol": sym,
+                "trade_date": trade_date,
+                "bar_index": idx,
+                "bar_time_text": _s(hist[-1].get("bar_time_text") or hist[-1].get("ts")),
+                "entry_price": _round(effective_entry, 4),
+                "setup_price": _round(setup_entry, 4),
+                "trigger_price": _round(trigger_px, 4),
+                "stop_price": _round(stop_px, 4),
+                "risk_pct": _round(risk_pct, 2),
+                "triggered_in_horizon": bool(triggered_in_horizon),
+                "trigger_bar_offset": int(trigger_bar_offset),
+                "pattern_id": pid,
+                "pattern_name_ar": _PATTERN_AR.get(pid, pid),
+                "family": best.get("family"),
+                "direction": best.get("direction"),
+                "action": best.get("action"),
+                "lab_role": best.get("lab_role"),
+                "recommended_bucket": best.get("recommended_bucket"),
+                "pattern_stage": stage,
+                "stage_quality": best.get("pivot_stage_quality") or best.get("second_wave_stage_quality") or best.get("compression_stage_quality"),
+                "calibrated_score": _round(best.get("calibrated_score", best.get("score")), 2),
+                "max_gain_pct_next_horizon": _round(max_gain, 2),
+                "max_drawdown_pct_next_horizon": _round(max_drawdown, 2),
+                "success_proxy": bool(success),
+                "under_test": True,
+                "under_test_label_ar": "نمط تحت الاختبار — لا يساوي دخولًا مباشرًا.",
+                **confluence,
+            })
+    return signals
+
+
+def _summary_from_signal_list(signals: list[dict]) -> dict:
+    def finalize(bucket: dict[str, dict]) -> list[dict]:
+        out = []
+        for v in bucket.values():
+            n = max(1, int(v.get("signals") or 0))
+            v["win_rate_proxy"] = _round(_f(v.get("wins")) / n * 100.0, 2)
+            v["avg_gain"] = _round(_f(v.get("avg_gain")) / n, 2)
+            v["avg_drawdown"] = _round(_f(v.get("avg_drawdown")) / n, 2)
+            v["avg_risk_pct"] = _round(_f(v.get("avg_risk_pct")) / n, 2)
+            v["pattern_lab_decision"] = _walk_forward_decision(v)
+            out.append(v)
+        return sorted(out, key=lambda x: (_f(x.get("win_rate_proxy")), _f(x.get("avg_gain")), -_f(x.get("avg_drawdown")), int(x.get("signals") or 0)), reverse=True)
+
+    by_pattern: dict[str, dict] = {}
+    by_stage: dict[str, dict] = {}
+    by_confluence: dict[str, dict] = {}
+    for s in signals:
+        pid = _s(s.get("pattern_id"))
+        stage = _s(s.get("pattern_stage")) or pid
+        conf_key = "pattern_plus_tool" if s.get("pattern_tool_confluence") else "pattern_without_tool_match"
+        for key, bucket, name_key in ((pid, by_pattern, "pattern_id"), (stage, by_stage, "stage"), (conf_key, by_confluence, "confluence_group")):
+            b = bucket.setdefault(key, {name_key: key, "signals": 0, "wins": 0, "avg_gain": 0.0, "avg_drawdown": 0.0, "avg_risk_pct": 0.0, "symbols": []})
+            if name_key == "pattern_id":
+                b["pattern_name_ar"] = _PATTERN_AR.get(pid, pid)
+            b["signals"] += 1
+            b["wins"] += 1 if s.get("success_proxy") else 0
+            b["avg_gain"] += _f(s.get("max_gain_pct_next_horizon"))
+            b["avg_drawdown"] += _f(s.get("max_drawdown_pct_next_horizon"))
+            b["avg_risk_pct"] += _f(s.get("risk_pct"))
+            if len(b["symbols"]) < 12:
+                b["symbols"].append(s.get("symbol"))
+    return {
+        "signals_count": len(signals),
+        "summary_by_pattern": finalize(by_pattern),
+        "summary_by_stage": finalize(by_stage),
+        "confluence_summary": finalize(by_confluence),
+    }
+
+
+def _walk_forward_decision(summary: dict) -> str:
+    n = int(summary.get("signals") or 0)
+    wr = _f(summary.get("win_rate_proxy"))
+    gain = _f(summary.get("avg_gain"))
+    dd = _f(summary.get("avg_drawdown"))
+    if n < 5:
+        return "keep_in_lab_only_small_sample"
+    if wr >= 55 and gain >= 5 and dd > -4:
+        return "promote_as_under_test_evidence_when_tool_agrees"
+    if wr >= 48 and gain >= 3 and dd > -6:
+        return "use_as_weak_under_test_tag"
+    if wr < 40:
+        return "keep_low_priority_or_lab_only"
+    return "monitor_more_data_required"
+
+
+def run_pattern_walk_forward_replay(
+    start_date: str = "2026-05-04",
+    learn_days: int = 10,
+    test_days: int = 5,
+    limit_symbols: int = 120,
+    horizon_bars: int = 12,
+    use_polygon_flatfiles: bool = False,
+    force_polygon_pull: bool = False,
+    max_rows_per_day: int = 450_000,
+) -> dict:
+    """One-shot pattern walk-forward test.
+
+    Design: 10 trading days learning + 5 trading days forward test by default.
+    Uses SQLite cached evidence bars when available.  If use_polygon_flatfiles=true,
+    pulls minute flat files once to /tmp through the safe fetcher, parses compact
+    bars, then deletes raw files.
+    """
+    learn_n = max(1, min(20, int(learn_days or 10)))
+    test_n = max(1, min(10, int(test_days or 5)))
+    total_n = learn_n + test_n
+    all_dates = _trading_days_from(start_date or "2026-05-04", total_n)
+    learn_dates = all_dates[:learn_n]
+    test_dates = all_dates[learn_n:]
+    if len(test_dates) < test_n:
+        return {"ok": False, "version": GPT_PATTERN_LAB_VERSION, "error": "not_enough_trading_days", "requested": total_n, "dates": all_dates}
+
+    bars_by_date: dict[str, dict[str, list[dict]]] = {}
+    source_used = "sqlite_cache"
+    sqlite_dates_loaded: list[str] = []
+    conn = _connect_db()
+    if conn is not None:
+        try:
+            for d in all_dates:
+                b = _bars_by_symbol_from_sqlite(conn, d, limit_symbols=max(1, int(limit_symbols or 120)))
+                if b:
+                    bars_by_date[d] = b
+                    sqlite_dates_loaded.append(d)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    polygon_pull_status: dict = {"used": False}
+    if use_polygon_flatfiles and (len(bars_by_date) < len(all_dates) or force_polygon_pull):
+        source_used = "polygon_flatfiles_tmp_once"
+        tmp_dir = ""
+        try:
+            from app.polygon_flatfile_fetcher import DATASET_MINUTE, cleanup_tmp_path, fetch_flatfile_to_tmp, flatfiles_config_status, make_tmp_dir
+            tmp_dir = str(make_tmp_dir(prefix="stock_radar_pattern_wf_"))
+            minute_paths = []
+            results = []
+            # Pull exactly the selected trading dates once.  This avoids the fetcher's 14-day window clamp
+            # and preserves the user's requested 10 learning + 5 forward trading days.
+            for d in all_dates:
+                r = fetch_flatfile_to_tmp(DATASET_MINUTE, d, tmp_dir=tmp_dir, force=bool(force_polygon_pull), redownload_processed=False)
+                results.append(r)
+                if r.get("ok") and r.get("path"):
+                    minute_paths.append(str(r.get("path")))
+            polygon_pull_status = {
+                "used": True,
+                "ok": bool(minute_paths),
+                "minute_dates_requested": all_dates,
+                "minute_dates_downloaded": [str(r.get("trade_date")) for r in results if r.get("ok") and r.get("path")],
+                "minute_files_downloaded": len(minute_paths),
+                "results_summary": [
+                    {"dataset": r.get("dataset"), "trade_date": r.get("trade_date"), "ok": r.get("ok"), "status": r.get("status"), "skipped": r.get("skipped"), "attempts": r.get("attempts"), "error": r.get("error", "")}
+                    for r in results
+                ],
+                "config": flatfiles_config_status(),
+            }
+            if minute_paths:
+                parsed = _bars_by_date_symbol_from_paths(minute_paths, set(all_dates), limit_symbols=max(1, int(limit_symbols or 120)), max_rows_per_day=max_rows_per_day)
+                for d, bysym in parsed.items():
+                    if bysym:
+                        bars_by_date[d] = bysym
+        except Exception as exc:
+            polygon_pull_status = {"used": True, "ok": False, "error": "polygon_flatfile_walk_forward_failed", "detail": f"{type(exc).__name__}: {str(exc)[:180]}"}
+        finally:
+            if tmp_dir:
+                try:
+                    from app.polygon_flatfile_fetcher import cleanup_tmp_path
+                    cleanup_tmp_path(tmp_dir)
+                except Exception:
+                    pass
+
+    missing_dates = [d for d in all_dates if d not in bars_by_date]
+    learn_signals: list[dict] = []
+    test_signals: list[dict] = []
+    for d in learn_dates:
+        learn_signals.extend(_signals_from_bars_by_symbol(d, bars_by_date.get(d, {}), limit_symbols=limit_symbols, horizon_bars=horizon_bars))
+    for d in test_dates:
+        test_signals.extend(_signals_from_bars_by_symbol(d, bars_by_date.get(d, {}), limit_symbols=limit_symbols, horizon_bars=horizon_bars))
+
+    learn_summary = _summary_from_signal_list(learn_signals)
+    forward_summary = _summary_from_signal_list(test_signals)
+    return {
+        "ok": len(test_signals) > 0,
+        "version": GPT_PATTERN_LAB_VERSION,
+        "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
+        "walk_forward_version": "pattern_walk_forward_v2w17_2026_06_27",
+        "start_date": learn_dates[0] if learn_dates else start_date,
+        "learn_dates": learn_dates,
+        "test_dates": test_dates,
+        "learn_days": len(learn_dates),
+        "test_days": len(test_dates),
+        "source_used": source_used,
+        "sqlite_dates_loaded": sqlite_dates_loaded,
+        "missing_dates": missing_dates,
+        "polygon_pull_status": polygon_pull_status,
+        "symbols_limit_per_day": max(1, int(limit_symbols or 120)),
+        "horizon_bars": max(2, int(horizon_bars or 12)),
+        "learn_period": learn_summary,
+        "forward_period": forward_summary,
+        "recommended_next_step_ar": "استخدم forward_period فقط لاتخاذ قرار الدمج. أي نمط يظهر في الأداة يجب أن يحمل وسم: تحت الاختبار. وإذا وافق تحليل الأداة يظهر كـ توافق نمط + أداة، لا كشراء مباشر.",
+        "rule_ar": "اختبار Walk-Forward مرة واحدة: أسبوعان تعلم ثم أسبوع نتائج أمامية، مع تخطي الويكند/العطل. لا يوجد live polling ولا BUY_NOW، وملفات Polygon الخام مؤقتة فقط إذا فُعل use_polygon_flatfiles.",
+        "sample_forward_signals": sorted(test_signals, key=lambda x: (_f(x.get("success_proxy")), _f(x.get("max_gain_pct_next_horizon")), _f(x.get("calibrated_score"))), reverse=True)[:120],
+    }
 
 
 def run_pattern_leaderboard_from_evidence(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12) -> dict:
