@@ -28,7 +28,8 @@ except Exception:  # pragma: no cover - safe import fallback for local tests
     DATA_DIR = Path(os.getenv("APP_DATA_DIR", "/tmp"))
     SQLITE_DB_PATH = str(Path(DATA_DIR) / "stock_radar_ai.sqlite3")
 
-GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w13_candles_bos_tasuki_tweezer_gptalpha_2026_06_27"
+GPT_PATTERN_LAB_VERSION = "gpt_pattern_lab_v2w13b_scoring_calibration_leaderboard_2026_06_27"
+GPT_PATTERN_CALIBRATION_VERSION = "pattern_lab_scoring_calibration_v2w13b_2026_06_27"
 
 # Patterns intentionally separated into analyst-derived vs GPT custom so the
 # simulator can rank them independently and we do not over-trust any single idea.
@@ -65,6 +66,212 @@ _PATTERN_AR = {
 }
 
 _BEARISH_PATTERN_IDS = {"elephant_trunk_drop", "strong_bos_bearish", "weak_bos_bearish", "tasuki_gap_bearish", "tweezer_top"}
+
+
+# V2W13b turns the first replay lessons into explicit, conservative routing rules.
+# These numbers are not permanent truths; they are the first calibration from
+# 2026-06-26 replay and should be re-ranked by more Polygon sessions before any
+# automatic trading decision.  The goal is: better monitoring/ranking + stronger
+# risk guards, never BUY_NOW by pattern alone.
+_PATTERN_CALIBRATION = {
+    "tweezer_bottom": {
+        "role": "bullish_setup",
+        "recommended_bucket": "support_bounce",
+        "promotion_hint": "support_bounce_or_reclaim_watch",
+        "score_bonus": 12.0,
+        "min_live_score": 64.0,
+        "replay_win_rate_proxy": 72.73,
+        "replay_avg_gain_proxy": 9.20,
+        "replay_avg_drawdown_proxy": -3.78,
+        "requires_confirmation": True,
+        "activation_rule_ar": "يرتفع إلى Support Bounce/Reclaim فقط إذا كان بعد هبوط وقرب دعم، مع تفعيل فوق قمة شمعة الملقاط أو استرداد واضح؛ ليس BUY_NOW وحده.",
+        "leaderboard_note_ar": "أفضل نمط صاعد في أول Replay؛ يحتاج دعم/سياق حتى لا يتحول إلى ضجيج.",
+    },
+    "elephant_trunk_drop": {
+        "role": "risk_guard",
+        "recommended_bucket": "continuation_pullback",
+        "promotion_hint": "no_chase_risk_guard",
+        "score_bonus": 10.0,
+        "min_live_score": 60.0,
+        "replay_win_rate_proxy": 65.62,
+        "replay_avg_gain_proxy": 5.92,
+        "replay_avg_drawdown_proxy": -4.78,
+        "requires_confirmation": False,
+        "activation_rule_ar": "حماية من المطاردة بعد اندفاع وذيل علوي وبيع لاحق؛ لا يُستخدم كشراء، بل يخفض الدرجة أو ينقل إلى No-Chase/Continuation Pullback.",
+        "leaderboard_note_ar": "مفيد جدًا كحارس خطر؛ نجاحه يعني حمايتنا من دخول سيئ لا أنه فرصة شراء.",
+    },
+    "tweezer_top": {
+        "role": "risk_guard",
+        "recommended_bucket": "continuation_pullback",
+        "promotion_hint": "top_rejection_guard",
+        "score_bonus": 8.0,
+        "min_live_score": 62.0,
+        "replay_win_rate_proxy": 55.56,
+        "replay_avg_gain_proxy": 8.03,
+        "replay_avg_drawdown_proxy": -3.63,
+        "requires_confirmation": False,
+        "activation_rule_ar": "اختبار قمة مرتين بعد صعود ثم رفض؛ يُعامل كتحذير مطاردة أو انتظار Pullback لا كدخول شراء.",
+        "leaderboard_note_ar": "يحمي من القمم ويحتاج ربطه بحالة الامتداد حتى لا يخفض فرصًا صحيحة مبكرًا.",
+    },
+    "gpt_second_wave_controlled_pullback": {
+        "role": "bullish_setup",
+        "recommended_bucket": "continuation_pullback",
+        "promotion_hint": "second_wave_watch",
+        "score_bonus": 10.0,
+        "min_live_score": 66.0,
+        "replay_win_rate_proxy": 52.94,
+        "replay_avg_gain_proxy": 5.38,
+        "replay_avg_drawdown_proxy": -3.79,
+        "requires_confirmation": True,
+        "activation_rule_ar": "لا نطارد الموجة الأولى؛ نراقب Pullback منضبط ثم تفعيل فوق قمة صغيرة/استرداد VWAP أو متوسط قريب.",
+        "leaderboard_note_ar": "أفضل نمط GPT Alpha مبدئيًا للتداول العملي لأنه ينتظر موجة ثانية بدل المطاردة.",
+    },
+    "strong_bos_bullish": {
+        "role": "bullish_setup_needs_confirmation",
+        "recommended_bucket": "pre_trigger",
+        "promotion_hint": "bos_hold_or_retest_required",
+        "score_bonus": 2.0,
+        "min_live_score": 72.0,
+        "replay_win_rate_proxy": 51.47,
+        "replay_avg_gain_proxy": 10.75,
+        "replay_avg_drawdown_proxy": -3.90,
+        "requires_confirmation": True,
+        "activation_rule_ar": "كسر قوي واعد لكن لا يدخل وحده؛ يحتاج ثبات فوق مستوى الكسر أو إعادة اختبار ناجحة/حجم استمرار.",
+        "leaderboard_note_ar": "أعلى متوسط صعود لكنه كثير الإشارات؛ نرفعه كـ Pre-Trigger مؤكد لا كدخول مباشر.",
+    },
+    "gpt_silent_compression_break": {
+        "role": "early_watch",
+        "recommended_bucket": "pre_trigger",
+        "promotion_hint": "early_compression_watch",
+        "score_bonus": -2.0,
+        "min_live_score": 74.0,
+        "replay_win_rate_proxy": 43.33,
+        "replay_avg_gain_proxy": 6.50,
+        "replay_avg_drawdown_proxy": -2.62,
+        "requires_confirmation": True,
+        "activation_rule_ar": "يراقب الضغط قبل الانفجار فقط؛ يحتاج اختراق نطاق الضغط أو دخول حجم جديد قبل الترقية.",
+        "leaderboard_note_ar": "يلتقط مبكرًا لكن يعطي ضجيجًا؛ يبقى Early Watch حتى تزيد جلسات المحاكاة.",
+    },
+    "gpt_liquidity_coil_reclaim": {
+        "role": "bullish_setup_needs_confirmation",
+        "recommended_bucket": "reclaim",
+        "promotion_hint": "reclaim_confirmation_required",
+        "score_bonus": 0.0,
+        "min_live_score": 70.0,
+        "replay_win_rate_proxy": 43.24,
+        "replay_avg_gain_proxy": 4.97,
+        "replay_avg_drawdown_proxy": -2.82,
+        "requires_confirmation": True,
+        "activation_rule_ar": "مصيدة سيولة + استرداد؛ يحتاج شمعة تالية أو ثبات فوق مستوى الاسترداد قبل الرفع العملي.",
+        "leaderboard_note_ar": "جيد للمراقبة؛ لا يكفي وحده بسبب نسبة نجاح أولية متوسطة.",
+    },
+    "tasuki_gap_bullish": {
+        "role": "continuation_setup",
+        "recommended_bucket": "continuation_pullback",
+        "promotion_hint": "gap_hold_continuation_watch",
+        "score_bonus": 3.0,
+        "min_live_score": 70.0,
+        "replay_win_rate_proxy": 50.0,
+        "replay_avg_gain_proxy": 9.10,
+        "replay_avg_drawdown_proxy": -3.66,
+        "requires_confirmation": True,
+        "activation_rule_ar": "يُقبل فقط إذا بقيت الفجوة محفوظة ولم يتحول السهم إلى مطاردة ممتدة.",
+        "leaderboard_note_ar": "مفيد كاستمرار اتجاه لكن يحتاج بيانات فجوات دقيقة وسياق جلسة.",
+    },
+    "tasuki_gap_bearish": {
+        "role": "risk_guard",
+        "recommended_bucket": "continuation_pullback",
+        "promotion_hint": "bearish_gap_guard",
+        "score_bonus": 5.0,
+        "min_live_score": 62.0,
+        "replay_win_rate_proxy": 71.43,
+        "replay_avg_gain_proxy": 5.79,
+        "replay_avg_drawdown_proxy": -5.72,
+        "requires_confirmation": False,
+        "activation_rule_ar": "فجوة هابطة محفوظة تعني تحذير استمرار هبوط؛ لا تُستخدم كشراء.",
+        "leaderboard_note_ar": "عدد إشارات قليل لكنه حارس خطر قوي؛ يحتاج عينة أكبر.",
+    },
+    "strong_bos_bearish": {
+        "role": "risk_guard",
+        "recommended_bucket": "continuation_pullback",
+        "promotion_hint": "invalidated_structure_guard",
+        "score_bonus": 4.0,
+        "min_live_score": 62.0,
+        "replay_win_rate_proxy": 30.43,
+        "replay_avg_gain_proxy": 6.21,
+        "replay_avg_drawdown_proxy": -2.16,
+        "requires_confirmation": False,
+        "activation_rule_ar": "كسر هيكل هابط يخفض أو يخرج فرصة الشراء حتى يظهر reclaim جديد.",
+        "leaderboard_note_ar": "حارس خطر لا يعتمد عليه وحده بسبب نتائج أولية مختلطة.",
+    },
+    "weak_bos_bullish": {
+        "role": "weak_watch",
+        "recommended_bucket": "pre_trigger",
+        "promotion_hint": "weak_bos_wait_confirmation",
+        "score_bonus": -8.0,
+        "min_live_score": 76.0,
+        "replay_win_rate_proxy": 33.33,
+        "replay_avg_gain_proxy": 4.59,
+        "replay_avg_drawdown_proxy": -3.05,
+        "requires_confirmation": True,
+        "activation_rule_ar": "كسر ضعيف لا يرفع السهم وحده؛ ينتظر Strong BOS أو ثبات/حجم.",
+        "leaderboard_note_ar": "تعليمي وتحذيري أكثر من كونه نمط دخول.",
+    },
+}
+
+
+def _calibration_for(pattern_id: str) -> dict:
+    return dict(_PATTERN_CALIBRATION.get(_s(pattern_id), {
+        "role": "unranked_watch",
+        "recommended_bucket": "pre_trigger",
+        "promotion_hint": "unranked_pattern_watch",
+        "score_bonus": 0.0,
+        "min_live_score": 72.0,
+        "requires_confirmation": True,
+        "activation_rule_ar": "نمط غير معاير بعد؛ مراقبة فقط حتى تتوفر نتائج محاكاة أكثر.",
+    }))
+
+
+def _apply_match_calibration(match: dict) -> dict:
+    if not isinstance(match, dict):
+        return match
+    pid = _s(match.get("pattern_id"))
+    cal = _calibration_for(pid)
+    base_score = _f(match.get("score"))
+    calibrated_score = max(0.0, min(100.0, base_score + _f(cal.get("score_bonus"))))
+    out = dict(match)
+    out["calibration_version"] = GPT_PATTERN_CALIBRATION_VERSION
+    out["lab_role"] = cal.get("role") or "unranked_watch"
+    out["recommended_bucket"] = cal.get("recommended_bucket") or "pre_trigger"
+    out["promotion_hint"] = cal.get("promotion_hint") or "pattern_watch"
+    out["requires_confirmation"] = bool(cal.get("requires_confirmation", True))
+    out["activation_rule_ar"] = cal.get("activation_rule_ar") or "مراقبة فقط حتى تأكيد إضافي."
+    out["replay_win_rate_proxy"] = _round(cal.get("replay_win_rate_proxy"), 2)
+    out["replay_avg_gain_proxy"] = _round(cal.get("replay_avg_gain_proxy"), 2)
+    out["replay_avg_drawdown_proxy"] = _round(cal.get("replay_avg_drawdown_proxy"), 2)
+    out["calibrated_score"] = _round(calibrated_score, 2)
+    if out.get("lab_role") == "risk_guard" or pid in _BEARISH_PATTERN_IDS:
+        out["risk_guard_strength"] = _round(max(calibrated_score, base_score), 2)
+    else:
+        out["bullish_setup_score"] = _round(calibrated_score, 2)
+    if cal.get("leaderboard_note_ar"):
+        out["leaderboard_note_ar"] = cal.get("leaderboard_note_ar")
+    return out
+
+
+def _calibrated_score(match: dict) -> float:
+    if not isinstance(match, dict):
+        return 0.0
+    return max(_f(match.get("calibrated_score")), _f(match.get("score")))
+
+
+def _match_is_bullish_setup(match: dict) -> bool:
+    role = _s(match.get("lab_role"))
+    return _s(match.get("direction")).lower() == "bullish" and role in {"bullish_setup", "bullish_setup_needs_confirmation", "continuation_setup", "early_watch", "weak_watch"}
+
+
+def _match_is_risk_guard(match: dict) -> bool:
+    return _s(match.get("lab_role")) == "risk_guard" or _s(match.get("pattern_id")) in _BEARISH_PATTERN_IDS
 
 
 def _now_iso() -> str:
@@ -167,7 +374,7 @@ def _recent_trend_pct(bars: list[dict], lookback: int = 6) -> float:
 
 
 def _add(matches: list[dict], pattern_id: str, score: float, direction: str, reasons: list[str], *, action: str = "monitor", trigger: float = 0.0, stop: float = 0.0, target: float = 0.0, confidence: str = "medium") -> None:
-    matches.append({
+    match = {
         "pattern_id": pattern_id,
         "pattern_name_ar": _PATTERN_AR.get(pattern_id, pattern_id),
         "family": "gpt_alpha" if pattern_id in GPT_ALPHA_PATTERN_IDS else "analyst_lesson",
@@ -180,7 +387,8 @@ def _add(matches: list[dict], pattern_id: str, score: float, direction: str, rea
         "target1": _round(target, 4),
         "reasons_ar": [str(x) for x in reasons if x][:6],
         "execution_note_ar": "مختبر أنماط فقط؛ لا يتحول إلى BUY_NOW إلا بعد بوابات الشرعية/السيولة/الخطة/التأكيد.",
-    })
+    }
+    matches.append(_apply_match_calibration(match))
 
 
 def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close: float = 0.0, timeframe: str = "5m") -> dict:
@@ -363,25 +571,39 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
                 "مفيد لعدم مطاردة الشمعة الأولى وانتظار موجة ثانية محسوبة.",
             ], action="continuation_watch", trigger=max(_f(b.get("high")) for b in look[-4:]), stop=pullback_low, target=price + max((high_price - pullback_low) * 0.75, price * 0.04), confidence="medium")
 
-    matches = sorted(matches, key=lambda x: float(x.get("score") or 0), reverse=True)
+    matches = [_apply_match_calibration(m) for m in matches]
+    matches = sorted(matches, key=lambda x: (_calibrated_score(x), _f(x.get("score"))), reverse=True)
     best = matches[0] if matches else {}
-    bullish = [m for m in matches if m.get("direction") == "bullish"]
-    bearish = [m for m in matches if m.get("direction") == "bearish"]
-    bullish_score = max([_f(m.get("score")) for m in bullish] or [0.0])
-    bearish_score = max([_f(m.get("score")) for m in bearish] or [0.0])
-    if bearish_score >= max(65, bullish_score + 8):
+    bullish = [m for m in matches if _match_is_bullish_setup(m)]
+    guards = [m for m in matches if _match_is_risk_guard(m)]
+    best_bullish = sorted(bullish, key=lambda x: (_calibrated_score(x), _f(x.get("score"))), reverse=True)[0] if bullish else {}
+    best_guard = sorted(guards, key=lambda x: (_calibrated_score(x), _f(x.get("score"))), reverse=True)[0] if guards else {}
+    bullish_score = max([_calibrated_score(m) for m in bullish] or [0.0])
+    bearish_score = max([_calibrated_score(m) for m in guards] or [0.0])
+    if bearish_score >= max(70, bullish_score + 6):
         bias = "risk_guard_bearish"
-    elif bullish_score >= 70:
-        bias = "bullish_watch"
-    elif bullish_score >= 52:
+        recommended_bucket = _s(best_guard.get("recommended_bucket")) or "continuation_pullback"
+        decision_mode = "guard_first"
+    elif bullish_score >= 76:
+        bias = "bullish_watch_high_quality"
+        recommended_bucket = _s(best_bullish.get("recommended_bucket")) or "pre_trigger"
+        decision_mode = "bullish_setup_requires_gates"
+    elif bullish_score >= 62:
         bias = "bullish_needs_confirmation"
+        recommended_bucket = _s(best_bullish.get("recommended_bucket")) or "pre_trigger"
+        decision_mode = "wait_confirmation"
     elif matches:
         bias = "mixed_or_weak"
+        recommended_bucket = _s(best.get("recommended_bucket")) or "pre_trigger"
+        decision_mode = "observe_only"
     else:
         bias = "no_pattern"
+        recommended_bucket = ""
+        decision_mode = "no_pattern"
     return {
         "ok": True,
         "version": GPT_PATTERN_LAB_VERSION,
+        "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
         "symbol": sym,
         "timeframe": timeframe,
         "bar_count": len(bars),
@@ -389,9 +611,13 @@ def detect_patterns_from_bars(symbol: str, raw_bars: list[dict], previous_close:
         "previous_close": _round(previous_close, 4),
         "matches": matches[:12],
         "best_pattern": best,
+        "best_bullish_pattern": best_bullish,
+        "best_risk_guard_pattern": best_guard,
         "score": _round(max(bullish_score, bearish_score), 2),
         "bullish_score": _round(bullish_score, 2),
         "bearish_score": _round(bearish_score, 2),
+        "recommended_bucket": recommended_bucket,
+        "pattern_decision_mode": decision_mode,
         "bias": bias,
         "generated_at": _now_iso(),
     }
@@ -462,64 +688,120 @@ def enrich_rows_with_gpt_pattern_lab(rows: list[dict], *, apply_bucket_hints: bo
         except Exception as exc:
             lab = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:120]}", "matches": [], "score": 0.0}
         out["gpt_pattern_lab_v2w13"] = lab
+        out["gpt_pattern_lab_v2w13b"] = lab
+
         best = lab.get("best_pattern") if isinstance(lab.get("best_pattern"), dict) else {}
+        best_bullish = lab.get("best_bullish_pattern") if isinstance(lab.get("best_bullish_pattern"), dict) else {}
+        best_guard = lab.get("best_risk_guard_pattern") if isinstance(lab.get("best_risk_guard_pattern"), dict) else {}
         matches = lab.get("matches") if isinstance(lab.get("matches"), list) else []
-        score = _f(lab.get("score"))
+        score = max(_f(lab.get("score")), _calibrated_score(best), _calibrated_score(best_bullish), _calibrated_score(best_guard))
+        bullish_score = max(_f(lab.get("bullish_score")), _calibrated_score(best_bullish))
+        guard_score = max(_f(lab.get("bearish_score")), _calibrated_score(best_guard))
+
         out["gpt_pattern_score"] = _round(score, 2)
+        out["gpt_pattern_bullish_score"] = _round(bullish_score, 2)
+        out["gpt_pattern_guard_score"] = _round(guard_score, 2)
         out["gpt_pattern_best"] = best.get("pattern_id") or ""
         out["gpt_pattern_best_ar"] = best.get("pattern_name_ar") or ""
+        out["gpt_pattern_recommended_bucket"] = lab.get("recommended_bucket") or ""
+        out["gpt_pattern_decision_mode"] = lab.get("pattern_decision_mode") or ""
+        out["gpt_pattern_calibration_version"] = GPT_PATTERN_CALIBRATION_VERSION
+
         if matches:
             reasons = []
             for m in matches[:3]:
-                reasons.append(f"{m.get('pattern_name_ar')}: {', '.join((m.get('reasons_ar') or [])[:2])}")
+                note = _s(m.get("activation_rule_ar"))
+                reasons.append(f"{m.get('pattern_name_ar')}: {', '.join((m.get('reasons_ar') or [])[:2])}" + (f" — {note}" if note else ""))
             existing = out.get("opportunity_reasons") if isinstance(out.get("opportunity_reasons"), list) else []
             out["opportunity_reasons"] = list(dict.fromkeys([str(x) for x in existing + reasons if x]))[:12]
             out["technical_explainer_reasons"] = out.get("opportunity_reasons")
-        # Bearish/risk patterns are guards, not short signals.
-        if best.get("pattern_id") in _BEARISH_PATTERN_IDS and _f(best.get("score")) >= 62:
+
+        # Risk guards win over bullish tags only when they are meaningfully stronger.
+        if best_guard and guard_score >= max(62.0, bullish_score + 6.0):
             flags = out.get("risk_flags") if isinstance(out.get("risk_flags"), list) else []
-            flags.append(f"GPT Pattern Lab: {best.get('pattern_name_ar')} — حماية من المطاردة/الدخول.")
+            flags.append(f"GPT Pattern Lab V2W13b: {best_guard.get('pattern_name_ar')} — {best_guard.get('activation_rule_ar', 'حماية من المطاردة/الدخول.')}" )
             out["risk_flags"] = list(dict.fromkeys([str(x) for x in flags if x]))[:10]
-            out["pattern_risk_status"] = "bearish_guard"
-            out["pattern_risk_label"] = "⚠️ نمط سلبي/رفض — لا مطاردة"
-            if _s(out.get("opportunity_bucket")) in {"pre_trigger", "support_bounce", "reclaim", "low_float_premarket"}:
+            out["pattern_risk_status"] = "bearish_guard_v2w13b"
+            out["pattern_risk_label"] = "⚠️ نمط سلبي/رفض — No-Chase"
+            out["gpt_pattern_route_reason_ar"] = best_guard.get("activation_rule_ar") or "حماية من المطاردة."
+            cur = _s(out.get("opportunity_bucket"))
+            if cur in {"pre_trigger", "support_bounce", "reclaim", "low_float_premarket", "early_movement", "watch", "learning_opportunity"}:
                 out["opportunity_bucket"] = "continuation_pullback"
                 out["opportunity_stage"] = "continuation_pullback"
-                out["opportunity_stage_label"] = "⚠️ تحول إلى حماية/انتظار Pullback بعد نمط سلبي"
-        elif apply_bucket_hints and _f(lab.get("bullish_score")) >= 72:
-            # Feed strong pattern candidates into monitoring/pre-trigger if they had no specific stage.
+                out["opportunity_stage_label"] = "⚠️ GPT Pattern Guard — انتظار Pullback / لا مطاردة"
+        elif apply_bucket_hints and best_bullish:
+            cal = _calibration_for(best_bullish.get("pattern_id"))
+            min_score = _f(cal.get("min_live_score"), 72.0)
+            recommended = _s(best_bullish.get("recommended_bucket") or cal.get("recommended_bucket"))
+            action = _s(best_bullish.get("action"))
             cur_bucket = _s(out.get("opportunity_bucket"))
-            action = _s(best.get("action"))
-            if cur_bucket in {"", "watch", "early_movement", "learning_opportunity"}:
-                if action in {"reclaim_watch"}:
+            should_route = bullish_score >= min_score and cur_bucket in {"", "watch", "early_movement", "learning_opportunity", "small_stock_classic", "raw_fast_lane"}
+            # Allow important calibrated patterns to improve a nearby bucket even if already classified.
+            should_label_existing = bullish_score >= min_score and cur_bucket in {"pre_trigger", "support_bounce", "reclaim", "continuation_pullback", "low_float_premarket"}
+            if should_route:
+                if recommended == "reclaim" or action in {"reclaim_watch"}:
                     out["opportunity_bucket"] = "reclaim"
                     out["opportunity_stage"] = "reclaim"
-                    out["opportunity_stage_label"] = "🔁 GPT Pattern Lab Reclaim — مراقبة لا شراء مباشر"
-                elif action in {"support_bounce_watch"}:
+                    out["opportunity_stage_label"] = "🔁 GPT Pattern Lab Reclaim — يحتاج تأكيد"
+                elif recommended == "support_bounce" or action in {"support_bounce_watch"}:
                     out["opportunity_bucket"] = "support_bounce"
                     out["opportunity_stage"] = "support_bounce"
-                    out["opportunity_stage_label"] = "↩️ GPT Pattern Lab Support Bounce — مراقبة"
-                elif action in {"continuation_watch"}:
+                    out["opportunity_stage_label"] = "↩️ GPT Pattern Lab Support Bounce — يحتاج تأكيد"
+                elif recommended == "continuation_pullback" or action in {"continuation_watch"}:
                     out["opportunity_bucket"] = "continuation_pullback"
                     out["opportunity_stage"] = "continuation_pullback"
-                    out["opportunity_stage_label"] = "📈 GPT Pattern Lab Continuation — انتظار إعادة اختبار"
+                    out["opportunity_stage_label"] = "📈 GPT Second Wave / Continuation — انتظار إعادة اختبار"
                 else:
                     out["opportunity_bucket"] = "pre_trigger"
                     out["opportunity_stage"] = "pre_trigger"
-                    out["opportunity_stage_label"] = "⏳ GPT Pattern Lab — قريب من نمط تفعيل"
-        out["opportunity_rank_score"] = _round(max(_f(out.get("opportunity_rank_score")), _f(out.get("live_rank_score")), score * 12.0), 2) if score >= 55 else out.get("opportunity_rank_score", 0)
+                    out["opportunity_stage_label"] = "⏳ GPT Pattern Lab — مرشح تفعيل مشروط"
+            if should_route or should_label_existing:
+                out["gpt_pattern_route_reason_ar"] = best_bullish.get("activation_rule_ar") or "نمط صاعد معاير يحتاج تأكيدًا وبوابات السلامة."
+                out["gpt_pattern_requires_confirmation"] = bool(best_bullish.get("requires_confirmation", True))
+
+        # V2W13b ranking: patterns can move a row higher in monitoring, but never
+        # bypass Sharia/plan/tradability gates.  Guard patterns reduce practical rank.
+        current_rank = max(_f(out.get("opportunity_rank_score")), _f(out.get("live_rank_score")), _f(out.get("display_rank_score")))
+        if guard_score >= max(62.0, bullish_score + 6.0):
+            out["opportunity_rank_score"] = _round(max(0.0, current_rank - guard_score * 8.0), 2)
+        elif bullish_score >= 60.0:
+            # calibrated_score * 10 gives a useful boost without overwhelming live scan and liquidity scoring.
+            out["opportunity_rank_score"] = _round(max(current_rank, bullish_score * 10.0), 2)
         out_rows.append(out)
     return out_rows
-
 
 def pattern_lab_status() -> dict:
     return {
         "ok": True,
         "version": GPT_PATTERN_LAB_VERSION,
+        "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
         "analyst_lesson_patterns": sorted(ANALYST_PATTERN_IDS),
         "gpt_alpha_patterns": sorted(GPT_ALPHA_PATTERN_IDS),
+        "top_calibrated_lessons_ar": [
+            "Tweezer Bottom أصبح Support Bounce/Reclaim قويًا لكن بشرط الدعم والتأكيد.",
+            "Elephant Trunk Drop وTweezer Top أصبحا Risk Guards لا إشارات شراء.",
+            "GPT Second Wave هو أفضل نمط GPT Alpha مبدئيًا للمراقبة العملية.",
+            "Strong BOS Bullish يحتاج hold/retest أو حجم استمرار ولا يدخل وحده.",
+        ],
         "execution_rule_ar": "مختبر الأنماط يوسم ويرتب ويراقب فقط؛ لا يصنع BUY_NOW ولا يتجاوز الشرعية أو السيولة أو الخطة.",
         "weekend_use_ar": "مناسب للويكند: تحليل ومحاكاة بدون live polling ثقيل.",
+    }
+
+
+def pattern_lab_calibration_payload() -> dict:
+    items = []
+    for pid, cal in _PATTERN_CALIBRATION.items():
+        item = dict(cal)
+        item["pattern_id"] = pid
+        item["pattern_name_ar"] = _PATTERN_AR.get(pid, pid)
+        item["family"] = "gpt_alpha" if pid in GPT_ALPHA_PATTERN_IDS else "analyst_lesson"
+        items.append(item)
+    return {
+        "ok": True,
+        "version": GPT_PATTERN_LAB_VERSION,
+        "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
+        "items": sorted(items, key=lambda x: (_f(x.get("replay_win_rate_proxy")), _f(x.get("replay_avg_gain_proxy"))), reverse=True),
+        "rule_ar": "هذه معايرة أولية من replay واحد؛ تزيد أو تنقص بعد اختبار Polygon على جلسات أكثر.",
     }
 
 
@@ -646,6 +928,11 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
                     "score": _round(best.get("score"), 2),
                     "direction": best.get("direction"),
                     "action": best.get("action"),
+                    "lab_role": best.get("lab_role"),
+                    "calibrated_score": _round(best.get("calibrated_score", best.get("score")), 2),
+                    "recommended_bucket": best.get("recommended_bucket"),
+                    "requires_confirmation": bool(best.get("requires_confirmation", True)),
+                    "activation_rule_ar": best.get("activation_rule_ar"),
                     "max_gain_pct_next_horizon": _round(max_gain, 2),
                     "max_drawdown_pct_next_horizon": _round(max_drawdown, 2),
                     "success_proxy": bool(success),
@@ -661,24 +948,82 @@ def run_pattern_replay_from_evidence(trade_date: str = "", limit_symbols: int = 
             a["avg_drawdown"] += _f(s.get("max_drawdown_pct_next_horizon"))
             if len(a["symbols"]) < 12:
                 a["symbols"].append(s.get("symbol"))
+        role_summary: dict[str, dict] = {}
         for a in agg.values():
             n = max(1, int(a.get("signals") or 0))
-            a["win_rate_proxy"] = _round(a.get("wins", 0) / n * 100.0, 2)
-            a["avg_gain"] = _round(a.get("avg_gain", 0.0) / n, 2)
-            a["avg_drawdown"] = _round(a.get("avg_drawdown", 0.0) / n, 2)
+            pid = _s(a.get("pattern_id"))
+            cal = _calibration_for(pid)
+            role = _s(cal.get("role")) or "unranked_watch"
+            avg_gain = _f(a.get("avg_gain", 0.0)) / n
+            avg_dd = _f(a.get("avg_drawdown", 0.0)) / n
+            win_rate = _f(a.get("wins", 0)) / n * 100.0
+            a["win_rate_proxy"] = _round(win_rate, 2)
+            a["avg_gain"] = _round(avg_gain, 2)
+            a["avg_drawdown"] = _round(avg_dd, 2)
+            a["lab_role"] = role
+            a["recommended_bucket"] = cal.get("recommended_bucket")
+            a["promotion_hint"] = cal.get("promotion_hint")
+            a["requires_confirmation"] = bool(cal.get("requires_confirmation", True))
+            a["activation_rule_ar"] = cal.get("activation_rule_ar")
+            a["leaderboard_note_ar"] = cal.get("leaderboard_note_ar")
+            if role == "risk_guard":
+                leaderboard_score = win_rate * 0.55 + max(0.0, abs(avg_dd)) * 3.0 + min(12.0, n * 0.18)
+                a["success_meaning_ar"] = "نجاح النمط هنا يعني حماية/No-Chase أو خفض فرصة الشراء، وليس إشارة شراء."
+            else:
+                leaderboard_score = win_rate * 0.45 + max(0.0, avg_gain) * 2.5 - max(0.0, abs(avg_dd)) * 0.9 + min(12.0, n * 0.12)
+                a["success_meaning_ar"] = "نجاح النمط هنا يعني أن الإشارة أعطت صعودًا لاحقًا ضمن الأفق المحدد مع Drawdown مقبول."
+            a["leaderboard_score"] = _round(leaderboard_score, 2)
+            rs = role_summary.setdefault(role, {"lab_role": role, "signals": 0, "wins": 0, "avg_gain": 0.0, "avg_drawdown": 0.0, "patterns": []})
+            rs["signals"] += n
+            rs["wins"] += int(a.get("wins") or 0)
+            rs["avg_gain"] += avg_gain * n
+            rs["avg_drawdown"] += avg_dd * n
+            if len(rs["patterns"]) < 8:
+                rs["patterns"].append(pid)
+        for rs in role_summary.values():
+            n = max(1, int(rs.get("signals") or 0))
+            rs["win_rate_proxy"] = _round(_f(rs.get("wins")) / n * 100.0, 2)
+            rs["avg_gain"] = _round(_f(rs.get("avg_gain")) / n, 2)
+            rs["avg_drawdown"] = _round(_f(rs.get("avg_drawdown")) / n, 2)
+        summary_sorted = sorted(agg.values(), key=lambda x: (_f(x.get("leaderboard_score")), _f(x.get("win_rate_proxy")), int(x.get("signals") or 0)), reverse=True)
         return {
             "ok": True,
             "version": GPT_PATTERN_LAB_VERSION,
+            "calibration_version": GPT_PATTERN_CALIBRATION_VERSION,
             "trade_date": d,
             "symbols_checked": len(syms),
             "signals_count": len(signals),
             "horizon_bars": int(horizon_bars or 12),
-            "summary_by_pattern": sorted(agg.values(), key=lambda x: (int(x.get("signals") or 0), _f(x.get("win_rate_proxy"))), reverse=True),
-            "signals": sorted(signals, key=lambda x: (_f(x.get("score")), _f(x.get("max_gain_pct_next_horizon"))), reverse=True)[:300],
-            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط، ثم تقيس الحركة اللاحقة.",
+            "summary_by_pattern": summary_sorted,
+            "summary_by_role": sorted(role_summary.values(), key=lambda x: int(x.get("signals") or 0), reverse=True),
+            "leaderboard_top": summary_sorted[:8],
+            "signals": sorted(signals, key=lambda x: (_f(x.get("calibrated_score", x.get("score"))), _f(x.get("max_gain_pct_next_horizon"))), reverse=True)[:300],
+            "rule_ar": "محاكاة no-lookahead خفيفة: كل إشارة تُحسب من الشموع السابقة فقط، ثم تقيس الحركة اللاحقة. V2W13b يفصل نماذج الشراء عن حراس الخطر.",
         }
     finally:
         try:
             conn.close()
         except Exception:
             pass
+
+
+
+def run_pattern_leaderboard_from_evidence(trade_date: str = "", limit_symbols: int = 80, horizon_bars: int = 12) -> dict:
+    """Compact replay leaderboard without the long per-signal payload."""
+    payload = run_pattern_replay_from_evidence(trade_date=trade_date, limit_symbols=limit_symbols, horizon_bars=horizon_bars)
+    if not isinstance(payload, dict):
+        return {"ok": False, "version": GPT_PATTERN_LAB_VERSION, "error": "invalid_replay_payload"}
+    return {
+        "ok": bool(payload.get("ok")),
+        "version": payload.get("version", GPT_PATTERN_LAB_VERSION),
+        "calibration_version": payload.get("calibration_version", GPT_PATTERN_CALIBRATION_VERSION),
+        "trade_date": payload.get("trade_date"),
+        "symbols_checked": payload.get("symbols_checked"),
+        "signals_count": payload.get("signals_count"),
+        "horizon_bars": payload.get("horizon_bars"),
+        "leaderboard_top": payload.get("leaderboard_top", []),
+        "summary_by_pattern": payload.get("summary_by_pattern", []),
+        "summary_by_role": payload.get("summary_by_role", []),
+        "rule_ar": "نسخة مختصرة للويكند والتشخيص بدون payload طويل للإشارات.",
+        "error": payload.get("error"),
+    }

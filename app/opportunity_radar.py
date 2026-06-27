@@ -3427,9 +3427,12 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
     """Rank a candidate with live-state and source freshness, not only the old snapshot score."""
     if not isinstance(row, dict):
         return 0.0
-    gpt_lab = row.get("gpt_pattern_lab_v2w13") if isinstance(row.get("gpt_pattern_lab_v2w13"), dict) else {}
+    gpt_lab = row.get("gpt_pattern_lab_v2w13b") if isinstance(row.get("gpt_pattern_lab_v2w13b"), dict) else (row.get("gpt_pattern_lab_v2w13") if isinstance(row.get("gpt_pattern_lab_v2w13"), dict) else {})
     gpt_best = gpt_lab.get("best_pattern") if isinstance(gpt_lab.get("best_pattern"), dict) else {}
-    gpt_score = max(_num(row.get("gpt_pattern_score"), 0.0), _num(gpt_lab.get("bullish_score"), 0.0))
+    gpt_bullish_best = gpt_lab.get("best_bullish_pattern") if isinstance(gpt_lab.get("best_bullish_pattern"), dict) else {}
+    gpt_guard_best = gpt_lab.get("best_risk_guard_pattern") if isinstance(gpt_lab.get("best_risk_guard_pattern"), dict) else {}
+    gpt_score = max(_num(row.get("gpt_pattern_score"), 0.0), _num(row.get("gpt_pattern_bullish_score"), 0.0), _num(gpt_lab.get("bullish_score"), 0.0), _num(gpt_bullish_best.get("calibrated_score"), 0.0))
+    gpt_guard_score = max(_num(row.get("gpt_pattern_guard_score"), 0.0), _num(gpt_lab.get("bearish_score"), 0.0), _num(gpt_guard_best.get("calibrated_score"), 0.0))
     base = max(
         _num(row.get("live_rank_score"), 0.0),
         _num(row.get("display_rank_score"), 0.0),
@@ -3453,20 +3456,33 @@ def _dynamic_rank_score_v2w11(row: dict, section: str = "") -> float:
     # unchanged.
     if tags & V2W11_LIVE_SOURCE_KEYS:
         live_bonus += 260.0
-    # V2W13: if a live-scan row also has a strong GPT Pattern Lab match, it
-    # should outrank reserve/Tomorrow Prep candidates.  Bearish GPT patterns are
-    # treated as risk guards and are not boosted here.
+    # V2W13b: calibrated Pattern Lab ranking.  Bullish patterns can help the
+    # strongest live-scan candidates outrank yesterday/reserve rows; risk guards
+    # demote practical entry sections and route toward No-Chase/Pullback.
     gpt_pid = _s(gpt_best.get("pattern_id"))
-    gpt_direction = _s(gpt_best.get("direction")).lower()
-    if gpt_score >= 72 and gpt_direction == "bullish":
-        score += 140.0
-        if tags & V2W11_LIVE_SOURCE_KEYS:
-            score += 120.0
-    elif gpt_pid in {"elephant_trunk_drop", "strong_bos_bearish", "tasuki_gap_bearish", "tweezer_top"}:
+    gpt_bullish_pid = _s(gpt_bullish_best.get("pattern_id"))
+    gpt_guard_pid = _s(gpt_guard_best.get("pattern_id"))
+    gpt_role = _s(gpt_bullish_best.get("lab_role"))
+    if gpt_guard_score >= max(62.0, gpt_score + 6.0) or gpt_guard_pid in {"elephant_trunk_drop", "strong_bos_bearish", "tasuki_gap_bearish", "tweezer_top"}:
         if section in {"pre_trigger_candidates", "support_bounce_candidates", "reclaim_candidates", "low_float_premarket_radar"}:
-            score -= 260.0
+            score -= 340.0
         elif section == "continuation_pullback_candidates":
-            score += 40.0
+            score += 85.0
+    elif gpt_score >= 64 and gpt_bullish_pid:
+        if gpt_bullish_pid == "tweezer_bottom" and section in {"support_bounce_candidates", "reclaim_candidates"}:
+            score += 220.0
+        elif gpt_bullish_pid == "gpt_second_wave_controlled_pullback" and section == "continuation_pullback_candidates":
+            score += 210.0
+        elif gpt_bullish_pid == "strong_bos_bullish" and section == "pre_trigger_candidates":
+            score += 120.0
+        elif gpt_bullish_pid == "gpt_liquidity_coil_reclaim" and section == "reclaim_candidates":
+            score += 105.0
+        elif gpt_bullish_pid == "gpt_silent_compression_break" and section in {"pre_trigger_candidates", "low_float_premarket_radar"}:
+            score += 70.0
+        elif gpt_role in {"bullish_setup", "bullish_setup_needs_confirmation", "continuation_setup"}:
+            score += 80.0
+        if tags & V2W11_LIVE_SOURCE_KEYS:
+            score += 160.0
     if row.get("live_tight_monitoring_v2v") or row.get("live_tight_memory_v2v"):
         live_bonus += 320.0
     if row.get("big_explosion_live_lane_v2t") or row.get("big_explosion_live_lane_v2u"):
