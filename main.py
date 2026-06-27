@@ -5169,10 +5169,10 @@ def pattern_lab_gpt_leaderboard_endpoint(trade_date: str = "", limit_symbols: in
     )
 
 
-PATTERN_WALK_FORWARD_V2W17B_KEY = "pattern_walk_forward_v2w17b_last_job"
-PATTERN_WALK_FORWARD_V2W17B_RESULT_KEY = "pattern_walk_forward_v2w17b_last_result"
-_PATTERN_WALK_FORWARD_V2W17B_LOCK = threading.Lock()
-_PATTERN_WALK_FORWARD_V2W17B_STATE: dict = {"running": False, "job_id": "", "started_at": "", "finished_at": ""}
+PATTERN_WALK_FORWARD_V2W17C_KEY = "pattern_walk_forward_v2w17c_last_job"
+PATTERN_WALK_FORWARD_V2W17C_RESULT_KEY = "pattern_walk_forward_v2w17c_last_result"
+_PATTERN_WALK_FORWARD_V2W17C_LOCK = threading.Lock()
+_PATTERN_WALK_FORWARD_V2W17C_STATE: dict = {"running": False, "job_id": "", "started_at": "", "finished_at": ""}
 
 
 def _pattern_wf_now_label() -> str:
@@ -5196,7 +5196,7 @@ def _pattern_wf_params(
         "start_date": start_date or "2026-05-04",
         "learn_days": max(1, min(20, int(learn_days or 10))),
         "test_days": max(1, min(10, int(test_days or 5))),
-        # V2W17b keeps the requested run bounded so Railway does not time out or get overloaded.
+        # V2W17c keeps the requested run bounded so Railway does not time out or get overloaded.
         "limit_symbols": max(10, min(180, int(limit_symbols or 120))),
         "horizon_bars": max(2, min(48, int(horizon_bars or 12))),
         "use_polygon_flatfiles": bool(use_polygon_flatfiles),
@@ -5218,11 +5218,11 @@ def _pattern_wf_background_worker(job_id: str, params: dict) -> None:
         "job_id": job_id,
         "started_at": started,
         "params": params,
-        "version": "pattern_walk_forward_v2w17b_async_guard_2026_06_27",
-        "message_ar": "تم بدء اختبار Walk-Forward في الخلفية لتجنب upstream timeout. افحص رابط status بعد عدة دقائق.",
+        "version": "pattern_walk_forward_v2w17c_shadow_confluence_test_2026_06_27",
+        "message_ar": "تم بدء اختبار Walk-Forward + Shadow Confluence في الخلفية. هذا لا يغيّر تحليل الأداة الأصلي.",
     }
     try:
-        set_json(PATTERN_WALK_FORWARD_V2W17B_KEY, payload)
+        set_json(PATTERN_WALK_FORWARD_V2W17C_KEY, payload)
     except Exception:
         pass
     try:
@@ -5231,7 +5231,7 @@ def _pattern_wf_background_worker(job_id: str, params: dict) -> None:
             "job_id": job_id,
             "started_at": started,
             "finished_at": _pattern_wf_now_label(),
-            "mode": "background_thread_v2w17b",
+            "mode": "background_thread_v2w17c",
             "note_ar": "هذه نتيجة تشغيل خلفي حتى لا ينتظر المتصفح/Reverse proxy مدة طويلة.",
         }
         final_payload = {
@@ -5244,12 +5244,12 @@ def _pattern_wf_background_worker(job_id: str, params: dict) -> None:
             "result": result,
         }
         try:
-            set_json(PATTERN_WALK_FORWARD_V2W17B_RESULT_KEY, result)
-            set_json(PATTERN_WALK_FORWARD_V2W17B_KEY, final_payload)
+            set_json(PATTERN_WALK_FORWARD_V2W17C_RESULT_KEY, result)
+            set_json(PATTERN_WALK_FORWARD_V2W17C_KEY, final_payload)
         except Exception:
             pass
-        with _PATTERN_WALK_FORWARD_V2W17B_LOCK:
-            _PATTERN_WALK_FORWARD_V2W17B_STATE.update(final_payload)
+        with _PATTERN_WALK_FORWARD_V2W17C_LOCK:
+            _PATTERN_WALK_FORWARD_V2W17C_STATE.update(final_payload)
     except Exception as exc:
         err_payload = {
             "ok": False,
@@ -5263,33 +5263,33 @@ def _pattern_wf_background_worker(job_id: str, params: dict) -> None:
             "message_ar": "فشل تشغيل Walk-Forward في الخلفية. جرّب تقليل limit_symbols/max_rows_per_day أو استخدم SQLite cache فقط.",
         }
         try:
-            set_json(PATTERN_WALK_FORWARD_V2W17B_KEY, err_payload)
+            set_json(PATTERN_WALK_FORWARD_V2W17C_KEY, err_payload)
         except Exception:
             pass
-        with _PATTERN_WALK_FORWARD_V2W17B_LOCK:
-            _PATTERN_WALK_FORWARD_V2W17B_STATE.update(err_payload)
+        with _PATTERN_WALK_FORWARD_V2W17C_LOCK:
+            _PATTERN_WALK_FORWARD_V2W17C_STATE.update(err_payload)
 
 
 def _pattern_wf_start_async(params: dict) -> dict:
-    with _PATTERN_WALK_FORWARD_V2W17B_LOCK:
-        if _PATTERN_WALK_FORWARD_V2W17B_STATE.get("running"):
+    with _PATTERN_WALK_FORWARD_V2W17C_LOCK:
+        if _PATTERN_WALK_FORWARD_V2W17C_STATE.get("running"):
             return {
                 "ok": True,
                 "already_running": True,
                 "running": True,
-                "job_id": _PATTERN_WALK_FORWARD_V2W17B_STATE.get("job_id"),
-                "started_at": _PATTERN_WALK_FORWARD_V2W17B_STATE.get("started_at"),
+                "job_id": _PATTERN_WALK_FORWARD_V2W17C_STATE.get("job_id"),
+                "started_at": _PATTERN_WALK_FORWARD_V2W17C_STATE.get("started_at"),
                 "status_url": "/pattern-lab/gpt/walk-forward/status",
                 "message_ar": "يوجد اختبار Walk-Forward يعمل الآن. لا تبدأ نسخة ثانية؛ افحص status.",
             }
         job_id = _pattern_wf_job_id(params)
-        _PATTERN_WALK_FORWARD_V2W17B_STATE.clear()
-        _PATTERN_WALK_FORWARD_V2W17B_STATE.update({"running": True, "job_id": job_id, "started_at": _pattern_wf_now_label(), "params": params})
+        _PATTERN_WALK_FORWARD_V2W17C_STATE.clear()
+        _PATTERN_WALK_FORWARD_V2W17C_STATE.update({"running": True, "job_id": job_id, "started_at": _pattern_wf_now_label(), "params": params})
     th = threading.Thread(target=_pattern_wf_background_worker, args=(job_id, params), daemon=True)
     th.start()
     return {
         "ok": True,
-        "version": "pattern_walk_forward_v2w17b_async_guard_2026_06_27",
+        "version": "pattern_walk_forward_v2w17c_shadow_confluence_test_2026_06_27",
         "started": True,
         "running": True,
         "job_id": job_id,
@@ -5297,19 +5297,19 @@ def _pattern_wf_start_async(params: dict) -> dict:
         "status_url": "/pattern-lab/gpt/walk-forward/status",
         "result_url": "/pattern-lab/gpt/walk-forward/result",
         "message_ar": "بدأ التشغيل في الخلفية. لا تنتظر هذا الرابط؛ افتح status بعد 2-5 دقائق حسب حجم Polygon/cache.",
-        "safe_rule_ar": "V2W17b يمنع upstream timeout لأن رابط التشغيل يرجع فورًا والنتيجة تُحفظ عند الانتهاء.",
+        "safe_rule_ar": "V2W17c يعمل Shadow فقط: يقيس توافق النمط مع الأداة دون تغيير ranking أو BUY_NOW أو أي قرار أصلي.",
     }
 
 
 @app.get("/pattern-lab/gpt/walk-forward/status")
 @app.get("/pattern-lab/gpt/walk-forward/status/")
 def pattern_lab_gpt_walk_forward_status_endpoint():
-    saved = get_json(PATTERN_WALK_FORWARD_V2W17B_KEY, {}) or {}
-    result = get_json(PATTERN_WALK_FORWARD_V2W17B_RESULT_KEY, {}) or {}
-    state = dict(_PATTERN_WALK_FORWARD_V2W17B_STATE or {})
+    saved = get_json(PATTERN_WALK_FORWARD_V2W17C_KEY, {}) or {}
+    result = get_json(PATTERN_WALK_FORWARD_V2W17C_RESULT_KEY, {}) or {}
+    state = dict(_PATTERN_WALK_FORWARD_V2W17C_STATE or {})
     return {
         "ok": True,
-        "version": "pattern_walk_forward_v2w17b_async_guard_2026_06_27",
+        "version": "pattern_walk_forward_v2w17c_shadow_confluence_test_2026_06_27",
         "running": bool(state.get("running") or saved.get("running")),
         "job_id": state.get("job_id") or saved.get("job_id") or "",
         "started_at": state.get("started_at") or saved.get("started_at") or "",
@@ -5333,7 +5333,7 @@ def pattern_lab_gpt_walk_forward_status_endpoint():
 @app.get("/pattern-lab/gpt/walk-forward/result")
 @app.get("/pattern-lab/gpt/walk-forward/result/")
 def pattern_lab_gpt_walk_forward_result_endpoint(compact: bool = True):
-    result = get_json(PATTERN_WALK_FORWARD_V2W17B_RESULT_KEY, {}) or {}
+    result = get_json(PATTERN_WALK_FORWARD_V2W17C_RESULT_KEY, {}) or {}
     if not isinstance(result, dict) or not result:
         return {"ok": False, "error": "no_walk_forward_result_yet", "status_url": "/pattern-lab/gpt/walk-forward/status", "message_ar": "لا توجد نتيجة محفوظة بعد."}
     if not bool(compact):
