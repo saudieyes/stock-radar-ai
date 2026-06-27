@@ -240,6 +240,7 @@ from app.gpt_pattern_lab import (
 from app.active_tradability_gate import (
     ACTIVE_TRADABILITY_GATE_VERSION,
     audit_row as active_tradability_audit_row,
+    attach_quote_context as attach_active_quote_context,
     enrich_rows as enrich_rows_with_active_tradability_gate,
     summarize_rows as summarize_active_tradability_rows,
 )
@@ -1648,6 +1649,11 @@ def _apply_live_quote_overlay(row: dict, quote: dict | None) -> dict:
         "price_reliable_for_execution": bool(quote_reliable_for_execution),
         "price_monitoring_only": bool(quote_delayed or not quote_reliable_for_execution),
         "last_price_update_label": updated_label,
+        "live_quote_updated_epoch": quote.get("updated_at"),
+        "live_quote_updated_at": datetime.fromtimestamp(float(quote.get("updated_at") or 0), ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S") if quote.get("updated_at") else "",
+        "quote_session": quote.get("market_phase") or get_market_phase(),
+        "price_session": "extended" if (quote.get("extended_hours") or str(quote_source).startswith("fmp_extended")) else (quote.get("market_phase") or get_market_phase()),
+        "volume_session": "extended_or_regular_quote" if (quote.get("extended_hours") or str(quote_source).startswith("fmp_extended")) else "regular",
         "live_overlay_label": live_label,
         "live_rank_score": safe_round(live_rank, 2),
         "live_rank_adjustment": safe_round(live_adjustment, 2),
@@ -1836,6 +1842,8 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
 
     snapshot = get_json("last_trade_scan_snapshot", {})
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    if isinstance(rows, list):
+        rows = attach_active_quote_context(rows, snapshot_updated_at=_snapshot_updated_at(snapshot) if isinstance(snapshot, dict) else "", market_phase=phase)
     if not isinstance(rows, list) or not rows:
         return {
             "ok": False,
@@ -5160,6 +5168,7 @@ def diagnostics_active_tradability_gate(limit: int = 80):
     snapshot = get_json("last_trade_scan_snapshot", {}) or {}
     rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
     rows = rows if isinstance(rows, list) else []
+    rows = attach_active_quote_context(rows, snapshot_updated_at=snapshot.get("updated_at", "") if isinstance(snapshot, dict) else "", market_phase=phase)
     try:
         enriched = enrich_rows_with_active_tradability_gate(rows, market_phase=phase)
     except Exception:
@@ -5188,6 +5197,8 @@ def active_tradability_audit_endpoint(symbol: str = ""):
                 break
     if row is None:
         row = {"symbol": sym}
+    else:
+        row = attach_active_quote_context([row], snapshot_updated_at=snapshot.get("updated_at", "") if isinstance(snapshot, dict) else "", market_phase=phase)[0]
     audit = active_tradability_audit_row(row, market_phase=phase, strict=False)
     return {
         "ok": True,
