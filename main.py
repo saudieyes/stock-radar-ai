@@ -235,6 +235,7 @@ from app.gpt_pattern_lab import (
     pattern_lab_status as gpt_pattern_lab_status_payload,
     run_pattern_leaderboard_from_evidence as run_gpt_pattern_leaderboard_from_evidence,
     run_pattern_replay_from_evidence as run_gpt_pattern_replay_from_evidence,
+    run_pattern_walk_forward_replay as run_gpt_pattern_walk_forward_replay,
     summarize_current_rows as summarize_gpt_pattern_current_rows,
 )
 from app.active_tradability_gate import (
@@ -5168,6 +5169,32 @@ def pattern_lab_gpt_leaderboard_endpoint(trade_date: str = "", limit_symbols: in
     )
 
 
+@app.get("/pattern-lab/gpt/walk-forward")
+@app.get("/pattern-lab/gpt/walk-forward/")
+@app.get("/pattern-lab/gpt/walk-forward/run")
+@app.get("/pattern-lab/gpt/walk-forward/run/")
+def pattern_lab_gpt_walk_forward_endpoint(
+    start_date: str = "2026-05-04",
+    learn_days: int = 10,
+    test_days: int = 5,
+    limit_symbols: int = 120,
+    horizon_bars: int = 12,
+    use_polygon_flatfiles: bool = False,
+    force_polygon_pull: bool = False,
+    max_rows_per_day: int = 450000,
+):
+    return run_gpt_pattern_walk_forward_replay(
+        start_date=start_date or "2026-05-04",
+        learn_days=max(1, min(20, int(learn_days or 10))),
+        test_days=max(1, min(10, int(test_days or 5))),
+        limit_symbols=max(10, min(250, int(limit_symbols or 120))),
+        horizon_bars=max(2, min(48, int(horizon_bars or 12))),
+        use_polygon_flatfiles=bool(use_polygon_flatfiles),
+        force_polygon_pull=bool(force_polygon_pull),
+        max_rows_per_day=max(50000, min(1500000, int(max_rows_per_day or 450000))),
+    )
+
+
 
 
 @app.get("/pattern-lab/gpt")
@@ -5182,8 +5209,9 @@ def pattern_lab_gpt_index_endpoint():
             "/pattern-lab/gpt/calibration",
             "/pattern-lab/gpt/replay",
             "/pattern-lab/gpt/leaderboard",
+            "/pattern-lab/gpt/walk-forward",
         ],
-        "rule_ar": "فهرس سريع لتجنب خطأ Not Found عند فتح مسار Pattern Lab الأساسي."
+        "rule_ar": "فهرس سريع لتجنب خطأ Not Found. V2W17 أضاف Walk-Forward لتجربة الأنماط: تعلم ثم نتائج أمامية، والأنماط تبقى تحت الاختبار."
     }
 
 
