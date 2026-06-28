@@ -25,7 +25,7 @@ from .settings import (
 from .sqlite_store import SQLITE_ENABLED, _connect, init_db
 from .utils import normalize_symbol_text, safe_round
 
-SEC_SHARIA_VERSION = "sec_xbrl_platform_override_calibration_v2w19d_2026_06_28"
+SEC_SHARIA_VERSION = "sec_xbrl_platform_override_calibration_v2w19d3_diagnostics_hotfix_2026_06_28"
 
 SEC_DIR = Path(os.getenv("SEC_SHARIA_DATA_DIR", str(DATA_DIR / "sec")) or str(DATA_DIR / "sec"))
 SEC_COMPANYFACTS_ZIP = Path(os.getenv("SEC_COMPANYFACTS_ZIP", str(SEC_DIR / "companyfacts.zip")) or str(SEC_DIR / "companyfacts.zip"))
@@ -822,6 +822,28 @@ def recalibrate_sec_screen_results(limit: int | None = None) -> dict:
     out["finished_at"] = _now_iso()
     return out
 
+
+
+def sec_status_counts() -> dict:
+    """Lightweight final_status counts used by calibration diagnostics.
+
+    V2W19d3 hotfix: V2W19d introduced a call to sec_status_counts() in
+    sec_formula_calibration_report(), but the helper was missing in one build,
+    causing /diagnostics/sharia-formula-calibration to return a raw 500 after
+    platform seeding. Keep this helper defensive so diagnostics never breaks
+    the app.
+    """
+    out: dict[str, int] = {}
+    try:
+        init_sec_sharia_db()
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT final_status, COUNT(*) AS c FROM sharia_screen_results GROUP BY final_status ORDER BY c DESC"
+            ).fetchall()
+        out = {str(r["final_status"] or "unknown"): int(r["c"] or 0) for r in rows}
+    except Exception as exc:
+        out = {"error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+    return out
 
 def sec_formula_calibration_report(sample_limit: int = 12) -> dict:
     """Platform-aware formula report.
