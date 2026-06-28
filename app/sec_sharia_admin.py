@@ -3,6 +3,9 @@
 V2W19b goal: the user should only deploy the code and open one admin URL.
 The admin job downloads SEC bulk files into /data/sec, imports them into SQLite,
 and activates SEC-primary Sharia only after a successful full import.
+
+V2W19c adds a lightweight calibration action that re-screens already-imported
+SEC rows without re-downloading companyfacts.zip.
 """
 from __future__ import annotations
 
@@ -28,6 +31,8 @@ from .sec_sharia_store import (
     import_companyfacts_zip,
     import_sec_company_map,
     mark_sec_sharia_active,
+    recalibrate_sec_screen_results,
+    sec_formula_calibration_report,
     sec_sharia_status,
 )
 
@@ -184,6 +189,15 @@ def _run_setup_job(mode: str, *, refresh: bool = False, symbols: list[str] | Non
         activated=False,
     )
     try:
+        # V2W19c calibration uses existing SQLite SEC facts only. It does not
+        # download companyfacts.zip and does not re-run the heavy full importer.
+        if mode == "calibrate":
+            _update_state(phase="calibrate", message="إعادة معايرة معادلة SEC من قاعدة SQLite الحالية بدون تحميل جديد...", progress_pct=None)
+            facts_result = recalibrate_sec_screen_results(limit=limit or None)
+            calibration = sec_formula_calibration_report(sample_limit=12)
+            _update_state(facts=facts_result, calibration=calibration, activated=True, phase="finished", message="اكتملت معايرة V2W19c: تحذيرات SEC المالية أصبحت مراجعة محدودة وليست حظرًا نهائيًا.", progress_pct=100, running=False, finished_at=_now_iso())
+            return
+
         # 1) Download required SEC files.  For full setup, companyfacts.zip is the expensive step.
         tickers_download = _download_file(SEC_TICKERS_EXCHANGE_URL, SEC_TICKERS_EXCHANGE_JSON, refresh=refresh, min_existing_mb=0.01, label="company_tickers_exchange.json")
         if not tickers_download.get("ok"):
@@ -264,7 +278,9 @@ def _merged_status(sample_limit: int = 6) -> dict[str, Any]:
             "status": "/admin/sec-sharia/status",
             "start_full": "/admin/sec-sharia/setup?mode=full&confirm=YES",
             "start_test": "/admin/sec-sharia/setup?mode=test&confirm=YES",
+            "calibrate_v2w19c": "/admin/sec-sharia/calibrate?confirm=YES",
             "diagnostics_json": "/diagnostics/sharia-sec-refresh",
+            "formula_calibration_json": "/diagnostics/sharia-formula-calibration",
         },
     }
 
@@ -276,7 +292,7 @@ def _html_status(payload: dict[str, Any]) -> str:
     counts = (sec.get("counts") or {}) if isinstance(sec, dict) else {}
     by_status = counts.get("by_final_status") or {}
     running = bool(job.get("running"))
-    title = "SEC Sharia Admin — V2W19b"
+    title = "SEC Sharia Admin — V2W19c"
     safe_json = html.escape(json.dumps(payload, ensure_ascii=False, indent=2)[:20000])
     refresh = '<meta http-equiv="refresh" content="15">' if running else ''
     phase = html.escape(str(job.get("phase") or "idle"))
@@ -291,9 +307,10 @@ def _html_status(payload: dict[str, Any]) -> str:
     rows = "".join([f"<tr><td>{html.escape(str(k))}</td><td>{html.escape(str(v))}</td></tr>" for k, v in by_status.items()]) or "<tr><td colspan='2'>لا توجد نتائج بعد</td></tr>"
     buttons = "" if running else """
       <p>
-        <a class="btn primary" href="/admin/sec-sharia/setup?mode=full&confirm=YES">تشغيل الإعداد الكامل الآن</a>
-        <a class="btn" href="/admin/sec-sharia/setup?mode=test&confirm=YES">تجربة محدودة فقط</a>
+        <a class="btn primary" href="/admin/sec-sharia/calibrate?confirm=YES">معايرة V2W19c بدون تحميل</a>
+        <a class="btn" href="/diagnostics/sharia-formula-calibration">تقرير المعادلة</a>
         <a class="btn" href="/diagnostics/sharia-sec-refresh">JSON diagnostics</a>
+        <a class="btn" href="/admin/sec-sharia/setup?mode=full&confirm=YES">إعادة الإعداد الكامل فقط عند الحاجة</a>
       </p>
     """
     return f"""
@@ -374,13 +391,29 @@ def register_sec_sharia_admin_routes(app) -> None:
         if not ok:
             return JSONResponse({"ok": False, "error": err}, status_code=403)
         mode_clean = str(mode or "full").lower().strip()
-        if mode_clean not in {"full", "test", "download"}:
-            return JSONResponse({"ok": False, "error": "mode must be full, test, or download"}, status_code=400)
+        if mode_clean not in {"full", "test", "download", "calibrate"}:
+            return JSONResponse({"ok": False, "error": "mode must be full, test, download, or calibrate"}, status_code=400)
         if str(confirm or "").upper() != "YES":
             # Show status page with safe links instead of starting accidentally.
             return HTMLResponse(_html_status(_merged_status(sample_limit=6)))
         symbol_list = [x.strip().upper() for x in str(symbols or "").replace(";", ",").split(",") if x.strip()]
         started = _start_job(mode_clean, refresh=bool(refresh), symbols=symbol_list or None, limit=int(limit or 0) or None)
+        if not started.get("ok") and started.get("already_running"):
+            return RedirectResponse(url="/admin/sec-sharia/status", status_code=303)
+        return RedirectResponse(url="/admin/sec-sharia/status", status_code=303)
+
+    @app.get("/admin/sec-sharia/calibrate")
+    def admin_sec_sharia_calibrate(
+        confirm: str = Query(default=""),
+        token: str = Query(default=""),
+        limit: int = Query(default=0),
+    ):
+        ok, err = _check_token(token)
+        if not ok:
+            return JSONResponse({"ok": False, "error": err}, status_code=403)
+        if str(confirm or "").upper() != "YES":
+            return HTMLResponse(_html_status(_merged_status(sample_limit=6)))
+        started = _start_job("calibrate", refresh=False, symbols=None, limit=int(limit or 0) or None)
         if not started.get("ok") and started.get("already_running"):
             return RedirectResponse(url="/admin/sec-sharia/status", status_code=303)
         return RedirectResponse(url="/admin/sec-sharia/status", status_code=303)

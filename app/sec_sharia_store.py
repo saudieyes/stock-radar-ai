@@ -20,11 +20,12 @@ from .settings import (
     SHARIA_GRAY_CASH_TO_ASSETS,
     SHARIA_MAX_DEBT_TO_ASSETS,
     SHARIA_MAX_INTEREST_EXPENSE_TO_REVENUE,
+    SHARIA_SEC_FINANCIAL_WARNING_BLOCKS,
 )
 from .sqlite_store import SQLITE_ENABLED, _connect, init_db
 from .utils import normalize_symbol_text, safe_round
 
-SEC_SHARIA_VERSION = "sec_xbrl_sharia_primary_v2w19b_admin_loader_2026_06_28"
+SEC_SHARIA_VERSION = "sec_xbrl_sharia_formula_calibration_v2w19c_2026_06_28"
 
 SEC_DIR = Path(os.getenv("SEC_SHARIA_DATA_DIR", str(DATA_DIR / "sec")) or str(DATA_DIR / "sec"))
 SEC_COMPANYFACTS_ZIP = Path(os.getenv("SEC_COMPANYFACTS_ZIP", str(SEC_DIR / "companyfacts.zip")) or str(SEC_DIR / "companyfacts.zip"))
@@ -462,23 +463,21 @@ def _screen_financials(row: dict) -> dict:
     cash_ratio = cash / assets if assets > 0 else 0.0
     interest_ratio = interest / revenue if revenue > 0 and interest > 0 else 0.0
 
+    financial_warnings = []
     if debt_ratio > float(SHARIA_MAX_DEBT_TO_ASSETS or 0.33):
-        return {
-            "symbol": symbol,
-            "final_status": "sec_blocked_financial",
-            "label": "غير متوافق ماليًا — SEC",
-            "reason": f"SEC: الديون/الأصول {safe_round(debt_ratio * 100, 1)}% وتتجاوز الحد {safe_round(float(SHARIA_MAX_DEBT_TO_ASSETS or 0.33) * 100, 1)}%.",
-            "evidence_age_days": evidence_age_i,
-            "debt_ratio": safe_round(debt_ratio, 4),
-            "cash_ratio": safe_round(cash_ratio, 4),
-            "interest_ratio": safe_round(interest_ratio, 4),
-        }
+        financial_warnings.append(
+            f"الديون/الأصول {safe_round(debt_ratio * 100, 1)}% أعلى من حد المعادلة {safe_round(float(SHARIA_MAX_DEBT_TO_ASSETS or 0.33) * 100, 1)}%"
+        )
     if interest_ratio > float(SHARIA_MAX_INTEREST_EXPENSE_TO_REVENUE or 0.05):
+        financial_warnings.append(
+            f"مصروف الفوائد/الإيرادات {safe_round(interest_ratio * 100, 1)}% أعلى من حد المعادلة {safe_round(float(SHARIA_MAX_INTEREST_EXPENSE_TO_REVENUE or 0.05) * 100, 1)}%"
+        )
+    if financial_warnings:
         return {
             "symbol": symbol,
-            "final_status": "sec_blocked_financial",
-            "label": "غير متوافق ماليًا — SEC",
-            "reason": f"SEC: مصروف الفوائد/الإيرادات {safe_round(interest_ratio * 100, 1)}% ويتجاوز الحد {safe_round(float(SHARIA_MAX_INTEREST_EXPENSE_TO_REVENUE or 0.05) * 100, 1)}%.",
+            "final_status": "sec_financial_warning",
+            "label": "تحذير مالي SEC — يحتاج تحقق منصة",
+            "reason": "SEC: " + "؛ ".join(financial_warnings) + "؛ لا يعتبر حظرًا نهائيًا في V2W19c بل يخفض الأولوية ويحتاج مراجعة منصة التداول.",
             "evidence_age_days": evidence_age_i,
             "debt_ratio": safe_round(debt_ratio, 4),
             "cash_ratio": safe_round(cash_ratio, 4),
@@ -489,7 +488,7 @@ def _screen_financials(row: dict) -> dict:
             "symbol": symbol,
             "final_status": "sec_needs_review",
             "label": "رمادي — SEC يحتاج مراجعة",
-            "reason": f"SEC: النقد والاستثمارات السائلة/الأصول {safe_round(cash_ratio * 100, 1)}%؛ لا يدخل Strong/Cautious قبل مراجعة.",
+            "reason": f"SEC: النقد والاستثمارات السائلة/الأصول {safe_round(cash_ratio * 100, 1)}%؛ يخفض الأولوية ولا يمنع السهم إذا كانت الفرصة الفنية قوية.",
             "evidence_age_days": evidence_age_i,
             "debt_ratio": safe_round(debt_ratio, 4),
             "cash_ratio": safe_round(cash_ratio, 4),
@@ -707,13 +706,183 @@ def map_sec_result_to_assessment(symbol: str, result: dict | None) -> dict:
         "period_end": result.get("period_end", ""),
     }
     if status == "sec_clean":
-        base.update({"is_gray": False, "is_halal": True, "should_block": False, "source_filter_action": "allow"})
-    elif status == "sec_blocked_financial":
-        base.update({"is_gray": False, "is_halal": False, "should_block": True, "source_filter_action": "block"})
+        base.update({
+            "is_gray": False,
+            "is_halal": True,
+            "should_block": False,
+            "source_filter_action": "allow",
+            "sharia_priority_tier": "priority_clean",
+            "trade_policy": "allowed_if_technical_plan_valid",
+        })
+    elif status in {"sec_financial_warning", "sec_blocked_financial"}:
+        # V2W19c: a SEC financial formula failure is not a final non-Sharia ruling.
+        # It becomes a limited review warning unless the operator explicitly enables
+        # the old strict behavior via SHARIA_SEC_FINANCIAL_WARNING_BLOCKS=true.
+        warning_label = "تحذير مالي SEC — يحتاج تحقق منصة"
+        warning_reason = reason
+        if status == "sec_blocked_financial":
+            warning_reason = "تمت إعادة تفسير نتيجة V2W19b القديمة كتحذير مالي فقط في V2W19c؛ " + warning_reason
+        if not label or "غير متوافق" in label:
+            base["label"] = warning_label
+        base["reason"] = warning_reason
+        if bool(SHARIA_SEC_FINANCIAL_WARNING_BLOCKS):
+            base.update({
+                "is_gray": False,
+                "is_halal": False,
+                "should_block": True,
+                "source_filter_action": "block",
+                "sharia_priority_tier": "strict_financial_block",
+                "trade_policy": "blocked_by_sec_formula_strict_mode",
+            })
+        else:
+            base.update({
+                "is_gray": True,
+                "is_halal": True,
+                "should_block": False,
+                "source_filter_action": "gray",
+                "sharia_priority_tier": "review_limited",
+                "trade_policy": "review_platform_before_entry_no_telegram",
+            })
     else:
-        base.update({"is_gray": True, "is_halal": True, "should_block": False, "source_filter_action": "gray"})
+        base.update({
+            "is_gray": True,
+            "is_halal": True,
+            "should_block": False,
+            "source_filter_action": "gray",
+            "sharia_priority_tier": "review_limited",
+            "trade_policy": "review_platform_before_entry_no_telegram",
+        })
     return base
 
+
+
+def recalibrate_sec_screen_results(limit: int | None = None) -> dict:
+    """Recalculate sharia_screen_results from already-imported SEC facts.
+
+    This is intentionally much cheaper than re-downloading/re-importing
+    companyfacts.zip. It lets V2W19c update the formula after V2W19b has already
+    loaded SEC data into SQLite.
+    """
+    init_sec_sharia_db()
+    out = {
+        "ok": False,
+        "version": SEC_SHARIA_VERSION,
+        "processed": 0,
+        "updated": 0,
+        "by_final_status": {},
+        "started_at": _now_iso(),
+        "finished_at": "",
+        "error": "",
+    }
+    try:
+        sql = "SELECT * FROM sec_latest_financials ORDER BY symbol"
+        params: tuple[Any, ...] = ()
+        if limit and int(limit) > 0:
+            sql += " LIMIT ?"
+            params = (int(limit),)
+        with _connect() as conn:
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+            now = _now_iso()
+            for row in rows:
+                screen = _screen_financials(row)
+                conn.execute(
+                    """
+                    INSERT INTO sharia_screen_results(
+                        symbol, final_status, label, reason, evidence_source, evidence_age_days,
+                        debt_ratio, cash_ratio, interest_ratio, filing_date, period_end, updated_at
+                    ) VALUES(?, ?, ?, ?, 'SEC', ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        final_status=excluded.final_status,
+                        label=excluded.label,
+                        reason=excluded.reason,
+                        evidence_source=excluded.evidence_source,
+                        evidence_age_days=excluded.evidence_age_days,
+                        debt_ratio=excluded.debt_ratio,
+                        cash_ratio=excluded.cash_ratio,
+                        interest_ratio=excluded.interest_ratio,
+                        filing_date=excluded.filing_date,
+                        period_end=excluded.period_end,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        row.get("symbol", ""), screen.get("final_status", "sec_missing_data"), screen.get("label", ""),
+                        screen.get("reason", ""), screen.get("evidence_age_days"), screen.get("debt_ratio"),
+                        screen.get("cash_ratio"), screen.get("interest_ratio"), row.get("filing_date", ""),
+                        row.get("period_end", ""), now,
+                    ),
+                )
+                out["processed"] += 1
+                out["updated"] += 1
+            conn.commit()
+            counts = conn.execute("SELECT final_status, COUNT(*) AS c FROM sharia_screen_results GROUP BY final_status ORDER BY c DESC").fetchall()
+            out["by_final_status"] = {str(r["final_status"]): int(r["c"] or 0) for r in counts}
+        out["ok"] = True
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:260]}"
+    out["finished_at"] = _now_iso()
+    return out
+
+
+def sec_formula_calibration_report(sample_limit: int = 12) -> dict:
+    """Small platform-aware formula report.
+
+    It checks known user-reviewed names against the SEC formula so we can spot
+    false warnings/false passes without changing the user's manual platform
+    authority.
+    """
+    approved_reference = ["AAPL", "EHGO", "ICCM", "NIXX", "HOUR"]
+    blocked_reference = ["TPC", "SNBR", "BDTX", "BLND", "PRFX", "GUTS", "KUST"]
+
+    def _row(sym: str, expected: str) -> dict:
+        screen = get_sec_screen_result(sym) or sec_missing_response(sym)
+        assessment = map_sec_result_to_assessment(sym, screen)
+        status = str(screen.get("final_status") or assessment.get("status") or "")
+        if expected == "platform_approved":
+            mismatch = status not in {"sec_clean"}
+        else:
+            mismatch = status == "sec_clean"
+        return {
+            "symbol": sym,
+            "platform_reference": expected,
+            "sec_status": status,
+            "sec_label": assessment.get("label", ""),
+            "priority_tier": assessment.get("sharia_priority_tier", ""),
+            "trade_policy": assessment.get("trade_policy", ""),
+            "should_block_now": bool(assessment.get("should_block", False)),
+            "is_gray_now": bool(assessment.get("is_gray", False)),
+            "mismatch_needs_review": bool(mismatch),
+            "reason": assessment.get("reason", ""),
+            "debt_ratio": assessment.get("debt_to_assets"),
+            "cash_ratio": assessment.get("cash_to_assets"),
+            "interest_ratio": assessment.get("interest_expense_to_revenue"),
+            "evidence_age_days": assessment.get("evidence_age_days"),
+        }
+
+    approved_rows = [_row(s, "platform_approved") for s in approved_reference]
+    blocked_rows = [_row(s, "platform_blocked") for s in blocked_reference]
+    status = sec_sharia_status(sample_limit=sample_limit)
+    return {
+        "ok": True,
+        "version": SEC_SHARIA_VERSION,
+        "formula_policy": "balanced_priority_not_strict_block",
+        "strict_sec_warning_blocks_enabled": bool(SHARIA_SEC_FINANCIAL_WARNING_BLOCKS),
+        "reference_summary": {
+            "approved_reference_count": len(approved_rows),
+            "approved_mismatch_count": sum(1 for r in approved_rows if r.get("mismatch_needs_review")),
+            "blocked_reference_count": len(blocked_rows),
+            "blocked_false_clean_count": sum(1 for r in blocked_rows if r.get("mismatch_needs_review")),
+        },
+        "platform_approved_reference": approved_rows,
+        "platform_blocked_reference": blocked_rows,
+        "current_sec_counts": (status.get("counts") or {}).get("by_final_status", {}),
+        "recommended_usage": {
+            "priority_clean": ["manual_approved", "platform_approved", "sec_clean"],
+            "limited_review_not_hidden": ["sec_financial_warning", "sec_needs_review", "sec_missing_data", "sec_stale_data"],
+            "hard_block_only": ["manual_excluded", "platform_blocked", "activity_haram_confirmed", "non_compliant_activity"],
+            "telegram_buy_now": "priority_clean فقط",
+            "gray_cap_rule": "الرمادي يستخدم كاحتياطي محدود ولا يزاحم clean في المصدر",
+        },
+    }
 
 def sec_sharia_status(sample_limit: int = 12) -> dict:
     out = {
@@ -742,7 +911,7 @@ def sec_sharia_status(sample_limit: int = 12) -> dict:
             out["counts"]["sec_latest_financials"] = int((conn.execute("SELECT COUNT(*) AS c FROM sec_latest_financials").fetchone() or {"c": 0})["c"])
             rows = conn.execute("SELECT final_status, COUNT(*) AS c FROM sharia_screen_results GROUP BY final_status ORDER BY c DESC").fetchall()
             out["counts"]["by_final_status"] = {str(r["final_status"]): int(r["c"] or 0) for r in rows}
-            for status in ["sec_clean", "sec_needs_review", "sec_blocked_financial", "sec_missing_data", "sec_stale_data"]:
+            for status in ["sec_clean", "sec_financial_warning", "sec_needs_review", "sec_blocked_financial", "sec_missing_data", "sec_stale_data"]:
                 sample = conn.execute(
                     "SELECT symbol, final_status, label, reason, evidence_age_days, debt_ratio, cash_ratio, interest_ratio, filing_date, period_end FROM sharia_screen_results WHERE final_status=? ORDER BY symbol LIMIT ?",
                     (status, int(sample_limit or 12)),
