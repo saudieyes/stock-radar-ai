@@ -92,6 +92,8 @@ from app.sec_sharia_store import (
     init_sec_sharia_db,
     import_sec_company_map,
     import_companyfacts_zip,
+    recalibrate_sec_screen_results,
+    sec_formula_calibration_report,
     sec_sharia_status,
 )
 from app.sec_sharia_admin import register_sec_sharia_admin_routes
@@ -6576,12 +6578,34 @@ def watchlist_get():
 def diagnostics_sharia_sec_refresh(sample_limit: int = 12):
     status = sec_sharia_status(sample_limit=max(1, min(50, int(sample_limit or 12))))
     status["acceptance_rules"] = {
-        "strong_cautious_allowed_statuses": ["manual_approved", "sec_clean"],
-        "gray_review_only_statuses": ["sec_missing_data", "sec_stale_data", "sec_needs_review"],
-        "blocked_statuses": ["manual_excluded", "non_compliant", "sec_blocked_financial"],
+        "version_policy": "V2W19c balanced priority: SEC clean first, SEC warnings limited review, hard block only manual/activity",
+        "strong_cautious_allowed_statuses": ["manual_approved", "platform_approved", "sec_clean"],
+        "gray_limited_review_statuses": ["sec_financial_warning", "sec_blocked_financial", "sec_missing_data", "sec_stale_data", "sec_needs_review"],
+        "hard_block_statuses": ["manual_excluded", "platform_blocked", "non_compliant_activity"],
+        "telegram_buy_now_allowed_statuses": ["manual_approved", "platform_approved", "sec_clean"],
         "legacy_simfin_csv_clean_allowed_by_default": False,
+        "sec_financial_warning_is_final_haram": False,
     }
     return status
+
+
+@app.get("/diagnostics/sharia-formula-calibration")
+def diagnostics_sharia_formula_calibration(sample_limit: int = 12):
+    return sec_formula_calibration_report(sample_limit=max(1, min(50, int(sample_limit or 12))))
+
+
+@app.post("/maintenance/sec-sharia/recalibrate")
+def maintenance_sec_sharia_recalibrate(payload: dict = Body(default={})):
+    payload = payload or {}
+    limit = int(float(payload.get("limit", 0) or 0))
+    result = recalibrate_sec_screen_results(limit=limit or None)
+    return {
+        "ok": bool(result.get("ok")),
+        "version": SEC_SHARIA_VERSION,
+        "result": result,
+        "status": sec_sharia_status(sample_limit=8),
+        "formula_calibration": sec_formula_calibration_report(sample_limit=8),
+    }
 
 
 @app.post("/maintenance/sec-sharia/import")
