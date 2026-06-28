@@ -1,4 +1,12 @@
 {
+  "AAPL": {
+    "approved_at": "2026-06-28 17:46:15",
+    "note": "معتمد في منصة التداول — seed V2W19d",
+    "reason": "معتمد في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
+    "symbol": "AAPL",
+    "updated_at": "2026-06-28 17:52:30"
+  },
   "ABAT": {
     "approved_at": "2026-06-03 10:35:54",
     "note": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
@@ -465,11 +473,11 @@
   },
   "EHGO": {
     "approved_at": "2026-06-20 15:42:01",
-    "note": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
-    "reason": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
-    "source": "manual",
+    "note": "معتمد في منصة التداول — seed V2W19d",
+    "reason": "معتمد في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "EHGO",
-    "updated_at": "2026-06-20 15:42:01"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "ELTX": {
     "approved_at": "2026-06-23 01:41:07",
@@ -663,6 +671,14 @@
     "symbol": "HOFT",
     "updated_at": "2026-06-11 10:03:36"
   },
+  "HOUR": {
+    "approved_at": "2026-06-28 17:46:16",
+    "note": "معتمد في منصة التداول — seed V2W19d",
+    "reason": "معتمد في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
+    "symbol": "HOUR",
+    "updated_at": "2026-06-28 17:52:30"
+  },
   "HOVR": {
     "approved_at": "2026-05-26 07:41:04",
     "note": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
@@ -689,11 +705,11 @@
   },
   "ICCM": {
     "approved_at": "2026-06-04 13:55:33",
-    "note": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
-    "reason": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
-    "source": "manual",
+    "note": "معتمد في منصة التداول — seed V2W19d",
+    "reason": "معتمد في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "ICCM",
-    "updated_at": "2026-06-20 15:42:19"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "IESC": {
     "approved_at": "2026-04-28 12:25:26",
@@ -1057,11 +1073,11 @@
   },
   "NIXX": {
     "approved_at": "2026-06-20 15:45:07",
-    "note": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
-    "reason": "اعتماد يدوي من قائمة غير محسومة شرعيًا",
-    "source": "manual",
+    "note": "معتمد في منصة التداول — seed V2W19d",
+    "reason": "معتمد في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "NIXX",
-    "updated_at": "2026-06-20 15:45:07"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "NMAX": {
     "approved_at": "2026-06-26 15:59:09",
