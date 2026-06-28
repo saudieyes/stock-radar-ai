@@ -2141,11 +2141,28 @@ def radar_live_refresh(limit: int = 25, allow_fallback: bool = True, include_wat
         pass
 
     try:
+        # V2W18b: save a compact copy of the same visible sections returned to the UI
+        # so /diagnostics/sharia-filter-audit can audit real visible/actionable cards.
+        # This is read-only telemetry; it does not change any decision, order, BUY_NOW,
+        # Telegram alert, or Sharia state.
+        visible_section_keys = [
+            "strong_entries", "cautious_entries", "gray_strong", "premarket_setups",
+            "early_movement_watchlist", "promotion_bridge_candidates",
+            "live_tight_monitoring_candidates", "support_bounce_candidates",
+            "reclaim_candidates", "pre_trigger_candidates",
+            "continuation_pullback_candidates", "high_risk_day_trades",
+            "low_float_premarket_radar", "low_float_fast_lane_raw_watch",
+            "gap_fill_watch", "catalyst_watch", "watchlist",
+        ]
+        saved_visible = {k: payload.get(k, []) for k in visible_section_keys if isinstance(payload.get(k), list)}
         set_json("last_radar_live_refresh", {
             "updated_at": payload["live_updated_at"],
             "symbols_requested": payload["symbols_requested"],
             "quotes_available": payload["quotes_available"],
             "quote_diagnostics": payload["quote_diagnostics"],
+            "groups": payload.get("groups", {}),
+            "opportunity_radar": payload.get("opportunity_radar", {}),
+            **saved_visible,
         })
     except Exception:
         pass
@@ -3162,7 +3179,7 @@ def _apply_manual_sharia_overrides(rows: list[dict]) -> list[dict]:
 
 
 
-SHARIA_FILTER_AUDIT_VERSION = "sharia_filter_audit_v2w18_iphone_and_strict_review_2026_06_28"
+SHARIA_FILTER_AUDIT_VERSION = "sharia_filter_audit_v2w18b_visible_source_coverage_fix_2026_06_28"
 SHARIA_AUDIT_ACTIONABLE_SECTION_KEYS = [
     "strong_entries",
     "cautious_entries",
@@ -3250,16 +3267,50 @@ def _summarize_sharia_audit_rows(rows: list[dict], *, sample_limit: int = 10) ->
     }
 
 
+def _rows_from_any_section_value(val) -> list:
+    """Return rows from either a raw list or a UI group payload.
+
+    V2W18 audit looked only for top-level lists. The live UI stores many visible
+    sections under `groups.<section>.items`, so the audit could incorrectly show
+    total=0 even when cards are visible. This helper keeps the audit read-only but
+    lets it inspect the same section shape used by the iPhone/mobile UI.
+    """
+    if isinstance(val, list):
+        return val
+    if isinstance(val, dict):
+        for k in ("items", "rows", "candidates", "stocks", "data"):
+            x = val.get(k)
+            if isinstance(x, list):
+                return x
+    return []
+
+
 def _rows_from_payload_section(payload: dict, key: str) -> list:
     if not isinstance(payload, dict):
         return []
-    val = payload.get(key)
-    if isinstance(val, list):
-        return val
+    rows = _rows_from_any_section_value(payload.get(key))
+    if rows:
+        return rows
     opp = payload.get("opportunity_radar")
-    if isinstance(opp, dict) and isinstance(opp.get(key), list):
-        return opp.get(key) or []
+    if isinstance(opp, dict):
+        rows = _rows_from_any_section_value(opp.get(key))
+        if rows:
+            return rows
+    groups = payload.get("groups")
+    if isinstance(groups, dict):
+        rows = _rows_from_any_section_value(groups.get(key))
+        if rows:
+            return rows
     return []
+
+
+def _sharia_audit_payload_has_actionable_sections(payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for key in SHARIA_AUDIT_ACTIONABLE_SECTION_KEYS:
+        if _rows_from_payload_section(payload, key):
+            return True
+    return False
 
 
 def _synthetic_sharia_sections_from_snapshot(rows: list[dict]) -> dict:
@@ -3304,6 +3355,18 @@ def diagnostics_sharia_filter_audit():
     sections = {}
     actionable_totals = {"total": 0, "clean_or_approved": 0, "gray_or_unknown": 0, "blocked_or_non_compliant": 0}
     section_payload_sources = [last_live if isinstance(last_live, dict) else {}]
+    # V2W18b: keep this audit read-only. It should inspect the last visible live
+    # payload saved by /radar-live-refresh; if the page has not refreshed since
+    # the update, it will explicitly report an inconclusive source-coverage issue
+    # instead of pretending the filter is clean with total=0.
+    audit_source_coverage = {
+        "last_live_saved": isinstance(last_live, dict) and bool(last_live),
+        "last_live_has_visible_sections": _sharia_audit_payload_has_actionable_sections(last_live if isinstance(last_live, dict) else {}),
+        "snapshot_rows_available": len(raw_rows or []),
+        "visible_sections_read": 0,
+        "inconclusive_no_visible_sections": False,
+        "note_ar": "",
+    }
 
     for key in SHARIA_AUDIT_ACTIONABLE_SECTION_KEYS:
         rows = []
@@ -3318,6 +3381,7 @@ def diagnostics_sharia_filter_audit():
                 rows = list(rows or [])
             summary = _summarize_sharia_audit_rows(rows, sample_limit=8)
             sections[key] = summary
+            audit_source_coverage["visible_sections_read"] = int(audit_source_coverage.get("visible_sections_read", 0) or 0) + 1
             for k in actionable_totals:
                 actionable_totals[k] = int(actionable_totals.get(k, 0) or 0) + int(summary.get(k, 0) or 0)
 
@@ -3331,11 +3395,18 @@ def diagnostics_sharia_filter_audit():
     actionable_blocked = int(actionable_totals.get("blocked_or_non_compliant", 0) or 0)
     actionable_clean_ratio = round((actionable_clean / actionable_total) * 100, 2) if actionable_total else 0.0
 
+    no_visible_sections = actionable_total == 0
+    audit_source_coverage["inconclusive_no_visible_sections"] = bool(no_visible_sections)
+    if no_visible_sections:
+        audit_source_coverage["note_ar"] = "لم يقرأ التشخيص أي قسم عملي مرئي. هذه نتيجة غير حاسمة وليست دليلًا أن فلتر الشريعة سليم. افتح الصفحة الرئيسية/تحديث السيولة مرة واحدة ثم أعد التشخيص."
     likely_relaxed = bool(actionable_total and (actionable_gray or actionable_blocked))
-    raw_unknown_pressure = bool(raw_summary.get("gray_ratio_pct", 0) >= 25 and actionable_blocked == 0)
+    raw_unknown_pressure = bool((not no_visible_sections) and raw_summary.get("gray_ratio_pct", 0) >= 25 and actionable_blocked == 0)
     recommendation = "audit_first_no_change_yet"
     recommendation_ar = "تشخيص فقط: لم يتم تغيير الفلتر. أرسل هذه النتيجة لتحديد هل المشكلة تخفيف فعلي أو ضغط unknown من أسهم صغيرة/جديدة."
-    if likely_relaxed and actionable_blocked:
+    if no_visible_sections:
+        recommendation = "audit_inconclusive_refresh_visible_sections_first"
+        recommendation_ar = "التشخيص غير حاسم لأنه لم يقرأ أي قائمة عملية مرئية. بعد V2W18b افتح الصفحة الرئيسية أو /radar-live-refresh مرة واحدة ثم أعد /diagnostics/sharia-filter-audit."
+    elif likely_relaxed and actionable_blocked:
         recommendation = "restore_strict_filter_for_all_actionable_sections"
         recommendation_ar = "يوجد غير شرعي/مستبعد داخل أقسام عملية؛ يوصى بإعادة الفلتر الصارم لكل القوائم العملية."
     elif likely_relaxed and actionable_gray:
@@ -3353,6 +3424,7 @@ def diagnostics_sharia_filter_audit():
         "last_live_updated_at": (last_live or {}).get("live_updated_at", "") or (last_live or {}).get("updated_at", "") if isinstance(last_live, dict) else "",
         "raw_snapshot_summary": raw_summary,
         "synthetic_snapshot_sections": synthetic_sections,
+        "audit_source_coverage": audit_source_coverage,
         "visible_actionable_sections": sections,
         "visible_actionable_totals": {
             **actionable_totals,
@@ -3364,7 +3436,7 @@ def diagnostics_sharia_filter_audit():
         "raw_unknown_pressure_from_small_new_stocks": raw_unknown_pressure,
         "recommendation": recommendation,
         "recommendation_ar": recommendation_ar,
-        "rule_ar": "V2W18: هذا تشخيص فقط. لا يغير تحليل الأداة الأصلي، ولا القوائم، ولا BUY_NOW، ولا Telegram. إذا ظهر blocked/gray داخل الأقسام العملية نعيد فلتر الشريعة الصارم في تحديث لاحق.",
+        "rule_ar": "V2W18b: هذا تشخيص فقط مع إصلاح مصدر القراءة. لا يغير تحليل الأداة الأصلي، ولا القوائم، ولا BUY_NOW، ولا Telegram. إذا ظهر blocked/gray داخل الأقسام العملية نعيد فلتر الشريعة الصارم في تحديث لاحق.",
     }
 
 
