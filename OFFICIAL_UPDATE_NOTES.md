@@ -1,14 +1,25 @@
-# V2W9e Official Update
+# V2W18 — iPhone Card Responsive Fix + Sharia Filter Audit
 
-- Added FMP-only final after-hours sweep after the extended session ends.
-- Added source session date, intended trading date, started/completed timestamps in ET/KSA.
-- Mark regular close as reference-only when no extended price is returned during premarket/after-hours.
-- Faster page opening: render saved scan first, hydrate live/extended prices in the background.
+Version goal: fix iPhone/Safari card layout readability and add a Sharia audit endpoint without changing original radar decisions.
 
+## UI
+- Adds final mobile CSS guard for compact-modern cards.
+- Prevents ticker symbols from truncating/ellipsis on narrow iPhone widths.
+- Moves compact price presentation into its own readable row on narrow screens.
+- Avoids displaying `0` as current price when no positive price candidate exists; shows `—` instead.
+- Adds safer display price fallback order.
 
-## V2W9f — Tomorrow Prep Final Bridge to Live Lists
+## Backend diagnostics
+New endpoint:
 
-- Bridges final V2W9e after-hours Tomorrow Prep rows into live visible Pre-Trigger and Low-Float sections.
-- Prioritizes these symbols in live quote refresh to prevent stale snapshot-only lists.
-- Adds monitoring-only trigger/stop/target fields for bridged prep rows.
-- Adds `/diagnostics/list-freshness`.
+`GET /diagnostics/sharia-filter-audit`
+
+It reads the latest saved scan/live refresh snapshots and reports:
+- raw snapshot Sharia composition,
+- visible actionable section Sharia composition,
+- synthetic strong/cautious/gray/blocked groups from the saved snapshot,
+- whether the filter looks relaxed/bypassed,
+- whether the issue is likely new-small-stock unknown pressure.
+
+## Safety
+Audit only. No changes to ranking, BUY_NOW, Telegram, original tool analysis, or Sharia decisions.

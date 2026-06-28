@@ -2215,6 +2215,116 @@
       .symbol, .compact-modern .symbol { min-width: 70px; max-width: 38vw; text-align: left; }
     }
 
+
+
+    /* V2W18: iPhone card readability guard.
+       Keeps ticker/price readable on narrow Safari screens without changing data or ranking. */
+    .card-heading-line .symbol,
+    .compact-modern .symbol,
+    .weekly-symbol {
+      direction: ltr;
+      unicode-bidi: isolate;
+      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      overflow-wrap: normal;
+      word-break: keep-all;
+      max-width: none;
+    }
+    .compact-modern .price-plan-value,
+    .compact-modern .compact-source-line {
+      overflow: visible;
+      text-overflow: clip;
+    }
+    @media (max-width: 520px) {
+      .compact-modern .cards > .card {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 7px !important;
+        padding: 11px 12px !important;
+      }
+      .compact-modern .card-top,
+      .compact-modern .card-heading-line,
+      .compact-modern .badges,
+      .compact-modern .price-plan-grid {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+      }
+      .compact-modern .card-heading-line {
+        grid-template-columns: auto minmax(0, 1fr) !important;
+        align-items: center !important;
+      }
+      .compact-modern .rank-badge {
+        min-width: 34px !important;
+        height: 30px !important;
+      }
+      .compact-modern .symbol {
+        font-size: clamp(22px, 7vw, 29px) !important;
+        line-height: 1.08 !important;
+        text-align: left !important;
+        justify-self: start !important;
+      }
+      .compact-modern .company {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.35 !important;
+        max-height: none !important;
+      }
+      .compact-modern .badges {
+        max-height: none !important;
+        overflow: visible !important;
+        flex-wrap: wrap !important;
+      }
+      .compact-modern .price-plan-grid {
+        grid-column: auto !important;
+        grid-row: auto !important;
+        min-width: 0 !important;
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        align-items: stretch !important;
+        margin-top: 1px !important;
+      }
+      .compact-modern .price-plan-grid .price-plan-item {
+        display: grid !important;
+        grid-template-columns: auto minmax(0, 1fr) !important;
+        gap: 6px 10px !important;
+        align-items: baseline !important;
+        text-align: initial !important;
+      }
+      .compact-modern .price-plan-grid .price-plan-item:not(:first-child) {
+        display: none !important;
+      }
+      .compact-modern .price-plan-label {
+        display: block !important;
+        font-size: 11px !important;
+        white-space: nowrap !important;
+      }
+      .compact-modern .price-plan-value {
+        font-size: clamp(19px, 6vw, 25px) !important;
+        line-height: 1.12 !important;
+        direction: ltr !important;
+        text-align: left !important;
+        white-space: nowrap !important;
+        justify-self: start !important;
+      }
+      .compact-modern .live-change-line,
+      .compact-modern .compact-source-line {
+        grid-column: 1 / -1 !important;
+        direction: rtl !important;
+        text-align: right !important;
+        max-width: 100% !important;
+        white-space: normal !important;
+      }
+    }
+    @media (max-width: 380px) {
+      .compact-modern .symbol { font-size: 22px !important; }
+      .compact-modern .price-plan-value { font-size: 20px !important; }
+      .compact-modern .rank-badge { min-width: 31px !important; height: 28px !important; font-size: 11px !important; }
+    }
+
   </style>
 </head>
 <body>
@@ -2541,6 +2651,35 @@
       const num = Number(value);
       if (Number.isNaN(num)) return escapeHtml(value);
       return num.toLocaleString("en-US", { maximumFractionDigits: 2 });
+    }
+
+    function selectDisplayPriceCandidate(stock) {
+      const candidates = [
+        stock?.current_price_live,
+        stock?.live_price,
+        stock?.display_price,
+        stock?.financials?.current_price,
+        stock?.current_price,
+        stock?.price,
+        stock?.last_price,
+        stock?.latest_price,
+        stock?.regularMarketPrice,
+        stock?.extended_price,
+        stock?.close,
+        stock?.previous_close,
+        stock?.prev_close
+      ];
+      for (const value of candidates) {
+        const n = Number(String(value ?? '').replace(/,/g, ''));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return 0;
+    }
+
+    function formatPriceOrDash(value) {
+      const n = Number(String(value ?? '').replace(/,/g, ''));
+      if (!Number.isFinite(n) || n <= 0) return '—';
+      return formatNumber(n);
     }
 
     function formatPercent(value) {
@@ -3858,7 +3997,7 @@
       const source = livePriceSourceLabel(stock);
       return `<div class="price-plan-item live-price-item" data-symbol="${safeText(stock?.symbol || '')}">
         <div class="price-plan-label">السعر الحالي</div>
-        <div class="price-plan-value ${cls}">${safeText(formatNumber(displayPrice))}</div>
+        <div class="price-plan-value ${cls}">${safeText(formatPriceOrDash(displayPrice))}</div>
         <div class="live-change-line ${cls}">${safeText(changeText)}</div>
         ${source ? `<div class="compact-source-line">${safeText(source)}</div>` : ''}
         ${(stock?.extended_hours_price_overlay_v2w6 || stock?.extended_price) ? `<div class="compact-source-line">${safeText(stock?.extended_display_note_ar || 'سعر خارج السوق للعرض فقط')}</div>` : ''}
@@ -4234,7 +4373,7 @@
       stock = applyClientOpportunityGuard(stock);
       window.__stockPayloadBySymbol = window.__stockPayloadBySymbol || {};
       if (stock && stock.symbol) window.__stockPayloadBySymbol[String(stock.symbol).toUpperCase()] = stock;
-      const displayPrice = stock.current_price_live ?? stock.display_price ?? stock.financials?.current_price ?? 0;
+      const displayPrice = selectDisplayPriceCandidate(stock);
       const supportSanity = buildSupportSanity(stock, displayPrice);
       const resistanceSanity = buildResistanceSanity(stock, displayPrice);
       const company = safeText(stock.company || stock.symbol);
@@ -4253,7 +4392,7 @@
       details.push(detailBox('مناطق الدعم/المقاومة V2', renderOpportunityZonesBlock(stock), true));
       details.push(detailBox('الخطة الأصلية وحالتها الآن', renderOriginalPlanBlock(stock), true));
       details.push(detailBox('فلتر السعر الشخصي', safeText(stock.personal_price_label || ''), false));
-      details.push(detailBox('سعر السهم', formatNumber(displayPrice)));
+      details.push(detailBox('سعر السهم', formatPriceOrDash(displayPrice)));
       details.push(detailBox(safeText(stock.display_entry_label || 'سعر الدخول'), formatNumber(stock.display_entry_price)));
       details.push(detailBox(safeText(stock.display_target_label || 'الهدف الأول'), formatNumber(stock.display_target_price)));
       details.push(detailBox(safeText(stock.display_stop_label || 'وقف الخسارة'), formatNumber(stock.display_stop_price)));
@@ -5471,7 +5610,7 @@
 
     function livePricePresentationFromItem(item) {
       if (!item) return null;
-      const displayPrice = Number(item.current_price_live || item.live_price || item.display_price || item.current_price || item.price || 0);
+      const displayPrice = selectDisplayPriceCandidate(item);
       if (!Number.isFinite(displayPrice) || displayPrice <= 0) return null;
       const rawChange = item.display_change_pct ?? item.change_vs_prev_close_pct ?? item.change_pct ?? item.change_from_open_pct;
       const change = Number(rawChange);

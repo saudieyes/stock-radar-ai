@@ -3160,6 +3160,214 @@ def _apply_manual_sharia_overrides(rows: list[dict]) -> list[dict]:
     return [_apply_manual_sharia_overrides_to_stock(row, manual_exclusions, manual_approvals) for row in (rows or [])]
 
 
+
+
+SHARIA_FILTER_AUDIT_VERSION = "sharia_filter_audit_v2w18_iphone_and_strict_review_2026_06_28"
+SHARIA_AUDIT_ACTIONABLE_SECTION_KEYS = [
+    "strong_entries",
+    "cautious_entries",
+    "premarket_setups",
+    "early_movement_watchlist",
+    "live_tight_monitoring_candidates",
+    "critical_pre_explosion_watch",
+    "support_bounce_candidates",
+    "reclaim_candidates",
+    "pre_trigger_candidates",
+    "continuation_pullback_candidates",
+    "high_risk_day_trades",
+    "low_float_premarket_radar",
+    "low_float_fast_lane_raw_watch",
+    "gap_fill_watch",
+    "catalyst_watch",
+    "promotion_bridge_candidates",
+    "next_week_watchlist",
+]
+SHARIA_AUDIT_REVIEW_OR_LEARNING_KEYS = [
+    "gray_strong",
+    "learning_opportunity_candidates",
+    "learning_overlay_candidates",
+    "all_results",
+    "watchlist",
+]
+
+
+def _sharia_audit_class(row: dict) -> str:
+    if not isinstance(row, dict):
+        return "invalid"
+    status = str(row.get("sharia_status", "") or "").strip().lower()
+    label = str(row.get("sharia_label", "") or "").strip().lower()
+    decision = str(row.get("decision", "") or "")
+    if _is_blocked_sharia(row) or status in {"non_compliant", "manual_excluded", "blocked", "not_halal", "haram"} or bool(row.get("sharia_manual_excluded")):
+        return "blocked_or_non_compliant"
+    if _is_gray_sharia(row) or status in {"gray", "grey", "unknown", "unresolved", "needs_review", "review", ""} or "غير محسوم" in decision or "رمادي" in decision or "غير متوفر" in label:
+        return "gray_or_unknown"
+    if bool(row.get("sharia_manual_approved")) or bool(row.get("manual_approved")) or status in {"manual_approved", "approved", "compliant", "halal"}:
+        return "clean_or_approved"
+    if row.get("is_halal") is True and row.get("halal_ok") is not False:
+        return "clean_or_approved"
+    return "gray_or_unknown"
+
+
+def _sharia_audit_sample(row: dict) -> dict:
+    return {
+        "symbol": normalize_symbol_text((row or {}).get("symbol", "")),
+        "decision": str((row or {}).get("decision", "") or ""),
+        "sharia_status": str((row or {}).get("sharia_status", "") or ""),
+        "sharia_label": str((row or {}).get("sharia_label", "") or ""),
+        "sharia_reason": str((row or {}).get("sharia_reason", "") or "")[:180],
+        "source_bucket": str((row or {}).get("opportunity_bucket", "") or (row or {}).get("bucket", "") or ""),
+    }
+
+
+def _summarize_sharia_audit_rows(rows: list[dict], *, sample_limit: int = 10) -> dict:
+    counts = {"clean_or_approved": 0, "gray_or_unknown": 0, "blocked_or_non_compliant": 0, "invalid": 0}
+    samples = {"gray_or_unknown": [], "blocked_or_non_compliant": []}
+    symbols = set()
+    for row in rows or []:
+        cls = _sharia_audit_class(row)
+        counts[cls] = int(counts.get(cls, 0) or 0) + 1
+        sym = normalize_symbol_text((row or {}).get("symbol", "")) if isinstance(row, dict) else ""
+        if sym:
+            symbols.add(sym)
+        if cls in samples and len(samples[cls]) < sample_limit:
+            samples[cls].append(_sharia_audit_sample(row))
+    total = sum(int(v or 0) for v in counts.values())
+    clean = int(counts.get("clean_or_approved", 0) or 0)
+    gray = int(counts.get("gray_or_unknown", 0) or 0)
+    blocked = int(counts.get("blocked_or_non_compliant", 0) or 0)
+    return {
+        "total": total,
+        "unique_symbols": len(symbols),
+        "clean_or_approved": clean,
+        "gray_or_unknown": gray,
+        "blocked_or_non_compliant": blocked,
+        "invalid": int(counts.get("invalid", 0) or 0),
+        "clean_ratio_pct": round((clean / total) * 100, 2) if total else 0.0,
+        "gray_ratio_pct": round((gray / total) * 100, 2) if total else 0.0,
+        "blocked_ratio_pct": round((blocked / total) * 100, 2) if total else 0.0,
+        "needs_attention": bool(total and (gray or blocked)),
+        "samples": samples,
+    }
+
+
+def _rows_from_payload_section(payload: dict, key: str) -> list:
+    if not isinstance(payload, dict):
+        return []
+    val = payload.get(key)
+    if isinstance(val, list):
+        return val
+    opp = payload.get("opportunity_radar")
+    if isinstance(opp, dict) and isinstance(opp.get(key), list):
+        return opp.get(key) or []
+    return []
+
+
+def _synthetic_sharia_sections_from_snapshot(rows: list[dict]) -> dict:
+    out = {
+        "snapshot_strong_decision": [],
+        "snapshot_cautious_decision": [],
+        "snapshot_gray_or_unresolved": [],
+        "snapshot_blocked_or_non_compliant": [],
+    }
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        decision = str(row.get("decision", "") or "")
+        cls = _sharia_audit_class(row)
+        if decision == "دخول قوي":
+            out["snapshot_strong_decision"].append(row)
+        if decision == "دخول بحذر":
+            out["snapshot_cautious_decision"].append(row)
+        if cls == "gray_or_unknown":
+            out["snapshot_gray_or_unresolved"].append(row)
+        if cls == "blocked_or_non_compliant":
+            out["snapshot_blocked_or_non_compliant"].append(row)
+    return out
+
+
+@app.get("/diagnostics/sharia-filter-audit")
+def diagnostics_sharia_filter_audit():
+    """Audit only: does not change ranking, decisions, Telegram, or Sharia state.
+
+    The goal is to tell whether visible/actionable sections are getting gray or
+    non-compliant names because of relaxed filtering, missing data, or newer
+    small-stock discovery.
+    """
+    snapshot = get_json("last_trade_scan_snapshot", {}) or {}
+    last_live = get_json("last_radar_live_refresh", {}) or {}
+    raw_rows = snapshot.get("rows", []) if isinstance(snapshot, dict) else []
+    try:
+        raw_rows = _apply_manual_sharia_overrides(list(raw_rows or []))
+    except Exception:
+        raw_rows = list(raw_rows or [])
+
+    sections = {}
+    actionable_totals = {"total": 0, "clean_or_approved": 0, "gray_or_unknown": 0, "blocked_or_non_compliant": 0}
+    section_payload_sources = [last_live if isinstance(last_live, dict) else {}]
+
+    for key in SHARIA_AUDIT_ACTIONABLE_SECTION_KEYS:
+        rows = []
+        for payload in section_payload_sources:
+            rows = _rows_from_payload_section(payload, key)
+            if rows:
+                break
+        if rows:
+            try:
+                rows = _apply_manual_sharia_overrides(list(rows or []))
+            except Exception:
+                rows = list(rows or [])
+            summary = _summarize_sharia_audit_rows(rows, sample_limit=8)
+            sections[key] = summary
+            for k in actionable_totals:
+                actionable_totals[k] = int(actionable_totals.get(k, 0) or 0) + int(summary.get(k, 0) or 0)
+
+    synthetic = _synthetic_sharia_sections_from_snapshot(raw_rows)
+    synthetic_sections = {k: _summarize_sharia_audit_rows(v, sample_limit=8) for k, v in synthetic.items()}
+    raw_summary = _summarize_sharia_audit_rows(raw_rows, sample_limit=12)
+
+    actionable_total = int(actionable_totals.get("total", 0) or 0)
+    actionable_clean = int(actionable_totals.get("clean_or_approved", 0) or 0)
+    actionable_gray = int(actionable_totals.get("gray_or_unknown", 0) or 0)
+    actionable_blocked = int(actionable_totals.get("blocked_or_non_compliant", 0) or 0)
+    actionable_clean_ratio = round((actionable_clean / actionable_total) * 100, 2) if actionable_total else 0.0
+
+    likely_relaxed = bool(actionable_total and (actionable_gray or actionable_blocked))
+    raw_unknown_pressure = bool(raw_summary.get("gray_ratio_pct", 0) >= 25 and actionable_blocked == 0)
+    recommendation = "audit_first_no_change_yet"
+    recommendation_ar = "تشخيص فقط: لم يتم تغيير الفلتر. أرسل هذه النتيجة لتحديد هل المشكلة تخفيف فعلي أو ضغط unknown من أسهم صغيرة/جديدة."
+    if likely_relaxed and actionable_blocked:
+        recommendation = "restore_strict_filter_for_all_actionable_sections"
+        recommendation_ar = "يوجد غير شرعي/مستبعد داخل أقسام عملية؛ يوصى بإعادة الفلتر الصارم لكل القوائم العملية."
+    elif likely_relaxed and actionable_gray:
+        recommendation = "move_unknown_to_urgent_sharia_review_only"
+        recommendation_ar = "يوجد رمادي/غير محسوم داخل أقسام عملية؛ يوصى بإبقائه كمراجعة شرعية فقط لا فرصة عادية."
+    elif raw_unknown_pressure:
+        recommendation = "small_stock_unknown_pressure_keep_audit"
+        recommendation_ar = "الأغلب أن التوسع في الأسهم الصغيرة زاد unknown؛ الفلتر العملي لا يبدو مخففًا إذا بقيت القوائم العملية نظيفة."
+
+    return {
+        "ok": True,
+        "version": SHARIA_FILTER_AUDIT_VERSION,
+        "mode": "audit_only_no_filter_change",
+        "snapshot_updated_at": (snapshot or {}).get("updated_at", "") if isinstance(snapshot, dict) else "",
+        "last_live_updated_at": (last_live or {}).get("live_updated_at", "") or (last_live or {}).get("updated_at", "") if isinstance(last_live, dict) else "",
+        "raw_snapshot_summary": raw_summary,
+        "synthetic_snapshot_sections": synthetic_sections,
+        "visible_actionable_sections": sections,
+        "visible_actionable_totals": {
+            **actionable_totals,
+            "clean_ratio_pct": actionable_clean_ratio,
+            "gray_ratio_pct": round((actionable_gray / actionable_total) * 100, 2) if actionable_total else 0.0,
+            "blocked_ratio_pct": round((actionable_blocked / actionable_total) * 100, 2) if actionable_total else 0.0,
+        },
+        "likely_relaxed_or_bypassed_filter": likely_relaxed,
+        "raw_unknown_pressure_from_small_new_stocks": raw_unknown_pressure,
+        "recommendation": recommendation,
+        "recommendation_ar": recommendation_ar,
+        "rule_ar": "V2W18: هذا تشخيص فقط. لا يغير تحليل الأداة الأصلي، ولا القوائم، ولا BUY_NOW، ولا Telegram. إذا ظهر blocked/gray داخل الأقسام العملية نعيد فلتر الشريعة الصارم في تحديث لاحق.",
+    }
+
+
 def _copy_for_bucket(stock: dict, label: str, reason: str = "") -> dict:
     out = dict(stock or {})
     out.setdefault("original_decision", stock.get("decision", "") if isinstance(stock, dict) else "")
