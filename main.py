@@ -6652,7 +6652,15 @@ def diagnostics_sharia_sec_refresh(sample_limit: int = 12):
 
 @app.get("/diagnostics/sharia-formula-calibration")
 def diagnostics_sharia_formula_calibration(sample_limit: int = 12):
-    return sec_formula_calibration_report(sample_limit=max(1, min(50, int(sample_limit or 12))))
+    try:
+        return sec_formula_calibration_report(sample_limit=max(1, min(50, int(sample_limit or 12))))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "version": SEC_SHARIA_VERSION,
+            "error": f"{type(exc).__name__}: {str(exc)[:260]}",
+            "note": "V2W19d3 diagnostics safety wrapper: التشخيص فشل لكن التطبيق لا يتعطل. أرسل هذا الناتج للمراجعة.",
+        }
 
 
 @app.post("/maintenance/sec-sharia/recalibrate")
