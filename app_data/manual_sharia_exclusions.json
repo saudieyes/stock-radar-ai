@@ -617,11 +617,11 @@
   },
   "BDTX": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "BDTX",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "BFRI": {
     "excluded_at": "2026-06-23 01:40:37",
@@ -689,11 +689,11 @@
   },
   "BLND": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "BLND",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "BMBL": {
     "excluded_at": "2026-04-21 10:28:48",
@@ -2025,11 +2025,11 @@
   },
   "GUTS": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "GUTS",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "H": {
     "excluded_at": "2026-05-26 19:02:22",
@@ -2441,11 +2441,11 @@
   },
   "KUST": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "KUST",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "KVHI": {
     "excluded_at": "2026-05-22 15:29:24",
@@ -3345,11 +3345,11 @@
   },
   "PRFX": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "PRFX",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "PRI": {
     "excluded_at": "2026-06-06 17:16:02",
@@ -3849,11 +3849,11 @@
   },
   "SNBR": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "SNBR",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "SNGX": {
     "excluded_at": "2026-06-25 13:12:22",
@@ -4081,11 +4081,11 @@
   },
   "TPC": {
     "excluded_at": "2026-06-20 18:58:00",
-    "note": "V2U5: غير شرعي حسب مراجعة المستخدم في منصة الشرعية؛ يظهر فقط كتعلم/تأكد ولا يفتح شراء",
-    "reason": "غير شرعي حسب مراجعة المستخدم في منصة الشرعية",
-    "source": "manual_user_platform_review_v2u5",
+    "note": "غير شرعي في منصة التداول — seed V2W19d",
+    "reason": "غير شرعي في منصة التداول — seed V2W19d",
+    "source": "platform_reference_seed_v2w19d",
     "symbol": "TPC",
-    "updated_at": "2026-06-20 18:58:00"
+    "updated_at": "2026-06-28 17:52:30"
   },
   "TRVG": {
     "excluded_at": "2026-06-23 15:59:13",
@@ -4334,5 +4334,13 @@
     "source": "manual",
     "symbol": "ZNTL",
     "updated_at": "2026-06-26 15:58:51"
+  },
+  "ZURA": {
+    "excluded_at": "2026-06-28 09:13:36",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ZURA",
+    "updated_at": "2026-06-28 17:59:34"
   }
 }
