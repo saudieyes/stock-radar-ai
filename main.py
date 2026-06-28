@@ -86,6 +86,15 @@ from app.display_contract import *
 from app.single_stock_engine import scan_all, build_single_stock_response, get_last_scan_debug
 
 from app.sqlite_store import init_db, sqlite_status, set_json, get_json
+from app.sec_sharia_store import (
+    SEC_SHARIA_VERSION,
+    SEC_COMPANYFACTS_ZIP,
+    init_sec_sharia_db,
+    import_sec_company_map,
+    import_companyfacts_zip,
+    sec_sharia_status,
+)
+from app.sec_sharia_admin import register_sec_sharia_admin_routes
 from app.market_fear import get_market_fear_snapshot, market_fear_status
 from app.user_auth_store import has_auth_user, create_first_user, verify_db_user
 from app.live_quotes import get_live_quotes
@@ -313,6 +322,16 @@ try:
     init_db()
 except Exception as exc:
     print(f"SQLITE_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+
+try:
+    init_sec_sharia_db()
+except Exception as exc:
+    print(f"SEC_SHARIA_INIT_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+
+try:
+    register_sec_sharia_admin_routes(app)
+except Exception as exc:
+    print(f"SEC_SHARIA_ADMIN_ROUTES_ERROR: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
 
 try:
     init_detection_journal_db()
@@ -6551,6 +6570,59 @@ def watchlist_get():
             "market_phase_label": live_block.get("market_phase_label", ""),
         })
     return {"items": out}
+
+
+@app.get("/diagnostics/sharia-sec-refresh")
+def diagnostics_sharia_sec_refresh(sample_limit: int = 12):
+    status = sec_sharia_status(sample_limit=max(1, min(50, int(sample_limit or 12))))
+    status["acceptance_rules"] = {
+        "strong_cautious_allowed_statuses": ["manual_approved", "sec_clean"],
+        "gray_review_only_statuses": ["sec_missing_data", "sec_stale_data", "sec_needs_review"],
+        "blocked_statuses": ["manual_excluded", "non_compliant", "sec_blocked_financial"],
+        "legacy_simfin_csv_clean_allowed_by_default": False,
+    }
+    return status
+
+
+@app.post("/maintenance/sec-sharia/import")
+def maintenance_sec_sharia_import(payload: dict = Body(default={})):
+    # Intended for controlled admin use. For the 1.39GB full companyfacts.zip,
+    # prefer running tools/sec_sharia_importer.py from Railway shell/local CLI.
+    payload = payload or {}
+    tickers_path = str(payload.get("tickers_path", "") or "").strip()
+    facts_path = str(payload.get("facts_path", "") or "").strip()
+    symbols_raw = payload.get("symbols") or []
+    if isinstance(symbols_raw, str):
+        symbols = [x.strip().upper() for x in symbols_raw.replace(";", ",").split(",") if x.strip()]
+    else:
+        symbols = [str(x or "").strip().upper() for x in symbols_raw if str(x or "").strip()]
+    limit = int(float(payload.get("limit", 0) or 0))
+    run_facts = bool(payload.get("run_facts", bool(symbols or limit)))
+    full = bool(payload.get("full", False))
+
+    from pathlib import Path as _Path
+    result = {
+        "ok": True,
+        "version": SEC_SHARIA_VERSION,
+        "note": "For full 1GB+ imports, CLI is safer than an HTTP request.",
+        "map": None,
+        "facts": None,
+        "status": None,
+    }
+    result["map"] = import_sec_company_map(_Path(tickers_path)) if tickers_path else import_sec_company_map()
+    if run_facts:
+        if not full and not symbols and limit <= 0:
+            return {
+                "ok": False,
+                "version": SEC_SHARIA_VERSION,
+                "error": "Refusing full HTTP import without full=true. Use CLI or pass symbols/limit/full=true.",
+                "map": result["map"],
+                "status": sec_sharia_status(sample_limit=5),
+            }
+        result["facts"] = import_companyfacts_zip(_Path(facts_path) if facts_path else SEC_COMPANYFACTS_ZIP, symbols=symbols or None, limit=limit or None)
+    result["status"] = sec_sharia_status(sample_limit=5)
+    result["ok"] = bool((result.get("map") or {}).get("ok", False)) and (not run_facts or bool((result.get("facts") or {}).get("ok", False)))
+    return result
 
 
 @app.post("/sharia-exclusions/add")
