@@ -155,6 +155,16 @@ SHARIA_MAX_IMPERMISSIBLE_REVENUE_RATIO = _env_float("SHARIA_MAX_IMPERMISSIBLE_RE
 SHARIA_GRAY_CASH_TO_ASSETS = _env_float("SHARIA_GRAY_CASH_TO_ASSETS", 0.33)
 SHARIA_BLOCK_GRAY_IN_SOURCE = str(os.getenv("SHARIA_BLOCK_GRAY_IN_SOURCE", "false") or "false").lower() in {"1", "true", "yes", "on"}
 
+# V2W19a: SEC XBRL is the primary Sharia financial evidence source.
+# The old SimFin/CSV files remain bundled as historical reference, but by default
+# they no longer grant a clean Sharia result when SEC primary mode is enabled.
+SHARIA_SEC_PRIMARY_ENABLED = str(os.getenv("SHARIA_SEC_PRIMARY_ENABLED", "true") or "true").strip().lower() in {"1", "true", "yes", "on"}
+SHARIA_LEGACY_FINANCIALS_ENABLED = str(os.getenv("SHARIA_LEGACY_FINANCIALS_ENABLED", "false") or "false").strip().lower() in {"1", "true", "yes", "on"}
+SEC_SHARIA_DATA_DIR = Path(os.getenv("SEC_SHARIA_DATA_DIR", str(DATA_DIR / "sec")) or str(DATA_DIR / "sec"))
+SEC_COMPANYFACTS_ZIP = str(os.getenv("SEC_COMPANYFACTS_ZIP", str(SEC_SHARIA_DATA_DIR / "companyfacts.zip")) or str(SEC_SHARIA_DATA_DIR / "companyfacts.zip"))
+SEC_TICKERS_EXCHANGE_JSON = str(os.getenv("SEC_TICKERS_EXCHANGE_JSON", str(SEC_SHARIA_DATA_DIR / "company_tickers_exchange.json")) or str(SEC_SHARIA_DATA_DIR / "company_tickers_exchange.json"))
+SEC_SHARIA_MAX_EVIDENCE_AGE_DAYS = int(_env_float("SEC_SHARIA_MAX_EVIDENCE_AGE_DAYS", 540.0))
+
 # GitHub sync for durable app-generated data (manual Sharia exclusions, later archives).
 GITHUB_SYNC_TOKEN = str(os.getenv("GITHUB_SYNC_TOKEN", "") or "").strip()
 GITHUB_SYNC_REPO = str(os.getenv("GITHUB_SYNC_REPO", "") or "").strip()  # owner/repo

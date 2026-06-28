@@ -8,9 +8,26 @@ from .settings import (
     SHARIA_MAX_IMPERMISSIBLE_REVENUE_RATIO,
     SHARIA_GRAY_CASH_TO_ASSETS,
     SHARIA_BLOCK_GRAY_IN_SOURCE,
+    SHARIA_SEC_PRIMARY_ENABLED,
+    SHARIA_LEGACY_FINANCIALS_ENABLED,
 )
 from .utils import *
 from .data_loader import BALANCE_DATA, INCOME_DATA, COMPANIES_DATA, SECTOR_DATA
+
+try:
+    from .sec_sharia_store import (
+        get_sec_financials,
+        get_sec_screen_result,
+        map_sec_result_to_assessment,
+        sec_missing_response,
+        is_sec_sharia_ready,
+    )
+except Exception:  # keep older deployments bootable if the module is missing mid-update
+    get_sec_financials = None
+    get_sec_screen_result = None
+    map_sec_result_to_assessment = None
+    sec_missing_response = None
+    is_sec_sharia_ready = None
 
 
 def _first_number(row: dict, names: list[str], default: float = 0.0) -> float:
@@ -195,6 +212,48 @@ def assess_sharia(symbol, sector, industry, total_assets, cash, total_debt, manu
             "source_filter_action": "block",
         }
 
+    # V2W19b: SEC XBRL becomes the primary financial evidence source only after
+    # the one-click admin loader completes a full import and writes the active
+    # flag. This keeps deployment safe: before activation, the legacy local
+    # filter remains available; after activation, old SimFin/CSV cannot grant clean.
+    if bool(SHARIA_SEC_PRIMARY_ENABLED) and is_sec_sharia_ready is not None and bool(is_sec_sharia_ready()) and map_sec_result_to_assessment is not None:
+        try:
+            sec_result = get_sec_screen_result(symbol) if get_sec_screen_result is not None else None
+            if sec_result is None and sec_missing_response is not None:
+                sec_result = sec_missing_response(symbol)
+            sec_assessment = map_sec_result_to_assessment(symbol, sec_result)
+            if approval_entry and bool(sec_assessment.get("is_gray", False)):
+                resp = _manual_approved_response(symbol, approval_entry, str(sec_assessment.get("reason", "") or ""))
+                resp.update({
+                    "sharia_evidence_source": "manual_override_over_sec_gray",
+                    "evidence_source": "SEC",
+                    "evidence_age_days": sec_assessment.get("evidence_age_days"),
+                    "filing_date": sec_assessment.get("filing_date", ""),
+                    "period_end": sec_assessment.get("period_end", ""),
+                })
+                return resp
+            return sec_assessment
+        except Exception:
+            # Fail closed as gray if SEC mode is requested but the local store is unavailable.
+            if approval_entry:
+                return _manual_approved_response(symbol, approval_entry, "تعذر قراءة قاعدة SEC المحلية")
+            return {
+                "status": "sec_missing_data",
+                "label": "رمادي — SEC غير متاح",
+                "reason": "تعذر قراءة قاعدة SEC المحلية؛ لا يستخدم SimFin/CSV القديم كدليل clean في V2W19a.",
+                "manual_excluded": False,
+                "manual_approved": False,
+                "is_gray": True,
+                "is_halal": True,
+                "should_block": False,
+                "note": "",
+                "debt_to_assets": None,
+                "interest_expense_to_revenue": None,
+                "cash_to_assets": None,
+                "source_filter_action": "gray",
+                "sharia_evidence_source": "SEC",
+            }
+
     total_assets = float(total_assets or 0)
     cash = float(cash or 0)
     total_debt = float(total_debt or 0)
@@ -360,6 +419,62 @@ def is_halal(sector, industry, total_assets, cash, total_debt):
 
 def get_financials(symbol, prev_data=None):
     symbol = normalize_symbol_text(symbol)
+
+    # V2W19a: prefer compact imported SEC facts. If SEC mode is enabled and no
+    # SEC row exists, return empty financials so the caller becomes gray/review-only
+    # rather than clean based on stale legacy SimFin CSVs.
+    if bool(SHARIA_SEC_PRIMARY_ENABLED) and get_sec_financials is not None:
+        try:
+            sec = get_sec_financials(symbol)
+            if sec:
+                cash = float(sec.get("cash_and_equivalents", 0) or 0) + float(sec.get("short_term_investments", 0) or 0)
+                total_assets = float(sec.get("assets", 0) or 0)
+                total_debt = float(sec.get("total_debt", 0) or 0)
+                revenue = float(sec.get("revenue", 0) or 0)
+                interest_expense_net = float(sec.get("interest_expense", 0) or 0)
+                debt_to_assets = (total_debt / total_assets) if total_assets > 0 else None
+                cash_to_assets = (cash / total_assets) if total_assets > 0 else None
+                interest_expense_to_revenue = (abs(interest_expense_net) / revenue) if revenue > 0 and interest_expense_net else None
+                return {
+                    "total_assets": total_assets,
+                    "cash": cash,
+                    "short_debt": 0.0,
+                    "long_debt": total_debt,
+                    "total_debt": total_debt,
+                    "shares": 0.0,
+                    "revenue": revenue,
+                    "interest_expense_net": interest_expense_net,
+                    "non_operating_income": 0.0,
+                    "current_price": 0.0,
+                    "approx_market_cap": 0.0,
+                    "debt_to_market_cap": None,
+                    "debt_to_assets": debt_to_assets,
+                    "cash_to_assets": cash_to_assets,
+                    "interest_expense_to_revenue": interest_expense_to_revenue,
+                    "non_operating_income_to_revenue": None,
+                    "source": "SEC",
+                    "filing_date": sec.get("filing_date", ""),
+                    "period_end": sec.get("period_end", ""),
+                    "evidence_age_days": sec.get("fact_age_days"),
+                }
+            if not bool(SHARIA_LEGACY_FINANCIALS_ENABLED):
+                return {
+                    "total_assets": 0.0, "cash": 0.0, "short_debt": 0.0, "long_debt": 0.0, "total_debt": 0.0,
+                    "shares": 0.0, "revenue": 0.0, "interest_expense_net": 0.0, "non_operating_income": 0.0,
+                    "current_price": 0.0, "approx_market_cap": 0.0, "debt_to_market_cap": None, "debt_to_assets": None,
+                    "cash_to_assets": None, "interest_expense_to_revenue": None, "non_operating_income_to_revenue": None,
+                    "source": "SEC_MISSING",
+                }
+        except Exception:
+            if not bool(SHARIA_LEGACY_FINANCIALS_ENABLED):
+                return {
+                    "total_assets": 0.0, "cash": 0.0, "short_debt": 0.0, "long_debt": 0.0, "total_debt": 0.0,
+                    "shares": 0.0, "revenue": 0.0, "interest_expense_net": 0.0, "non_operating_income": 0.0,
+                    "current_price": 0.0, "approx_market_cap": 0.0, "debt_to_market_cap": None, "debt_to_assets": None,
+                    "cash_to_assets": None, "interest_expense_to_revenue": None, "non_operating_income_to_revenue": None,
+                    "source": "SEC_ERROR",
+                }
+
     b = BALANCE_DATA.get(symbol, {}) or {}
     i = INCOME_DATA.get(symbol, {}) or {}
 
