@@ -6715,8 +6715,9 @@ def maintenance_sec_sharia_import(payload: dict = Body(default={})):
 def admin_sharia_platform_reference_seed(confirm: str = ""):
     """Seed the known trading-platform Sharia decisions as manual overrides.
 
-    One browser link after V2W19d:
-    /admin/sharia/platform-reference-seed?confirm=YES
+    V2W19d2 hotfix: this endpoint must never return a raw 500.  It saves the
+    platform references first, then returns a lightweight JSON result.  The user
+    can open /diagnostics/sharia-formula-calibration separately after seeding.
     """
     if str(confirm or "").upper() != "YES":
         return {
@@ -6727,14 +6728,28 @@ def admin_sharia_platform_reference_seed(confirm: str = ""):
             "will_block": PLATFORM_BLOCKED_REFERENCE_V2W19D,
             "note": "أضف confirm=YES لحفظ قرارات منصة التداول كـ overrides أعلى من SEC.",
         }
-    approved = [_upsert_manual_sharia_approval(s, "معتمد في منصة التداول — seed V2W19d", "platform_reference_seed_v2w19d") for s in PLATFORM_APPROVED_REFERENCE_V2W19D]
-    blocked = [_upsert_manual_sharia_exclusion(s, "غير شرعي في منصة التداول — seed V2W19d", "platform_reference_seed_v2w19d") for s in PLATFORM_BLOCKED_REFERENCE_V2W19D]
+    approved = []
+    blocked = []
+    errors = []
+    for s in PLATFORM_APPROVED_REFERENCE_V2W19D:
+        try:
+            approved.append(_upsert_manual_sharia_approval(s, "معتمد في منصة التداول — seed V2W19d", "platform_reference_seed_v2w19d"))
+        except Exception as exc:
+            errors.append({"symbol": s, "action": "approve", "error": f"{type(exc).__name__}: {str(exc)[:240]}"})
+    for s in PLATFORM_BLOCKED_REFERENCE_V2W19D:
+        try:
+            blocked.append(_upsert_manual_sharia_exclusion(s, "غير شرعي في منصة التداول — seed V2W19d", "platform_reference_seed_v2w19d"))
+        except Exception as exc:
+            errors.append({"symbol": s, "action": "block", "error": f"{type(exc).__name__}: {str(exc)[:240]}"})
     return {
-        "ok": True,
+        "ok": not bool(errors),
         "version": SEC_SHARIA_VERSION,
+        "approved_requested": PLATFORM_APPROVED_REFERENCE_V2W19D,
+        "blocked_requested": PLATFORM_BLOCKED_REFERENCE_V2W19D,
         "approved": approved,
         "blocked": blocked,
-        "formula_calibration": sec_formula_calibration_report(sample_limit=12),
+        "errors": errors,
+        "note": "إذا كانت errors فارغة فالحفظ تم. افتح رابط التشخيص التالي للتأكد.",
         "next": "/diagnostics/sharia-formula-calibration",
     }
 
@@ -6747,7 +6762,7 @@ def admin_sharia_approve_get(symbol: str = "", confirm: str = "", note: str = ""
     if str(confirm or "").upper() != "YES":
         return {"ok": False, "needs_confirm": True, "open": f"/admin/sharia/approve?symbol={symbol}&confirm=YES", "symbol": symbol}
     result = _upsert_manual_sharia_approval(symbol, note or "معتمد في منصة التداول", "platform_manual_get_v2w19d")
-    return {"ok": True, "result": result, "symbol": symbol, "formula_calibration": sec_formula_calibration_report(sample_limit=8)}
+    return {"ok": True, "result": result, "symbol": symbol, "next": "/diagnostics/sharia-formula-calibration"}
 
 
 @app.get("/admin/sharia/block")
@@ -6758,7 +6773,7 @@ def admin_sharia_block_get(symbol: str = "", confirm: str = "", note: str = ""):
     if str(confirm or "").upper() != "YES":
         return {"ok": False, "needs_confirm": True, "open": f"/admin/sharia/block?symbol={symbol}&confirm=YES", "symbol": symbol}
     result = _upsert_manual_sharia_exclusion(symbol, note or "غير شرعي في منصة التداول", "platform_manual_get_v2w19d")
-    return {"ok": True, "result": result, "symbol": symbol, "formula_calibration": sec_formula_calibration_report(sample_limit=8)}
+    return {"ok": True, "result": result, "symbol": symbol, "next": "/diagnostics/sharia-formula-calibration"}
 
 
 @app.post("/sharia-exclusions/add")
