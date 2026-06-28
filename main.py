@@ -316,6 +316,67 @@ from app.tomorrow_prep_session_builder import (
     format_tomorrow_prep_session_brief,
 )
 
+
+
+# V2W19d platform/manual reference seeds. These are the user's known platform
+# Sharia decisions used to calibrate the SEC formula without making SEC strict.
+PLATFORM_APPROVED_REFERENCE_V2W19D = ["AAPL", "EHGO", "ICCM", "NIXX", "HOUR"]
+PLATFORM_BLOCKED_REFERENCE_V2W19D = ["TPC", "SNBR", "BDTX", "BLND", "PRFX", "GUTS", "KUST"]
+
+
+def _upsert_manual_sharia_exclusion(symbol: str, note: str = "", source: str = "manual") -> dict:
+    symbol = normalize_symbol_text(symbol)
+    if not symbol:
+        return {"ok": False, "error": "missing_symbol"}
+    note = str(note or "استبعاد منصة التداول الشرعية").strip()
+    now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    items = load_manual_sharia_exclusions()
+    found = False
+    for item in items:
+        if normalize_symbol_text(item.get("symbol", "")) == symbol:
+            item["note"] = note
+            item["reason"] = note
+            item["updated_at"] = now_str
+            if not item.get("excluded_at"):
+                item["excluded_at"] = now_str
+            item["source"] = source
+            found = True
+            break
+    if not found:
+        items.insert(0, {"symbol": symbol, "note": note, "reason": note, "excluded_at": now_str, "updated_at": now_str, "source": source})
+    save_manual_sharia_exclusions(items)
+    approvals_before = load_manual_sharia_approvals()
+    approvals_after = [item for item in approvals_before if normalize_symbol_text(item.get("symbol", "")) != symbol]
+    if len(approvals_after) != len(approvals_before):
+        save_manual_sharia_approvals(approvals_after)
+    return {"ok": True, "symbol": symbol, "exclusions_count": len(items), "approval_removed": len(approvals_after) != len(approvals_before)}
+
+
+def _upsert_manual_sharia_approval(symbol: str, note: str = "", source: str = "manual") -> dict:
+    symbol = normalize_symbol_text(symbol)
+    if not symbol:
+        return {"ok": False, "error": "missing_symbol"}
+    note = str(note or "اعتماد منصة التداول الشرعية").strip()
+    now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+    exclusions = [item for item in load_manual_sharia_exclusions() if normalize_symbol_text(item.get("symbol", "")) != symbol]
+    save_manual_sharia_exclusions(exclusions)
+    items = load_manual_sharia_approvals()
+    found = False
+    for item in items:
+        if normalize_symbol_text(item.get("symbol", "")) == symbol:
+            item["note"] = note
+            item["reason"] = note
+            item["updated_at"] = now_str
+            if not item.get("approved_at"):
+                item["approved_at"] = now_str
+            item["source"] = source
+            found = True
+            break
+    if not found:
+        items.insert(0, {"symbol": symbol, "note": note, "reason": note, "approved_at": now_str, "updated_at": now_str, "source": source})
+    save_manual_sharia_approvals(items)
+    return {"ok": True, "symbol": symbol, "approvals_count": len(items)}
+
 app = FastAPI()
 # V2W12b: compress JSON payloads so dynamic snapshots/diffs do not burn Railway egress.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
@@ -6649,50 +6710,65 @@ def maintenance_sec_sharia_import(payload: dict = Body(default={})):
     return result
 
 
+
+@app.get("/admin/sharia/platform-reference-seed")
+def admin_sharia_platform_reference_seed(confirm: str = ""):
+    """Seed the known trading-platform Sharia decisions as manual overrides.
+
+    One browser link after V2W19d:
+    /admin/sharia/platform-reference-seed?confirm=YES
+    """
+    if str(confirm or "").upper() != "YES":
+        return {
+            "ok": False,
+            "needs_confirm": True,
+            "open": "/admin/sharia/platform-reference-seed?confirm=YES",
+            "will_approve": PLATFORM_APPROVED_REFERENCE_V2W19D,
+            "will_block": PLATFORM_BLOCKED_REFERENCE_V2W19D,
+            "note": "أضف confirm=YES لحفظ قرارات منصة التداول كـ overrides أعلى من SEC.",
+        }
+    approved = [_upsert_manual_sharia_approval(s, "معتمد في منصة التداول — seed V2W19d", "platform_reference_seed_v2w19d") for s in PLATFORM_APPROVED_REFERENCE_V2W19D]
+    blocked = [_upsert_manual_sharia_exclusion(s, "غير شرعي في منصة التداول — seed V2W19d", "platform_reference_seed_v2w19d") for s in PLATFORM_BLOCKED_REFERENCE_V2W19D]
+    return {
+        "ok": True,
+        "version": SEC_SHARIA_VERSION,
+        "approved": approved,
+        "blocked": blocked,
+        "formula_calibration": sec_formula_calibration_report(sample_limit=12),
+        "next": "/diagnostics/sharia-formula-calibration",
+    }
+
+
+@app.get("/admin/sharia/approve")
+def admin_sharia_approve_get(symbol: str = "", confirm: str = "", note: str = ""):
+    symbol = normalize_symbol_text(symbol)
+    if not symbol:
+        return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
+    if str(confirm or "").upper() != "YES":
+        return {"ok": False, "needs_confirm": True, "open": f"/admin/sharia/approve?symbol={symbol}&confirm=YES", "symbol": symbol}
+    result = _upsert_manual_sharia_approval(symbol, note or "معتمد في منصة التداول", "platform_manual_get_v2w19d")
+    return {"ok": True, "result": result, "symbol": symbol, "formula_calibration": sec_formula_calibration_report(sample_limit=8)}
+
+
+@app.get("/admin/sharia/block")
+def admin_sharia_block_get(symbol: str = "", confirm: str = "", note: str = ""):
+    symbol = normalize_symbol_text(symbol)
+    if not symbol:
+        return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
+    if str(confirm or "").upper() != "YES":
+        return {"ok": False, "needs_confirm": True, "open": f"/admin/sharia/block?symbol={symbol}&confirm=YES", "symbol": symbol}
+    result = _upsert_manual_sharia_exclusion(symbol, note or "غير شرعي في منصة التداول", "platform_manual_get_v2w19d")
+    return {"ok": True, "result": result, "symbol": symbol, "formula_calibration": sec_formula_calibration_report(sample_limit=8)}
+
+
 @app.post("/sharia-exclusions/add")
 def sharia_exclusions_add(payload: dict = Body(...)):
     symbol = normalize_symbol_text(payload.get("symbol", ""))
     if not symbol:
         return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
     note = str(payload.get("note", "") or payload.get("reason", "") or "استبعاد يدوي شرعي").strip()
-    items = load_manual_sharia_exclusions()
-    now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
-    found = False
-    for item in items:
-        if normalize_symbol_text(item.get("symbol", "")) == symbol:
-            item["note"] = note
-            item["reason"] = note
-            item["updated_at"] = now_str
-            if not item.get("excluded_at"):
-                item["excluded_at"] = now_str
-            item["source"] = "manual"
-            found = True
-            break
-    if not found:
-        items.insert(0, {"symbol": symbol, "note": note, "reason": note, "excluded_at": now_str, "updated_at": now_str, "source": "manual"})
-    save_manual_sharia_exclusions(items)
-
-    # Sharia safety rule: a manual exclusion must be authoritative.
-    # If the same symbol was previously manually approved, remove that old
-    # approval immediately so the stock cannot reappear in cached/frozen lists
-    # as approved after the user excludes it.
-    approvals_before = load_manual_sharia_approvals()
-    approvals_after = [
-        item for item in approvals_before
-        if normalize_symbol_text(item.get("symbol", "")) != symbol
-    ]
-    approval_removed = len(approvals_after) != len(approvals_before)
-    if approval_removed:
-        save_manual_sharia_approvals(approvals_after)
-
-    return {
-        "ok": True,
-        "count": len(items),
-        "symbol": symbol,
-        "saved": True,
-        "approval_removed": approval_removed,
-        "rule": "manual_exclusion_overrides_manual_approval",
-    }
+    result = _upsert_manual_sharia_exclusion(symbol, note, "manual")
+    return {"ok": bool(result.get("ok")), "count": result.get("exclusions_count"), "symbol": symbol, "saved": True, "approval_removed": result.get("approval_removed"), "rule": "manual_exclusion_overrides_manual_approval"}
 
 
 @app.post("/sharia-exclusions/remove")
@@ -6711,27 +6787,8 @@ def sharia_approvals_add(payload: dict = Body(...)):
     if not symbol:
         return JSONResponse({"ok": False, "error": "missing_symbol"}, status_code=400)
     note = str(payload.get("note", "") or payload.get("reason", "") or "اعتماد يدوي بعد مراجعة الشرعية").strip()
-    # If user approves a gray symbol, remove it from manual exclusions if present.
-    exclusions = [item for item in load_manual_sharia_exclusions() if normalize_symbol_text(item.get("symbol", "")) != symbol]
-    save_manual_sharia_exclusions(exclusions)
-
-    items = load_manual_sharia_approvals()
-    now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
-    found = False
-    for item in items:
-        if normalize_symbol_text(item.get("symbol", "")) == symbol:
-            item["note"] = note
-            item["reason"] = note
-            item["updated_at"] = now_str
-            if not item.get("approved_at"):
-                item["approved_at"] = now_str
-            item["source"] = "manual"
-            found = True
-            break
-    if not found:
-        items.insert(0, {"symbol": symbol, "note": note, "reason": note, "approved_at": now_str, "updated_at": now_str, "source": "manual"})
-    save_manual_sharia_approvals(items)
-    return {"ok": True, "count": len(items), "symbol": symbol, "saved": True}
+    result = _upsert_manual_sharia_approval(symbol, note, "manual")
+    return {"ok": bool(result.get("ok")), "count": result.get("approvals_count"), "symbol": symbol, "saved": True}
 
 
 @app.post("/sharia-approvals/remove")
