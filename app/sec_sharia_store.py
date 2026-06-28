@@ -25,7 +25,7 @@ from .settings import (
 from .sqlite_store import SQLITE_ENABLED, _connect, init_db
 from .utils import normalize_symbol_text, safe_round
 
-SEC_SHARIA_VERSION = "sec_xbrl_sharia_formula_calibration_v2w19c_2026_06_28"
+SEC_SHARIA_VERSION = "sec_xbrl_platform_override_calibration_v2w19d_2026_06_28"
 
 SEC_DIR = Path(os.getenv("SEC_SHARIA_DATA_DIR", str(DATA_DIR / "sec")) or str(DATA_DIR / "sec"))
 SEC_COMPANYFACTS_ZIP = Path(os.getenv("SEC_COMPANYFACTS_ZIP", str(SEC_DIR / "companyfacts.zip")) or str(SEC_DIR / "companyfacts.zip"))
@@ -824,26 +824,90 @@ def recalibrate_sec_screen_results(limit: int | None = None) -> dict:
 
 
 def sec_formula_calibration_report(sample_limit: int = 12) -> dict:
-    """Small platform-aware formula report.
+    """Platform-aware formula report.
 
-    It checks known user-reviewed names against the SEC formula so we can spot
-    false warnings/false passes without changing the user's manual platform
-    authority.
+    V2W19d distinguishes between:
+    - SEC formula evidence (priority / warning / review), and
+    - the user's trading-platform/manual overrides, which are authoritative.
+
+    The previous V2W19c report correctly softened SEC financial failures, but it
+    showed the platform-blocked reference names as not blocked because the report
+    did not apply the stored manual/platform override layer.  This report applies
+    that layer first, so TPC/SNBR/BDTX/BLND/PRFX/GUTS/KUST become hard-blocked
+    once the platform reference seed has been saved.
     """
     approved_reference = ["AAPL", "EHGO", "ICCM", "NIXX", "HOUR"]
     blocked_reference = ["TPC", "SNBR", "BDTX", "BLND", "PRFX", "GUTS", "KUST"]
+    try:
+        from .data_store import get_manual_sharia_exclusions_map, get_manual_sharia_approvals_map
+        manual_exclusions = get_manual_sharia_exclusions_map() or {}
+        manual_approvals = get_manual_sharia_approvals_map() or {}
+    except Exception:
+        manual_exclusions = {}
+        manual_approvals = {}
+
+    def _manual_block_row(sym: str, expected: str, screen: dict) -> dict:
+        item = manual_exclusions.get(sym) or {}
+        return {
+            "symbol": sym,
+            "platform_reference": expected,
+            "override_status": "platform_blocked" if expected == "platform_blocked" else "manual_excluded",
+            "sec_status": str(screen.get("final_status") or "sec_missing_data"),
+            "sec_label": str(screen.get("label") or ""),
+            "priority_tier": "hard_block",
+            "trade_policy": "blocked_by_platform_or_manual_override",
+            "should_block_now": True,
+            "is_gray_now": False,
+            "mismatch_needs_review": False if expected == "platform_blocked" else True,
+            "reason": str(item.get("note") or item.get("reason") or "مستبعد في منصة التداول/القائمة اليدوية؛ هذا override أعلى من SEC."),
+            "override_source": str(item.get("source") or "manual"),
+            "debt_ratio": screen.get("debt_ratio"),
+            "cash_ratio": screen.get("cash_ratio"),
+            "interest_ratio": screen.get("interest_ratio"),
+            "evidence_age_days": screen.get("evidence_age_days"),
+        }
+
+    def _manual_approved_row(sym: str, expected: str, screen: dict) -> dict:
+        item = manual_approvals.get(sym) or {}
+        return {
+            "symbol": sym,
+            "platform_reference": expected,
+            "override_status": "platform_approved" if expected == "platform_approved" else "manual_approved",
+            "sec_status": str(screen.get("final_status") or "sec_missing_data"),
+            "sec_label": str(screen.get("label") or ""),
+            "priority_tier": "priority_clean",
+            "trade_policy": "allowed_if_technical_plan_valid",
+            "should_block_now": False,
+            "is_gray_now": False,
+            "mismatch_needs_review": False if expected == "platform_approved" else True,
+            "reason": str(item.get("note") or item.get("reason") or "معتمد في منصة التداول/القائمة اليدوية؛ هذا override أعلى من SEC."),
+            "override_source": str(item.get("source") or "manual"),
+            "debt_ratio": screen.get("debt_ratio"),
+            "cash_ratio": screen.get("cash_ratio"),
+            "interest_ratio": screen.get("interest_ratio"),
+            "evidence_age_days": screen.get("evidence_age_days"),
+        }
 
     def _row(sym: str, expected: str) -> dict:
         screen = get_sec_screen_result(sym) or sec_missing_response(sym)
+        # Highest authority: user/platform block > user/platform approval > SEC evidence.
+        if sym in manual_exclusions:
+            return _manual_block_row(sym, expected, screen)
+        if sym in manual_approvals:
+            return _manual_approved_row(sym, expected, screen)
+
         assessment = map_sec_result_to_assessment(sym, screen)
         status = str(screen.get("final_status") or assessment.get("status") or "")
         if expected == "platform_approved":
             mismatch = status not in {"sec_clean"}
         else:
+            # If a known platform-blocked name is still SEC-clean and has not
+            # been seeded into manual exclusions, it is a dangerous false pass.
             mismatch = status == "sec_clean"
         return {
             "symbol": sym,
             "platform_reference": expected,
+            "override_status": "not_seeded",
             "sec_status": status,
             "sec_label": assessment.get("label", ""),
             "priority_tier": assessment.get("sharia_priority_tier", ""),
@@ -852,35 +916,44 @@ def sec_formula_calibration_report(sample_limit: int = 12) -> dict:
             "is_gray_now": bool(assessment.get("is_gray", False)),
             "mismatch_needs_review": bool(mismatch),
             "reason": assessment.get("reason", ""),
-            "debt_ratio": assessment.get("debt_to_assets"),
-            "cash_ratio": assessment.get("cash_to_assets"),
-            "interest_ratio": assessment.get("interest_expense_to_revenue"),
-            "evidence_age_days": assessment.get("evidence_age_days"),
+            "override_source": "none",
+            "debt_ratio": screen.get("debt_ratio"),
+            "cash_ratio": screen.get("cash_ratio"),
+            "interest_ratio": screen.get("interest_ratio"),
+            "evidence_age_days": screen.get("evidence_age_days"),
         }
 
     approved_rows = [_row(s, "platform_approved") for s in approved_reference]
     blocked_rows = [_row(s, "platform_blocked") for s in blocked_reference]
-    status = sec_sharia_status(sample_limit=sample_limit)
+    approved_mismatch = [r for r in approved_rows if r.get("mismatch_needs_review")]
+    blocked_false_clean = [r for r in blocked_rows if r.get("mismatch_needs_review")]
+    seeded_approved = [s for s in approved_reference if s in manual_approvals]
+    seeded_blocked = [s for s in blocked_reference if s in manual_exclusions]
     return {
         "ok": True,
         "version": SEC_SHARIA_VERSION,
-        "formula_policy": "balanced_priority_not_strict_block",
+        "formula_policy": "balanced_priority_with_platform_override_authority",
         "strict_sec_warning_blocks_enabled": bool(SHARIA_SEC_FINANCIAL_WARNING_BLOCKS),
         "reference_summary": {
             "approved_reference_count": len(approved_rows),
-            "approved_mismatch_count": sum(1 for r in approved_rows if r.get("mismatch_needs_review")),
+            "approved_mismatch_count": len(approved_mismatch),
             "blocked_reference_count": len(blocked_rows),
-            "blocked_false_clean_count": sum(1 for r in blocked_rows if r.get("mismatch_needs_review")),
+            "blocked_false_clean_count": len(blocked_false_clean),
+            "platform_approved_seeded_count": len(seeded_approved),
+            "platform_blocked_seeded_count": len(seeded_blocked),
+            "platform_approved_seeded": seeded_approved,
+            "platform_blocked_seeded": seeded_blocked,
         },
         "platform_approved_reference": approved_rows,
         "platform_blocked_reference": blocked_rows,
-        "current_sec_counts": (status.get("counts") or {}).get("by_final_status", {}),
+        "current_sec_counts": sec_status_counts(),
         "recommended_usage": {
             "priority_clean": ["manual_approved", "platform_approved", "sec_clean"],
             "limited_review_not_hidden": ["sec_financial_warning", "sec_needs_review", "sec_missing_data", "sec_stale_data"],
             "hard_block_only": ["manual_excluded", "platform_blocked", "activity_haram_confirmed", "non_compliant_activity"],
             "telegram_buy_now": "priority_clean فقط",
             "gray_cap_rule": "الرمادي يستخدم كاحتياطي محدود ولا يزاحم clean في المصدر",
+            "platform_override_rule": "نتيجة منصة التداول/الاستبعاد اليدوي أعلى من SEC دائمًا",
         },
     }
 
