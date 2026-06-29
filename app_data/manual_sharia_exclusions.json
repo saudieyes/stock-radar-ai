@@ -909,7 +909,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "CARS",
-    "updated_at": "2026-06-28 18:04:31"
+    "updated_at": "2026-06-28 20:46:11"
   },
   "CAT": {
     "excluded_at": "2026-05-01 17:09:09",
@@ -1917,7 +1917,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "FMC",
-    "updated_at": "2026-06-28 18:04:58"
+    "updated_at": "2026-06-28 20:46:41"
   },
   "FNKO": {
     "excluded_at": "2026-05-29 12:45:48",
@@ -3397,7 +3397,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "PAYO",
-    "updated_at": "2026-06-28 20:40:04"
+    "updated_at": "2026-06-28 20:45:38"
   },
   "PAYS": {
     "excluded_at": "2026-05-01 15:18:47",
