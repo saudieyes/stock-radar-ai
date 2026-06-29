@@ -167,6 +167,14 @@
     "symbol": "AFCG",
     "updated_at": "2026-06-26 09:47:22"
   },
+  "AGBK": {
+    "excluded_at": "2026-06-28 20:36:29",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "AGBK",
+    "updated_at": "2026-06-28 20:36:29"
+  },
   "AGH": {
     "excluded_at": "2026-05-01 11:24:11",
     "note": "استبعاد يدوي شرعي",
@@ -566,6 +574,14 @@
     "source": "manual",
     "symbol": "AVAH",
     "updated_at": "2026-06-22 03:40:24"
+  },
+  "AVAL": {
+    "excluded_at": "2026-06-28 20:38:03",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "AVAL",
+    "updated_at": "2026-06-28 20:38:03"
   },
   "AVBP": {
     "excluded_at": "2026-06-03 10:40:52",
@@ -1157,7 +1173,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "CNTB",
-    "updated_at": "2026-06-28 20:10:07"
+    "updated_at": "2026-06-28 20:38:51"
   },
   "CNTN": {
     "excluded_at": "2026-06-26 15:50:52",
@@ -1551,6 +1567,14 @@
     "symbol": "DOW",
     "updated_at": "2026-05-04 12:10:35"
   },
+  "DPRO": {
+    "excluded_at": "2026-06-28 20:39:28",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DPRO",
+    "updated_at": "2026-06-28 20:39:28"
+  },
   "DRI": {
     "excluded_at": "2026-05-24 13:04:23",
     "note": "استبعاد يدوي شرعي",
@@ -1582,6 +1606,14 @@
     "source": "manual",
     "symbol": "DRVN",
     "updated_at": "2026-05-18 10:16:44"
+  },
+  "DSX": {
+    "excluded_at": "2026-06-28 20:35:31",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "DSX",
+    "updated_at": "2026-06-28 20:35:31"
   },
   "DTIL": {
     "excluded_at": "2026-06-26 17:10:26",
@@ -2997,7 +3029,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NB",
-    "updated_at": "2026-06-28 20:04:37"
+    "updated_at": "2026-06-28 20:35:11"
   },
   "NBIS": {
     "excluded_at": "2026-05-01 11:25:52",
@@ -3029,7 +3061,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NEUP",
-    "updated_at": "2026-06-28 20:16:11"
+    "updated_at": "2026-06-28 20:37:34"
   },
   "NEXA": {
     "excluded_at": "2026-06-15 08:12:36",
@@ -3365,7 +3397,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "PAYO",
-    "updated_at": "2026-06-28 20:17:17"
+    "updated_at": "2026-06-28 20:40:04"
   },
   "PAYS": {
     "excluded_at": "2026-05-01 15:18:47",
