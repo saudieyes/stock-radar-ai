@@ -1189,7 +1189,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "CNTX",
-    "updated_at": "2026-06-28 20:28:44"
+    "updated_at": "2026-06-28 20:49:25"
   },
   "CNVS": {
     "excluded_at": "2026-06-26 15:44:15",
@@ -1637,7 +1637,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "DUOT",
-    "updated_at": "2026-06-28 20:10:49"
+    "updated_at": "2026-06-28 20:49:54"
   },
   "DVN": {
     "excluded_at": "2026-05-15 10:20:06",
@@ -2845,7 +2845,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "MBI",
-    "updated_at": "2026-06-28 20:28:57"
+    "updated_at": "2026-06-28 20:49:39"
   },
   "MBRX": {
     "excluded_at": "2026-06-24 12:31:14",
@@ -3061,7 +3061,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NEUP",
-    "updated_at": "2026-06-28 20:37:34"
+    "updated_at": "2026-06-28 20:48:32"
   },
   "NEXA": {
     "excluded_at": "2026-06-15 08:12:36",
@@ -3741,7 +3741,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "RMNI",
-    "updated_at": "2026-06-28 20:28:26"
+    "updated_at": "2026-06-28 20:49:08"
   },
   "RNAC": {
     "excluded_at": "2026-06-26 17:07:33",
