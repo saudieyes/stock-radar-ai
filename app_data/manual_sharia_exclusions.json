@@ -3015,6 +3015,14 @@
     "symbol": "MYPS",
     "updated_at": "2026-06-26 15:15:51"
   },
+  "NAKA": {
+    "excluded_at": "2026-06-29 04:19:46",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "NAKA",
+    "updated_at": "2026-06-29 04:19:46"
+  },
   "NAT": {
     "excluded_at": "2026-04-27 17:55:42",
     "note": "",
@@ -3038,6 +3046,14 @@
     "source": "manual",
     "symbol": "NBIS",
     "updated_at": "2026-05-01 11:25:52"
+  },
+  "NCPL": {
+    "excluded_at": "2026-06-29 04:19:23",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "NCPL",
+    "updated_at": "2026-06-29 04:19:23"
   },
   "NE": {
     "excluded_at": "2026-04-27 12:43:46",
