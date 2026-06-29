@@ -421,7 +421,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "AP",
-    "updated_at": "2026-06-28 20:07:30"
+    "updated_at": "2026-06-28 21:09:04"
   },
   "APA": {
     "excluded_at": "2026-05-04 14:20:28",
@@ -1373,7 +1373,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "CVRX",
-    "updated_at": "2026-06-28 20:11:51"
+    "updated_at": "2026-06-28 21:07:01"
   },
   "CVS": {
     "excluded_at": "2026-05-13 10:08:33",
@@ -3029,7 +3029,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NB",
-    "updated_at": "2026-06-28 20:35:11"
+    "updated_at": "2026-06-28 21:08:21"
   },
   "NBIS": {
     "excluded_at": "2026-05-01 11:25:52",
@@ -3101,7 +3101,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NLOP",
-    "updated_at": "2026-06-28 21:03:37"
+    "updated_at": "2026-06-28 21:09:27"
   },
   "NMFC": {
     "excluded_at": "2026-06-28 20:06:33",
@@ -3109,7 +3109,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NMFC",
-    "updated_at": "2026-06-28 21:03:14"
+    "updated_at": "2026-06-28 21:08:40"
   },
   "NNBR": {
     "excluded_at": "2026-06-24 08:50:42",
@@ -3677,7 +3677,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "RDZN",
-    "updated_at": "2026-06-28 20:12:18"
+    "updated_at": "2026-06-28 21:07:14"
   },
   "RETL": {
     "excluded_at": "2026-06-24 13:23:01",
