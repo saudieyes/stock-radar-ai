@@ -269,7 +269,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "ALKS",
-    "updated_at": "2026-06-28 20:21:06"
+    "updated_at": "2026-06-28 21:00:14"
   },
   "ALL": {
     "excluded_at": "2026-06-06 17:16:21",
@@ -3141,7 +3141,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "NOWL",
-    "updated_at": "2026-06-28 20:22:48"
+    "updated_at": "2026-06-28 21:01:31"
   },
   "NRIX": {
     "excluded_at": "2026-06-12 09:58:42",
@@ -4325,7 +4325,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "UCTT",
-    "updated_at": "2026-06-28 20:20:46"
+    "updated_at": "2026-06-28 20:59:58"
   },
   "UEIC": {
     "excluded_at": "2026-06-24 09:18:23",
