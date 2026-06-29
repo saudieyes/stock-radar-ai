@@ -1151,6 +1151,14 @@
     "symbol": "CMG",
     "updated_at": "2026-06-16 11:39:42"
   },
+  "CMII": {
+    "excluded_at": "2026-06-29 18:21:05",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CMII",
+    "updated_at": "2026-06-29 18:21:05"
+  },
   "CMPS": {
     "excluded_at": "2026-05-20 10:11:17",
     "note": "استبعاد يدوي شرعي",
@@ -2127,13 +2135,21 @@
     "symbol": "GAP",
     "updated_at": "2026-05-28 10:09:11"
   },
+  "GBTG": {
+    "excluded_at": "2026-06-29 18:21:21",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "GBTG",
+    "updated_at": "2026-06-29 18:21:21"
+  },
   "GCMG": {
     "excluded_at": "2026-06-29 18:17:56",
     "note": "استبعاد يدوي شرعي",
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "GCMG",
-    "updated_at": "2026-06-29 18:17:56"
+    "updated_at": "2026-06-29 18:21:35"
   },
   "GCO": {
     "excluded_at": "2026-05-30 19:57:41",
@@ -2718,6 +2734,14 @@
     "source": "manual",
     "symbol": "LASE",
     "updated_at": "2026-06-23 11:29:41"
+  },
+  "LBGJ": {
+    "excluded_at": "2026-06-29 18:19:34",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LBGJ",
+    "updated_at": "2026-06-29 18:19:34"
   },
   "LBRDA": {
     "excluded_at": "2026-06-15 08:19:34",
