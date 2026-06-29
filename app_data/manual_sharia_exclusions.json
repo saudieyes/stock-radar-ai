@@ -1173,7 +1173,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "CNTX",
-    "updated_at": "2026-06-28 20:00:24"
+    "updated_at": "2026-06-28 20:28:44"
   },
   "CNVS": {
     "excluded_at": "2026-06-26 15:44:15",
@@ -2813,7 +2813,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "MBI",
-    "updated_at": "2026-06-28 20:10:31"
+    "updated_at": "2026-06-28 20:28:57"
   },
   "MBRX": {
     "excluded_at": "2026-06-24 12:31:14",
@@ -3709,7 +3709,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "RMNI",
-    "updated_at": "2026-06-28 20:00:10"
+    "updated_at": "2026-06-28 20:28:26"
   },
   "RNAC": {
     "excluded_at": "2026-06-26 17:07:33",
@@ -4253,7 +4253,7 @@
     "reason": "استبعاد يدوي شرعي",
     "source": "manual",
     "symbol": "TUSK",
-    "updated_at": "2026-06-28 20:02:56"
+    "updated_at": "2026-06-28 20:29:35"
   },
   "TWI": {
     "excluded_at": "2026-06-25 04:47:25",
