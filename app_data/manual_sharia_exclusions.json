@@ -4367,6 +4367,14 @@
     "symbol": "TDIC",
     "updated_at": "2026-06-23 11:00:02"
   },
+  "TDOC": {
+    "excluded_at": "2026-06-29 18:11:25",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "TDOC",
+    "updated_at": "2026-06-29 18:11:25"
+  },
   "TE": {
     "excluded_at": "2026-05-18 10:23:39",
     "note": "استبعاد يدوي شرعي",
@@ -4558,6 +4566,14 @@
     "source": "manual",
     "symbol": "UNFI",
     "updated_at": "2026-06-06 17:27:30"
+  },
+  "UPBD": {
+    "excluded_at": "2026-06-29 18:13:38",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "UPBD",
+    "updated_at": "2026-06-29 18:13:38"
   },
   "USAS": {
     "excluded_at": "2026-06-26 04:44:42",
