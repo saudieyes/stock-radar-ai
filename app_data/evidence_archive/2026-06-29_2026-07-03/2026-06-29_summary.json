@@ -1,0 +1,550 @@
+{
+  "archive_manifest": {
+    "compact_sync": true,
+    "evidence_json_original_bytes_estimate": 2839450,
+    "evidence_json_original_path": "app_data/evidence_archive/2026-06-29_2026-07-03/2026-06-29_evidence.json",
+    "evidence_json_parts": [
+      {
+        "bytes_estimate": 2318614,
+        "contains_daily_big_movers": true,
+        "label": "json_part_001",
+        "path": "app_data/evidence_archive/2026-06-29_2026-07-03/2026-06-29_evidence_part_001.json",
+        "snapshot_rows": 1500
+      }
+    ],
+    "evidence_json_split": true,
+    "evidence_json_split_target_bytes": 2550000,
+    "generated_at": "2026-06-29 22:46:00",
+    "local_counts_at_sync": {
+      "bar_symbols": 201,
+      "daily_big_movers": 182,
+      "evidence_intraday_bars": 10942,
+      "evidence_runs": 65,
+      "evidence_snapshots": 16666,
+      "evidence_winner_profiles": 80,
+      "snapshot_symbols": 784,
+      "winner_symbols": 80
+    },
+    "notes": "This manifest is the verification anchor before any Railway pruning. No deletion is performed by sync. Oversized evidence archives may be split into safe JSON parts.",
+    "ok": true,
+    "prune_allowed_after_verify": true,
+    "trade_date": "2026-06-29",
+    "version": "evidence_archive_manifest_v5d_split_safe",
+    "week_key": "2026-06-29_2026-07-03"
+  },
+  "intraday_bars": {
+    "c": 10942,
+    "symbols": 201
+  },
+  "market_fear": {
+    "badge": "⚪",
+    "cache_hit": true,
+    "captured_at": "2026-06-29 22:45:49",
+    "captured_ts": 1782787548.8972037,
+    "change_pct": -4.13,
+    "change_points": -0.76,
+    "confirmation_strictness": "normal",
+    "enabled": true,
+    "execution_rules": {
+      "avoid_late_entries_when_stressed": false,
+      "breakout_requires_liquidity_confirmation": false,
+      "confirmation_strictness": "normal",
+      "no_chase_strictness": "normal",
+      "position_size_multiplier": 0.85,
+      "prefer_near_support_entries_when_stressed": false
+    },
+    "guidance_ar": [
+      "الخوف العام طبيعي تقريبًا؛ قرارات السهم الفردية والسيولة تبقى الأهم.",
+      "استمر في طلب تأكيد الاختراق والسيولة خصوصًا قرب المقاومات."
+    ],
+    "history_points": 0,
+    "is_proxy": false,
+    "no_chase_strictness": "normal",
+    "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
+    "ok": true,
+    "position_size_multiplier": 0.85,
+    "previous_close": 18.41,
+    "regime_key": "normal",
+    "regime_label": "طبيعي",
+    "requested_symbol": "^VIX",
+    "source": "FMP",
+    "source_symbol": "^VIX",
+    "stress_score": 42.0,
+    "summary_ar": "⚪ طبيعي | VIX 17.65 | التغير -4.13% | حجم الدخول المقترح ×0.85",
+    "tracking_fields": {
+      "market_fear_regime": "normal",
+      "market_fear_score": 42.0,
+      "vix": 17.65,
+      "vix_change_pct": -4.13,
+      "vix_trend_5d_pct": 0.0
+    },
+    "version": "market_fear_v4d_decision_support_no_scoring",
+    "vix": 17.65,
+    "vix_avg_5d": 0.0,
+    "vix_trend_5d_pct": 0.0
+  },
+  "notes": {
+    "next_weekend_use": "تحليل ما سبق الرابحين والخاسرين وتحديد الأنماط المتكررة.",
+    "safe_mode": "جمع أدلة فقط؛ لا يغير السكور أو التصنيف."
+  },
+  "ok": true,
+  "sessions": [
+    {
+      "c": 8086,
+      "session": "pre_market",
+      "symbols": 447
+    },
+    {
+      "c": 6500,
+      "session": "regular",
+      "symbols": 606
+    },
+    {
+      "c": 2080,
+      "session": "after_hours",
+      "symbols": 357
+    }
+  ],
+  "summary": {
+    "avg_change_pct": 15.002188287531501,
+    "avg_dollar_volume": 246518961.97401896,
+    "big_mover_snapshots": 2584,
+    "no_chase_count": 1352,
+    "reconfirm_count": 10153,
+    "snapshots": 16666,
+    "symbols": 784,
+    "tool_snapshots": 14257
+  },
+  "top_movers_observed": [
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 2400.0,
+      "observations": 27,
+      "symbol": "GIBO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 1882.04,
+      "observations": 25,
+      "symbol": "FSTB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 909.22,
+      "observations": 3,
+      "symbol": "XXRP"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 648.84,
+      "observations": 1,
+      "symbol": "SPCK"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 524.51,
+      "observations": 28,
+      "symbol": "MNDR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 456.42,
+      "observations": 33,
+      "symbol": "UPC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 247.09,
+      "observations": 57,
+      "symbol": "SDOT"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 161.76,
+      "observations": 56,
+      "symbol": "ZCMD"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 147.93,
+      "observations": 33,
+      "symbol": "TNMG"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 127.04,
+      "observations": 27,
+      "symbol": "PCLA"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 103.88,
+      "observations": 33,
+      "symbol": "DCOY"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 103.39,
+      "observations": 27,
+      "symbol": "DGNX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 97.58,
+      "observations": 27,
+      "symbol": "IVF"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 97.3,
+      "observations": 5,
+      "symbol": "LGCL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 69.85,
+      "observations": 31,
+      "symbol": "WSHP"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 68.01,
+      "observations": 33,
+      "symbol": "AZI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 56.05,
+      "observations": 33,
+      "symbol": "NNBR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 55.98,
+      "observations": 59,
+      "symbol": "CRIS"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 53.69,
+      "observations": 30,
+      "symbol": "KUST"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 51.41,
+      "observations": 17,
+      "symbol": "AMPGR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 46.62,
+      "observations": 33,
+      "symbol": "ASTC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 46.47,
+      "observations": 33,
+      "symbol": "INLF"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 46.23,
+      "observations": 10,
+      "symbol": "GDHG"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 46.23,
+      "observations": 27,
+      "symbol": "ILLR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 38.6,
+      "observations": 31,
+      "symbol": "ATLN"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 37.31,
+      "observations": 33,
+      "symbol": "QDEL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 37.0,
+      "observations": 27,
+      "symbol": "EURKR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 36.63,
+      "observations": 27,
+      "symbol": "LVWR"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 36.0,
+      "observations": 33,
+      "symbol": "TVRD"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 35.71,
+      "observations": 18,
+      "symbol": "XHLD"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 35.62,
+      "observations": 4,
+      "symbol": "JEM"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 35.55,
+      "observations": 21,
+      "symbol": "CNET"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 34.46,
+      "observations": 65,
+      "symbol": "AIIO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 34.38,
+      "observations": 24,
+      "symbol": "SKYQ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 32.89,
+      "observations": 33,
+      "symbol": "RKLX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 32.25,
+      "observations": 30,
+      "symbol": "LCDL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 31.08,
+      "observations": 27,
+      "symbol": "AUC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 31.03,
+      "observations": 27,
+      "symbol": "CCEL"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 30.36,
+      "observations": 8,
+      "symbol": "SLAI"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 30.29,
+      "observations": 47,
+      "symbol": "CALC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 30.18,
+      "observations": 21,
+      "symbol": "AMPGZ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 30.06,
+      "observations": 27,
+      "symbol": "CABO"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 1,
+      "max_change_pct": 29.5,
+      "observations": 35,
+      "symbol": "PED"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 29.18,
+      "observations": 25,
+      "symbol": "GLWG"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 29.11,
+      "observations": 5,
+      "symbol": "IFRX"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 29.07,
+      "observations": 9,
+      "symbol": "FABC"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 29.04,
+      "observations": 8,
+      "symbol": "AGMB"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 29.02,
+      "observations": 27,
+      "symbol": "RYOJ"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 28.8,
+      "observations": 27,
+      "symbol": "LNZA"
+    },
+    {
+      "in_big_movers": 1,
+      "in_tool_snapshot": 0,
+      "max_change_pct": 28.78,
+      "observations": 9,
+      "symbol": "PLSM"
+    }
+  ],
+  "version": "evidence_collection_v2_passive",
+  "week_key": "2026-06-29_2026-07-03",
+  "winner_patterns": [
+    {
+      "avg_gain": 35.294444444444444,
+      "cases": 18,
+      "likely_pattern": "steady_liquidity_followthrough",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 74.819,
+      "cases": 10,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "gap_chase_risk"
+    },
+    {
+      "avg_gain": 42.083000000000006,
+      "cases": 10,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 31.37125,
+      "cases": 8,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "early_intraday_acceleration"
+    },
+    {
+      "avg_gain": 32.54,
+      "cases": 6,
+      "likely_pattern": "first_hour_liquidity_acceleration",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 41.158,
+      "cases": 5,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "gap_chase_risk"
+    },
+    {
+      "avg_gain": 27.892000000000003,
+      "cases": 5,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 30.2475,
+      "cases": 4,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "winner_needs_more_context"
+    },
+    {
+      "avg_gain": 25.432499999999997,
+      "cases": 4,
+      "likely_pattern": "steady_liquidity_followthrough",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 138.01000000000002,
+      "cases": 3,
+      "likely_pattern": "open_gap_big_mover",
+      "move_quality_label": "high_quality_followthrough"
+    },
+    {
+      "avg_gain": 27.69666666666667,
+      "cases": 3,
+      "likely_pattern": "pre_market_gap_then_followthrough",
+      "move_quality_label": "gap_followthrough_candidate"
+    },
+    {
+      "avg_gain": 26.6,
+      "cases": 2,
+      "likely_pattern": "unclassified_winner",
+      "move_quality_label": "winner_needs_more_context"
+    }
+  ],
+  "winner_profiles": {
+    "c": 80,
+    "symbols": 80
+  }
+}
