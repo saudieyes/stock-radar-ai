@@ -71,6 +71,14 @@
     "symbol": "ACRE",
     "updated_at": "2026-06-25 11:00:28"
   },
+  "ACRV": {
+    "excluded_at": "2026-06-29 23:57:54",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "ACRV",
+    "updated_at": "2026-06-29 23:57:54"
+  },
   "ACTG": {
     "excluded_at": "2026-06-26 11:33:41",
     "note": "استبعاد يدوي شرعي",
@@ -839,6 +847,14 @@
     "symbol": "BTBT",
     "updated_at": "2026-06-25 13:08:55"
   },
+  "BTCS": {
+    "excluded_at": "2026-06-29 23:52:02",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "BTCS",
+    "updated_at": "2026-06-29 23:52:02"
+  },
   "BTG": {
     "excluded_at": "2026-06-25 13:12:05",
     "note": "استبعاد يدوي شرعي",
@@ -1359,6 +1375,14 @@
     "symbol": "CRNC",
     "updated_at": "2026-06-29 18:30:39"
   },
+  "CRON": {
+    "excluded_at": "2026-06-29 23:56:58",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CRON",
+    "updated_at": "2026-06-29 23:56:58"
+  },
   "CRWV": {
     "excluded_at": "2026-04-28 12:26:51",
     "note": "استبعاد يدوي شرعي",
@@ -1398,6 +1422,14 @@
     "source": "manual",
     "symbol": "CTKB",
     "updated_at": "2026-06-24 07:22:52"
+  },
+  "CTM": {
+    "excluded_at": "2026-06-29 23:52:35",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "CTM",
+    "updated_at": "2026-06-29 23:52:35"
   },
   "CTMX": {
     "excluded_at": "2026-06-23 13:09:59",
@@ -1958,6 +1990,14 @@
     "source": "manual",
     "symbol": "FA",
     "updated_at": "2026-04-27 12:44:42"
+  },
+  "FABC": {
+    "excluded_at": "2026-06-29 23:54:00",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "FABC",
+    "updated_at": "2026-06-29 23:54:00"
   },
   "FATE": {
     "excluded_at": "2026-06-24 09:49:07",
@@ -2559,6 +2599,14 @@
     "symbol": "IMRX",
     "updated_at": "2026-04-23 17:01:19"
   },
+  "IMTX": {
+    "excluded_at": "2026-06-29 23:56:38",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "IMTX",
+    "updated_at": "2026-06-29 23:56:38"
+  },
   "INDI": {
     "excluded_at": "2026-04-27 10:59:43",
     "note": "",
@@ -2838,6 +2886,14 @@
     "source": "manual",
     "symbol": "LBTYK",
     "updated_at": "2026-06-29 18:17:27"
+  },
+  "LCID": {
+    "excluded_at": "2026-06-29 23:43:54",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "LCID",
+    "updated_at": "2026-06-29 23:44:53"
   },
   "LCTX": {
     "excluded_at": "2026-06-29 18:06:59",
@@ -3334,6 +3390,14 @@
     "source": "manual",
     "symbol": "NCPL",
     "updated_at": "2026-06-29 04:19:23"
+  },
+  "NCT": {
+    "excluded_at": "2026-06-29 23:53:16",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "NCT",
+    "updated_at": "2026-06-29 23:53:16"
   },
   "NE": {
     "excluded_at": "2026-04-27 12:43:46",
@@ -4703,6 +4767,14 @@
     "symbol": "TSHA",
     "updated_at": "2026-06-29 18:08:00"
   },
+  "TTEC": {
+    "excluded_at": "2026-06-29 23:57:27",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "TTEC",
+    "updated_at": "2026-06-29 23:57:27"
+  },
   "TUSK": {
     "excluded_at": "2026-06-28 18:11:55",
     "note": "استبعاد يدوي شرعي",
@@ -4710,6 +4782,14 @@
     "source": "manual",
     "symbol": "TUSK",
     "updated_at": "2026-06-28 20:29:35"
+  },
+  "TV": {
+    "excluded_at": "2026-06-29 23:57:41",
+    "note": "استبعاد يدوي شرعي",
+    "reason": "استبعاد يدوي شرعي",
+    "source": "manual",
+    "symbol": "TV",
+    "updated_at": "2026-06-29 23:57:41"
   },
   "TWI": {
     "excluded_at": "2026-06-25 04:47:25",
