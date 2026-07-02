@@ -1,0 +1,774 @@
+{
+  "history_tail": [
+    {
+      "captured_at": "2026-06-26 11:58:20",
+      "change_pct": -0.48,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.8
+    },
+    {
+      "captured_at": "2026-06-26 11:43:04",
+      "change_pct": -1.16,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.67
+    },
+    {
+      "captured_at": "2026-06-26 11:27:53",
+      "change_pct": 0.79,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.04
+    },
+    {
+      "captured_at": "2026-06-26 11:12:39",
+      "change_pct": 2.28,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.32
+    },
+    {
+      "captured_at": "2026-06-26 10:57:29",
+      "change_pct": 1.91,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.25
+    },
+    {
+      "captured_at": "2026-06-26 10:42:17",
+      "change_pct": 2.38,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.34
+    },
+    {
+      "captured_at": "2026-06-26 10:27:03",
+      "change_pct": 1.22,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.12
+    },
+    {
+      "captured_at": "2026-06-26 10:11:49",
+      "change_pct": 2.22,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.31
+    },
+    {
+      "captured_at": "2026-06-26 09:56:39",
+      "change_pct": 5.82,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 19.99
+    },
+    {
+      "captured_at": "2026-06-26 09:41:24",
+      "change_pct": 8.31,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.46
+    },
+    {
+      "captured_at": "2026-06-26 09:26:18",
+      "change_pct": 7.57,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.32
+    },
+    {
+      "captured_at": "2026-06-26 09:05:26",
+      "change_pct": 6.56,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.13
+    },
+    {
+      "captured_at": "2026-06-26 08:44:21",
+      "change_pct": 5.35,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 19.9
+    },
+    {
+      "captured_at": "2026-06-26 08:13:03",
+      "change_pct": 6.78,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.17
+    },
+    {
+      "captured_at": "2026-06-26 07:52:07",
+      "change_pct": 6.09,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.04
+    },
+    {
+      "captured_at": "2026-06-26 07:31:15",
+      "change_pct": 6.19,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.06
+    },
+    {
+      "captured_at": "2026-06-26 07:10:24",
+      "change_pct": 6.93,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.2
+    },
+    {
+      "captured_at": "2026-06-26 06:07:14",
+      "change_pct": 6.19,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.06
+    },
+    {
+      "captured_at": "2026-06-26 05:46:20",
+      "change_pct": 7.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.29
+    },
+    {
+      "captured_at": "2026-06-26 05:24:10",
+      "change_pct": 6.78,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 20.17
+    },
+    {
+      "captured_at": "2026-06-26 05:04:30",
+      "change_pct": 5.61,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 19.95
+    },
+    {
+      "captured_at": "2026-06-26 04:19:06",
+      "change_pct": 4.24,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.69
+    },
+    {
+      "captured_at": "2026-06-26 03:57:12",
+      "change_pct": 3.97,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.64
+    },
+    {
+      "captured_at": "2026-06-25 22:45:31",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 19:55:03",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 18:54:27",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 18:24:10",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 17:45:05",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 17:23:06",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 16:45:43",
+      "change_pct": 1.4,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.89
+    },
+    {
+      "captured_at": "2026-06-25 16:20:35",
+      "change_pct": 1.34,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.88
+    },
+    {
+      "captured_at": "2026-06-25 15:50:24",
+      "change_pct": 3.27,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.24
+    },
+    {
+      "captured_at": "2026-06-25 15:35:23",
+      "change_pct": 2.79,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.15
+    },
+    {
+      "captured_at": "2026-06-25 15:20:15",
+      "change_pct": 2.58,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.11
+    },
+    {
+      "captured_at": "2026-06-25 15:04:43",
+      "change_pct": 2.31,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.06
+    },
+    {
+      "captured_at": "2026-06-25 14:49:17",
+      "change_pct": 1.99,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.0
+    },
+    {
+      "captured_at": "2026-06-25 14:33:56",
+      "change_pct": 0.91,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.8
+    },
+    {
+      "captured_at": "2026-06-25 14:18:34",
+      "change_pct": 1.23,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.86
+    },
+    {
+      "captured_at": "2026-06-25 14:02:54",
+      "change_pct": 1.66,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.94
+    },
+    {
+      "captured_at": "2026-06-25 13:44:31",
+      "change_pct": 2.09,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.02
+    },
+    {
+      "captured_at": "2026-06-25 13:17:48",
+      "change_pct": 1.5,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.91
+    },
+    {
+      "captured_at": "2026-06-25 13:01:33",
+      "change_pct": 2.9,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.17
+    },
+    {
+      "captured_at": "2026-06-25 12:37:18",
+      "change_pct": 2.36,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.07
+    },
+    {
+      "captured_at": "2026-06-25 12:21:55",
+      "change_pct": 0.27,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.68
+    },
+    {
+      "captured_at": "2026-06-25 12:06:18",
+      "change_pct": 1.45,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.9
+    },
+    {
+      "captured_at": "2026-06-25 11:50:55",
+      "change_pct": 1.61,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.93
+    },
+    {
+      "captured_at": "2026-06-25 11:35:10",
+      "change_pct": 2.25,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.05
+    },
+    {
+      "captured_at": "2026-06-25 11:19:45",
+      "change_pct": 3.17,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.22
+    },
+    {
+      "captured_at": "2026-06-25 11:04:11",
+      "change_pct": 0.75,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.77
+    },
+    {
+      "captured_at": "2026-06-25 10:44:17",
+      "change_pct": 1.77,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.96
+    },
+    {
+      "captured_at": "2026-06-25 10:18:14",
+      "change_pct": 3.81,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 19.34
+    },
+    {
+      "captured_at": "2026-06-25 10:01:23",
+      "change_pct": 5.96,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 62.0,
+      "vix": 19.74
+    },
+    {
+      "captured_at": "2026-06-25 09:44:08",
+      "change_pct": -0.38,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.56
+    },
+    {
+      "captured_at": "2026-06-25 09:27:42",
+      "change_pct": -3.86,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.91
+    },
+    {
+      "captured_at": "2026-06-25 09:10:05",
+      "change_pct": -4.35,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.82
+    },
+    {
+      "captured_at": "2026-06-25 08:47:20",
+      "change_pct": -4.13,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.86
+    },
+    {
+      "captured_at": "2026-06-25 08:26:03",
+      "change_pct": -3.49,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.98
+    },
+    {
+      "captured_at": "2026-06-25 07:50:12",
+      "change_pct": -2.9,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.09
+    },
+    {
+      "captured_at": "2026-06-25 07:33:08",
+      "change_pct": -3.33,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.01
+    },
+    {
+      "captured_at": "2026-06-25 06:57:08",
+      "change_pct": -3.76,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.93
+    },
+    {
+      "captured_at": "2026-06-25 06:40:12",
+      "change_pct": -3.81,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.92
+    },
+    {
+      "captured_at": "2026-06-25 06:08:10",
+      "change_pct": -3.49,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.98
+    },
+    {
+      "captured_at": "2026-06-25 05:47:02",
+      "change_pct": -2.95,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.08
+    },
+    {
+      "captured_at": "2026-06-25 05:02:28",
+      "change_pct": -2.84,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.1
+    },
+    {
+      "captured_at": "2026-06-25 04:42:26",
+      "change_pct": -3.27,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.02
+    },
+    {
+      "captured_at": "2026-06-25 04:22:06",
+      "change_pct": -3.49,
+      "regime_label": "طبيعي",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 42.0,
+      "vix": 17.98
+    },
+    {
+      "captured_at": "2026-06-25 03:46:14",
+      "change_pct": -3.17,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.04
+    },
+    {
+      "captured_at": "2026-06-24 22:45:31",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 21:39:16",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 21:21:42",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 21:06:00",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 21:05:59",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 20:05:29",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 19:18:41",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 19:00:44",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 19:00:43",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 18:20:27",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 18:04:30",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 17:44:31",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    },
+    {
+      "captured_at": "2026-06-24 17:19:19",
+      "change_pct": -4.41,
+      "regime_label": "حذر متوسط",
+      "source": "FMP",
+      "source_symbol": "^VIX",
+      "stress_score": 58.0,
+      "vix": 18.63
+    }
+  ],
+  "ok": true,
+  "snapshot": {
+    "badge": "⚪",
+    "cache_hit": true,
+    "captured_at": "2026-07-01 22:45:41",
+    "captured_ts": 1782960341.0417702,
+    "change_pct": 0.85,
+    "change_points": 0.14,
+    "confirmation_strictness": "normal",
+    "enabled": true,
+    "execution_rules": {
+      "avoid_late_entries_when_stressed": false,
+      "breakout_requires_liquidity_confirmation": false,
+      "confirmation_strictness": "normal",
+      "no_chase_strictness": "normal",
+      "position_size_multiplier": 0.85,
+      "prefer_near_support_entries_when_stressed": false
+    },
+    "guidance_ar": [
+      "الخوف العام طبيعي تقريبًا؛ قرارات السهم الفردية والسيولة تبقى الأهم.",
+      "استمر في طلب تأكيد الاختراق والسيولة خصوصًا قرب المقاومات."
+    ],
+    "history_points": 0,
+    "is_proxy": false,
+    "no_chase_strictness": "normal",
+    "note": "طبقة VIX/Market Fear للدعم التنفيذي والتتبع فقط في V4d؛ لا تغير نقاط الأسهم أو الفلتر الشرعي أو الترتيب مباشرة.",
+    "ok": true,
+    "position_size_multiplier": 0.85,
+    "previous_close": 16.45,
+    "regime_key": "normal",
+    "regime_label": "طبيعي",
+    "requested_symbol": "^VIX",
+    "source": "FMP",
+    "source_symbol": "^VIX",
+    "stress_score": 42.0,
+    "summary_ar": "⚪ طبيعي | VIX 16.59 | التغير 0.85% | حجم الدخول المقترح ×0.85",
+    "tracking_fields": {
+      "market_fear_regime": "normal",
+      "market_fear_score": 42.0,
+      "vix": 16.59,
+      "vix_change_pct": 0.85,
+      "vix_trend_5d_pct": 0.0
+    },
+    "version": "market_fear_v4d_decision_support_no_scoring",
+    "vix": 16.59,
+    "vix_avg_5d": 0.0,
+    "vix_trend_5d_pct": 0.0
+  },
+  "trade_date": "2026-07-01",
+  "week_key": "2026-06-29_2026-07-03"
+}
